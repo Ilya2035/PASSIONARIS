@@ -1,0 +1,27 @@
+{
+  "name": "orbis",
+  "productName": "ORBIS",
+  "version": "0.1.0",
+  "description": "ORBIS — grand strategy on a living globe (working title)",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "data:download": "node scripts/download-data.mjs",
+    "data:bake": "node scripts/bake-map.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "sharp": "^0.35.5",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "vite": "^8.3.7"
+  }
+}

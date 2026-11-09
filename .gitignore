@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tools/
+data/raw/
+public/assets/map/*.gz
+public/assets/map/*.jpg
+public/assets/map/world.json
+*.log
+.claude/settings.local.json
