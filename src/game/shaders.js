@@ -131,6 +131,7 @@ uniform float uHasSim;
 uniform sampler2D uWeather;   // 720x360 RGBA: R snow/ice, G clouds/precip, B T anomaly, A drought
 uniform float uHasWeather;
 uniform float uCloudAmt;
+uniform float uLineSea;       // sea-zone borders (only up close)
 uniform float uNeedInfo;      // 1 only when district/province/country lines are drawn (saves ~10 fetches/pixel)
 
 in vec3 vGeo;
@@ -139,12 +140,14 @@ in vec3 vUp;
 layout(location = 0) out vec4 fragColor;
 
 int gw() { return int(uGrid.x); }
-uint cellAt(ivec2 p) {
+const uint SEA_BIT = 0x40000000u;   // sea-zone ids (regions module); everything at or above is water
+uint rawAt(ivec2 p) {
   int w = gw();
   p.x = ((p.x % w) + w) % w;
   p.y = clamp(p.y, 0, int(uGrid.y) - 1);
   return texelFetch(uCells, p, 0).r;
 }
+uint cellAt(ivec2 p) { uint v = rawAt(p); return v >= SEA_BIT ? 0u : v; }
 uvec2 infoOf(uint id) { return texelFetch(uInfo, ivec2(int(id) % uInfoW, int(id) / uInfoW), 0).rg; }
 vec4 colorOf(uint id) { return texelFetch(uColor, ivec2(int(id) % uInfoW, int(id) / uInfoW), 0); }
 
@@ -206,7 +209,13 @@ vec3 biomeBlend(vec2 uv) {
   float w0 = (1.0 - f.x) * (1.0 - f.y) * float(k0 != 0u), w1 = f.x * (1.0 - f.y) * float(k1 != 0u);
   float w2 = (1.0 - f.x) * f.y * float(k2 != 0u), w3 = f.x * f.y * float(k3 != 0u);
   float ws = w0 + w1 + w2 + w3;
-  if (ws < 1e-4) return uPaper;
+  if (ws < 1e-4) {
+    // land by the fine coast mask but water in the coarse raster: borrow the nearest land class around
+    const ivec2 R[12] = ivec2[12](ivec2(-1, 0), ivec2(2, 0), ivec2(0, -1), ivec2(0, 2), ivec2(1, -1), ivec2(-1, 1),
+                                  ivec2(2, 1), ivec2(1, 2), ivec2(-1, -1), ivec2(2, 2), ivec2(-1, 2), ivec2(2, -1));
+    for (int i = 0; i < 12; i++) { uint k = biomeAt(b + R[i]); if (k != 0u) return uBiomeCol[min(k, 15u)]; }
+    return uPaper;
+  }
   return (uBiomeCol[min(k0, 15u)] * w0 + uBiomeCol[min(k1, 15u)] * w1 + uBiomeCol[min(k2, 15u)] * w2 + uBiomeCol[min(k3, 15u)] * w3) / ws;
 }
 
@@ -269,6 +278,8 @@ void main() {
   // crisp coasts from the 1.2 km coverage mask when the detail window is active
   float cov = detailLand(uv, lodD, land ? 1.0 : 0.0);
   if (cov >= 0.0) land = cov > 0.5;
+  // fine-mask land on a coarse water cell: take a land neighbour's district (colour, borders, info)
+  if (land && win < 2u) win = id0 >= 2u ? id0 : id1 >= 2u ? id1 : id2 >= 2u ? id2 : id3 >= 2u ? id3 : win;
   uvec2 wi = uvec2(0u), i0 = uvec2(0u), i1 = uvec2(0u), i2 = uvec2(0u), i3 = uvec2(0u);
   if (uNeedInfo > 0.5) { wi = infoOf(win); i0 = infoOf(id0); i1 = infoOf(id1); i2 = infoOf(id2); i3 = infoOf(id3); }
 
@@ -327,7 +338,7 @@ void main() {
       col = mix(col, uInk, line * (uMode == 0 ? 0.3 : 0.16) * uContourAmt);
     }
     // data overlays
-    if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.72);
+    if (uMode == 2) col = mix(desat(col), tempRamp(sim.r + (uHasWeather > 0.5 ? (wx.b * 255.0 - 128.0) / 640.0 : 0.0)), 0.72);
     else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.72);
     else if (uMode == 4) col = mix(desat(col), hazardRamp(sim.b), 0.75 * step(0.02, sim.b));
     else if (uMode == 5 || uMode == 9) {
@@ -353,7 +364,7 @@ void main() {
     wc *= 1.0 + (n - 0.5) * 0.08 * (1.0 - smoothstep(0.6, 3.0, texPerPx));
 #endif
     // sea ice: from the simulation when running, else from the imagery
-    float ice = uHasWeather > 0.5 ? smoothstep(0.25, 0.7, wx.r) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
+    float ice = uHasWeather > 0.5 ? smoothstep(0.15, 0.55, wx.r) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
     col = mix(wc, uSnow * mix(1.0, shade, 0.5), ice * 0.9);
     if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.45);
     else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.3);
@@ -366,8 +377,10 @@ void main() {
 #else
     float cn = vnoise(uv * vec2(900.0, 450.0) + vec2(uTime * 0.02, 0.0)) * 0.55 + vnoise(uv * vec2(2600.0, 1300.0)) * 0.45;
 #endif
-    float cm = smoothstep(0.42, 0.8, wx.g + (cn - 0.5) * 0.5);
-    col = mix(col, vec3(0.96, 0.95, 0.93), cm * 0.55 * uCloudAmt);
+    float cloudF = wx.g < 0.5 ? wx.g * 2.0 : 1.0;
+    float rain = clamp(wx.g * 2.0 - 1.0, 0.0, 1.0);
+    float cm = smoothstep(0.5, 0.9, cloudF + (cn - 0.5) * 0.55);
+    col = mix(col, vec3(0.96, 0.95, 0.93) * (1.0 - 0.22 * rain), cm * (0.45 + 0.2 * rain) * uCloudAmt);
   }
 
   // ---------------------------------------------------------------- borders
@@ -392,11 +405,25 @@ void main() {
       lineProv = lineA(dP, 1.3) * aMag;
       lineDist = lineA(dD, 0.9) * aMag;
       float S0 = id0 == uSelected ? 1.0 : 0.0, S1 = id1 == uSelected ? 1.0 : 0.0, S2 = id2 == uSelected ? 1.0 : 0.0, S3 = id3 == uSelected ? 1.0 : 0.0;
-      if (S0 + S1 + S2 + S3 > 0.0 && S0 + S1 + S2 + S3 < 4.0) sel = lineA(isoDistPx(S0, S1, S2, S3, f, jx, jy), 3.0) * aMag;
+      if (uSelected >= 2u && S0 + S1 + S2 + S3 > 0.0 && S0 + S1 + S2 + S3 < 4.0) sel = lineA(isoDistPx(S0, S1, S2, S3, f, jx, jy), 3.0) * aMag;
       float H0 = id0 == uHover ? 1.0 : 0.0, H1 = id1 == uHover ? 1.0 : 0.0, H2 = id2 == uHover ? 1.0 : 0.0, H3 = id3 == uHover ? 1.0 : 0.0;
-      if (H0 + H1 + H2 + H3 > 0.0 && H0 + H1 + H2 + H3 < 4.0) hov = lineA(isoDistPx(H0, H1, H2, H3, f, jx, jy), 1.8) * aMag;
+      if (uHover >= 2u && H0 + H1 + H2 + H3 > 0.0 && H0 + H1 + H2 + H3 < 4.0) hov = lineA(isoDistPx(H0, H1, H2, H3, f, jx, jy), 1.8) * aMag;
     }
     coast = (L0 + L1 + L2 + L3 > 0.0 && L0 + L1 + L2 + L3 < 4.0) ? lineA(dCoast, 1.4) * aMag : 0.0;
+    // sea zones: faint dotted ink where two zones meet (land and lakes count as "same", so coasts stay clean)
+    if (!land && uLineSea > 0.0 && aMag > 0.0) {
+      uint rw = rawAt(ivec2(floor(uv * uGrid)));
+      if (rw >= SEA_BIT) {
+        uint r0 = rawAt(b), r1 = rawAt(b + ivec2(1, 0)), r2 = rawAt(b + ivec2(0, 1)), r3 = rawAt(b + ivec2(1, 1));
+        float Z0 = (r0 < SEA_BIT || r0 == rw) ? 1.0 : 0.0, Z1 = (r1 < SEA_BIT || r1 == rw) ? 1.0 : 0.0;
+        float Z2 = (r2 < SEA_BIT || r2 == rw) ? 1.0 : 0.0, Z3 = (r3 < SEA_BIT || r3 == rw) ? 1.0 : 0.0;
+        if (Z0 + Z1 + Z2 + Z3 < 4.0) {
+          float dS = isoDistPx(Z0, Z1, Z2, Z3, f, jx, jy);
+          float dash = step(0.45, fract(dot(uv * uGrid, vec2(1.7, 1.3))));
+          col = mix(col, uInk, lineA(dS, 1.0) * aMag * uLineSea * 0.32 * mix(0.35, 1.0, dash));
+        }
+      }
+    }
     if (cov >= 0.0) coast = lineA(abs(cov - 0.5) / max(fwidth(cov), 1e-5), 1.4);
 
     // screen-space neighbour test in the minified range (globe view)
@@ -421,7 +448,7 @@ void main() {
     }
   }
   col = mix(col, uInk, coast * 0.75);
-  col = mix(col, col * 0.7, lineDist * uLineDist * 0.5);
+  col = mix(col, mix(col * 0.62, uInk, 0.25), lineDist * uLineDist * 0.6);
   col = mix(col, mix(col, uInk, 0.55), lineProv * uLineProv * 0.75);
   col = mix(col, uInk, lineCountry * 0.9 * uLineCountry);
   if (land && win == uHover) col = col * 1.08 + 0.03;

@@ -12,6 +12,11 @@ import { loadBiomes } from './biomes.js';
 import { createTime } from './time.js';
 import { createClimate } from './climate.js';
 import { createHazards } from './hazards.js';
+import { createRegions } from './regions.js';
+import { INFO_W } from '../globe.js';
+
+const R2D = 180 / Math.PI;
+const toGeo = v => (v ? { lat: Math.asin(Math.max(-1, Math.min(1, v.y))) * R2D, lon: Math.atan2(v.x, v.z) * R2D } : null);
 
 const has = p => !!OPT[p];
 const load = async p => (OPT[p] ? OPT[p]() : null);
@@ -23,7 +28,9 @@ export async function createWorldSystems(ctx) {
   let mode = 'terrain';
   const sys = {
     features,
-    onModeChange(id) { mode = id; },
+    onModeChange(id) { mode = id; sys.regions?.setMode(id); },
+    onHover(v) { sys.regions?.onHover(toGeo(v)); },
+    onSelect(v) { sys.regions?.onSelect(toGeo(v)); },
     liveInfo: false,
     update() {},
     renderClock(extra) { hud.renderClock({ date: '—', time: extra || '' }, 0); },
@@ -36,15 +43,29 @@ export async function createWorldSystems(ctx) {
 
   sys.describe = (g, geo, cell) => {
     const rows = [];
-    let kicker;
+    let kicker, title;
     if (biomes && cell >= 2) {
       const b = biomes.at(geo.lat, geo.lon);
       if (b) { kicker = b.nameRu; rows.push(['Местность', b.nameRu]); }
     }
+    const rd = sys.regions?.describe(geo.lat, geo.lon);
+    if (rd) {
+      title = rd.title;
+      rows.push(...rd.rows);
+      if (mode === 'regions' && rd.kicker) kicker = rd.kicker;
+    }
     if (sys.climate) rows.push(...sys.climate.describe(geo.lat, geo.lon));
     if (sys.hazards && mode === 'hazards') rows.push(...sys.hazards.describe(geo.lat, geo.lon));
-    return { kicker, rows, tip: kicker };
+    return { kicker, title, rows, tip: kicker };
   };
+
+  // ---- natural districts, provinces, regions, sea zones and roads
+  sys.regions = await createRegions({ globe, scene: ctx.scene, settings: ctx.settings, infoW: INFO_W })
+    .catch(e => { console.warn('regions', e); return null; });
+  if (sys.regions) {
+    features.add('regions');
+    updaters.push(() => sys.regions.update(ctx.gcam));
+  }
 
   // ---- time, saves, autosave
   const [cal, clk, save] = await Promise.all([load('../../sim/calendar.js'), load('../../sim/clock.js'), load('../../save/index.js')]);

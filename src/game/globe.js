@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TERRAIN_VERT, TERRAIN_FRAG, RIVER_VERT, RIVER_FRAG, ATMO_VERT, ATMO_FRAG } from './shaders.js';
 import { makeHeightTexture, makeCellTexture, makeInfoTexture, makeColorTexture, INFO_W } from './data.js';
+export { INFO_W };
 import { getPalette } from '../shared/palettes.js';
 
 const QUALITY = {
@@ -66,6 +67,7 @@ export class Globe {
     this.settings = settings;
     const { W, H, world } = data;
 
+    this.overlayBase = 0.6;   // strength of the regions / political colour overlay
     this.heightTex = makeHeightTexture(data.height, W, H);
     this.cellTex = makeCellTexture(data.cells, W, H);
     this.infoTex = makeInfoTexture(world);
@@ -107,6 +109,7 @@ export class Globe {
         uColor: { value: this.colorTex },
         uInfoW: { value: INFO_W },
         uHover: { value: 0 },
+        uLineSea: { value: 0 },
         uSelected: { value: 0 },
         uOverlay: { value: 1 },
         uShadeK: { value: 6 },
@@ -185,6 +188,24 @@ export class Globe {
     this.terrainMat.needsUpdate = true;
   }
 
+  // natural districts from the regions module: new cell raster + per-district info / colours
+  setRegions({ cells, info, colors, rows }) {
+    const u = this.terrainMat.uniforms;
+    this.data.cells = cells;
+    this.cellTex.image.data = cells;
+    this.cellTex.needsUpdate = true;
+    const it = new THREE.DataTexture(info, INFO_W, rows, THREE.RGIntegerFormat, THREE.UnsignedShortType);
+    it.internalFormat = 'RG16UI'; it.minFilter = it.magFilter = THREE.NearestFilter; it.generateMipmaps = false; it.needsUpdate = true;
+    const ct = new THREE.DataTexture(colors, INFO_W, rows, THREE.RGBAFormat, THREE.UnsignedByteType);
+    ct.minFilter = ct.magFilter = THREE.NearestFilter; ct.generateMipmaps = false; ct.needsUpdate = true;
+    this.infoTex.dispose(); this.colorTex.dispose();
+    this.infoTex = it; this.colorTex = ct;
+    u.uInfo.value = it; u.uColor.value = ct;
+    this.hasRegions = true;
+  }
+  setHover(id) { this.terrainMat.uniforms.uHover.value = id >>> 0; }
+  setSelected(id) { this.terrainMat.uniforms.uSelected.value = id >>> 0; }
+
   setMode(id) {
     this.mode = id;
     this.terrainMat.uniforms.uMode.value = MODE_INDEX[id] ?? 1;
@@ -229,7 +250,8 @@ export class Globe {
     const lat = Math.asin(Math.max(-1, Math.min(1, v.y))), lon = Math.atan2(v.x, v.z);
     const x = Math.min(W - 1, Math.max(0, Math.floor((lon / (2 * Math.PI) + 0.5) * W)));
     const y = Math.min(H - 1, Math.max(0, Math.floor((0.5 - lat / Math.PI) * H)));
-    return cells[y * W + x];
+    const c = cells[y * W + x];
+    return c >= 0x40000000 ? 0 : c;
   }
 
   update(gcam, time, camera) {
@@ -258,11 +280,13 @@ export class Globe {
     const alt = gcam.alt;
     const fade = (a0, a1) => 1 - Math.min(1, Math.max(0, (Math.log(alt) - Math.log(a0)) / (Math.log(a1) - Math.log(a0))));
     // no nations yet: political lines only in the legacy political mode; district lines in the regions mode
-    const political = this.mode === 'political';
-    u.uNeedInfo.value = (political || this.mode === 'regions') && !this.clean ? 1 : 0;
-    u.uLineProv.value = this.clean || !political ? 0 : fade(0.35, 1.1);
-    u.uLineCountry.value = this.clean || !political ? 0 : 1;
-    u.uLineDist.value = this.settings.showDistricts && !this.clean && (political || this.mode === 'regions') ? fade(0.12, 0.6) : 0;
+    const political = this.mode === 'political', regions = this.mode === 'regions';
+    u.uNeedInfo.value = (political || regions) && !this.clean ? 1 : 0;
+    // regions mode: region borders always, provinces from mid zoom, districts up close, sea zones only very close
+    u.uLineProv.value = this.clean || !(political || regions) ? 0 : regions ? fade(0.9, 2.2) : fade(0.35, 1.1);
+    u.uLineCountry.value = this.clean || !(political || regions) ? 0 : regions ? 0.75 : 1;
+    u.uLineDist.value = this.settings.showDistricts && !this.clean && (political || regions) ? fade(0.12, 0.6) : 0;
+    u.uLineSea.value = this.clean || !this.hasRegions || this.settings.showDistricts === false ? 0 : regions ? fade(0.1, 0.35) : fade(0.03, 0.09);
     u.uCloudAmt.value = this.settings.showWeather === false ? 0 : 0.35 + 0.65 * p.globe;
     // political colours are strong from afar and give way to the terrain up close
     u.uOverlay.value = this.overlayBase * (0.3 + 0.7 * Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.015)) / (Math.log(0.6) - Math.log(0.015)))));
