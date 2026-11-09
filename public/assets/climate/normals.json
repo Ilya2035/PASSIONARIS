@@ -1,0 +1,94 @@
+{
+  "format": "passionaris-climate-normals",
+  "version": 1,
+  "generated": "2026-11-09T23:02:09.912Z",
+  "file": "normals.bin.gz",
+  "compression": "gzip",
+  "byteOrder": "little-endian",
+  "totalBytes": 12960000,
+  "grid": {
+    "W": 720,
+    "H": 360,
+    "resolutionDeg": 0.5,
+    "cell": "y * 720 + x",
+    "rows": "row 0 = 90°N .. 89.5°N (centre lat = 90 - (y + 0.5) * 0.5)",
+    "cols": "col 0 = 180°W .. 179.5°W (centre lon = -180 + (x + 0.5) * 0.5)"
+  },
+  "months": "index 0 = January .. 11 = December",
+  "baseline": "1970–2000 climatological normals",
+  "sections": [
+    {
+      "name": "tavg",
+      "type": "Int16",
+      "shape": [
+        12,
+        360,
+        720
+      ],
+      "scale": 0.1,
+      "units": "°C",
+      "note": "monthly mean air temperature; value * 0.1 = °C",
+      "offset": 0,
+      "byteLength": 6220800
+    },
+    {
+      "name": "prec",
+      "type": "Uint16",
+      "shape": [
+        12,
+        360,
+        720
+      ],
+      "scale": 1,
+      "units": "mm/month",
+      "note": "monthly precipitation total",
+      "offset": 6220800,
+      "byteLength": 6220800
+    },
+    {
+      "name": "elev",
+      "type": "Int16",
+      "shape": [
+        360,
+        720
+      ],
+      "scale": 1,
+      "units": "m",
+      "note": "mean land elevation of the cell; open ocean = 0 (sea surface)",
+      "offset": 12441600,
+      "byteLength": 518400
+    }
+  ],
+  "extras": {
+    "landfrac": {
+      "file": "landfrac.bin.gz",
+      "compression": "gzip",
+      "type": "Uint8",
+      "shape": [
+        2,
+        360,
+        720
+      ],
+      "layers": [
+        "land",
+        "lake"
+      ],
+      "scale": 0.00392156862745098,
+      "note": "fraction of MAP cells (cells.bin.gz) inside the SIM cell: land = id >= 2, lake = id 1"
+    }
+  },
+  "source": {
+    "name": "WorldClim version 2.1, 10 arc-minute monthly tavg / prec / elev",
+    "url": "https://www.worldclim.org/data/worldclim21.html",
+    "citation": "Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2: new 1-km spatial resolution climate surfaces for global land areas. International Journal of Climatology 37 (12): 4302–4315.",
+    "terms": "See data/sources/climate.md: worldclim.org states free academic / non-commercial use; redistribution or commercial use requires prior permission."
+  },
+  "processing": {
+    "resample": "3x3 block mean of valid 10′ pixels -> 0.5°",
+    "oceanFill": "screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T 3.5 cells, P 5 cells; enclosed water bodies < 600 cells: Laplace fill from shores",
+    "antarctic": "land cells south of 60°S above 1000 m blended (weight smoothstep((z-1000)/1500)) towards Fortuin & Oerlemans 1990 T = 34.46 - 0.00914 z - 0.688|lat| + South Pole seasonal cycle; accumulation towards (600 e^(-z/700) + 20)/12 mm/month; 21217 cells",
+    "waterCells": 163753,
+    "enclosedCells": 1648,
+    "script": "scripts/climate/bake-normals.mjs"
+  }
+}

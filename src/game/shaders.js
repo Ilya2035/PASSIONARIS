@@ -291,6 +291,13 @@ void main() {
       c = mix(c, uDesert, smoothstep(0.42, 0.66, albL));
       c = mix(c, uSnow, ice);
     }
+    // paleoclimate: wetter than today greens arid land (green Sahara), drier pushes towards desert
+    if (uHasSim > 0.5 && uMode == 1) {
+      float gr = (sim.a - 0.5) * 2.0;
+      float arid = smoothstep(0.55, 0.8, dot(c, vec3(0.333)));
+      c = mix(c, vec3(0.62, 0.66, 0.42), clamp(gr, 0.0, 1.0) * arid * 0.85);
+      c = mix(c, vec3(0.88, 0.8, 0.6), clamp(-gr, 0.0, 1.0) * 0.6);
+    }
     c = mix(c, uPaperDark, smoothstep(1400.0, 4800.0, hLand) * (uMode == 0 ? 0.0 : 0.22));
     c = mix(c, uSnow, smoothstep(4300.0, 5800.0, hLand) * 0.8);
     // seasonal snow from the weather simulation, broken into crisp dense patches

@@ -10,6 +10,7 @@ const OPT = import.meta.glob([
 ]);
 import { loadBiomes } from './biomes.js';
 import { createTime } from './time.js';
+import { createClimate } from './climate.js';
 
 const has = p => !!OPT[p];
 const load = async p => (OPT[p] ? OPT[p]() : null);
@@ -37,6 +38,7 @@ export async function createWorldSystems(ctx) {
       const b = biomes.at(geo.lat, geo.lon);
       if (b) { kicker = b.nameRu; rows.push(['Местность', b.nameRu]); }
     }
+    if (sys.climate) rows.push(...sys.climate.describe(geo.lat, geo.lon));
     return { kicker, rows, tip: kicker };
   };
 
@@ -56,6 +58,15 @@ export async function createWorldSystems(ctx) {
     sys.quickLoad = () => time.quickLoad();
     const prevSetting = sys.onSetting;
     sys.onSetting = (k, v) => { if (k === 'autosaveMinutes') time.setAutosave(v); prevSetting?.(k, v); };
+  }
+
+  // ---- climate: monthly normals + paleoclimate (needs the clock)
+  if (sys.clock) {
+    const [climatology, paleo] = await Promise.all([load('../../sim/climate/climatology.js'), load('../../sim/climate/paleo.js')]);
+    if (climatology && paleo) {
+      sys.climate = await createClimate({ climatology, paleo, globe, clock: sys.clock, cal }).catch(e => { console.warn('climate', e); return null; });
+      if (sys.climate) features.add('climate');
+    }
   }
 
   sys.update = (dt, t, p) => {

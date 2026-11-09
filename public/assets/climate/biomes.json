@@ -1,0 +1,119 @@
+{
+  "format": "passionaris-biomes",
+  "version": 1,
+  "generated": "2026-11-09T23:02:24.648Z",
+  "file": "biome.bin.gz",
+  "compression": "gzip",
+  "type": "Uint8",
+  "grid": {
+    "W": 8192,
+    "H": 4096,
+    "note": "MAP grid: row 0 = 90°N, col 0 = 180°W, same as public/assets/map/cells.bin.gz"
+  },
+  "method": "WorldClim 1970–2000 normals, lapse-rate (6.5 °C/km) temperature downscaling to the map height, bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules (src/sim/climate/biomes.js); wetlands = flat humid lowlands",
+  "classes": [
+    {
+      "id": 0,
+      "key": "water",
+      "nameRu": "Вода",
+      "description": "Океаны, моря и озёра.",
+      "color": "#8e9a9c"
+    },
+    {
+      "id": 1,
+      "key": "ice",
+      "nameRu": "Льды",
+      "description": "Ледниковые щиты и вечные льды: даже летом ниже нуля.",
+      "color": "#e8e6df",
+      "landShare": 0.0967
+    },
+    {
+      "id": 2,
+      "key": "tundra",
+      "nameRu": "Тундра",
+      "description": "Холодная безлесная равнина: мхи, лишайники, карликовые кустарники, вечная мерзлота.",
+      "color": "#b8b6a2",
+      "landShare": 0.0288
+    },
+    {
+      "id": 3,
+      "key": "taiga",
+      "nameRu": "Тайга",
+      "description": "Северный хвойный лес с долгой суровой зимой и коротким летом.",
+      "color": "#7b866e",
+      "landShare": 0.145
+    },
+    {
+      "id": 4,
+      "key": "temperate_forest",
+      "nameRu": "Умеренный лес",
+      "description": "Широколиственные и смешанные леса умеренного пояса с выраженными сезонами.",
+      "color": "#929c78",
+      "landShare": 0.1101
+    },
+    {
+      "id": 5,
+      "key": "steppe",
+      "nameRu": "Степь и луга",
+      "description": "Травянистые равнины умеренного пояса с засушливым летом или малым количеством осадков.",
+      "color": "#c6bf92",
+      "landShare": 0.069
+    },
+    {
+      "id": 6,
+      "key": "mediterranean",
+      "nameRu": "Средиземноморье",
+      "description": "Жестколистные леса и кустарники: сухое жаркое лето, мягкая дождливая зима.",
+      "color": "#aaa47a",
+      "landShare": 0.0316
+    },
+    {
+      "id": 7,
+      "key": "desert",
+      "nameRu": "Пустыня",
+      "description": "Крайне засушливые земли: пески, камни, редкие оазисы.",
+      "color": "#e3d7b6",
+      "landShare": 0.1755
+    },
+    {
+      "id": 8,
+      "key": "semi_desert",
+      "nameRu": "Полупустыня",
+      "description": "Сухие кустарники и редкая трава на границе пустыни.",
+      "color": "#d3c59f",
+      "landShare": 0.0549
+    },
+    {
+      "id": 9,
+      "key": "savanna",
+      "nameRu": "Саванна",
+      "description": "Жаркие травяные равнины с редкими деревьями, долгим сухим сезоном и сезоном дождей.",
+      "color": "#c8b27e",
+      "landShare": 0.1417
+    },
+    {
+      "id": 10,
+      "key": "tropical_forest",
+      "nameRu": "Тропический лес",
+      "description": "Влажные вечнозелёные и муссонные леса жаркого пояса.",
+      "color": "#6e7e5e",
+      "landShare": 0.0985
+    },
+    {
+      "id": 11,
+      "key": "wetland",
+      "nameRu": "Болота",
+      "description": "Плоские переувлажнённые низины: болота, топи, поймы.",
+      "color": "#879488",
+      "landShare": 0.0166
+    },
+    {
+      "id": 12,
+      "key": "highland",
+      "nameRu": "Высокогорье",
+      "description": "Горы выше границы леса и высокие плато: альпийские луга, камни, снега.",
+      "color": "#a39c8e",
+      "landShare": 0.0316
+    }
+  ]
+}
