@@ -177,6 +177,14 @@ export class Globe {
     scene.add(this.atmo);
   }
 
+  // 'full' | 'simple': simple = 3-tap hillshade, no sea ripples / isobaths, flat cloud edges (weak GPUs)
+  setShaders(kind) {
+    const simple = kind === 'simple';
+    if (!!this.terrainMat.defines.SIMPLE === simple) return;
+    if (simple) this.terrainMat.defines.SIMPLE = 1; else delete this.terrainMat.defines.SIMPLE;
+    this.terrainMat.needsUpdate = true;
+  }
+
   setMode(id) {
     this.mode = id;
     this.terrainMat.uniforms.uMode.value = MODE_INDEX[id] ?? 1;

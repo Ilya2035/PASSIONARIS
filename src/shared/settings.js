@@ -5,6 +5,7 @@ export const DEFAULT_SETTINGS = {
   pixelRatio: 1,              // legacy render scale multiplier
   renderScale: 'auto',        // 'auto' (dynamic resolution) or 0.5..1, upscaled with sharpening (FSR-like)
   sharpen: 0.35,              // sharpening strength for the upscale pass
+  shaders: 'full',            // 'full' | 'simple' (cheaper terrain shading for weak GPUs)
   brightness: 1,              // 0.7..1.3
   reliefScale: 1,             // vertical scale: 1 = true 1:1 proportions
   unroll: 0.85,               // 0 = always a globe, 1 = almost flat when zoomed in

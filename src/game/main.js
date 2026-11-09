@@ -23,6 +23,7 @@ const $ = id => document.getElementById(id);
 const settings = await loadSettings();
 const params = new URLSearchParams(location.search);
 if (params.has('palette')) settings.palette = params.get('palette');
+if (params.has('shaders')) settings.shaders = params.get('shaders');
 applyUiPalette(settings.palette);
 applyStippleTheme();
 const PAL = getPalette(settings.palette).map;
@@ -64,6 +65,7 @@ const data = await loadWorld(p => { fill.style.width = `${(p * 70).toFixed(1)}%`
 loadText.textContent = 'Поднимаем горы и наполняем океаны…';
 await new Promise(r => setTimeout(r, 20));
 const globe = new Globe(scene, renderer, data, settings);
+globe.setShaders(settings.shaders);
 const gcam = new GlobeCamera(camera, settings);
 const detail = new DetailTerrain(globe, data);
 if (params.has('lat')) gcam.lookAt(+params.get('lat'), +params.get('lon'), +(params.get('alt') || 0.3));
@@ -81,6 +83,11 @@ if (SHOT) {
 loadText.textContent = 'Заводим часы мира…';
 const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
 fill.style.width = '100%';
+// "Continue" in the launcher: load the save it picked (one-shot)
+try {
+  const cont = localStorage.getItem('passionaris.continue');
+  if (cont) { localStorage.removeItem('passionaris.continue'); if (!SHOT) world.time?.loadId(cont); }
+} catch { /* storage unavailable */ }
 
 // ------------------------------------------------------------------ map modes
 let mode = 'terrain';
@@ -219,6 +226,7 @@ $('menu-launcher').onclick = () => { if (isElectron) window.passionaris.exitToLa
 $('menu-quit').onclick = () => { if (isElectron) window.passionaris.quit(); else location.href = './index.html'; };
 buildSettings(settings, (key, value) => {
   if (key === 'brightness' || key === 'renderScale' || key === 'sharpen') return; // read every frame
+  if (key === 'shaders') globe.setShaders(value);
   world.onSetting?.(key, value);
 });
 

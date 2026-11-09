@@ -96,6 +96,25 @@ $('play').onclick = async () => {
   if (isElectron) window.passionaris.launch(settings);
   else location.href = './game.html';
 };
+// "Continue": the latest save (manual or autosave); the game picks the id up from localStorage (same origin)
+const CONTINUE_KEY = 'passionaris.continue';
+(async () => {
+  try {
+    const { createDefaultStorage } = await import('../save/index.js');
+    const list = await createDefaultStorage().list();
+    if (!list?.length) return;
+    const last = list.slice().sort((a, b) => (b.modified || 0) - (a.modified || 0))[0];
+    const btn = $('continue');
+    btn.disabled = false;
+    btn.title = [last.meta?.name || last.id, last.meta?.dateText].filter(Boolean).join(' · ');
+    btn.onclick = async () => {
+      try { localStorage.setItem(CONTINUE_KEY, last.id); } catch { /* private mode: start fresh */ }
+      await saveSettings(settings);
+      if (isElectron) window.passionaris.launch(settings);
+      else location.href = './game.html';
+    };
+  } catch (e) { console.warn('saves', e); }
+})();
 $('quit').onclick = () => { if (isElectron) window.passionaris.quit(); else window.close(); };
 $('win-close').onclick = () => window.passionaris?.quit();
 $('win-min').onclick = () => window.passionaris?.minimize();

@@ -18,6 +18,7 @@ const FIELDS = [
   { key: 'sharpen', label: 'Резкость апскейла', type: 'range', min: 0, max: 1, step: 0.05 },
   { key: 'brightness', label: 'Яркость', type: 'range', min: 0.7, max: 1.3, step: 0.01 },
   { key: 'quality', label: 'Детализация сетки', type: 'select', options: [['auto', 'Авто'], ['low', 'Низкая'], ['medium', 'Средняя'], ['high', 'Высокая']], reload: true },
+  { key: 'shaders', label: 'Шейдеры', type: 'select', options: [['full', 'Полные — тени рельефа, рябь, изобаты'], ['simple', 'Простые — быстрее на слабой графике']] },
   { key: 'reliefScale', label: 'Высота рельефа (1 = как в жизни)', type: 'range', min: 1, max: 10, step: 0.5 },
   { key: 'unroll', label: 'Разворачивание глобуса', type: 'range', min: 0, max: 1, step: 0.01 },
   { key: 'showWeather', label: 'Погода: облака, снег, засуха', type: 'check' },

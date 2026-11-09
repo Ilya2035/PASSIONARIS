@@ -81,6 +81,7 @@ export function createTime({ cal, clk, save, hud, settings }) {
     openSaves: mode => openSaves(api, mode),
     quickSave: () => saveAs('Быстрое сохранение'),
     quickLoad: () => loadId(save.slugSaveId('Быстрое сохранение')),
+    loadId,
     onLoad: fn => listeners.add(fn),
     setAutosave(minutes) { autosave.setIntervalMinutes(Number(minutes)); },
   };

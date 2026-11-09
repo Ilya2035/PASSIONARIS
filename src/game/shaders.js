@@ -229,12 +229,18 @@ void main() {
   vec2 o = uDetailOn > 0.5 ? exp2(lodD) / DGRID : exp2(lodH) / uGrid;
   float hc = heightAt(uv, lodH, lodD);
   float he = heightAt(uv + vec2(o.x, 0.0), lodH, lodD);
-  float hw = heightAt(uv - vec2(o.x, 0.0), lodH, lodD);
   float hn = heightAt(uv - vec2(0.0, o.y), lodH, lodD);
+#ifdef SIMPLE
+  float hw = hc, hs = hc;                 // "simple shaders": forward differences, 3 height taps instead of 5
+  const float SPAN = 1.0;
+#else
+  float hw = heightAt(uv - vec2(o.x, 0.0), lodH, lodD);
   float hs = heightAt(uv + vec2(0.0, o.y), lodH, lodD);
+  const float SPAN = 2.0;
+#endif
   float coslat = max(cos(lat), 0.02);
-  float dxm = 2.0 * o.x * 2.0 * PI * 6371000.0 * coslat;
-  float dym = 2.0 * o.y * PI * 6371000.0;
+  float dxm = SPAN * o.x * 2.0 * PI * 6371000.0 * coslat;
+  float dym = SPAN * o.y * PI * 6371000.0;
   vec3 nLocal = normalize(vec3(-(max(he, 0.0) - max(hw, 0.0)) / dxm * uShadeK, -(max(hn, 0.0) - max(hs, 0.0)) / dym * uShadeK, 1.0));
   const vec3 SUN = vec3(-0.55, 0.62, 0.56);            // from the north-west, cartographic style
   float lambert = dot(nLocal, normalize(SUN));
@@ -333,6 +339,7 @@ void main() {
     float depth = max(-hc, 0.0);
     vec3 wc = mix(uShallow, uDeep, pow(smoothstep(0.0, 5000.0, depth), 0.55));
     if (win == 1u) wc = uLake;
+#ifndef SIMPLE
     float bv = depth / 1000.0;
     float bw = max(fwidth(bv), 1e-4);
     float iso = (1.0 - smoothstep(0.3, 1.1, abs(fract(bv - 0.5) - 0.5) / bw)) * step(500.0, depth);
@@ -344,6 +351,7 @@ void main() {
     vec2 q = uv * uGrid * 0.35;
     float n = vnoise(q + vec2(uTime * 0.05, uTime * 0.035)) * 0.6 + vnoise(q * 2.7 - vec2(uTime * 0.08, 0.0)) * 0.4;
     wc *= 1.0 + (n - 0.5) * 0.08 * (1.0 - smoothstep(0.6, 3.0, texPerPx));
+#endif
     // sea ice: from the simulation when running, else from the imagery
     float ice = uHasWeather > 0.5 ? smoothstep(0.25, 0.7, wx.r) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
     col = mix(wc, uSnow * mix(1.0, shade, 0.5), ice * 0.9);
@@ -353,7 +361,11 @@ void main() {
   }
   // clouds from the weather simulation (soft, broken edges), strongest at globe distance
   if (uHasWeather > 0.5 && uCloudAmt > 0.0) {
+#ifdef SIMPLE
+    float cn = 0.5;
+#else
     float cn = vnoise(uv * vec2(900.0, 450.0) + vec2(uTime * 0.02, 0.0)) * 0.55 + vnoise(uv * vec2(2600.0, 1300.0)) * 0.45;
+#endif
     float cm = smoothstep(0.42, 0.8, wx.g + (cn - 0.5) * 0.5);
     col = mix(col, vec3(0.96, 0.95, 0.93), cm * 0.55 * uCloudAmt);
   }
