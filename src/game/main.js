@@ -18,12 +18,18 @@ import { DetailTerrain } from './terrain/detail.js';
 import * as hud from './ui/hud.js';
 import { buildSettings, openModal, closeModal, anyModalOpen } from './ui/menus.js';
 import { createWorldSystems } from './world/systems.js';
+import { applyPackData, runPackScripts } from '../engine/packs.js';
+import { BIOME_COLORS } from './world/biomes.js';
+import { VERSION } from '../shared/version.js';
 
 const $ = id => document.getElementById(id);
 const settings = await loadSettings();
 const params = new URLSearchParams(location.search);
 if (params.has('palette')) settings.palette = params.get('palette');
 if (params.has('shaders')) settings.shaders = params.get('shaders');
+// mods and DLC: data first (palettes, colours), scripts once the world is up; ?packs=a,b switches packs on (tests)
+if (params.has('packs')) settings.packs = Object.fromEntries(params.get('packs').split(',').filter(Boolean).map(id => [id, true]));
+const packs = await applyPackData(settings, { biomeColors: BIOME_COLORS }).catch(e => { console.warn('packs', e); return { enabled: [] }; });
 applyUiPalette(settings.palette);
 applyStippleTheme();
 const PAL = getPalette(settings.palette).map;
@@ -83,6 +89,7 @@ if (SHOT) {
 loadText.textContent = 'Заводим часы мира…';
 const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
 fill.style.width = '100%';
+if ((!SHOT || params.has('packs')) && packs.enabled.length) runPackScripts(packs.enabled, { version: VERSION, hud, world, globe, scene, gcam });
 // "Continue" in the launcher: load the save it picked (one-shot)
 try {
   const cont = localStorage.getItem('passionaris.continue');

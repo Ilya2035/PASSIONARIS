@@ -9,6 +9,7 @@ import changelogMd from '../../CHANGELOG.md?raw';
 import { APP_NAME, VERSION, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
 import { loadSettings, saveSettings, isElectron, DEFAULT_SETTINGS } from '../shared/settings.js';
 import { PALETTES, applyUiPalette } from '../shared/palettes.js';
+import { applyPackData, isEnabled } from '../engine/packs.js';
 import { applyStippleTheme } from '../shared/stipple.js';
 applyStippleTheme();
 
@@ -67,6 +68,27 @@ $('roadmap').innerHTML = ROADMAP.map(([t, s]) => `<li class="${s}">${t}</li>`).j
 // ------------------------------------------------------------- settings
 const settings = await loadSettings();
 applyUiPalette(settings.palette);
+// installed packs: palettes from enabled ones join the list; each pack gets an on/off switch
+const packInfo = await applyPackData(settings).catch(() => ({ packs: [] }));
+if (packInfo.packs.length) {
+  const box = $('s-packs');
+  box.innerHTML = '';
+  for (const p of packInfo.packs) {
+    const row = document.createElement('label');
+    row.className = 'pack';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = isEnabled(p, settings);
+    cb.onchange = () => { settings.packs = { ...(settings.packs || {}), [p.id]: cb.checked }; saveSettings(settings); };
+    const txt = document.createElement('span');
+    txt.innerHTML = `<b></b> <i></i><br><small></small>`;
+    txt.querySelector('b').textContent = p.name;
+    txt.querySelector('i').textContent = `${p.kind === 'dlc' ? 'DLC' : 'мод'} · v${p.version}`;
+    txt.querySelector('small').textContent = p.description;
+    row.append(cb, txt);
+    box.appendChild(row);
+  }
+}
 for (const [id, p] of Object.entries(PALETTES)) {
   const o = document.createElement('option'); o.value = id; o.textContent = p.name; $('s-palette').appendChild(o);
 }

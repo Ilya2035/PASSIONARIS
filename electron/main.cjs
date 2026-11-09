@@ -102,16 +102,17 @@ app.whenReady().then(() => {
 // PASSIONARIS_CAPTURE={"query":"lat=..&lon=..","width":2560,"height":1440,"out":"file.png"}
 // renders game.html?shot=1&<query> in an offscreen-sized window and saves one frame (menu art, docs)
 const CAPTURE = process.env.PASSIONARIS_CAPTURE;
-async function captureShot({ query, width = 2560, height = 1440, out }) {
+async function captureShot({ query, width = 2560, height = 1440, out, evaluate }) {
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const win = new BrowserWindow({ width, height, useContentSize: true, show: false, frame: false, paintWhenInitiallyHidden: true, backgroundColor: '#121211', webPreferences });
-  win.webContents.on('console-message', e => { if (e.level === 'error') console.log('[capture] console:', e.message); });
+  win.webContents.on('console-message', e => { if (e.level === 'error' || e.level === 'warning') console.log('[capture] console:', e.level, e.message); });
   await win.loadURL(`${pageUrl('game.html')}?shot=1&${query}`);
   for (let i = 0; i < 240; i++) {
     if (await win.webContents.executeJavaScript('!!(window.__game && window.__game.ready)').catch(() => false)) break;
     await wait(250);
   }
   await wait(2500); // let streaming/fades settle
+  if (evaluate) console.log('[capture] eval:', await win.webContents.executeJavaScript(evaluate).catch(e => 'ERR ' + e.message));
   fs.writeFileSync(out, (await win.webContents.capturePage()).toPNG());
   console.log('[capture] saved', out);
   app.quit();
@@ -157,6 +158,19 @@ async function smokeTest() {
     log('fps close:', await probe('g.gcam.lookAt(46.4, 9, 0.012); g.gcam.alt = 0.012'));
     // time flow: speed 5 for 3 s, then read the HUD date
     log('time:', await game.webContents.executeJavaScript(`(async () => { const w = window.__game.world; if (!w.clock) return 'no clock'; const d0 = document.getElementById('clock-date').textContent; w.setSpeed(5); await new Promise(r => setTimeout(r, 3000)); const d1 = document.getElementById('clock-date').textContent; w.setSpeed(0); return d0 + ' -> ' + d1 + ' | t=' + w.clock.t.toFixed(1); })()`));
+    if (process.env.PASSIONARIS_SAVETEST) {
+      // save -> run on -> load: the clock (and the weather snapshot) must come back
+      log('savetest:', await game.webContents.executeJavaScript(`(async () => {
+        const w = window.__game.world, sleep = ms => new Promise(r => setTimeout(r, ms));
+        w.setSpeed(3); await sleep(2500); w.setSpeed(0);
+        const t0 = w.clock.t; await w.quickSave(); await sleep(500);
+        w.setSpeed(4); await sleep(2500); w.setSpeed(0);
+        const t1 = w.clock.t; await w.quickLoad(); await sleep(1500);
+        const t2 = w.clock.t;
+        const toasts = [...document.querySelectorAll('#toasts .toast')].map(e => e.textContent).join(' | ');
+        return 'saved t=' + t0.toFixed(2) + ', moved to ' + t1.toFixed(2) + ', loaded t=' + t2.toFixed(2) + ' | ' + toasts;
+      })()`));
+    }
     if (process.env.PASSIONARIS_PERF2) {
       // what each layer costs at the globe view and up close (PASSIONARIS_PERF2=1 with PASSIONARIS_SMOKE)
       const g0 = 'g.gcam.lookAt(30, 20, 2.2); g.gcam.alt = 2.2';

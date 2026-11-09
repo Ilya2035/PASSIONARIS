@@ -1,0 +1,18 @@
+{
+  "id": "night-ink",
+  "name": "Ночные чернила",
+  "version": "1.0.0",
+  "kind": "mod",
+  "author": "Passionaris",
+  "description": "Пример мода: тёмно-синяя палитра карты и приветствие при запуске. Образец для своих модов.",
+  "enabledByDefault": false,
+  "palettes": {
+    "nightink": {
+      "name": "Ночные чернила (мод)",
+      "ui": { "--accent": "#8ea0c2", "--accent-hi": "#c9d4ea", "--accent-soft": "rgba(142, 160, 194, 0.3)" },
+      "map": { "deep": [0.2, 0.25, 0.34], "shallow": [0.5, 0.58, 0.66], "ink": [0.08, 0.1, 0.18], "river": [0.3, 0.38, 0.5] }
+    }
+  },
+  "biomeColors": {},
+  "scripts": ["main.js"]
+}

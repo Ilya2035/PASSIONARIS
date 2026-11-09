@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS = {
   showFps: false,
   gpu: 'discrete',            // Electron: force the discrete GPU on dual-GPU laptops ('auto' = system choice)
   palette: 'graphite',        // see src/shared/palettes.js
+  packs: {},                  // mods / DLC on or off: {packId: true | false}; unset = the pack's default
 };
 
 const KEY = 'passionaris.settings';
