@@ -1,0 +1,265 @@
+{
+  "totalUSD": 0.144256,
+  "calls": [
+    {
+      "at": "2026-11-09T21:59:25.473Z",
+      "name": "portrait-medieval",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1536",
+      "n": 1,
+      "usage": {
+        "input_tokens": 111,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 111
+        },
+        "output_tokens": 343,
+        "output_tokens_details": {
+          "image_tokens": 343,
+          "text_tokens": 0
+        },
+        "total_tokens": 454
+      },
+      "costUSD": 0.0108,
+      "files": [
+        "art\\drafts\\portrait-medieval-1794261565471-1.png"
+      ],
+      "prompt": "Cut-out portrait bust of a medieval ruler for a grand strategy game, rendered entirely in fine stipple dots like a pointillist engraving with depth and volume. Soft muted palette: oxblood red, bone white, aged gold ochre, warm grey. Clean cut-out silhouette edge with a thin stippled halo; a soft stippled drop shadow falls onto a light warm cream paper background with fine canvas speckle grain. Crisp, highly detailed face, calm dignified expression. No text, no frame, no signature."
+    },
+    {
+      "at": "2026-11-09T21:59:45.462Z",
+      "name": "clock-astrolabe",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 93,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 93
+        },
+        "output_tokens": 439,
+        "output_tokens_details": {
+          "image_tokens": 439,
+          "text_tokens": 0
+        },
+        "total_tokens": 532
+      },
+      "costUSD": 0.0136,
+      "files": [
+        "art\\drafts\\clock-astrolabe-1794261585460-1.png"
+      ],
+      "prompt": "Ornate game UI clock element shaped like an astrolabe: concentric rings with engraved decade and century tick marks, sharp angular geometric ornaments, a pointed hand, a central disc with sun and moon phases. Rendered with stipple-dot shading for depth and volume, muted bronze, bone and charcoal colours, crisp edges, subtle stippled shadow. Isolated on a transparent background. No text, no numbers, no letters."
+    },
+    {
+      "at": "2026-11-09T22:00:03.278Z",
+      "name": "map-political-volume",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1536x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 126,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 126
+        },
+        "output_tokens": 343,
+        "output_tokens_details": {
+          "image_tokens": 343,
+          "text_tokens": 0
+        },
+        "total_tokens": 469
+      },
+      "costUSD": 0.0109,
+      "files": [
+        "art\\drafts\\map-political-volume-1794261603272-1.png"
+      ],
+      "prompt": "Tilted aerial view of a 3D relief map of western Europe for a grand strategy game. Countries are shown as saturated translucent coloured volumes resting over the real terrain like tinted glass, with soft stippled glow along their inner edges and crisp thin dark borders that meet at sharp clean points. One contested region is filled with dense clustered patches of two country colours, one clearly dominant. Mountains with realistic relief, rivers, sea with fine speckle grain and soft depth. Muted but rich period palette, painterly stipple texture, cinematic soft light. No text, no labels, no icons."
+    },
+    {
+      "at": "2026-11-09T22:08:44.760Z",
+      "name": "portrait-v2",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1536",
+      "n": 1,
+      "usage": {
+        "input_tokens": 1646,
+        "input_tokens_details": {
+          "image_tokens": 1536,
+          "text_tokens": 110
+        },
+        "output_tokens": 343,
+        "output_tokens_details": {
+          "image_tokens": 343,
+          "text_tokens": 0
+        },
+        "total_tokens": 1989
+      },
+      "costUSD": 0.0231,
+      "files": [
+        "art\\drafts\\portrait-v2-1794262124757-1.png"
+      ],
+      "prompt": "Restyle this exact portrait: keep the same colour palette, composition, cut-out silhouette and cream paper background. Make it more of an impression than a detailed illustration: noticeably coarser and stronger stipple grain everywhere, fewer fine details in crown, embroidery and fur, simplified softer facial features, the eyes partly lost in shadow, deeper shadows on one side of the face and under the brow, a slightly mysterious mood. Keep the stippled drop shadow. No text."
+    },
+    {
+      "at": "2026-11-09T22:09:05.526Z",
+      "name": "portrait-ancient-v2",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1536",
+      "n": 1,
+      "usage": {
+        "input_tokens": 1624,
+        "input_tokens_details": {
+          "image_tokens": 1536,
+          "text_tokens": 88
+        },
+        "output_tokens": 343,
+        "output_tokens_details": {
+          "image_tokens": 343,
+          "text_tokens": 0
+        },
+        "total_tokens": 1967
+      },
+      "costUSD": 0.023,
+      "files": [
+        "art\\drafts\\portrait-ancient-v2-1794262145524-1.png"
+      ],
+      "prompt": "Using exactly the same stipple engraving style, grain, cut-out silhouette, cream paper background and muted palette as this portrait, depict instead a Bronze Age chieftainess with braided hair, a simple bronze torc and a wool cloak. Impressionistic: coarse strong stipple grain, few fine details, eyes partly in shadow, deeper shadows. No text."
+    },
+    {
+      "at": "2026-11-09T22:09:25.498Z",
+      "name": "map-political-v2a",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1536x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 178,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 178
+        },
+        "output_tokens": 343,
+        "output_tokens_details": {
+          "image_tokens": 343,
+          "text_tokens": 0
+        },
+        "total_tokens": 521
+      },
+      "costUSD": 0.0112,
+      "files": [
+        "art\\drafts\\map-political-v2a-1794262165496-1.png"
+      ],
+      "prompt": "Tilted aerial view of a grand strategy political map of Europe. Countries are clean translucent colour zones lying over the terrain; the relief underneath is subtle, low-contrast and quiet so it never overpowers the political colours. A rich variety of distinct, pleasant, slightly muted but saturated hues: every nation has its own associated colour family and its regions use related shades of that family (for example France in several blues, England in crimsons, Spain in ochres and golds, German lands in greys and slate, Italy in greens, Poland in roses, Scandinavia in teals). Crisp thin dark borders meeting at clean sharp points. One contested region filled with dense clustered patches of two nation colours, one clearly dominant. Calm sea with fine speckle grain. Soft overall stipple grain like printed canvas. No text, no labels, no icons."
+    },
+    {
+      "at": "2026-11-09T22:09:44.939Z",
+      "name": "map-political-v2b",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1536x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 135,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 135
+        },
+        "output_tokens": 343,
+        "output_tokens_details": {
+          "image_tokens": 343,
+          "text_tokens": 0
+        },
+        "total_tokens": 478
+      },
+      "costUSD": 0.011,
+      "files": [
+        "art\\drafts\\map-political-v2b-1794262184937-1.png"
+      ],
+      "prompt": "Top-down slightly tilted political map of the Mediterranean and Middle East for a grand strategy game, in a soft stippled canvas print style. Nations as clean colour zones with a very wide palette of distinct period-appropriate hues (terracotta, olive, lapis, saffron, plum, teal, sand, rust, sage, indigo), each nation's provinces in related shades of its own colour. Terrain relief is only faintly visible beneath the colours. Crisp thin borders with sharp junctions, sea in calm blue-grey with fine grain. Two contested regions shown as dense clustered dot patches mixing two colours, one dominant. No text, no labels."
+    },
+    {
+      "at": "2026-11-09T22:10:01.632Z",
+      "name": "clock-simple-a",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 72,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 72
+        },
+        "output_tokens": 439,
+        "output_tokens_details": {
+          "image_tokens": 439,
+          "text_tokens": 0
+        },
+        "total_tokens": 511
+      },
+      "costUSD": 0.0135,
+      "files": [
+        "art\\drafts\\clock-simple-a-1794262201630-1.png"
+      ],
+      "prompt": "Minimal geometric clock UI element for a grand strategy game: a single slim bronze ring with small sharp tick marks, one slender pointed hand, a flat inner disc in muted ochre with soft stipple shading for gentle volume. Clean, calm and readable, not ornate. Isolated on a transparent background. No numbers, no text."
+    },
+    {
+      "at": "2026-11-09T22:10:16.843Z",
+      "name": "clock-simple-b",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 78,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 78
+        },
+        "output_tokens": 439,
+        "output_tokens_details": {
+          "image_tokens": 439,
+          "text_tokens": 0
+        },
+        "total_tokens": 517
+      },
+      "costUSD": 0.0136,
+      "files": [
+        "art\\drafts\\clock-simple-b-1794262216841-1.png"
+      ],
+      "prompt": "Simple elegant era dial UI element: a flat circular dial divided into a few soft coloured sectors (bone, ochre, muted teal, oxblood), stipple-textured surface, thin dark outline, one sharp needle pointer, a small faceted centre stone. Minimal ornament, crisp and readable. Isolated on a transparent background. No numbers, no text."
+    },
+    {
+      "at": "2026-11-09T22:10:31.358Z",
+      "name": "clock-simple-c",
+      "model": "gpt-image-2.5-sunburst",
+      "quality": "medium",
+      "size": "1024x1024",
+      "n": 1,
+      "usage": {
+        "input_tokens": 61,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 61
+        },
+        "output_tokens": 439,
+        "output_tokens_details": {
+          "image_tokens": 439,
+          "text_tokens": 0
+        },
+        "total_tokens": 500
+      },
+      "costUSD": 0.0135,
+      "files": [
+        "art\\drafts\\clock-simple-c-1794262231356-1.png"
+      ],
+      "prompt": "Hourglass time indicator UI element for a grand strategy game: a simple geometric hourglass with sharp angular bronze frame, sand rendered as fine stipple dots, soft stippled shading for volume, minimal and elegant, not ornate. Isolated on a transparent background. No text."
+    }
+  ]
+}

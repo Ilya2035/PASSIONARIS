@@ -52,13 +52,23 @@ if (ledger.totalUSD + estimate > budget) { console.error('BUDGET: this call woul
 if (!flag('yes')) { console.log('dry run — add --yes to generate'); process.exit(0); }
 
 const env = loadEnv();
-const body = { model, prompt, size, quality, n, output_format: 'png' };
-if (flag('transparent')) body.background = 'transparent';
-const res = await fetch('https://api.openai.com/v1/images/generations', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
+const ref = opt('ref'); // --ref <png>: edit/restyle an existing image (keeps palette & composition)
+let res;
+if (ref) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries({ model, prompt, size, quality, n: String(n), output_format: 'png' })) form.append(k, v);
+  if (flag('transparent')) form.append('background', 'transparent');
+  form.append('image', new Blob([fs.readFileSync(path.resolve(ROOT, ref))], { type: 'image/png' }), path.basename(ref));
+  res = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
+} else {
+  const body = { model, prompt, size, quality, n, output_format: 'png' };
+  if (flag('transparent')) body.background = 'transparent';
+  res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
 const j = await res.json();
 if (!res.ok) { console.error('API error:', res.status, j.error?.message || j.error?.code); process.exit(1); }
 
