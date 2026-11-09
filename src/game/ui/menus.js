@@ -75,10 +75,11 @@ export async function openSaves(api, mode /* 'save' | 'load' */) {
       row.className = 'save-row';
       row.innerHTML = `<div><div class="nm">${esc(s.name)}</div><div class="meta">${esc(s.meta?.dateText || '')}${s.meta?.saved ? ' · ' + esc(new Date(s.meta.saved).toLocaleString('ru-RU')) : ''}</div></div>
         <button data-act="${mode === 'save' ? 'over' : 'load'}">${mode === 'save' ? 'Перезаписать' : 'Загрузить'}</button><button data-act="del">Удалить</button>`;
-      row.querySelector('[data-act="del"]').onclick = async () => { await api.remove(s.name); render(); };
+      const id = s.id ?? s.name;
+      row.querySelector('[data-act="del"]').onclick = async () => { await api.remove(id); render(); };
       row.querySelector('[data-act="load"], [data-act="over"]').onclick = async () => {
         if (mode === 'save') { await api.save(s.name); render(); }
-        else { await api.load(s.name); closeModal('saves'); }
+        else { await api.load(id); closeModal('saves'); }
       };
       $('save-list').appendChild(row);
     }

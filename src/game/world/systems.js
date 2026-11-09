@@ -9,6 +9,7 @@ const OPT = import.meta.glob([
   '../../save/*.js',
 ]);
 import { loadBiomes } from './biomes.js';
+import { createTime } from './time.js';
 
 const has = p => !!OPT[p];
 const load = async p => (OPT[p] ? OPT[p]() : null);
@@ -16,6 +17,7 @@ const load = async p => (OPT[p] ? OPT[p]() : null);
 export async function createWorldSystems(ctx) {
   const { hud, globe } = ctx;
   const features = new Set();
+  const updaters = [];
   const sys = {
     features,
     liveInfo: false,
@@ -36,6 +38,29 @@ export async function createWorldSystems(ctx) {
       if (b) { kicker = b.nameRu; rows.push(['Местность', b.nameRu]); }
     }
     return { kicker, rows, tip: kicker };
+  };
+
+  // ---- time, saves, autosave
+  const [cal, clk, save] = await Promise.all([load('../../sim/calendar.js'), load('../../sim/clock.js'), load('../../save/index.js')]);
+  if (cal && clk && save) {
+    const time = createTime({ cal, clk, save, hud, settings: ctx.settings });
+    sys.time = time;
+    sys.clock = time.clock;
+    features.add('time');
+    sys.renderClock = extra => time.render(extra);
+    sys.setSpeed = n => time.setSpeed(n);
+    sys.togglePause = () => time.togglePause();
+    sys.pauseForMenu = open => time.pauseForMenu(open);
+    sys.openSaves = mode => time.openSaves(mode);
+    sys.quickSave = () => time.quickSave();
+    sys.quickLoad = () => time.quickLoad();
+    const prevSetting = sys.onSetting;
+    sys.onSetting = (k, v) => { if (k === 'autosaveMinutes') time.setAutosave(v); prevSetting?.(k, v); };
+  }
+
+  sys.update = (dt, t, p) => {
+    sys.time?.update(dt);
+    for (const u of updaters) u(dt, t, p);
   };
 
   ctx.onProgress?.(1);

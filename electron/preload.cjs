@@ -8,4 +8,10 @@ contextBridge.exposeInMainWorld('passionaris', {
   exitToLauncher: () => ipcRenderer.send('game:exit-to-launcher'),
   quit: () => ipcRenderer.send('app:quit'),
   minimize: () => ipcRenderer.send('win:minimize'),
+  saves: {
+    list: () => ipcRenderer.invoke('saves:list'),
+    save: (id, bytes) => ipcRenderer.invoke('saves:save', id, bytes),
+    load: id => ipcRenderer.invoke('saves:load', id),
+    remove: id => ipcRenderer.invoke('saves:remove', id),
+  },
 });

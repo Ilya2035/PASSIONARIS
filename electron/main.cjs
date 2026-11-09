@@ -1,5 +1,6 @@
 // Passionaris desktop wrapper: launcher window -> game window.
-const { app, BrowserWindow, ipcMain, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, shell } = require('electron');
+const { registerSaveIpc } = require('./saves.cjs');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -77,6 +78,8 @@ app.whenReady().then(() => {
     return new Response('Not found', { status: 404 });
   });
 
+  // saves live in %APPDATA%/Passionaris/saves; deleting moves the file to the recycle bin
+  registerSaveIpc(ipcMain, app, { trashItem: p => shell.trashItem(p) });
   ipcMain.handle('settings:get', () => readSettings());
   ipcMain.handle('settings:set', (_e, s) => { writeSettings(s); return true; });
   ipcMain.on('game:launch', (_e, s) => {
@@ -152,6 +155,8 @@ async function smokeTest() {
     const probe = q => game.webContents.executeJavaScript(`(async () => { const g = window.__game; ${q}; await new Promise(r => setTimeout(r, 1500)); let n = 0; const t0 = performance.now(); await new Promise(r => { const f = () => { n++; performance.now() - t0 < 3000 ? requestAnimationFrame(f) : r(); }; requestAnimationFrame(f); }); return (n / ((performance.now() - t0) / 1000)).toFixed(1); })()`);
     log('fps globe:', await probe('g.gcam.lookAt(30, 20, 2.2); g.gcam.alt = 2.2'));
     log('fps close:', await probe('g.gcam.lookAt(46.4, 9, 0.012); g.gcam.alt = 0.012'));
+    // time flow: speed 5 for 3 s, then read the HUD date
+    log('time:', await game.webContents.executeJavaScript(`(async () => { const w = window.__game.world; if (!w.clock) return 'no clock'; const d0 = document.getElementById('clock-date').textContent; w.setSpeed(5); await new Promise(r => setTimeout(r, 3000)); const d1 = document.getElementById('clock-date').textContent; w.setSpeed(0); return d0 + ' -> ' + d1 + ' | t=' + w.clock.t.toFixed(1); })()`));
     if (process.env.PASSIONARIS_PERF) {
       log('settings:', await game.webContents.executeJavaScript('JSON.stringify({q: window.__game.settings.qualityResolved, rs: window.__game.settings.renderScale, dyn: window.__game.dynScale, size: [innerWidth, innerHeight, devicePixelRatio]})'));
       log('fps close @50%:', await probe('g.settings.renderScale = 0.5'));

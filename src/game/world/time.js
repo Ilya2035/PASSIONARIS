@@ -1,0 +1,86 @@
+// Time & saves integration: game clock (5000 BC → 2100), date/time HUD, speeds, pause, saves, autosave.
+import { openSaves } from '../ui/menus.js';
+
+export function createTime({ cal, clk, save, hud, settings }) {
+  const clock = clk.createClock({ t0: 0 }); // astronomical -4999-01-01 00:00, paused, speed 3 = 1 month/s in the first era
+  let menuPaused = false;
+
+  // ---- HUD: date always; hours only when time runs slower than ~a day per second
+  let lastLabel = '';
+  function render(extra) {
+    const rate = clock.rateOf(clock.speed);
+    const date = cal.formatRu(clock.t, rate > 20 ? 'month' : 'day');
+    const time = rate < 1.5 ? cal.formatRu(clock.t, 'hour') : `${clock.era.nameRu}`;
+    const label = `${date}|${time}|${extra}|${clock.paused}|${clock.speed}`;
+    if (label === lastLabel) return;
+    lastLabel = label;
+    hud.renderClock({ date, time: extra ? `${time} · ${extra}` : time }, clock.paused ? 0 : clock.speed);
+  }
+
+  function setSpeed(n) {
+    if (n <= 0) { clock.togglePause(); return; }
+    clock.setSpeed(n);
+    clock.resume();
+  }
+  hud.onSpeedClick(setSpeed);
+
+  // ---- saves
+  const storage = save.createDefaultStorage();
+  const registry = new save.SaveRegistry();
+  registry.register('clock', { save: () => clock.serialize(), load: s => clock.deserialize(s) });
+  const collect = () => ({ meta: { t: clock.t, dateText: cal.formatRu(clock.t, 'day') }, sections: registry.collect() });
+  const autosave = save.createAutosave({
+    storage, collect,
+    intervalMinutes: Number(settings.autosaveMinutes ?? 10), slots: Number(settings.autosaveSlots ?? 3),
+    getGameTime: () => clock.t,
+    onSaved: () => hud.toast('<b>Автосохранение</b> записано', 2500),
+    onError: e => hud.toast(`<b>Автосохранение не удалось</b><br>${e.message || e}`, 6000),
+  });
+  autosave.init?.();
+
+  const listeners = new Set();
+  async function saveAs(name) {
+    try {
+      const id = save.slugSaveId(name);
+      const data = collect();
+      await save.saveGame(storage, id, { meta: { ...data.meta, name }, sections: data.sections });
+      hud.toast(`<b>Сохранено</b> · ${hud.esc(name)}`, 2500);
+    } catch (e) { hud.toast(`<b>Не удалось сохранить</b><br>${hud.esc(e.message || e)}`, 6000); }
+  }
+  async function loadId(id) {
+    try {
+      const s = await save.loadGame(storage, id);
+      await registry.apply(s.sections);
+      autosave.reset?.();
+      lastLabel = '';
+      for (const fn of listeners) fn(s);
+      hud.toast(`<b>Загружено</b> · ${hud.esc(s.meta?.name || id)}`, 2500);
+    } catch (e) { hud.toast(`<b>Не удалось загрузить</b><br>${hud.esc(e.message || e)}`, 6000); }
+  }
+  const api = {
+    list: async () => (await storage.list()).sort((a, b) => (b.modified || 0) - (a.modified || 0)).map(s => ({
+      id: s.id, name: s.meta?.name || s.id,
+      meta: { dateText: s.meta?.dateText || (Number.isFinite(s.meta?.t) ? cal.formatRu(s.meta.t, 'day') : ''), saved: s.modified },
+    })),
+    save: name => saveAs(name),
+    load: id => loadId(id),
+    remove: id => storage.remove(id),
+  };
+
+  return {
+    clock, registry, storage,
+    update(dt) {
+      clock.advance(menuPaused ? 0 : dt);
+      autosave.tick();
+    },
+    render,
+    setSpeed,
+    togglePause: () => clock.togglePause(),
+    pauseForMenu(open) { menuPaused = open; },
+    openSaves: mode => openSaves(api, mode),
+    quickSave: () => saveAs('Быстрое сохранение'),
+    quickLoad: () => loadId(save.slugSaveId('Быстрое сохранение')),
+    onLoad: fn => listeners.add(fn),
+    setAutosave(minutes) { autosave.setIntervalMinutes(Number(minutes)); },
+  };
+}
