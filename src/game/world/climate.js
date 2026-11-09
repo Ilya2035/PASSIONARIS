@@ -78,7 +78,7 @@ export async function createClimate({ climatology, paleo, globe, clock, cal }) {
       const year = baseYear[c] * pF[c] + addYear[c];
       const f = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)} °C`;
       return [
-        ['Температура сейчас', f(now)],
+        ['Норма месяца', f(now)],
         ['Январь / июль', `${f(jan)} / ${f(jul)}`],
         ['Осадки за год', `${Math.round(year).toLocaleString('ru-RU')} мм`],
         ...(Math.abs(Math.log2(eff[c])) > 0.15 ? [[eff[c] > 1 ? 'Влажнее, чем сегодня' : 'Суше, чем сегодня', `×${eff[c].toFixed(1)}`]] : []),

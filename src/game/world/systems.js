@@ -55,9 +55,15 @@ export async function createWorldSystems(ctx) {
       rows.push(...rd.rows);
       if (mode === 'regions' && rd.kicker) kicker = rd.kicker;
     }
-    if (sys.climate) rows.push(...sys.climate.describe(geo.lat, geo.lon));
-    if (sys.weather) rows.push(...sys.weather.describe(geo.lat, geo.lon));
-    if (sys.hazards && mode === 'hazards') rows.push(...sys.hazards.describe(geo.lat, geo.lon));
+    const section = (name, list) => { if (list?.length) rows.push([name, null], ...list); };
+    if (sys.climate) section('Климат этой эпохи', sys.climate.describe(geo.lat, geo.lon));
+    if (sys.weather) {
+      const wr = sys.weather.describe(geo.lat, geo.lon);
+      const cut = wr.findIndex(r => r[1] === null);   // the chronicle brings its own header
+      section('Погода', cut < 0 ? wr : wr.slice(0, cut));
+      if (cut >= 0) rows.push(...wr.slice(cut));
+    }
+    if (sys.hazards && mode === 'hazards') section('Опасности', sys.hazards.describe(geo.lat, geo.lon));
     return { kicker, title, rows, tip: kicker };
   };
 

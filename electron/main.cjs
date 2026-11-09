@@ -158,6 +158,10 @@ async function smokeTest() {
     log('fps close:', await probe('g.gcam.lookAt(46.4, 9, 0.012); g.gcam.alt = 0.012'));
     // time flow: speed 5 for 3 s, then read the HUD date
     log('time:', await game.webContents.executeJavaScript(`(async () => { const w = window.__game.world; if (!w.clock) return 'no clock'; const d0 = document.getElementById('clock-date').textContent; w.setSpeed(5); await new Promise(r => setTimeout(r, 3000)); const d1 = document.getElementById('clock-date').textContent; w.setSpeed(0); return d0 + ' -> ' + d1 + ' | t=' + w.clock.t.toFixed(1); })()`));
+    if (process.env.PASSIONARIS_EVAL) {
+      // PASSIONARIS_EVAL=<file.js>: evaluate a script in the running game (visible window, real frame rate)
+      log('eval:', await game.webContents.executeJavaScript(fs.readFileSync(process.env.PASSIONARIS_EVAL, 'utf8')).catch(e => 'ERR ' + e.message));
+    }
     if (process.env.PASSIONARIS_SAVETEST) {
       // save -> run on -> load: the clock (and the weather snapshot) must come back
       log('savetest:', await game.webContents.executeJavaScript(`(async () => {
@@ -168,6 +172,8 @@ async function smokeTest() {
         const t1 = w.clock.t; await w.quickLoad(); await sleep(1500);
         const t2 = w.clock.t;
         const toasts = [...document.querySelectorAll('#toasts .toast')].map(e => e.textContent).join(' | ');
+        // the test's quick save was written by the test: remove it so the player's save list stays clean
+        await w.time.storage.remove(w.time.quickSaveId).catch(() => {});
         return 'saved t=' + t0.toFixed(2) + ', moved to ' + t1.toFixed(2) + ', loaded t=' + t2.toFixed(2) + ' | ' + toasts;
       })()`));
     }

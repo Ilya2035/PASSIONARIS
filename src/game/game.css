@@ -44,6 +44,8 @@ html, body { overflow: hidden; }
 #info dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin: 0; font-size: 13px; }
 #info dt { color: var(--paper-ink-dim); }
 #info dd { margin: 0; text-align: right; }
+#info dt.sec { grid-column: 1 / -1; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(60, 50, 38, 0.18);
+  font-family: var(--font-display); color: var(--paper-ink); font-size: 12px; letter-spacing: 0.06em; }
 .close { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--paper-ink-dim); font-size: 22px; cursor: pointer; z-index: 2; line-height: 1; }
 .close:hover { color: var(--paper-ink); }
 .bar { height: 7px; background: rgba(74, 54, 34, 0.15); position: relative; margin-top: 4px; }

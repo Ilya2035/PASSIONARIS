@@ -31,14 +31,20 @@ export function onSpeedClick(fn) {
   for (const b of document.querySelectorAll('#clock-speed .spd')) b.onclick = () => fn(Number(b.dataset.speed));
 }
 
-// Info window (opened on click). rows: [[label, valueHtml], ...]
+// Info window (opened on click). rows: [[label, value], ...] (plain text); [label, null] = section header.
+// Refreshed live while time runs, so the DOM is touched only when the content changes.
+let infoHtml = '';
 export function showInfo({ kicker, title, rows }) {
-  $('info-kicker').textContent = kicker || '';
-  $('info-title').textContent = title || '';
-  $('info-list').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
+  const html = `${esc(kicker)}|${esc(title)}|` + rows.map(([k, v]) => (v === null ? `<dt class="sec">${esc(k)}</dt>` : `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)).join('');
+  if (html !== infoHtml) {
+    infoHtml = html;
+    $('info-kicker').textContent = kicker || '';
+    $('info-title').textContent = title || '';
+    $('info-list').innerHTML = html.slice(html.indexOf('|', html.indexOf('|') + 1) + 1);
+  }
   $('info').classList.remove('hidden');
 }
-export function hideInfo() { $('info').classList.add('hidden'); }
+export function hideInfo() { $('info').classList.add('hidden'); infoHtml = ''; }
 
 export function showTooltip(html, x, y) {
   const t = $('tooltip');

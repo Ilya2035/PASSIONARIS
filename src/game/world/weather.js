@@ -75,6 +75,38 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
     },
   });
 
+  // climate chronicle (climateLog: per 5x5 degree box and year) for the info window
+  let log = null, logAt = -1e9;
+  async function refreshLog() {
+    if (performance.now() - logAt < 4000) return;
+    logAt = performance.now();
+    try { log = await client.climateLog(); } catch { log = null; }
+  }
+  const yearRu = y => (y <= 0 ? `${1 - y} г. до н.э.` : `${y} г.`);
+  function chronicle(lat, lon) {
+    const ys = log?.years;
+    if (!ys || !ys.year.length) return [];
+    const B = log.count, n = ys.year.length;
+    const box = Math.min(35, Math.max(0, Math.floor((90 - lat) / 5))) * 72 + Math.min(71, Math.max(0, Math.floor((lon + 180) / 5)));
+    const k = Math.min(50, n), i0 = n - k;
+    let T = 0, P = 0, sw = 0, dm = 0, hw = 0;
+    for (let i = i0; i < n; i++) {
+      const o = i * B + box;
+      T += ys.meanT[o] / 10; P += ys.totalP[o]; sw += ys.severeWinter[o]; dm += ys.droughtMonths[o]; hw += ys.heatwaves[o];
+    }
+    const last = n - 1, lo = last * B + box;
+    const rows = [
+      ['Летопись края (квадрат 5°)', null],
+      ['Годы', k > 1 ? `${yearRu(ys.year[i0])} — ${yearRu(ys.year[last])}` : yearRu(ys.year[last])],
+      ['Средняя температура', `${fmtT(T / k)}${k > 1 ? ` · в последний год ${fmtT(ys.meanT[lo] / 10)}` : ''}`],
+      ['Осадки в год', `${Math.round(P / k).toLocaleString('ru-RU')} мм`],
+      ['Суровые зимы', `${sw} из ${k}`],
+      ['Засушливые месяцы', `${(dm / k).toFixed(1)} в год`],
+    ];
+    if (hw) rows.push(['Волны жары', `${hw} за ${k} ${k === 1 ? 'год' : 'лет'}`]);
+    return rows;
+  }
+
   // point readout for the info window (async query, cached)
   let sel = null, selInfo = null, selAt = 0;
   async function querySel() {
@@ -91,13 +123,13 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
       toastCooldown -= dt;
       const t = clock.t;
       if (!client.busy && Math.abs(t - lastT) >= 1) stepTo(t);
-      if (sel && performance.now() - selAt > 1000 && !client.busy) { selAt = performance.now(); querySel(); }
+      if (sel && performance.now() - selAt > 1000 && !client.busy) { selAt = performance.now(); querySel(); refreshLog(); }
     },
     setEnabled(v) {
       enabled = v !== false;
       globe.terrainMat.uniforms.uHasWeather.value = enabled ? 1 : 0;
     },
-    onSelect(geo) { sel = geo; selInfo = null; selAt = 0; },
+    onSelect(geo) { sel = geo; selInfo = null; selAt = 0; if (geo) { logAt = -1e9; refreshLog(); } },
     describe(lat, lon) {
       if (!sel || !selInfo || Math.abs(sel.lat - lat) > 0.3 || Math.abs(sel.lon - lon) > 0.3) return [];
       const q = selInfo;
@@ -107,7 +139,7 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
       if (q.ice) rows.push(['Лёд', `${Math.round(q.iceCm)} см`]);
       if (q.drought > 0.3) rows.push(['Засуха', `${Math.round(q.drought * 100)} %`]);
       if (q.fireDanger > 0.4) rows.push(['Пожароопасность', `${Math.round(q.fireDanger * 100)} %`]);
-      return rows;
+      return rows.concat(chronicle(lat, lon));
     },
     climateLog: () => client.climateLog(),
     reset() { lastT = -1e9; },
