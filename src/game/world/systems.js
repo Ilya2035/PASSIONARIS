@@ -3,7 +3,7 @@
 // keeps running while modules are still being built.
 const OPT = import.meta.glob([
   '../../sim/calendar.js', '../../sim/clock.js',
-  '../../sim/climate/*.js', '../../sim/weather/client.js',
+  '../../sim/climate/*.js', '../../sim/weather/client.js', '../../sim/weather/grid.js',
   '../../sim/hazards/*.js',
   '../fx/*.js',
   '../../save/*.js',
@@ -13,6 +13,7 @@ import { createTime } from './time.js';
 import { createClimate } from './climate.js';
 import { createHazards } from './hazards.js';
 import { createRegions } from './regions.js';
+import { createWeather } from './weather.js';
 import { INFO_W } from '../globe.js';
 
 const R2D = 180 / Math.PI;
@@ -30,7 +31,7 @@ export async function createWorldSystems(ctx) {
     features,
     onModeChange(id) { mode = id; sys.regions?.setMode(id); },
     onHover(v) { sys.regions?.onHover(toGeo(v)); },
-    onSelect(v) { sys.regions?.onSelect(toGeo(v)); },
+    onSelect(v) { const g = toGeo(v); sys.regions?.onSelect(g); sys.weather?.onSelect(g); },
     liveInfo: false,
     update() {},
     renderClock(extra) { hud.renderClock({ date: '—', time: extra || '' }, 0); },
@@ -55,9 +56,14 @@ export async function createWorldSystems(ctx) {
       if (mode === 'regions' && rd.kicker) kicker = rd.kicker;
     }
     if (sys.climate) rows.push(...sys.climate.describe(geo.lat, geo.lon));
+    if (sys.weather) rows.push(...sys.weather.describe(geo.lat, geo.lon));
     if (sys.hazards && mode === 'hazards') rows.push(...sys.hazards.describe(geo.lat, geo.lon));
     return { kicker, title, rows, tip: kicker };
   };
+
+  // SIM-grid land / lake / ocean mask for the weather, taken before the regions module re-encodes the cell raster
+  const wxGrid = await load('../../sim/weather/grid.js');
+  const wxMask = wxGrid ? wxGrid.maskFromCells(globe.data.cells) : null;
 
   // ---- natural districts, provinces, regions, sea zones and roads
   sys.regions = await createRegions({ globe, scene: ctx.scene, settings: ctx.settings, infoW: INFO_W })
@@ -91,6 +97,24 @@ export async function createWorldSystems(ctx) {
     if (climatology && paleo) {
       sys.climate = await createClimate({ climatology, paleo, globe, clock: sys.clock, cal }).catch(e => { console.warn('climate', e); return null; });
       if (sys.climate) features.add('climate');
+    }
+  }
+
+  // ---- daily weather (worker): snow, ice, clouds, rain, drought, weather spells
+  if (sys.clock && sys.climate && wxMask) {
+    const clientMod = await load('../../sim/weather/client.js');
+    if (clientMod) {
+      sys.weather = await createWeather({
+        clientMod, mask: wxMask, normals: sys.climate.normals, clock: sys.clock, globe, fx: () => sys.fx, hud, gcam: ctx.gcam,
+        registry: sys.time?.registry, placeName: (la, lo) => sys.regions?.describe(la, lo)?.title,
+      }).catch(e => { console.warn('weather', e); return null; });
+      if (sys.weather) {
+        features.add('weather');
+        sys.liveInfo = true;
+        sys.weather.setEnabled(ctx.settings.showWeather !== false);
+        const prevSetting = sys.onSetting;
+        sys.onSetting = (k, v) => { if (k === 'showWeather') sys.weather.setEnabled(v !== false); prevSetting?.(k, v); };
+      }
     }
   }
 
@@ -150,6 +174,7 @@ export async function createWorldSystems(ctx) {
   sys.update = (dt, t, p) => {
     sys.time?.update(dt);
     sys.hazards?.update(dt, running());
+    sys.weather?.update(dt, running());
     sys.fx?.update(ctx.gcam, t, { running: running(), heightPx: ctx.renderHeight?.(), fov: ctx.camera?.fov });
     if (sys.currents) { if (sys.clock) sys.currents.setMonth(monthOf(sys.clock.t)); sys.currents.update(ctx.gcam, t); }
     sys.labels?.update(ctx.gcam, t);

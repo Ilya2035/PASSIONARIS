@@ -233,7 +233,7 @@ export class Globe {
   setWeather(rgba, w, h) {
     const u = this.terrainMat.uniforms;
     if (u.uHasWeather.value && u.uWeather.value.image.width === w) { u.uWeather.value.image.data.set(rgba); u.uWeather.value.needsUpdate = true; }
-    else { u.uWeather.value = makeLayerTexture(rgba, w, h); u.uHasWeather.value = 1; }
+    else { u.uWeather.value = makeLayerTexture(new Uint8Array(rgba), w, h); u.uHasWeather.value = 1; } // own copy: the caller may hand its buffer back to a worker
   }
 
   // CPU height lookup (metres) at a unit vector

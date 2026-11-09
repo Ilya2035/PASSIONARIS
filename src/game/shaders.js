@@ -291,7 +291,14 @@ void main() {
   vec3 col;
   float hLand = max(hc, 0.0);
   vec4 sim = uHasSim > 0.5 ? texture(uSim, uv) : vec4(0.0);
-  vec4 wx = uHasWeather > 0.5 ? texture(uWeather, uv) : vec4(0.0, 0.0, 0.5, 0.0);
+  vec4 wx = vec4(0.0, 0.0, 0.5, 0.0);
+  vec4 wxS = wx;   // softened (4-tap) weather for snow and cloud edges: the 0.5 degree grid never shows as steps
+  if (uHasWeather > 0.5) {
+    wx = texture(uWeather, uv);
+    vec2 tx = vec2(1.0 / 720.0, 1.0 / 360.0);
+    wxS = 0.25 * (texture(uWeather, uv + tx * vec2(0.75, 0.35)) + texture(uWeather, uv - tx * vec2(0.75, 0.35))
+                + texture(uWeather, uv + tx * vec2(-0.35, 0.75)) + texture(uWeather, uv - tx * vec2(-0.35, 0.75)));
+  }
   if (land) {
     vec3 c;
     if (uMode == 0) {
@@ -318,11 +325,14 @@ void main() {
     c = mix(c, uPaperDark, smoothstep(1400.0, 4800.0, hLand) * (uMode == 0 ? 0.0 : 0.22));
     c = mix(c, uSnow, smoothstep(4300.0, 5800.0, hLand) * 0.8);
     // seasonal snow from the weather simulation, broken into crisp dense patches
-    float snow = wx.r;
+    float snow = wxS.r;
     if (snow > 0.01) {
       float nz = vnoise(uv * uGrid * 1.7) * 0.6 + vnoise(uv * uGrid * 5.3) * 0.4;
       float fadeN = 1.0 - smoothstep(0.8, 3.0, texPerPx);
-      float m = smoothstep(0.32, 0.6, snow + (nz - 0.5) * 0.45 * fadeN);
+      float nm = vnoise(uv * vec2(2200.0, 1100.0)) * 0.65 + vnoise(uv * vec2(5100.0, 2550.0)) * 0.35;  // 0.1-0.2 deg blobs
+      float m = smoothstep(0.3, 0.62, snow + (nm - 0.5) * 0.34 + (nz - 0.5) * 0.4 * fadeN);
+      // more snow on heights and on the shaded side of slopes
+      m = clamp(m + smoothstep(0.15, 0.5, snow) * smoothstep(800.0, 2500.0, hLand) * 0.3, 0.0, 1.0);
       c = mix(c, uSnow, m * 0.92);
     }
     // drought tints the land warmer and paler
@@ -364,7 +374,7 @@ void main() {
     wc *= 1.0 + (n - 0.5) * 0.08 * (1.0 - smoothstep(0.6, 3.0, texPerPx));
 #endif
     // sea ice: from the simulation when running, else from the imagery
-    float ice = uHasWeather > 0.5 ? smoothstep(0.15, 0.55, wx.r) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
+    float ice = uHasWeather > 0.5 ? smoothstep(0.15, 0.55, wxS.r + (vnoise(uv * vec2(2200.0, 1100.0)) - 0.5) * 0.25) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
     col = mix(wc, uSnow * mix(1.0, shade, 0.5), ice * 0.9);
     if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.45);
     else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.3);
@@ -377,8 +387,8 @@ void main() {
 #else
     float cn = vnoise(uv * vec2(900.0, 450.0) + vec2(uTime * 0.02, 0.0)) * 0.55 + vnoise(uv * vec2(2600.0, 1300.0)) * 0.45;
 #endif
-    float cloudF = wx.g < 0.5 ? wx.g * 2.0 : 1.0;
-    float rain = clamp(wx.g * 2.0 - 1.0, 0.0, 1.0);
+    float cloudF = wxS.g < 0.5 ? wxS.g * 2.0 : 1.0;
+    float rain = clamp(wxS.g * 2.0 - 1.0, 0.0, 1.0);
     float cm = smoothstep(0.5, 0.9, cloudF + (cn - 0.5) * 0.55);
     col = mix(col, vec3(0.96, 0.95, 0.93) * (1.0 - 0.22 * rain), cm * (0.45 + 0.2 * rain) * uCloudAmt);
   }
