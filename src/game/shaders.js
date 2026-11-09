@@ -243,9 +243,13 @@ void main() {
   float hw = hc, hs = hc;                 // "simple shaders": forward differences, 3 height taps instead of 5
   const float SPAN = 1.0;
 #else
-  float hw = heightAt(uv - vec2(o.x, 0.0), lodH, lodD);
-  float hs = heightAt(uv + vec2(0.0, o.y), lodH, lodD);
-  const float SPAN = 2.0;
+  // minified (globe distance): forward differences are indistinguishable, save two height taps
+  float hw = hc, hs = hc, SPAN = 1.0;
+  if (texPerPx < 1.5) {
+    hw = heightAt(uv - vec2(o.x, 0.0), lodH, lodD);
+    hs = heightAt(uv + vec2(0.0, o.y), lodH, lodD);
+    SPAN = 2.0;
+  }
 #endif
   float coslat = max(cos(lat), 0.02);
   float dxm = SPAN * o.x * 2.0 * PI * 6371000.0 * coslat;
@@ -296,8 +300,7 @@ void main() {
   if (uHasWeather > 0.5) {
     wx = texture(uWeather, uv);
     vec2 tx = vec2(1.0 / 720.0, 1.0 / 360.0);
-    wxS = 0.25 * (texture(uWeather, uv + tx * vec2(0.75, 0.35)) + texture(uWeather, uv - tx * vec2(0.75, 0.35))
-                + texture(uWeather, uv + tx * vec2(-0.35, 0.75)) + texture(uWeather, uv - tx * vec2(-0.35, 0.75)));
+    wxS = 0.5 * (texture(uWeather, uv + tx * vec2(0.62, 0.45)) + texture(uWeather, uv - tx * vec2(0.62, 0.45)));
   }
   if (land) {
     vec3 c;

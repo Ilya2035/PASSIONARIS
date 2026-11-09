@@ -157,6 +157,19 @@ async function smokeTest() {
     log('fps close:', await probe('g.gcam.lookAt(46.4, 9, 0.012); g.gcam.alt = 0.012'));
     // time flow: speed 5 for 3 s, then read the HUD date
     log('time:', await game.webContents.executeJavaScript(`(async () => { const w = window.__game.world; if (!w.clock) return 'no clock'; const d0 = document.getElementById('clock-date').textContent; w.setSpeed(5); await new Promise(r => setTimeout(r, 3000)); const d1 = document.getElementById('clock-date').textContent; w.setSpeed(0); return d0 + ' -> ' + d1 + ' | t=' + w.clock.t.toFixed(1); })()`));
+    if (process.env.PASSIONARIS_PERF2) {
+      // what each layer costs at the globe view and up close (PASSIONARIS_PERF2=1 with PASSIONARIS_SMOKE)
+      const g0 = 'g.gcam.lookAt(30, 20, 2.2); g.gcam.alt = 2.2';
+      const g1 = 'g.gcam.lookAt(46.4, 9, 0.012); g.gcam.alt = 0.012';
+      log('perf2 globe base:', await probe(g0), '| dyn scale', await game.webContents.executeJavaScript('window.__game.dynScale'));
+      log('perf2 globe scale 1.0:', await probe(g0 + '; g.settings.renderScale = 1'));
+      log('perf2 globe scale 0.5:', await probe(g0 + '; g.settings.renderScale = 0.5'));
+      log('perf2 globe no weather:', await probe(g0 + '; g.globe.terrainMat.uniforms.uHasWeather.value = 0'));
+      log('perf2 globe dense mesh:', await probe(g0 + '; g.globe.terrainMat.uniforms.uHasWeather.value = 1; g.globe.forceNear = true; g.globe.terrainFar.visible = false; g.globe.terrainNear.visible = true; g.globe.terrainMat.uniforms.uRings.value = g.globe.rings'));
+      log('perf2 close scale 0.5:', await probe(g1 + '; g.globe.forceNear = false'));
+      log('perf2 close scale 1.0:', await probe(g1 + '; g.settings.renderScale = 1'));
+      await game.webContents.executeJavaScript("window.__game.settings.renderScale = 'auto'");
+    }
     if (process.env.PASSIONARIS_PERF) {
       log('settings:', await game.webContents.executeJavaScript('JSON.stringify({q: window.__game.settings.qualityResolved, rs: window.__game.settings.renderScale, dyn: window.__game.dynScale, size: [innerWidth, innerHeight, devicePixelRatio]})'));
       log('fps close @50%:', await probe('g.settings.renderScale = 0.5'));

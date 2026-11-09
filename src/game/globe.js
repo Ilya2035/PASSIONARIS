@@ -135,9 +135,16 @@ export class Globe {
         uNeedInfo: { value: 0 },
       },
     });
-    this.terrain = new THREE.Mesh(polarGrid(q.az, q.rings), this.terrainMat);
-    this.terrain.frustumCulled = false;
-    scene.add(this.terrain);
+    this.terrainNear = new THREE.Mesh(polarGrid(q.az, q.rings), this.terrainMat);
+    this.terrainNear.frustumCulled = false;
+    scene.add(this.terrainNear);
+    // at globe distance the dense grid makes ~1 triangle per pixel (GPU quad waste): a 7x lighter grid looks the same
+    this.farRings = 200;
+    this.terrainFar = new THREE.Mesh(polarGrid(384, this.farRings), this.terrainMat);
+    this.terrainFar.frustumCulled = false;
+    this.terrainFar.visible = false;
+    scene.add(this.terrainFar);
+    this.terrain = this.terrainNear;
 
     // rivers (vector, Natural Earth centre lines)
     const segs = data.rivers, ranks = data.riverRank;
@@ -273,6 +280,16 @@ export class Globe {
     const b = Math.asinh(sMax / a);
     const u = this.terrainMat.uniforms;
     u.uRingA.value = a; u.uRingB.value = b;
+    // mesh LOD: light grid from afar, dense grid close (hysteresis avoids flicker at the threshold)
+    if (!this.forceNear) {
+      const far = this.terrainFar.visible ? gcam.alt > 0.5 : gcam.alt > 0.62;
+      if (far !== this.terrainFar.visible) {
+        this.terrainFar.visible = far;
+        this.terrainNear.visible = !far;
+        this.terrain = far ? this.terrainFar : this.terrainNear;
+      }
+      u.uRings.value = this.terrainFar.visible ? this.farRings : this.rings;
+    }
     u.uTime.value = time;
     u.uGlobe.value = p.globe;
     // real 1.2 km slopes are steep: soften the shading as the detail window fades in
