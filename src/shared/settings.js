@@ -2,11 +2,23 @@
 export const DEFAULT_SETTINGS = {
   windowMode: 'fullscreen',   // 'fullscreen' | 'maximized' | 'window'
   quality: 'high',            // mesh density: 'low' | 'medium' | 'high'
-  pixelRatio: 1,              // render scale
-  reliefScale: 1,             // multiplier for terrain exaggeration
+  pixelRatio: 1,              // legacy render scale multiplier
+  renderScale: 1,             // 0.5..1: render at lower resolution, upscale with sharpening (FSR-like)
+  sharpen: 0.35,              // sharpening strength for the upscale pass
+  brightness: 1,              // 0.7..1.3
+  reliefScale: 1,             // vertical scale: 1 = true 1:1 proportions
   unroll: 0.85,               // 0 = always a globe, 1 = almost flat when zoomed in
   showDistricts: true,
   showRivers: true,
+  showCurrents: true,
+  showLabels: true,
+  showRoads: true,
+  showWeather: true,          // clouds, snow, drought tint
+  effects: true,              // eruptions, quakes, meteors, fires
+  waterAnimation: true,
+  autosaveMinutes: 10,        // 0 = off
+  autosaveSlots: 3,
+  showFps: false,
   palette: 'graphite',        // see src/shared/palettes.js
 };
 

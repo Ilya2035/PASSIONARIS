@@ -28,7 +28,7 @@ export class GlobeCamera {
   constructor(camera, settings) {
     this.cam = camera;
     this.settings = settings;
-    this.ALT_MIN = 0.0075;  // ~48 km
+    this.ALT_MIN = 0.003;   // ~19 km — the scale bar reaches ~2 km
     this.ALT_MAX = 3.6;
     this.F = geoToVec(47, 8);
     this.U = new THREE.Vector3();
@@ -65,7 +65,8 @@ export class GlobeCamera {
     const curv = cMin + (1 - cMin) * u;
     const tilt = this.tiltOverride ?? THREE.MathUtils.degToRad(46) * (1 - smooth(Math.log(0.012), Math.log(0.6), la));
     const relief = (this.settings.reliefScale ?? 1);
-    const exag = (9 + 26 * smooth(Math.log(0.05), Math.log(2.0), la)) * relief;
+    // 1:1 by default (true proportions); the settings slider can exaggerate up to x10
+    const exag = relief;
     return { curv, tilt, exag, globe: smooth(Math.log(0.45), Math.log(1.6), la) };
   }
 

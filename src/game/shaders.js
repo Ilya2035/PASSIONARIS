@@ -21,6 +21,24 @@ uniform float uCurv;    // curvature 0..1 (1 = globe)
 uniform float uExag;    // displacement per metre, in earth radii
 uniform sampler2D uHeight;
 uniform vec2 uGrid;     // cell grid size (W, H)
+uniform sampler2D uDetail;     // streamed detail heights, toroidal 2048x2048 window (8x8 tiles of 256)
+uniform vec2 uDetailOrigin;    // window origin in detail tiles
+uniform float uDetailOn;
+const vec2 DGRID = vec2(32768.0, 16384.0);
+const float DTILE = 256.0;
+const float DWIN = 2048.0;
+// height in metres at uv; lodG = mip level in global-grid texels, lodD = mip level in detail texels
+float heightAt(vec2 uv, float lodG, float lodD) {
+  float hg = textureLod(uHeight, uv, lodG).r;
+  if (uDetailOn < 0.5) return hg;
+  vec2 gt = uv * DGRID;
+  vec2 rel = gt / DTILE - uDetailOrigin;
+  rel.x = mod(rel.x, DGRID.x / DTILE);
+  if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= 8.0 || rel.y >= 8.0) return hg;
+  float edge = min(min(rel.x, 8.0 - rel.x), min(rel.y, 8.0 - rel.y));
+  float hd = textureLod(uDetail, gt / DWIN, lodD).r;
+  return mix(hg, hd, smoothstep(0.3, 1.2, edge) * uDetailOn);
+}
 
 vec2 geoToUV(vec3 g) {
   float lon = atan(g.x, g.z);
@@ -56,7 +74,7 @@ void main() {
 
   float spacing = uRingA * uRingB * cosh(t * uRingB) / uRings;
   float lod = clamp(log2(max(spacing / (PI / uGrid.y), 1.0)), 0.0, 12.0);
-  float h = textureLod(uHeight, geoToUV(g), lod).r;
+  float h = heightAt(geoToUV(g), lod, max(0.0, lod + 2.0));
 
   vec3 up;
   vec3 p = morphPos(s, T, max(h, 0.0) * uExag, up);
@@ -92,6 +110,15 @@ uniform vec3 uFogColor;
 uniform vec3 uPaper, uPaperDark, uForest, uDesert, uSnow, uShallow, uDeep, uLake, uInk, uSelectC;
 uniform float uContour;      // contour interval, metres
 uniform float uContourAmt;   // 0..1
+uniform int uMode;            // see base colour block
+uniform highp usampler2D uBiome; // R8UI biome classes on the MAP grid (1x1 until loaded)
+uniform float uHasBiome;
+uniform vec3 uBiomeCol[16];
+uniform sampler2D uSim;       // 720x360 RGBA per-mode data: R temperature, G precipitation, B hazard level (0..1)
+uniform float uHasSim;
+uniform sampler2D uWeather;   // 720x360 RGBA: R snow/ice, G clouds/precip, B T anomaly, A drought
+uniform float uHasWeather;
+uniform float uCloudAmt;
 
 in vec3 vGeo;
 in vec3 vWorld;
@@ -127,6 +154,44 @@ float isoDistPx(float I0, float I1, float I2, float I3, vec2 f, vec2 jx, vec2 jy
   return abs(G - 0.5) / max(length(gpx), 1e-6);
 }
 float lineA(float d, float w) { return clamp(0.5 * w + 0.5 - d, 0.0, 1.0); }
+vec3 desat(vec3 c) { return mix(c, vec3(dot(c, vec3(0.3, 0.55, 0.15))), 0.7); }
+// hypsometric tints: clear, pleasant, not loud
+vec3 hypso(float h) {
+  vec3 c = mix(vec3(0.62, 0.71, 0.55), vec3(0.78, 0.79, 0.6), smoothstep(0.0, 350.0, h));
+  c = mix(c, vec3(0.84, 0.76, 0.56), smoothstep(350.0, 1200.0, h));
+  c = mix(c, vec3(0.72, 0.6, 0.47), smoothstep(1200.0, 2600.0, h));
+  c = mix(c, vec3(0.6, 0.55, 0.52), smoothstep(2600.0, 4000.0, h));
+  return mix(c, vec3(0.95, 0.94, 0.92), smoothstep(4300.0, 5800.0, h));
+}
+vec3 tempRamp(float t) { // t: 0..1 maps -40..+40 C
+  vec3 c = mix(vec3(0.27, 0.36, 0.62), vec3(0.55, 0.72, 0.84), smoothstep(0.0, 0.42, t));
+  c = mix(c, vec3(0.93, 0.9, 0.78), smoothstep(0.42, 0.55, t));
+  c = mix(c, vec3(0.9, 0.62, 0.36), smoothstep(0.55, 0.75, t));
+  return mix(c, vec3(0.7, 0.25, 0.2), smoothstep(0.75, 1.0, t));
+}
+vec3 precRamp(float p) { // p: 0..1 maps 0..400 mm/month (sqrt)
+  vec3 c = mix(vec3(0.9, 0.84, 0.68), vec3(0.62, 0.78, 0.6), smoothstep(0.05, 0.35, p));
+  c = mix(c, vec3(0.3, 0.6, 0.62), smoothstep(0.35, 0.65, p));
+  return mix(c, vec3(0.16, 0.32, 0.55), smoothstep(0.65, 1.0, p));
+}
+vec3 hazardRamp(float h) { // 0..1 = level 0..5
+  vec3 c = mix(vec3(0.98, 0.9, 0.62), vec3(0.93, 0.62, 0.3), smoothstep(0.1, 0.5, h));
+  return mix(c, vec3(0.62, 0.16, 0.14), smoothstep(0.5, 1.0, h));
+}
+uint biomeAt(ivec2 p) {
+  int w = gw();
+  p.x = ((p.x % w) + w) % w;
+  p.y = clamp(p.y, 0, int(uGrid.y) - 1);
+  return texelFetch(uBiome, p, 0).r;
+}
+vec3 biomeBlend(vec2 uv) {
+  vec2 st = uv * uGrid - 0.5;
+  ivec2 b = ivec2(floor(st));
+  vec2 f = fract(st);
+  vec3 c0 = uBiomeCol[min(biomeAt(b), 15u)], c1 = uBiomeCol[min(biomeAt(b + ivec2(1, 0)), 15u)];
+  vec3 c2 = uBiomeCol[min(biomeAt(b + ivec2(0, 1)), 15u)], c3 = uBiomeCol[min(biomeAt(b + ivec2(1, 1)), 15u)];
+  return mix(mix(c0, c1, f.x), mix(c2, c3, f.x), f.y);
+}
 
 void main() {
   vec3 g = normalize(vGeo);
@@ -143,12 +208,13 @@ void main() {
 
   // ---------------------------------------------------------------- relief
   float lodH = max(0.0, log2(max(texPerPx, 1e-4)));
-  vec2 o = exp2(lodH) / uGrid;
-  float hc = textureLod(uHeight, uv, lodH).r;
-  float he = textureLod(uHeight, uv + vec2(o.x, 0.0), lodH).r;
-  float hw = textureLod(uHeight, uv - vec2(o.x, 0.0), lodH).r;
-  float hn = textureLod(uHeight, uv - vec2(0.0, o.y), lodH).r;
-  float hs = textureLod(uHeight, uv + vec2(0.0, o.y), lodH).r;
+  float lodD = max(0.0, log2(max(texPerPx * 4.0, 1e-4)));
+  vec2 o = uDetailOn > 0.5 ? exp2(lodD) / DGRID : exp2(lodH) / uGrid;
+  float hc = heightAt(uv, lodH, lodD);
+  float he = heightAt(uv + vec2(o.x, 0.0), lodH, lodD);
+  float hw = heightAt(uv - vec2(o.x, 0.0), lodH, lodD);
+  float hn = heightAt(uv - vec2(0.0, o.y), lodH, lodD);
+  float hs = heightAt(uv + vec2(0.0, o.y), lodH, lodD);
   float coslat = max(cos(lat), 0.02);
   float dxm = 2.0 * o.x * 2.0 * PI * 6371000.0 * coslat;
   float dym = 2.0 * o.y * PI * 6371000.0;
@@ -181,41 +247,62 @@ void main() {
   uvec2 i0 = infoOf(id0), i1 = infoOf(id1), i2 = infoOf(id2), i3 = infoOf(id3);
 
   // ---------------------------------------------------------------- base colour
-  // Neutral "archival map" style: paper land tinted by biome, ink lines, soft relief,
-  // procedural contour lines (crisp at any zoom because they come from the filtered height field).
+  // Modes: 0 relief (hypsometric), 1 terrain (biomes), 2 temperature, 3 precipitation, 4 hazards, 5 regions, 9 political.
+  // Style: clear pleasant tones, quiet relief, ink lines, procedural contours (crisp at any zoom).
   vec3 alb = textureGrad(uAlbedo, uv, duvx, duvy).rgb;
   float albL = dot(alb, vec3(0.299, 0.587, 0.114));
   vec3 col;
   float hLand = max(hc, 0.0);
+  vec4 sim = uHasSim > 0.5 ? texture(uSim, uv) : vec4(0.0);
+  vec4 wx = uHasWeather > 0.5 ? texture(uWeather, uv) : vec4(0.0, 0.0, 0.5, 0.0);
   if (land) {
-    // biome from imagery brightness: forest ~0.15, farmland/steppe ~0.3, desert ~0.65, ice ~0.95
-    float sat = max(alb.r, max(alb.g, alb.b)) - min(alb.r, min(alb.g, alb.b));
-    float ice = smoothstep(0.78, 0.92, albL) * (1.0 - smoothstep(0.08, 0.2, sat));
-    vec3 c = mix(uForest, uPaper, smoothstep(0.1, 0.36, albL));
-    c = mix(c, uDesert, smoothstep(0.42, 0.66, albL));
-    c = mix(c, uPaperDark, smoothstep(1400.0, 4800.0, hLand) * 0.3);
-    c = mix(c, uSnow, max(ice, smoothstep(4300.0, 5800.0, hLand) * 0.85));
-    col = c * shade;
-    // contours: thin every uContour metres, stronger every 5th
+    vec3 c;
+    if (uMode == 0) {
+      c = hypso(hLand);
+    } else if (uHasBiome > 0.5) {
+      c = biomeBlend(uv);
+    } else {
+      float sat = max(alb.r, max(alb.g, alb.b)) - min(alb.r, min(alb.g, alb.b));
+      float ice = smoothstep(0.78, 0.92, albL) * (1.0 - smoothstep(0.08, 0.2, sat));
+      c = mix(uForest, uPaper, smoothstep(0.1, 0.36, albL));
+      c = mix(c, uDesert, smoothstep(0.42, 0.66, albL));
+      c = mix(c, uSnow, ice);
+    }
+    c = mix(c, uPaperDark, smoothstep(1400.0, 4800.0, hLand) * (uMode == 0 ? 0.0 : 0.22));
+    c = mix(c, uSnow, smoothstep(4300.0, 5800.0, hLand) * 0.8);
+    // seasonal snow from the weather simulation, broken into crisp dense patches
+    float snow = wx.r;
+    if (snow > 0.01) {
+      float nz = vnoise(uv * uGrid * 1.7) * 0.6 + vnoise(uv * uGrid * 5.3) * 0.4;
+      float fadeN = 1.0 - smoothstep(0.8, 3.0, texPerPx);
+      float m = smoothstep(0.32, 0.6, snow + (nz - 0.5) * 0.45 * fadeN);
+      c = mix(c, uSnow, m * 0.92);
+    }
+    // drought tints the land warmer and paler
+    c = mix(c, c * vec3(1.08, 0.98, 0.82) + 0.04, smoothstep(0.35, 0.9, wx.a) * 0.5);
+    col = c * mix(1.0, shade, uMode == 0 ? 1.0 : 0.85);
     if (uContourAmt > 0.0) {
       float cv = hLand / uContour;
       float fw = max(fwidth(cv), 1e-4);
       float dl = abs(fract(cv - 0.5) - 0.5) / fw;
       float idx = abs(fract(cv / 5.0 - 0.5) - 0.5) * 5.0 / fw;
       float line = (1.0 - smoothstep(0.35, 1.1, dl)) * 0.55 + (1.0 - smoothstep(0.6, 1.5, idx)) * 0.45;
-      line *= smoothstep(0.02, 0.08, 1.0 / fw) * step(1.0, hLand);   // vanish when lines would crowd
-      col = mix(col, uInk, line * 0.22 * uContourAmt);
+      line *= smoothstep(0.02, 0.08, 1.0 / fw) * step(1.0, hLand);
+      col = mix(col, uInk, line * (uMode == 0 ? 0.3 : 0.16) * uContourAmt);
     }
-    // political colours, muted so the map stays calm
-    vec4 ov = colorOf(win);
-    vec3 muted = mix(ov.rgb, vec3(dot(ov.rgb, vec3(0.333))), 0.3);
-    muted = mix(muted, uPaper, 0.15);
-    col = mix(col, muted * mix(1.0, shade, 0.6), ov.a * uOverlay);
+    // data overlays
+    if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.72);
+    else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.72);
+    else if (uMode == 4) col = mix(desat(col), hazardRamp(sim.b), 0.75 * step(0.02, sim.b));
+    else if (uMode == 5 || uMode == 9) {
+      vec4 ov = colorOf(win);
+      vec3 tint = mix(ov.rgb, vec3(dot(ov.rgb, vec3(0.333))), 0.15);
+      col = mix(col, tint * mix(1.0, shade, 0.5), ov.a * uOverlay);
+    }
   } else {
     float depth = max(-hc, 0.0);
     vec3 wc = mix(uShallow, uDeep, pow(smoothstep(0.0, 5000.0, depth), 0.55));
     if (win == 1u) wc = uLake;
-    // isobaths: the shelf edge (200 m) and every 1000 m — engraved-chart look
     float bv = depth / 1000.0;
     float bw = max(fwidth(bv), 1e-4);
     float iso = (1.0 - smoothstep(0.3, 1.1, abs(fract(bv - 0.5) - 0.5) / bw)) * step(500.0, depth);
@@ -223,13 +310,22 @@ void main() {
     float sw = max(fwidth(sv), 1e-4);
     float shelf = (1.0 - smoothstep(0.3, 1.2, abs(sv - 1.0) / sw));
     float fadeIso = smoothstep(0.01, 0.05, 1.0 / bw);
-    wc = mix(wc, uInk, (iso * 0.1 + shelf * 0.16) * fadeIso * (win == 1u ? 0.0 : 1.0));
-    // faint moving sheen, faded out when it would alias
+    wc = mix(wc, uInk, (iso * 0.08 + shelf * 0.14) * fadeIso * (win == 1u ? 0.0 : 1.0));
     vec2 q = uv * uGrid * 0.35;
     float n = vnoise(q + vec2(uTime * 0.05, uTime * 0.035)) * 0.6 + vnoise(q * 2.7 - vec2(uTime * 0.08, 0.0)) * 0.4;
     wc *= 1.0 + (n - 0.5) * 0.08 * (1.0 - smoothstep(0.6, 3.0, texPerPx));
-    float ice = smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
-    col = mix(wc, uSnow * shade, ice);
+    // sea ice: from the simulation when running, else from the imagery
+    float ice = uHasWeather > 0.5 ? smoothstep(0.25, 0.7, wx.r) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
+    col = mix(wc, uSnow * mix(1.0, shade, 0.5), ice * 0.9);
+    if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.45);
+    else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.3);
+    else if (uMode == 4) col = mix(col, hazardRamp(sim.b), 0.6 * step(0.02, sim.b));
+  }
+  // clouds from the weather simulation (soft, broken edges), strongest at globe distance
+  if (uHasWeather > 0.5 && uCloudAmt > 0.0) {
+    float cn = vnoise(uv * vec2(900.0, 450.0) + vec2(uTime * 0.02, 0.0)) * 0.55 + vnoise(uv * vec2(2600.0, 1300.0)) * 0.45;
+    float cm = smoothstep(0.42, 0.8, wx.g + (cn - 0.5) * 0.5);
+    col = mix(col, vec3(0.96, 0.95, 0.93), cm * 0.55 * uCloudAmt);
   }
 
   // ---------------------------------------------------------------- borders
@@ -320,7 +416,7 @@ void main() {
   float tl = length(Tv);
   float s = atan(tl, d);
   vec3 T = tl > 1e-12 ? Tv / tl : uR;
-  float h = textureLod(uHeight, geoToUV(g), 0.0).r;
+  float h = heightAt(geoToUV(g), 0.0, 0.0);
   vec3 up;
   vec3 p = morphPos(s, T, max(h, 0.0) * uExag + uLift, up);
   vA = position.z <= uMaxRank ? 1.0 - 0.06 * position.z : 0.0;

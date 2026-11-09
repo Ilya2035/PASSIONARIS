@@ -9,6 +9,33 @@ const QUALITY = {
   high: { az: 1536, rings: 900 },
 };
 
+function dummyU8() {
+  const t = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedIntegerFormat, THREE.UnsignedByteType);
+  t.internalFormat = 'R8UI'; t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
+  return t;
+}
+function dummyHalf() {
+  const t = new THREE.DataTexture(new Uint16Array([0]), 1, 1, THREE.RedFormat, THREE.HalfFloatType);
+  t.internalFormat = 'R16F'; t.needsUpdate = true;
+  return t;
+}
+function dummyRGBA() {
+  const t = new THREE.DataTexture(new Uint8Array([0, 0, 128, 0]), 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.needsUpdate = true;
+  return t;
+}
+// equirectangular data layer (SIM grid etc.), linear filtering, wraps in longitude
+export function makeLayerTexture(data, w, h) {
+  const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+  t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
+}
+
+// map modes: id -> shader index
+export const MODE_INDEX = { relief: 0, terrain: 1, temperature: 2, precipitation: 3, hazards: 4, regions: 5, political: 9 };
+
 function polarGrid(nAz, nRings) {
   const pos = new Float32Array((nRings + 1) * (nAz + 1) * 3);
   let o = 0;
@@ -61,6 +88,9 @@ export class Globe {
       uExag: { value: 20 / 6371000 },
       uHeight: { value: this.heightTex },
       uGrid: { value: new THREE.Vector2(W, H) },
+      uDetail: { value: dummyHalf() },
+      uDetailOrigin: { value: new THREE.Vector2(0, 0) },
+      uDetailOn: { value: 0 },
     };
 
     this.terrainMat = new THREE.ShaderMaterial({
@@ -92,6 +122,12 @@ export class Globe {
         uShallow: { value: col(pal.shallow) }, uDeep: { value: col(pal.deep) }, uLake: { value: col(pal.lake) },
         uInk: { value: col(pal.ink) }, uSelectC: { value: col(pal.select) },
         uContour: { value: 500 }, uContourAmt: { value: 0 },
+        uMode: { value: 1 },
+        uBiome: { value: dummyU8() }, uHasBiome: { value: 0 },
+        uBiomeCol: { value: Array.from({ length: 16 }, () => new THREE.Color(0.8, 0.78, 0.7)) },
+        uSim: { value: dummyRGBA() }, uHasSim: { value: 0 },
+        uWeather: { value: dummyRGBA() }, uHasWeather: { value: 0 },
+        uCloudAmt: { value: 1 },
       },
     });
     this.terrain = new THREE.Mesh(polarGrid(q.az, q.rings), this.terrainMat);
@@ -135,6 +171,36 @@ export class Globe {
     scene.add(this.atmo);
   }
 
+  setMode(id) {
+    this.mode = id;
+    this.terrainMat.uniforms.uMode.value = MODE_INDEX[id] ?? 1;
+  }
+
+  // biome classes on the MAP grid (Uint8 8192x4096) + up to 16 colours ([r,g,b] 0..1)
+  setBiomes(classes, W, H, colors) {
+    const t = new THREE.DataTexture(classes, W, H, THREE.RedIntegerFormat, THREE.UnsignedByteType);
+    t.internalFormat = 'R8UI'; t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+    const u = this.terrainMat.uniforms;
+    u.uBiome.value?.dispose?.();
+    u.uBiome.value = t; u.uHasBiome.value = 1;
+    colors.slice(0, 16).forEach((c, i) => u.uBiomeCol.value[i].setRGB(c[0], c[1], c[2]));
+    this.biomes = { classes, W, H };
+  }
+
+  // per-mode data layer on the SIM grid (RGBA8: R temperature, G precipitation, B hazard level)
+  setSimLayer(rgba, w, h) {
+    const u = this.terrainMat.uniforms;
+    if (u.uHasSim.value && u.uSim.value.image.width === w) { u.uSim.value.image.data.set(rgba); u.uSim.value.needsUpdate = true; }
+    else { u.uSim.value = makeLayerTexture(rgba, w, h); u.uHasSim.value = 1; }
+  }
+
+  // weather grid from the simulation worker (RGBA8: snow, clouds, T anomaly, drought)
+  setWeather(rgba, w, h) {
+    const u = this.terrainMat.uniforms;
+    if (u.uHasWeather.value && u.uWeather.value.image.width === w) { u.uWeather.value.image.data.set(rgba); u.uWeather.value.needsUpdate = true; }
+    else { u.uWeather.value = makeLayerTexture(rgba, w, h); u.uHasWeather.value = 1; }
+  }
+
   // CPU height lookup (metres) at a unit vector
   heightAt(v) {
     const { W, H, height } = this.data;
@@ -168,12 +234,16 @@ export class Globe {
     u.uRingA.value = a; u.uRingB.value = b;
     u.uTime.value = time;
     u.uGlobe.value = p.globe;
-    u.uShadeK.value = 3.0 + 1.8 * (1 - p.globe);
+    // real 1.2 km slopes are steep: soften the shading as the detail window fades in
+    u.uShadeK.value = (3.0 + 1.8 * (1 - p.globe)) * (1 - 0.6 * this.shared.uDetailOn.value);
     const alt = gcam.alt;
     const fade = (a0, a1) => 1 - Math.min(1, Math.max(0, (Math.log(alt) - Math.log(a0)) / (Math.log(a1) - Math.log(a0))));
-    u.uLineProv.value = this.clean ? 0 : fade(0.35, 1.1);
-    u.uLineCountry.value = this.clean ? 0 : 1;
-    u.uLineDist.value = this.settings.showDistricts && !this.clean ? fade(0.05, 0.16) : 0;
+    // no nations yet: political lines only in the legacy political mode; district lines in the regions mode
+    const political = this.mode === 'political';
+    u.uLineProv.value = this.clean || !political ? 0 : fade(0.35, 1.1);
+    u.uLineCountry.value = this.clean || !political ? 0 : 1;
+    u.uLineDist.value = this.settings.showDistricts && !this.clean && (political || this.mode === 'regions') ? fade(0.12, 0.6) : 0;
+    u.uCloudAmt.value = this.settings.showWeather === false ? 0 : 0.35 + 0.65 * p.globe;
     // political colours are strong from afar and give way to the terrain up close
     u.uOverlay.value = this.overlayBase * (0.3 + 0.7 * Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.015)) / (Math.log(0.6) - Math.log(0.015)))));
     // contour interval follows the zoom; lines fade out at globe distance

@@ -1,5 +1,6 @@
-/* Visual identity: soft 20th-century archive — neutral graphite panels, paper-white type, one faded accent.
-   Colours come from src/shared/palettes.js (applyUiPalette); the values below are the "graphite" defaults. */
+/* Passionaris visual identity (approved 2026-11-10):
+   stipple "canvas" textures, paper windows with ink text, bronze accents, sharp chamfered/hexagonal shapes,
+   light-gothic headings (Alegreya SC). Textures are generated at start-up by src/shared/stipple.js. */
 :root {
   --ink: #121211;
   --ink-2: #1b1a18;
@@ -16,15 +17,23 @@
   --btn-text: #1b1a17;
   --danger: #b4594a;
   --ok: #8aa27f;
-  --font-display: 'Cormorant Garamond', 'Georgia', serif;
+  /* paper windows */
+  --paper: #efe8da;
+  --paper-ink: #2a1f15;
+  --paper-ink-dim: #5e4f3d;
+  --paper-line: #4a3622;
+  --bronze: #b58a52;
+  --font-display: 'Alegreya SC', 'Cormorant Garamond', Georgia, serif;
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --radius: 2px;
+  --cut: 10px;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); font-family: var(--font-ui); font-size: 14px; }
 button { font: inherit; color: inherit; }
 
+/* dark glass panel (legacy, launcher side panels) */
 .panel {
   background: var(--panel);
   border: 1px solid var(--accent-soft);
@@ -33,7 +42,6 @@ button { font: inherit; color: inherit; }
   border-radius: var(--radius);
   position: relative;
 }
-/* engraved corner ticks */
 .panel::before, .panel::after {
   content: ''; position: absolute; width: 9px; height: 9px; pointer-events: none;
   border-color: var(--accent); border-style: solid;
@@ -41,24 +49,60 @@ button { font: inherit; color: inherit; }
 .panel::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
 .panel::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
 
+/* paper window: chamfered stipple card with engraved double border and a stipple shadow */
+.paper {
+  position: relative; color: var(--paper-ink);
+  filter: drop-shadow(3px 5px 0 rgba(20, 15, 10, 0.22)) drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
+}
+.paper > .paper-body {
+  position: relative;
+  background: var(--tex-paper, var(--paper)) center / 320px;
+  clip-path: polygon(var(--cut) 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, var(--cut) 100%, 0 calc(100% - var(--cut)), 0 var(--cut));
+  padding: 16px 18px;
+}
+.paper > .paper-body::before {
+  content: ''; position: absolute; inset: 4px; pointer-events: none;
+  border: 1px solid rgba(74, 54, 34, 0.55);
+  clip-path: polygon(calc(var(--cut) - 3px) 0, calc(100% - var(--cut) + 3px) 0, 100% calc(var(--cut) - 3px), 100% calc(100% - var(--cut) + 3px), calc(100% - var(--cut) + 3px) 100%, calc(var(--cut) - 3px) 100%, 0 calc(100% - var(--cut) + 3px), 0 calc(var(--cut) - 3px));
+}
+.paper h1, .paper h2, .paper h3 { font-family: var(--font-display); color: var(--paper-ink); margin: 0; letter-spacing: 0.02em; }
+.paper .dim { color: var(--paper-ink-dim); }
+.paper .rule { background: linear-gradient(90deg, transparent, rgba(74, 54, 34, 0.45), transparent); }
+
+/* buttons */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   padding: 9px 16px; cursor: pointer; user-select: none;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--accent-soft); border-radius: var(--radius);
-  color: var(--text); letter-spacing: 0.04em; transition: border-color .15s, background .15s, color .15s;
+  color: var(--text); letter-spacing: 0.04em; transition: border-color .15s, background .15s, color .15s, filter .15s;
 }
 .btn:hover { border-color: var(--accent); color: #fff; background: rgba(255, 255, 255, 0.07); }
 .btn.active { border-color: var(--accent-hi); background: rgba(255, 255, 255, 0.12); color: #fff; }
 .btn:disabled { opacity: 0.4; cursor: default; }
-.btn.primary {
-  border-color: var(--btn-bottom); color: var(--btn-text); font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase;
-  background: linear-gradient(180deg, var(--btn-top) 0%, var(--btn-bottom) 100%);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 22px rgba(0, 0, 0, 0.35);
+/* bronze / stone stipple buttons with pointed ends */
+.btn.primary, .btn.stone {
+  border: 0; border-radius: 0; color: var(--paper-ink); font-family: var(--font-display); font-weight: 700;
+  letter-spacing: 0.14em; font-size: 17px; padding: 12px 30px;
+  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+  background: var(--tex-bronze, linear-gradient(180deg, var(--btn-top), var(--btn-bottom))) center / cover;
 }
-.btn.primary:hover { filter: brightness(1.06); color: #000; }
+.btn.stone { background: var(--tex-stone, #e3dccb) center / cover; font-size: 15px; }
+.btn.primary:hover, .btn.stone:hover { filter: brightness(1.07); color: #000; }
+.btn.primary:active, .btn.stone:active { filter: brightness(0.95); }
+.btn.primary:disabled, .btn.stone:disabled { filter: grayscale(0.6) brightness(0.8); opacity: 0.6; }
+/* hexagon icon button */
+.hex {
+  width: 46px; height: 52px; border: 0; padding: 0; cursor: pointer; color: var(--paper-ink);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: var(--tex-stone, #e3dccb) center / cover;
+  display: inline-flex; align-items: center; justify-content: center; transition: filter .15s, transform .15s;
+}
+.hex svg { width: 22px; height: 22px; }
+.hex:hover { filter: brightness(1.08); }
+.hex.active { background: var(--tex-bronze, #c9a26a) center / cover; transform: translateY(-2px); }
 
-.title-font { font-family: var(--font-display); font-weight: 600; }
+.title-font { font-family: var(--font-display); font-weight: 700; }
 .version-chip {
   font-family: var(--font-ui); font-size: 11px; letter-spacing: 0.08em;
   padding: 2px 7px; border: 1px solid var(--accent-soft); border-radius: 20px; color: var(--accent-hi);
@@ -67,23 +111,24 @@ button { font: inherit; color: inherit; }
 .muted { color: var(--muted); }
 kbd {
   font-family: var(--font-ui); font-size: 10px; padding: 1px 5px; border-radius: 2px;
-  border: 1px solid var(--accent-soft); color: var(--text-dim); background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(74, 54, 34, 0.4); color: var(--paper-ink-dim); background: rgba(255, 255, 255, 0.35);
 }
 
-.field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
-.field label { color: var(--text-dim); }
-.field input[type=range] { width: 180px; accent-color: var(--accent); }
+.field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(74, 54, 34, 0.14); }
+.field label { color: var(--paper-ink-dim); }
+.field input[type=range] { width: 170px; accent-color: var(--bronze); }
 .field select {
-  background: var(--ink-2); color: var(--text); border: 1px solid var(--accent-soft); border-radius: var(--radius); padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.55); color: var(--paper-ink); border: 1px solid rgba(74, 54, 34, 0.45); border-radius: var(--radius); padding: 5px 8px;
+  font: inherit;
 }
-.field input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+.field input[type=checkbox] { accent-color: var(--bronze); width: 16px; height: 16px; }
 
-.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: none; align-items: center; justify-content: center; z-index: 50; }
+.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: none; align-items: center; justify-content: center; z-index: 50; }
 .modal-back.open { display: flex; }
-.modal { width: min(440px, calc(100vw - 32px)); padding: 22px 24px; }
-.modal h2 { font-family: var(--font-display); font-weight: 600; font-size: 26px; margin: 0 0 6px; letter-spacing: 0.04em; }
+.modal { width: min(460px, calc(100vw - 32px)); }
+.modal h2 { font-size: 28px; margin: 0 0 4px; }
 
-/* faint film grain over everything — the archival mood (pure CSS, no assets) */
+/* faint film grain over everything */
 .grain::after {
   content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 200; opacity: 0.06; mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");

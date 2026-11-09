@@ -1,4 +1,5 @@
-import '@fontsource/cormorant-garamond/500.css';
+import '@fontsource/alegreya-sc/500.css';
+import '@fontsource/alegreya-sc/700.css';
 import '@fontsource/cormorant-garamond/600.css';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/600.css';
@@ -8,21 +9,26 @@ import * as THREE from 'three';
 import { APP_NAME, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
 import { loadSettings, saveSettings, isElectron } from '../shared/settings.js';
 import { getPalette, applyUiPalette } from '../shared/palettes.js';
-import { loadWorld, fillMapMode, MAP_MODES } from './data.js';
+import { applyStippleTheme } from '../shared/stipple.js';
+import { loadWorld } from './data.js';
 import { Globe } from './globe.js';
 import { GlobeCamera, vecToGeo } from './camera.js';
+import { Upscaler } from './post.js';
+import { DetailTerrain } from './terrain/detail.js';
+import * as hud from './ui/hud.js';
+import { buildSettings, openModal, closeModal, anyModalOpen } from './ui/menus.js';
+import { createWorldSystems } from './world/systems.js';
 
 const $ = id => document.getElementById(id);
 const settings = await loadSettings();
 const params = new URLSearchParams(location.search);
 if (params.has('palette')) settings.palette = params.get('palette');
 applyUiPalette(settings.palette);
+applyStippleTheme();
 const PAL = getPalette(settings.palette).map;
 
 document.title = `${APP_NAME} ${VERSION_LABEL}`;
 $('load-version').textContent = `${VERSION_LABEL} · ${EPOCH_LABEL}`;
-$('tb-version').textContent = VERSION_LABEL;
-$('tb-epoch').textContent = EPOCH_LABEL;
 $('menu-version').textContent = `${APP_NAME} ${VERSION_LABEL} · ${EPOCH_LABEL}`;
 
 // ------------------------------------------------------------------ renderer
@@ -30,6 +36,7 @@ const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', reverseDepthBuffer: true });
 renderer.setPixelRatio(Math.min(2, (window.devicePixelRatio || 1) * (settings.pixelRatio || 1)));
 renderer.setSize(window.innerWidth, window.innerHeight);
+const upscaler = new Upscaler(renderer);
 const scene = new THREE.Scene();
 const SPACE = new THREE.Color(...PAL.space);
 const SKY = new THREE.Color(...PAL.haze);
@@ -37,75 +44,78 @@ scene.background = SPACE.clone();
 const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.001, 50);
 
 // stars
-{
-  const n = 5000, pos = new Float32Array(n * 3), v = new THREE.Vector3();
+const stars = (() => {
+  const n = 4000, pos = new Float32Array(n * 3), v = new THREE.Vector3();
   for (let i = 0; i < n; i++) { v.randomDirection().multiplyScalar(40); pos.set([v.x, v.y, v.z], i * 3); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xbfc8d8, size: 1.2, sizeAttenuation: false, transparent: true, opacity: 0.8, depthWrite: false })));
-}
+  const p = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xd8d2c4, size: 1.1, sizeAttenuation: false, transparent: true, opacity: 0.7, depthWrite: false }));
+  scene.add(p);
+  return p;
+})();
 
 // ------------------------------------------------------------------ data
 const fill = $('load-fill'), loadText = $('load-text');
-const data = await loadWorld(p => { fill.style.width = `${(p * 85).toFixed(1)}%`; });
+const data = await loadWorld(p => { fill.style.width = `${(p * 70).toFixed(1)}%`; });
 loadText.textContent = 'Поднимаем горы и наполняем океаны…';
-await new Promise(r => setTimeout(r, 30));
+await new Promise(r => setTimeout(r, 20));
 const globe = new Globe(scene, renderer, data, settings);
-const world = data.world;
-fill.style.width = '100%';
-
 const gcam = new GlobeCamera(camera, settings);
+const detail = new DetailTerrain(globe, data);
 if (params.has('lat')) gcam.lookAt(+params.get('lat'), +params.get('lon'), +(params.get('alt') || 0.3));
+
 // "shot" mode: no UI, camera placed instantly — used to render menu art (scripts/render-menu-art.mjs)
 const SHOT = params.get('shot') === '1';
 if (SHOT) {
-  document.body.classList.add('shot');
+  if (params.get('ui') !== '1') document.body.classList.add('shot');
   gcam.alt = gcam.altTarget;
   if (params.has('tilt')) gcam.tiltOverride = THREE.MathUtils.degToRad(+params.get('tilt'));
   globe.clean = params.get('clean') === '1';
 }
 
+// ------------------------------------------------------------------ world systems (time, climate, weather, hazards, fx…)
+loadText.textContent = 'Заводим часы мира…';
+const world = await createWorldSystems({ scene, globe, gcam, settings, hud, onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
+fill.style.width = '100%';
+
 // ------------------------------------------------------------------ map modes
-let mode = 'political';
-const modesEl = $('modes');
-for (const m of MAP_MODES) {
-  const b = document.createElement('button');
-  b.className = 'btn'; b.dataset.mode = m.id;
-  b.innerHTML = `${m.name}<span class="k">${m.key}</span>`;
-  b.onclick = () => setMode(m.id);
-  modesEl.appendChild(b);
-}
+let mode = 'terrain';
 function setMode(id) {
   mode = id;
-  fillMapMode(globe.colorTex, world, id);
-  globe.overlayBase = id === 'terrain' ? 0 : 1;
-  for (const b of modesEl.children) b.classList.toggle('active', b.dataset.mode === id);
+  globe.setMode(id);
+  world.onModeChange?.(id);
+  hud.markMode(id);
 }
-setMode(params.get('mode') || 'political');
+function rebuildModes() { hud.buildModes(setMode, world.features); hud.markMode(mode); }
+rebuildModes();
+setMode(params.get('mode') || 'terrain');
 
-// ------------------------------------------------------------------ lookup helpers
-const D = world.districts;
-function describe(id) {
-  if (id === 0) return { kind: 'ocean', title: 'Мировой океан' };
-  if (id === 1) return { kind: 'lake', title: 'Озеро' };
-  const pv = world.provinces[D.province[id]];
-  const c = world.countries[pv?.country ?? 0];
-  const name = D.names[id] || `Район №${id - 1}`;
-  return { kind: 'district', title: name, province: pv, country: c, area: D.area[id], lat: D.lat[id], lon: D.lon[id] };
-}
-const fmtKm2 = a => `${Math.round(a).toLocaleString('ru-RU')} км²`;
+// ------------------------------------------------------------------ helpers
 const fmtLat = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'с.ш.' : 'ю.ш.'}`;
 const fmtLon = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'в.д.' : 'з.д.'}`;
+function describePoint(g) {
+  const geo = vecToGeo(g);
+  const cell = globe.cellAt(g);
+  const h = globe.heightAt(g);
+  const base = world.describe?.(g, geo, cell, h) || {};
+  const water = cell === 0 ? 'ocean' : cell === 1 ? 'lake' : 'land';
+  const kicker = base.kicker || (water === 'ocean' ? 'Мировой океан' : water === 'lake' ? 'Озеро' : 'Суша');
+  const rows = [
+    [water === 'land' ? 'Высота' : 'Глубина', `${Math.abs(Math.round(h)).toLocaleString('ru-RU')} м`],
+    ['Координаты', `${fmtLat(geo.lat)}, ${fmtLon(geo.lon)}`],
+    ...(base.rows || []),
+  ];
+  return { kicker, title: base.title || kicker, rows, tip: base.tip, water };
+}
 
 // ------------------------------------------------------------------ input
 const ndc = new THREE.Vector2();
 const mouse = { x: 0, y: 0, inside: false };
-let dragAnchor = null, downAt = null, moved = false;
+let dragAnchor = null, downAt = null, moved = false, hoverPoint = null;
 const keys = new Set();
-
-function toNdc(e, out = ndc) {
+const toNdc = (e, out = ndc) => {
   const r = canvas.getBoundingClientRect();
   return out.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-}
+};
 canvas.addEventListener('pointerdown', e => {
   if (e.button !== 0 && e.button !== 1) return;
   canvas.setPointerCapture(e.pointerId);
@@ -126,22 +136,29 @@ canvas.addEventListener('pointerup', e => {
   canvas.classList.remove('dragging');
   const wasClick = dragAnchor && !moved && e.button === 0;
   dragAnchor = null;
-  if (wasClick) select(hoverId);
+  if (wasClick && hoverPoint) openInfo(hoverPoint);
 });
 canvas.addEventListener('pointerleave', () => { mouse.inside = false; });
-canvas.addEventListener('contextmenu', e => { e.preventDefault(); select(0); });
+canvas.addEventListener('contextmenu', e => { e.preventDefault(); closeInfo(); });
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
   const f = Math.exp(Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 240) * 0.0024);
   const n = toNdc(e, new THREE.Vector2());
   gcam.zoom(f, gcam.pick(n), n);
 }, { passive: false });
+
 window.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { toggleMenu(); return; }
-  if (menuOpen) return;
+  if (e.key === 'Escape') {
+    if ($('settings').classList.contains('open')) { closeModal('settings'); return; }
+    if ($('saves').classList.contains('open')) { closeModal('saves'); return; }
+    toggleMenu(); return;
+  }
+  if (anyModalOpen() || e.target instanceof HTMLInputElement) return;
   keys.add(e.code);
-  const m = MAP_MODES.find(m => m.key === e.key);
-  if (m) setMode(m.id);
+  if (e.code === 'Space') { e.preventDefault(); world.togglePause?.(); }
+  if (/^Digit[1-5]$/.test(e.code)) world.setSpeed?.(Number(e.code.slice(5)));
+  if (e.code === 'F5') { e.preventDefault(); world.quickSave?.(); }
+  if (e.code === 'F9') { e.preventDefault(); world.quickLoad?.(); }
   if (e.code === 'Home') gcam.altTarget = 2.15;
   if (e.key === '+' || e.key === '=') gcam.zoom(0.7);
   if (e.key === '-') gcam.zoom(1.4);
@@ -149,82 +166,40 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 
-// ------------------------------------------------------------------ selection / info
-let hoverId = 0, selectedId = 0;
-const info = $('info');
-function select(id) {
-  selectedId = id >= 2 ? id : 0;
-  globe.terrainMat.uniforms.uSelected.value = selectedId;
-  if (!selectedId) { info.classList.add('hidden'); return; }
-  const d = describe(selectedId);
-  $('info-kicker').textContent = 'Район';
-  $('info-title').textContent = d.title;
-  $('info-list').innerHTML = `
-    <dt>Страна</dt><dd><span class="swatch" style="background:${d.country.color}"></span>${d.country.name}</dd>
-    <dt>Провинция</dt><dd>${d.province.name}</dd>
-    <dt>Площадь района</dt><dd>${fmtKm2(d.area)}</dd>
-    <dt>Площадь провинции</dt><dd>${fmtKm2(d.province.area)}</dd>
-    <dt>Центр</dt><dd>${fmtLat(d.lat)}, ${fmtLon(d.lon)}</dd>
-    <dt>Код</dt><dd class="muted">D-${selectedId} · P-${d.province.id} · ${d.country.code}</dd>`;
-  info.classList.remove('hidden');
-}
-$('info-close').onclick = () => select(0);
+// ------------------------------------------------------------------ info window
+let infoPoint = null;
+function openInfo(g) { infoPoint = g.clone(); hud.showInfo(describePoint(infoPoint)); world.onSelect?.(infoPoint); }
+function closeInfo() { infoPoint = null; hud.hideInfo(); world.onSelect?.(null); }
+$('info-close').onclick = closeInfo;
 
-const tooltip = $('tooltip');
 function updateHover() {
-  if (!mouse.inside || dragAnchor || menuOpen) { tooltip.classList.add('hidden'); return; }
+  if (!mouse.inside || dragAnchor || anyModalOpen()) { hud.hideTooltip(); return; }
   const r = canvas.getBoundingClientRect();
   const n = new THREE.Vector2(((mouse.x - r.left) / r.width) * 2 - 1, -((mouse.y - r.top) / r.height) * 2 + 1);
-  const g = gcam.pick(n);
-  const id = g ? globe.cellAt(g) : -1;
-  hoverId = id >= 2 ? id : 0;
-  globe.terrainMat.uniforms.uHover.value = hoverId;
-  if (id < 0) { tooltip.classList.add('hidden'); return; }
-  const d = describe(id);
-  const geo = vecToGeo(g);
-  tooltip.innerHTML = d.kind === 'district'
-    ? `<b>${d.title}</b><div class="t-sub">${d.province.name} · ${d.country.name}</div><div class="muted">${fmtKm2(d.area)} · ${fmtLat(geo.lat)}, ${fmtLon(geo.lon)}</div>`
-    : `<b>${d.title}</b><div class="muted">${fmtLat(geo.lat)}, ${fmtLon(geo.lon)}</div>`;
-  tooltip.classList.remove('hidden');
-  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
-  tooltip.style.left = `${Math.min(window.innerWidth - tw - 8, mouse.x + 16)}px`;
-  tooltip.style.top = `${Math.min(window.innerHeight - th - 8, mouse.y + 18)}px`;
+  hoverPoint = gcam.pick(n);
+  if (!hoverPoint) { hud.hideTooltip(); return; }
+  const d = describePoint(hoverPoint);
+  hud.showTooltip(`<b>${hud.esc(d.title)}</b>${d.tip ? `<div>${d.tip}</div>` : ''}`, mouse.x, mouse.y);
+  world.onHover?.(hoverPoint);
 }
 
-// ------------------------------------------------------------------ menu
+// ------------------------------------------------------------------ menus & settings
 let menuOpen = false;
-const menu = $('menu');
 function toggleMenu(force) {
   menuOpen = force ?? !menuOpen;
-  menu.classList.toggle('open', menuOpen);
+  if (menuOpen) { openModal('menu'); world.pauseForMenu?.(true); } else { closeModal('menu'); world.pauseForMenu?.(false); }
 }
-$('btn-menu').onclick = () => toggleMenu(true);
 $('menu-resume').onclick = () => toggleMenu(false);
+$('menu-settings').onclick = () => openModal('settings');
+$('menu-save').onclick = () => world.openSaves?.('save');
+$('menu-load').onclick = () => world.openSaves?.('load');
+$('menu-save').disabled = $('menu-load').disabled = !world.openSaves;
 $('menu-launcher').onclick = () => { if (isElectron) window.passionaris.exitToLauncher(); else location.href = './index.html'; };
 $('menu-quit').onclick = () => { if (isElectron) window.passionaris.quit(); else location.href = './index.html'; };
-const bind = (id, key, prop = 'value', parse = Number) => {
-  const el = $(id);
-  el[prop] = settings[key];
-  el.addEventListener('input', () => { settings[key] = parse(el[prop]); saveSettings(settings); });
-};
-bind('set-relief', 'reliefScale');
-bind('set-unroll', 'unroll');
-bind('set-districts', 'showDistricts', 'checked', Boolean);
-bind('set-rivers', 'showRivers', 'checked', Boolean);
-
-// ------------------------------------------------------------------ HUD
-const needle = $('compass-needle'), scaleBar = $('scale-bar'), scaleText = $('scale-text'), coords = $('coords');
-function updateHud() {
-  needle.setAttribute('transform', `rotate(${(-gcam.heading * 180 / Math.PI).toFixed(2)} 24 24)`);
-  const kmpp = gcam.kmPerPixel(window.innerHeight);
-  const target = kmpp * 120;
-  const pow = 10 ** Math.floor(Math.log10(target));
-  const nice = [1, 2, 5, 10].map(m => m * pow).reverse().find(v => v <= target) || pow;
-  scaleBar.style.width = `${(nice / kmpp).toFixed(0)}px`;
-  scaleText.textContent = `${nice.toLocaleString('ru-RU')} км`;
-  const g = vecToGeo(gcam.F);
-  coords.textContent = `${fmtLat(g.lat)} · ${fmtLon(g.lon)} · высота ${Math.round(gcam.alt * 6371).toLocaleString('ru-RU')} км`;
-}
+buildSettings(settings, (key, value) => {
+  if (key === 'brightness' || key === 'renderScale' || key === 'sharpen') return; // read every frame
+  world.onSetting?.(key, value);
+});
 
 // ------------------------------------------------------------------ loop
 window.addEventListener('resize', () => {
@@ -234,14 +209,12 @@ window.addEventListener('resize', () => {
 });
 
 const timer = new THREE.Timer();
-let fpsAcc = 0, fpsN = 0, hudT = 0;
-const fpsEl = $('fps');
+let fpsAcc = 0, fpsN = 0, hudT = 0, fpsText = '';
 function frame(ts) {
   timer.update(ts);
   const dt = Math.min(0.05, timer.getDelta());
   const t = timer.getElapsed();
 
-  // keyboard panning (arc radians per second ~ altitude)
   if (!menuOpen) {
     const sp = gcam.alt * 0.9 * dt;
     let dx = 0, dy = 0;
@@ -253,22 +226,31 @@ function frame(ts) {
   }
 
   const p = gcam.update(dt, globe.heightAt(gcam.F));
-  globe.update(gcam, t, camera);
+  detail.update(gcam, ts || performance.now());
+  world.update(dt, t, p);
+  globe.update(gcam, settings.waterAnimation === false ? 0 : t, camera);
   scene.background.copy(SPACE).lerp(SKY, (1 - p.globe) * Math.min(1, p.tilt / 0.6) * 0.9);
+  stars.material.opacity = 0.7 * p.globe;
 
-  renderer.render(scene, camera);
+  upscaler.render(scene, camera, settings);
 
   hudT += dt;
-  if (hudT > 0.05) { hudT = 0; updateHover(); updateHud(); }
+  if (hudT > 0.05) {
+    hudT = 0;
+    updateHover();
+    hud.updateCompassAndScale(gcam.heading, gcam.kmPerPixel(window.innerHeight));
+    if (infoPoint && world.liveInfo) hud.showInfo(describePoint(infoPoint));
+  }
   fpsAcc += dt; fpsN++;
-  if (fpsAcc > 0.5) { fpsEl.textContent = `${Math.round(fpsN / fpsAcc)} FPS`; fpsAcc = 0; fpsN = 0; }
+  if (fpsAcc > 0.5) { fpsText = `${Math.round(fpsN / fpsAcc)} FPS`; fpsAcc = 0; fpsN = 0; }
+  world.renderClock?.(settings.showFps ? fpsText : '');
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 setTimeout(() => $('loading')?.classList.add('done'), SHOT ? 0 : 150);
-if (SHOT) $('loading').remove();
+if (SHOT) $('loading')?.remove();
 
 // debug hooks for automated checks
-window.__game = { gcam, globe, camera, renderer, setMode, select, world, ready: false };
+window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, ready: false, rebuildModes };
 let framesDrawn = 0;
 (function markReady() { if (++framesDrawn > 20) window.__game.ready = true; else requestAnimationFrame(markReady); })();
