@@ -108,16 +108,22 @@ const dLand = part.dLand;
   const mi = mergeIslets(grid, did, D, type, area, target, ms.nb, uf);
   for (let i = 0; i < N; i++) did[i] = uf.find(did[i]);
   // single land texels cut off from their district (diagonal-only growth at river
-  // crossings) and enclosed by one other land district join that district
+  // crossings) and enclosed by other land districts join the most common neighbour
   let enclaves = 0;
   for (let y = 1; y < H - 1; y++) {
     const row = y * W;
     for (let x = 0; x < W; x++) {
       const i = row + x, p = did[i];
       if (!isLandType(type[p])) continue;
-      const q = did[row + (x + 1) % W];
-      if (q === p || !isLandType(type[q])) continue;
-      if (did[row + (x + W - 1) % W] === q && did[i - W] === q && did[i + W] === q) { did[i] = q; enclaves++; }
+      const n0 = did[row + (x + 1) % W], n1 = did[row + (x + W - 1) % W], n2 = did[i - W], n3 = did[i + W];
+      if (n0 === p || n1 === p || n2 === p || n3 === p) continue;
+      if (!isLandType(type[n0]) || !isLandType(type[n1]) || !isLandType(type[n2]) || !isLandType(type[n3])) continue;
+      let best = n0, bc = 0;
+      for (const q of [n0, n1, n2, n3]) {
+        const c = (q === n0) + (q === n1) + (q === n2) + (q === n3);
+        if (c > bc || (c === bc && q < best)) { bc = c; best = q; }
+      }
+      did[i] = best; enclaves++;
     }
   }
   log(`merged: ${ms.merged} slivers, ${mi} islets, ${enclaves} single-texel enclaves`);

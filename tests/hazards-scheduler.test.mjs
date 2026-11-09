@@ -143,6 +143,20 @@ test('stochastic filling: ancient and future years get instrumental-era rates, 1
   assert.ok(count(-4000, -3999, 'landslide') > 200, 'landslides');
 });
 
+test('no stochastic eruption of a volcano during its documented onset..paroxysm span', () => {
+  // Tambora: GVP onset 1812, paroxysm 10 Apr 1815
+  for (let seed = 0; seed < 12; seed++) {
+    const s = createScheduler({ data, seed });
+    const evs = s.eventsBetween(Y(1810), Y(1818), { types: ['eruption'] });
+    const tam = evs.find(e => e.documented && e.name === 'Тамбора' && e.vei === 7);
+    assert.ok(tam && tam.t - tam.tStart > 365, 'long documented span');
+    for (const e of evs) {
+      if (e.documented || e.volcano !== tam.volcano) continue;
+      assert.ok(e.t < tam.tStart - 365 || e.t > tam.t + 365, `seed ${seed}: ${e.id} at ${JSON.stringify(tToYmd(e.t))}`);
+    }
+  }
+});
+
 test('stochastic events never duplicate documented ones', () => {
   for (const [y0, y1] of [[-500, -450], [1200, 1250], [1850, 1900]]) {
     const evs = sched.eventsBetween(Y(y0), Y(y1), { types: ['eruption', 'earthquake'] });
@@ -182,5 +196,6 @@ test('filters and helpers', () => {
   assert.ok(L.quake >= 4 && L.place === 'Япония');
   assert.match(sched.label(evs[0]), /^Землетрясение/);
   const st = sched.stats();
-  assert.ok(st.ratesPerYear.earthquakesInstrumental > 90 && st.ratesPerYear.earthquakesInstrumental < 140);
+  // complete-era (1964–2025) global M>=6 rate is ~130–150 per year
+  assert.ok(st.ratesPerYear.earthquakesInstrumental > 120 && st.ratesPerYear.earthquakesInstrumental < 160, String(st.ratesPerYear.earthquakesInstrumental));
 });

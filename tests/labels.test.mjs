@@ -4,14 +4,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
+import * as THREE from 'three';
 
 import {
   toVec, toLonLat, makeAeqd, edtSq, pointInParts, distToPartsKm, partsOf, bendRange, gcKm, eastNorth, dot,
 } from '../scripts/labels/geom.mjs';
-import { keyOf, cleanRu } from '../scripts/labels/zone-table.mjs';
+import { keyOf, cleanRu, isCapePoint, MANUAL_PATH } from '../scripts/labels/zone-table.mjs';
 import {
-  collectGlyphs, buildGlyphAtlas, layoutLabel, labelText, isWater, glyphKey, sampleCurve, _segDist2, WATER_KINDS,
+  collectGlyphs, buildGlyphAtlas, layoutLabel, labelText, isWater, glyphKey, sampleCurve, curveAt, _segDist2, WATER_KINDS, ZoneLabels,
 } from '../src/game/fx/labels.js';
+import { GlobeCamera } from '../src/game/camera.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ZONES = path.join(ROOT, 'public', 'assets', 'labels', 'zones.json');
@@ -135,6 +138,17 @@ test('zones.json: key zones are present with correct names', () => {
   // hand-fixed Natural Earth names
   assert.ok(zones.some(z => z.nameRu === 'Татры'), 'Tatra fix');
   assert.ok(!zones.some(z => /Кшемёнки|гора Скотт/.test(z.nameRu)), 'bad NE translations gone');
+  // wrong NAME_EN values replaced; Russian names without English generic words ("залив Дарнли-Бэй")
+  assert.ok(!zones.some(z => /^(Enugu Nigeria|Taitailei|Ahag|Serra do Espinho|Nullabor Plain|Appennino Ligure)$/.test(z.nameEn)), 'bad NE English names gone');
+  assert.ok(zones.some(z => z.nameEn === 'Niger Delta' && z.nameRu === 'дельта Нигера'));
+  assert.ok(!zones.some(z => /\S-Бэй$|Сено /.test(z.nameRu)), 'no "-Бэй" / "Сено" calques');
+  // "Cape York Peninsula" is a peninsula, not a cape point
+  const cy = zones.find(z => z.nameEn === 'Cape York Peninsula');
+  assert.ok(cy && cy.kind === 'peninsula' && cy.nameRu === 'полуостров Кейп-Йорк', 'Cape York Peninsula');
+  assert.equal(isCapePoint('Cape York Peninsula'), false);
+  assert.equal(isCapePoint('CAPE YORK PEN.'), false);
+  assert.equal(isCapePoint('Cape Chelyuskin'), true);
+  assert.equal(isCapePoint('Point Barrow'), true);
 });
 
 test('zones.json: natural zones only — no countries', () => {
@@ -187,6 +201,29 @@ test('zones.json: every path point lies inside its source polygon', { skip: !fs.
   }
   assert.ok(checked > 2000);
   assert.deepEqual(bad, []);
+});
+
+// Cross-check with the game's own land/water grid (cells.bin.gz: 0 ocean, 1 lake, >= 2 land).
+const CELLS = path.join(ROOT, 'public', 'assets', 'map', 'cells.bin.gz');
+test('labels sit on the right side of the coastline (game land/water grid)', { skip: !fs.existsSync(CELLS) && 'map not baked' }, () => {
+  const buf = zlib.gunzipSync(fs.readFileSync(CELLS));
+  const W = 8192, H = 4096;
+  const cells = new Uint32Array(buf.buffer, buf.byteOffset, W * H);
+  const water = (lon, lat) => cells[Math.min(H - 1, Math.floor((90 - lat) / 180 * H)) * W + Math.min(W - 1, Math.floor((lon + 180) / 360 * W))] < 2;
+  const bad = [];
+  for (const z of zones) {
+    const c = sampleCurve(z.path);
+    let w = 0;
+    const N = 40;
+    for (let i = 0; i <= N; i++) if (water(...toLonLat(curveAt(c, c.length * i / N).p))) w++;
+    const f = w / (N + 1);
+    // narrow fjords and straits (a few km) are below the 4.9 km grid, hence the looser bound for small letters
+    if (z.water && f < (z.letterHeightKm >= 8 ? 0.6 : 0.3)) bad.push(`${z.id}: water label ${(f * 100).toFixed(0)}% on water`);
+    if (!z.water && f > 0.4) bad.push(`${z.id}: land label ${(f * 100).toFixed(0)}% on water`);
+  }
+  assert.deepEqual(bad, []);
+  // hand-placed strait / bay lines lie entirely on water
+  for (const [key, pts] of Object.entries(MANUAL_PATH)) for (const [lon, lat] of pts) assert.ok(water(lon, lat), `${key} (${lon},${lat}) on water`);
 });
 
 test('baker is deterministic and zones.json is up to date', async () => {
@@ -284,6 +321,111 @@ test('layout: every label builds without NaN', () => {
     quads += lay.quads.length;
   }
   assert.ok(quads > 5000 && quads < 40000, `${quads} glyph quads`);
+});
+
+// ------------------------------------------------------------------ the runtime layer (no WebGL needed)
+async function makeLayer({ palette, settings = { palette: 'sepia', showLabels: true } } = {}) {
+  const scene = new THREE.Scene();
+  // globe.shared as Globe builds it, but never updated here: the layer must not depend on it being current
+  const globe = {
+    settings,
+    shared: {
+      uF: { value: new THREE.Vector3(0, 0, 1) }, uR: { value: new THREE.Vector3(1, 0, 0) }, uU: { value: new THREE.Vector3(0, 1, 0) },
+      uCurv: { value: 1 }, uExag: { value: 1 / 6371000 }, uHeight: { value: null }, uGrid: { value: new THREE.Vector2(8192, 4096) },
+    },
+  };
+  const clock = { t: 100 };
+  const gcam = new GlobeCamera(new THREE.PerspectiveCamera(34, 1920 / 1080, 0.001, 50), { unroll: 0.85, reliefScale: 1 });
+  const layer = new ZoneLabels(scene, globe, {
+    zones: doc, palette, createCanvas: fakeCanvas, now: () => clock.t,
+    renderer: { domElement: { clientWidth: 1920, clientHeight: 1080 } },
+  });
+  await layer.ready$;
+  assert.ok(layer.ready && scene.children.includes(layer.mesh));
+  const look = (lat, lon, alt) => { gcam.lookAt(lat, lon, alt); gcam.alt = alt; gcam.update(0, 0); };
+  const idx = id => layer.zones.findIndex(z => z.id === id);
+  return { layer, gcam, globe, clock, look, idx, scene };
+}
+
+test('ZoneLabels: shows the right labels, independent of globe.update() order', async () => {
+  const { layer, gcam, look, idx } = await makeLayer();
+  look(22, 15, 2.0);
+  for (let k = 0; k < 30; k++) layer.update(gcam, 10 + k * 0.1);
+  const a = id => layer.alpha[idx(id)];
+  assert.ok(a('sahara') > 0.9, `Сахара visible (alpha ${a('sahara')})`);
+  assert.ok(a('mediterranean-sea') > 0.9, 'Средиземное море visible');
+  assert.equal(a('pacific-ocean'), 0, 'far side of the globe stays hidden');
+  assert.equal(a('danube-delta'), 0, 'tiny labels hidden from afar');
+  assert.ok(layer.alpha.every(Number.isFinite));
+  // GPU data texture mirrors alpha + flip; water flag set for seas
+  assert.equal(layer.labelData[idx('sahara') * 4], layer.alpha[idx('sahara')]);
+  assert.equal(layer.labelData[idx('mediterranean-sea') * 4 + 3], 1);
+  assert.equal(layer.labelData[idx('sahara') * 4 + 3], 0);
+
+  // zoomed in, the globe is "unrolled" (curv < 1): the CPU pass must use this frame's camera even when
+  // globe.shared is stale (main.js runs world updaters before globe.update)
+  const run = () => {
+    layer.lastT = null; layer.alpha.fill(0); layer.flip.fill(0);
+    look(46.5, 10, 0.4);
+    for (let k = 0; k < 20; k++) layer.update(gcam, 50 + k * 0.1);
+    return Float32Array.from(layer.alpha);
+  };
+  const stale = run();
+  assert.ok(gcam.derived.curv < 0.9, 'unrolled view');
+  const sh = layer.globe.shared;          // now as Globe.update() would set it
+  sh.uF.value.copy(gcam.F); sh.uR.value.crossVectors(gcam.U, gcam.F); sh.uCurv.value = gcam.derived.curv; sh.uExag.value = gcam.derived.exag / 6371000;
+  const fresh = run();
+  assert.deepEqual(stale, fresh);
+  assert.ok(fresh[idx('alps')] > 0.9, 'Альпы visible over the Alps at alt 0.4');
+  layer.dispose();
+  assert.equal(layer.mesh, null);
+});
+
+test('ZoneLabels: a degenerate camera frame (zero-size window) does not poison the fades', async () => {
+  const { layer, gcam, look, idx } = await makeLayer();
+  look(22, 15, 2.0);
+  layer.update(gcam, 1);
+  gcam.cam.aspect = 0 / 0;                  // innerWidth / innerHeight while minimised
+  gcam.cam.updateProjectionMatrix();
+  for (let k = 0; k < 5; k++) layer.update(gcam, 1.1 + k * 0.1);
+  assert.ok(layer.alpha.every(Number.isFinite), 'no NaN after the bad frames');
+  gcam.cam.aspect = 1920 / 1080;
+  gcam.cam.updateProjectionMatrix();
+  for (let k = 0; k < 30; k++) layer.update(gcam, 2 + k * 0.1);
+  assert.ok(layer.alpha[idx('sahara')] > 0.9, 'labels come back once the window is restored');
+  assert.ok(layer.labelData.every(Number.isFinite));
+});
+
+test('ZoneLabels: fades keep moving when timeSec is missing or constant (wall-clock fallback)', async () => {
+  const { layer, gcam, look, idx, clock } = await makeLayer();
+  look(22, 15, 2.0);
+  layer.update(gcam, 0);                    // first frame snaps
+  const s = idx('sahara');
+  assert.ok(layer.alpha[s] > 0.9);
+  look(22, 15, 0.12);                       // zoom in: the Sahara letters get far too big -> fade out
+  const before = layer.alpha[s];
+  for (let k = 0; k < 10; k++) { clock.t += 0.1; layer.update(gcam, 0); }   // constant timeSec
+  assert.ok(layer.alpha[s] < before * 0.5, `faded with constant timeSec (${before} -> ${layer.alpha[s]})`);
+  look(22, 15, 2.0);
+  for (let k = 0; k < 15; k++) { clock.t += 0.1; layer.update(gcam); }      // no timeSec at all
+  assert.ok(layer.alpha[s] > 0.9, 'faded back in without timeSec');
+});
+
+test('ZoneLabels: two-argument construction follows the game settings; undefined options keep defaults', async () => {
+  const { layer } = await makeLayer({ settings: { palette: 'sepia', showLabels: false } });
+  assert.equal(layer.visible, false, 'settings.showLabels = false');
+  assert.equal(layer.mesh.visible, false);
+  assert.equal(layer.opts.palette, 'sepia');
+  assert.equal(layer.opts.fontFamily, 'Alegreya SC, Georgia, serif');
+  const ink = layer.material.uniforms.uInk.value;
+  assert.ok(Math.abs(ink.r - 0.16) < 1e-6 && Math.abs(ink.b - 0.07) < 1e-6, 'sepia ink');
+  layer.setVisible(true);
+  assert.equal(layer.mesh.visible, true);
+  const l2 = new ZoneLabels(new THREE.Scene(), { shared: layer.globe.shared }, { zones: doc, fontFamily: undefined, createCanvas: fakeCanvas });
+  assert.equal(l2.opts.fontFamily, 'Alegreya SC, Georgia, serif', 'explicit undefined does not wipe the default font');
+  assert.equal(l2.visible, true);
+  await l2.ready$;
+  l2.dispose();
 });
 
 test('curve sampling across the antimeridian stays short', () => {

@@ -76,6 +76,24 @@ test('Lisbon earthquake of 1 Nov 1755', () => {
   assert.ok(q.ts > 0, 'linked tsunami');
 });
 
+test('catalogue rows are chronological; Vesuvius 79 carries the NCEI death toll', () => {
+  // the bake's day key once let mid/late-December dates sort after the next year
+  for (const [name, rows] of [['eruptions', eruptions], ['earthquakes', quakes], ['tsunamis', tsunamis], ['meteorites', meteorites]]) {
+    for (let i = 1; i < rows.length; i++) assert.ok(rows[i].y >= rows[i - 1].y, `${name} row ${i}: ${rows[i - 1].y} -> ${rows[i].y}`);
+  }
+  const ves = eruptions.find(r => r.v === volcanoIdx('Vesuvius') && r.y === 79);
+  assert.ok(ves.deaths >= 1000, `Vesuvius 79 deaths ${ves.deaths}`);
+});
+
+test('implausible NCEI intensity-XII entries without magnitude or impact are neutralised', () => {
+  // ~60 entries such as "ITALY: N" 1922 carry intensity 12 and nothing else
+  const flagged = quakes.filter(q => q.flags & 32);
+  assert.ok(flagged.length >= 50, `flagged ${flagged.length}`);
+  for (const q of flagged) assert.ok(q.level <= 3 && q.mag < 6 && (q.flags & 8), JSON.stringify([q.y, q.mag, q.I0, q.level]));
+  // size-assumed events (no magnitude, no intensity) use the documented I0 = 7
+  for (const q of quakes.filter(r => r.flags & 8)) assert.equal(q.I0, 7);
+});
+
 test('ancient and BC dates use astronomical years', () => {
   // NCEI: "2150 BC" Jordan -> astronomical -2149
   assert.ok(quakes.some(q => q.y === -2149), 'earliest NCEI earthquake at -2149');
@@ -162,6 +180,23 @@ test('tsunami exposure on Pacific coasts, none inland', () => {
   assert.equal(boxStats(lv.tsunami, 53, 60, 35, 50).max, 0, 'central Russia');
 });
 
+test('Italy: epicentral belts at level 5, Po plain and Sardinia lower', () => {
+  const at = (la, lo) => lv.quake[simCellOf(la, lo)];
+  for (const [name, la, lo] of [['Messina', 38.19, 15.55], ['Catania', 37.5, 15.09], ["L'Aquila", 42.35, 13.4]]) assert.equal(at(la, lo), 5, name);
+  assert.ok(at(45.46, 9.19) <= 4, `Milan ${at(45.46, 9.19)}`);         // max observed intensity in Milan ~VI–VII
+  assert.ok(at(40.1, 9.1) <= 2, `Sardinia ${at(40.1, 9.1)}`);
+  const it = boxStats(lv.quake, 37, 46, 7, 18);
+  assert.ok(it.median <= 4, `Italy box median ${it.median}`);
+});
+
+test('slope ignores the bathymetry of neighbouring sea pixels', () => {
+  // flat coasts next to the sea stay flat (Netherlands, Bangladesh delta, Florida)
+  for (const [la, lo] of [[52.3, 4.8], [22.3, 90.6], [26, -80.1]]) {
+    const c = simCellOf(la, lo);
+    assert.ok(lv.slope[c] <= 5 && lv.landslide[c] === 0, `${la},${lo}: slope ${lv.slope[c]} landslide ${lv.landslide[c]}`);
+  }
+});
+
 test('landslide susceptibility follows the mountains', () => {
   const himalaya = boxStats(lv.landslide, 27, 30, 83, 90);
   const plains = boxStats(lv.landslide, 50, 56, 30, 45);
@@ -181,7 +216,8 @@ test('intensity prediction equation behaves', () => {
 });
 
 test('user scale boundaries', () => {
-  assert.deepEqual([1.9, 2, 3.9, 4, 5.9, 6, 7.9, 8, 9.9, 10, 12].map(intensityToLevel), [0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+  // '5 = >10' is taken literally: intensity X itself is level 4
+  assert.deepEqual([1.9, 2, 3.9, 4, 5.9, 6, 7.9, 8, 9.9, 10, 10 + 2e-15, 10.1, 11, 12].map(intensityToLevel), [0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 5]);
   assert.deepEqual([0, 0.5, 1.5, 3, 6, 12, 40].map(tsunamiLevelFromHeight), [0, 1, 2, 3, 4, 5, 5]);
   assert.equal(volcanoLevelAt(10, 7), 5);
   assert.equal(volcanoLevelAt(2000, 7), 0);

@@ -308,6 +308,7 @@ function resolvePalette(p) {
 }
 const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const wallSeconds = () => (globalThis.performance?.now?.() ?? Date.now()) / 1000;
 
 // ------------------------------------------------------------------ the layer
 
@@ -321,12 +322,20 @@ export class ZoneLabels {
   constructor(scene, globe, opts = {}) {
     this.scene = scene;
     this.globe = globe;
-    this.opts = { fontFamily: DEFAULT_FONT, lang: 'ru', url: 'assets/labels/zones.json', fontBase: 'assets/labels/fonts/', ...opts };
-    this.visible = true;
+    // explicit `undefined` options must not wipe the defaults (e.g. fontFamily: settings.x that is unset)
+    const given = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined));
+    this.opts = {
+      fontFamily: DEFAULT_FONT, lang: 'ru', url: 'assets/labels/zones.json', fontBase: 'assets/labels/fonts/',
+      palette: globe?.settings?.palette, ...given,
+    };
+    // ENGINE.md two-argument form `new ZoneLabels(scene, globe)` still follows the game settings
+    this.visible = globe?.settings?.showLabels !== false;
     this.ready = false;
     this.disposed = false;
     this.mesh = null;
     this.lastT = null;
+    this.lastWall = null;
+    this._now = typeof this.opts.now === 'function' ? this.opts.now : wallSeconds;
     this.ready$ = this._init().catch(e => { console.error('[labels]', e); });
   }
 
@@ -341,7 +350,7 @@ export class ZoneLabels {
     const { regular, italic } = collectGlyphs(zones, this.opts.lang);
     const atlas = buildGlyphAtlas({
       regular, italic, fontFamily: this.opts.fontFamily,
-      createCanvas: (w, h) => Object.assign(document.createElement('canvas'), { width: w, height: h }),
+      createCanvas: this.opts.createCanvas ?? ((w, h) => Object.assign(document.createElement('canvas'), { width: w, height: h })),
     });
     this._build(zones, atlas);
   }
@@ -437,6 +446,7 @@ export class ZoneLabels {
     this.lbase = new Float32Array(n);
     this.lnMin = new Float32Array(n);
     this.lnMax = new Float32Array(n);
+    this.lenEm = new Float32Array(n);       // text length in letter heights (screen margin for long labels)
     this.prio = new Float32Array(n);
     this.alpha = new Float32Array(n);
     this.target = new Float32Array(n);
@@ -448,6 +458,7 @@ export class ZoneLabels {
       this.lbase[i] = z.baseM ?? 0;
       this.lnMin[i] = Math.log(Math.max(1e-5, z.minAltitude ?? 1e-5));
       this.lnMax[i] = Math.log(Math.max(1e-5, z.maxAltitude ?? 100));
+      this.lenEm[i] = lay.textLenKm / Math.max(1e-6, lay.letterHeightKm);
       this.prio[i] = z.priority ?? z.scalerank ?? 5;
       this.labelData[i * 4 + 2] = this.lbase[i];
       this.labelData[i * 4 + 3] = isWater(z) ? 1 : 0;
@@ -461,6 +472,9 @@ export class ZoneLabels {
     this.acc = new Int32Array(n);
     this._vp = new THREE.Matrix4();
     this._out = new Float64Array(4);
+    this._F = new THREE.Vector3(0, 0, 1);
+    this._R = new THREE.Vector3(1, 0, 0);
+    this._c = 1;
     this.ready = true;
   }
 
@@ -485,8 +499,11 @@ export class ZoneLabels {
   }
 
   // CPU twin of the vertex shader: unit vector -> screen px; returns facing (cos) or -2 if behind the camera
-  _project(lp, o, disp, sh, vw, vh) {
-    const F = sh.uF.value, R = sh.uR.value, c = sh.uCurv.value;
+  // (or if the camera is degenerate, e.g. a zero-size viewport gives a NaN projection).
+  // F / R / curvature come from the camera of this frame (see update), not from globe.shared,
+  // so the result does not depend on whether globe.update() already ran this frame.
+  _project(lp, o, disp, vw, vh) {
+    const F = this._F, R = this._R, c = this._c;
     const gx = lp[o], gy = lp[o + 1], gz = lp[o + 2];
     const d = gx * F.x + gy * F.y + gz * F.z;
     let tx = gx - F.x * d, ty = gy - F.y * d, tz = gz - F.z * d;
@@ -499,14 +516,17 @@ export class ZoneLabels {
     const px = F.x * k0 + tx * k1 + ux * disp, py = F.y * k0 + ty * k1 + uy * disp, pz = F.z * k0 + tz * k1 + uz * disp;
     const m = this._vp.elements;
     const cw = m[3] * px + m[7] * py + m[11] * pz + m[15];
-    if (cw <= 1e-6) return -2;
+    if (!(cw > 1e-6)) return -2;                     // behind the camera, or NaN
     const cx = m[0] * px + m[4] * py + m[8] * pz + m[12];
     const cy = m[1] * px + m[5] * py + m[9] * pz + m[13];
-    this._out[0] = (cx / cw * 0.5 + 0.5) * vw;
-    this._out[1] = (cy / cw * 0.5 + 0.5) * vh;
+    const sx = (cx / cw * 0.5 + 0.5) * vw, sy = (cy / cw * 0.5 + 0.5) * vh;
+    if (!Number.isFinite(sx) || !Number.isFinite(sy)) return -2;
+    this._out[0] = sx;
+    this._out[1] = sy;
     const cp = this._camPos;
     const vx = cp.x - px, vy = cp.y - py, vz = cp.z - pz, vl = Math.hypot(vx, vy, vz) || 1;
-    return (ux * vx + uy * vy + uz * vz) / vl;
+    const face = (ux * vx + uy * vy + uz * vz) / vl;
+    return Number.isFinite(face) ? face : -2;
   }
 
   _viewport() {
@@ -515,22 +535,51 @@ export class ZoneLabels {
     this._vh = el?.clientHeight || globalThis.innerHeight || 1080;
   }
 
+  // focus, screen-right and curvature for this frame: straight from the camera when it has them
+  // (GlobeCamera: F, U, derived.curv/exag), otherwise from the globe's shared uniforms
+  _frameState(gcam) {
+    const sh = this.globe.shared;
+    const d = gcam.derived;
+    if (gcam.F && gcam.U) {
+      this._F.copy(gcam.F);
+      this._R.crossVectors(gcam.U, gcam.F);          // = GlobeCamera.R, without its allocation
+      if (this._R.lengthSq() < 1e-12) this._R.copy(sh.uR.value);
+      else this._R.normalize();
+    } else {
+      this._F.copy(sh.uF.value);
+      this._R.copy(sh.uR.value);
+    }
+    const c = d && Number.isFinite(d.curv) && d.curv > 0 ? d.curv : sh.uCurv.value;
+    this._c = Math.max(1e-6, c);
+    return d && Number.isFinite(d.exag) ? d.exag / 6371000 : sh.uExag.value;
+  }
+
   // declutter order: lower = more important; labels already shown get a bonus (no flicker)
   _key(j) { return this.prio[j] - (this.alpha[j] > 0.5 ? 0.75 : 0); }
 
-  update(gcam, timeSec = 0) {
+  // timeSec: real seconds (any monotonic clock). If it is missing or does not advance (a paused or
+  // constant time passed by mistake), the fades fall back to the wall clock instead of freezing.
+  update(gcam, timeSec) {
     if (!this.ready || !this.visible || this.disposed) return;
-    const dt = this.lastT === null ? 1 : Math.min(0.25, Math.max(0, timeSec - this.lastT));
-    this.lastT = timeSec;
+    const wall = this._now();
+    let dt;
+    if (this.lastT === null) dt = 1;                 // first frame: snap to the targets
+    else {
+      dt = Number.isFinite(timeSec) ? timeSec - this.lastT : NaN;
+      if (!(dt > 0)) dt = wall - this.lastWall;
+      dt = Math.min(0.25, Math.max(0, Number.isFinite(dt) ? dt : 0));
+    }
+    this.lastT = Number.isFinite(timeSec) ? timeSec : wall;
+    this.lastWall = wall;
     const cam = gcam.cam;
-    const sh = this.globe.shared;
     const alt = gcam.alt, lnAlt = Math.log(alt);
+    if (!(alt > 0)) return;
     this._viewport();
     const vw = this._vw, vh = this._vh;
     cam.updateMatrixWorld();
     this._vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     this._camPos = cam.position;
-    const exag = sh.uExag.value;
+    const exag = this._frameState(gcam);
     const lift = alt * 0.003;
     this.material.uniforms.uLift.value = lift;
     this.material.uniforms.uHLod.value = alt < 0.05 ? 3 : alt < 0.3 ? 4 : 5;
@@ -545,20 +594,24 @@ export class ZoneLabels {
       if (aAlt <= 0.001) continue;
       const disp = this.lbase[i] * exag + lift;
       const o = i * S3;
-      const face = this._project(lp, o + SAMPLES * 3, disp, sh, vw, vh);
+      const face = this._project(lp, o + SAMPLES * 3, disp, vw, vh);
       if (face < 0.05) continue;
       const cx = out[0], cy = out[1];
-      if (cx < -0.5 * vw || cx > 1.5 * vw || cy < -0.5 * vh || cy > 1.5 * vh) continue;
       let lpx = 0;
-      if (this._project(lp, o + (SAMPLES + 1) * 3, disp, sh, vw, vh) > -2) lpx = Math.hypot(out[0] - cx, out[1] - cy);
-      if (this._project(lp, o + (SAMPLES + 2) * 3, disp, sh, vw, vh) > -2) lpx = Math.max(lpx, Math.hypot(out[0] - cx, out[1] - cy));
-      const aSize = smoothstep(7, 10, lpx) * (1 - smoothstep(105, 125, lpx));
+      if (this._project(lp, o + (SAMPLES + 1) * 3, disp, vw, vh) > -2) lpx = Math.hypot(out[0] - cx, out[1] - cy);
+      if (this._project(lp, o + (SAMPLES + 2) * 3, disp, vw, vh) > -2) lpx = Math.max(lpx, Math.hypot(out[0] - cx, out[1] - cy));
+      // off-screen test on the label centre, with a margin of half the text length:
+      // a long label can still cross the screen while its centre is far outside
+      const mx = Math.max(0.5 * vw, 0.55 * lpx * this.lenEm[i]), my = Math.max(0.5 * vh, 0.55 * lpx * this.lenEm[i]);
+      if (cx < -mx || cx > vw + mx || cy < -my || cy > vh + my) continue;
+      const maxPx = this.opts.maxLetterPx ?? 125;   // letters bigger than this fade out (smaller zones take over)
+      const aSize = smoothstep(7, 10, lpx) * (1 - smoothstep(maxPx * 0.82, maxPx, lpx));
       const t = aAlt * aSize * smoothstep(0.05, 0.2, face);
-      if (t <= 0.01) continue;
+      if (!(t > 0.01)) continue;
       // screen samples along the text
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, okAll = true;
       for (let k = 0; k < SAMPLES; k++) {
-        if (this._project(lp, o + k * 3, disp, sh, vw, vh) <= -2) { okAll = false; break; }
+        if (this._project(lp, o + k * 3, disp, vw, vh) <= -2) { okAll = false; break; }
         const x = out[0], y = out[1];
         this.scr[(i * SAMPLES + k) * 2] = x; this.scr[(i * SAMPLES + k) * 2 + 1] = y;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
@@ -602,6 +655,7 @@ export class ZoneLabels {
     const D = this.labelData;
     for (let i = 0; i < this.n; i++) {
       let a = this.alpha[i] + (this.target[i] - this.alpha[i]) * k;
+      if (!Number.isFinite(a)) a = 0;               // never let a bad frame poison the fades for good
       if (Math.abs(a - this.target[i]) < 0.004) a = this.target[i];
       this.alpha[i] = a;
       if (D[i * 4] !== a || D[i * 4 + 1] !== this.flip[i]) { D[i * 4] = a; D[i * 4 + 1] = this.flip[i]; dirty = true; }

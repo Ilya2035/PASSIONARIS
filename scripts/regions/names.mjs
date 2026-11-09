@@ -304,6 +304,9 @@ const lowerFirst = s => s.charAt(0).toLowerCase() + s.slice(1);
 export function genderOf(phrase, fb = null) {
   const toks = phrase.split(' ');
   for (const t of toks) { const hd = HEADS[t.toLowerCase()]; if (hd) return hd[1]; }
+  // hyphenated name with a generic first part (Кордильера-Реаль, Сьерра-Мадре)
+  const hy = HEADS[toks[0].split('-')[0].toLowerCase()];
+  if (toks[0].includes('-') && hy) return hy[1];
   const w = toks[toks.length - 1].toLowerCase();
   const last = w[w.length - 1], prev = w[w.length - 2] || '';
   if (last === 'ы') return 'p';
@@ -337,7 +340,8 @@ const COMPASS_HEAD = /^((Северн|Южн|Западн|Восточн|Цен�
 // "Долина Луары" + 'N' -> "Северная долина Луары"; "Альпы" + 'W' -> "Западные Альпы";
 // "Западный Саян" + 'E' -> "Западный Саян (восток)" (never "Восточный Западный Саян").
 export function qualify(base, dir, { gender, commonHead } = {}) {
-  if (COMPASS_HEAD.test(base)) return `${base} (${DIR_NOUNS[dir]})`;
+  // also "Западно-Сибирская равнина" + 'W': not "Западная Западно-Сибирская равнина"
+  if (COMPASS_HEAD.test(base) || base.startsWith(DIR_STEMS[dir])) return `${base} (${DIR_NOUNS[dir]})`;
   const g = gender || genderOf(base);
   const firstTok = base.split(' ')[0];
   const isCommon = commonHead ?? !!HEADS[firstTok.toLowerCase()];

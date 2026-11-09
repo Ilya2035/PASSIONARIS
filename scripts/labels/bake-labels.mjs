@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { partsOf, ringAreaKm2, toVec, toLonLat, norm, R_KM } from './geom.mjs';
 import { rasterZone, mainAxis, fitText, toGeoPath, orientPath, sliverAxis, spacingFor } from './centerline.mjs';
 import {
-  keyOf, LAND_CLASS, GEOAREA_ALLOW, SKIP, KIND_OVERRIDE, ALIAS, MARINE_CLASS, MARINE_SKIP, RU, EN, cleanRu, MANUAL_PATH,
+  keyOf, LAND_CLASS, GEOAREA_ALLOW, SKIP, KIND_OVERRIDE, ALIAS, MARINE_CLASS, MARINE_SKIP, MARINE_KIND_OVERRIDE, RU, EN, cleanRu,
+  MANUAL_PATH, isCapePoint,
 } from './zone-table.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -47,7 +48,7 @@ function collect() {
     if (p.FEATURECLA === 'Geoarea') kind = GEOAREA_ALLOW[key] ?? null;
     if (kind === undefined) { console.warn('unknown class', p.FEATURECLA, p.NAME); continue; }
     if (!kind) continue;
-    if (/^(cape|point|cabo|pointe)\b/i.test(p.NAME_EN || p.NAME)) continue;
+    if (isCapePoint(p.NAME_EN || p.NAME)) continue;
     kind = KIND_OVERRIDE[key] ?? kind;
     zones.push({
       key, src: 'land', neClass: p.FEATURECLA, neId: p.NE_ID, kind,
@@ -64,6 +65,7 @@ function collect() {
     let kind = MARINE_CLASS[p.featurecla];
     if (kind === undefined) { console.warn('unknown class', p.featurecla, p.name); continue; }
     if (!kind) continue;
+    kind = MARINE_KIND_OVERRIDE[key] ?? kind;
     zones.push({
       key, src: 'sea', neClass: p.featurecla, neId: p.ne_id, kind,
       neName: p.name, nameEn: EN[key] ?? (p.name_en || p.name), nameRuNE: p.name_ru, scalerank: p.scalerank, minLabel: p.min_label,
@@ -205,7 +207,7 @@ export function bakeZone(z, hm) {
   return {
     zone: {
       id: '', nameRu, nameEn: z.nameEn, kind, water,
-      scalerank: z.scalerank, minLabel: z.minLabel, priority: r1(priority * 10) / 10,
+      scalerank: z.scalerank, minLabel: z.minLabel, priority: Math.round(priority * 100) / 100,
       path: geo.path.map(([lon, lat]) => [r4(lon), r4(lat)]),
       lengthKm: r1(geo.lengthKm), letterHeightKm: r1(Math.max(0.1, h)), widthKm: r1(widthKm),
       baseM, minAltitude: sig(minAltitude), maxAltitude: sig(maxAltitude),

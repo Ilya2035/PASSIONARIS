@@ -304,7 +304,9 @@ export class Globe {
     u.uLineCountry.value = this.clean || !(political || regions) ? 0 : regions ? 0.75 : 1;
     u.uLineDist.value = this.settings.showDistricts && !this.clean && (political || regions) ? fade(0.12, 0.6) : 0;
     u.uLineSea.value = this.clean || !this.hasRegions || this.settings.showDistricts === false ? 0 : regions ? fade(0.1, 0.35) : fade(0.03, 0.09);
-    u.uCloudAmt.value = this.settings.showWeather === false ? 0 : 0.35 + 0.65 * p.globe;
+    // clouds belong to the landscape views; data maps (temperature, precipitation, hazards, regions) stay readable
+    const cloudy = this.mode === 'terrain' || this.mode === 'relief';
+    u.uCloudAmt.value = this.settings.showWeather === false || !cloudy ? 0 : 0.35 + 0.65 * p.globe;
     // political colours are strong from afar and give way to the terrain up close
     u.uOverlay.value = this.overlayBase * (0.3 + 0.7 * Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.015)) / (Math.log(0.6) - Math.log(0.015)))));
     // contour interval follows the zoom; lines fade out at globe distance

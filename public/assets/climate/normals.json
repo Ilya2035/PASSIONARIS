@@ -1,11 +1,15 @@
 {
   "format": "passionaris-climate-normals",
   "version": 1,
-  "generated": "2026-11-09T23:02:09.912Z",
   "file": "normals.bin.gz",
   "compression": "gzip",
   "byteOrder": "little-endian",
   "totalBytes": 12960000,
+  "offsets": {
+    "tavg": 0,
+    "prec": 6220800,
+    "elev": 12441600
+  },
   "grid": {
     "W": 720,
     "H": 360,
@@ -85,10 +89,11 @@
   },
   "processing": {
     "resample": "3x3 block mean of valid 10′ pixels -> 0.5°",
-    "oceanFill": "screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T 3.5 cells, P 5 cells; enclosed water bodies < 600 cells: Laplace fill from shores",
-    "antarctic": "land cells south of 60°S above 1000 m blended (weight smoothstep((z-1000)/1500)) towards Fortuin & Oerlemans 1990 T = 34.46 - 0.00914 z - 0.688|lat| + South Pole seasonal cycle; accumulation towards (600 e^(-z/700) + 20)/12 mm/month; 21217 cells",
-    "waterCells": 163753,
-    "enclosedCells": 1648,
+    "maskedPixels": "1471 WorldClim pixels with tavg exactly 0.0 °C in all 12 months (zero-filled gaps) and 1087 polar halo pixels around them (warmest month < 3 °C, annual range below 3 °C at 55°, 5 °C at 60°, 7 °C at 65°, 10 °C at 70°, 15 °C at 75°, 18 °C at 80°) ignored for every variable",
+    "oceanFill": "screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T 3.5 cells, P 5 cells; second temperature pass over frozen seas (ice weight 0..1 for pass-1 T -1..-7 °C): target = min(formula, 25-cell coast extension); enclosed water bodies < 600 cells: Laplace fill from shores",
+    "antarctic": "land cells south of 60°S above 1000 m blended (weight smoothstep((z-1000)/1500)) towards Fortuin & Oerlemans 1990 T = 34.46 - 0.00914 z - 0.688|lat| + South Pole seasonal cycle; accumulation towards (600 e^(-z/700) + 20)/12 mm/month; 21218 cells",
+    "waterCells": 164052,
+    "enclosedCells": 1652,
     "script": "scripts/climate/bake-normals.mjs"
   }
 }

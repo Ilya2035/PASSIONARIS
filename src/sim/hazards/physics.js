@@ -104,14 +104,16 @@ export function quakeIntensityObserved(M, dEpiKm, depthKm, I0) {
 
 /**
  * The user's earthquake scale (docs/ENGINE.md): level 1 = intensity 2–4, 2 = 4–6, 3 = 6–8,
- * 4 = 8–10, 5 = >10 (half-open bins [lo, hi)); below 2 -> 0.
+ * 4 = 8–10, 5 = >10; below 2 -> 0. Bins are [lo, hi) except the top one: the scale says
+ * "> 10" literally, so intensity X itself (the most common catalogue value, NCEI I0 is an
+ * integer) is level 4 and level 5 needs I > 10 (XI–XII).
  */
 export function intensityToLevel(I) {
   if (!(I >= 2)) return 0;
   if (I < 4) return 1;
   if (I < 6) return 2;
   if (I < 8) return 3;
-  if (I < 10) return 4;
+  if (I <= 10 + 1e-6) return 4;           // tolerance: I0 re-applied on top of the IPE may come out as 10.000000000000002
   return 5;
 }
 

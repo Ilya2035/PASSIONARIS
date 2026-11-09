@@ -14,9 +14,14 @@
 // Ocean (nodata in WorldClim) is filled by a screened Poisson solve: land cells are
 // fixed (Dirichlet), sea cells relax towards an SST-like air-temperature / precipitation
 // formula with a coastal influence length of a few cells; small enclosed water bodies
-// (Caspian, Black Sea, Baltic if closed at 0.5°, big lakes) are pure Laplace fills from
-// their shores. The East Antarctic plateau, where WorldClim is far too warm, is blended towards
-// an elevation/latitude parametrisation (see below). Everything is deterministic (no randomness).
+// (Black Sea, Red Sea, Baltic if closed at 0.5°; WorldClim itself covers the Caspian and
+// the big lakes) are pure Laplace fills from their shores. Over seas that freeze in winter
+// (Okhotsk, Bering, the Arctic shelf seas, the Antarctic sea-ice zone) a second temperature
+// pass pulls the sea target towards a long-range extension of the (colder) coasts, because air
+// over sea ice is continental rather than maritime. Zero-filled WorldClim pixels are masked
+// (see BOGUS). The East Antarctic plateau, where WorldClim is
+// far too warm, is blended towards an elevation/latitude parametrisation (see below).
+// Everything is deterministic (no randomness, no timestamps in the outputs).
 //
 // Run: tools/node/node.exe scripts/climate/bake-normals.mjs
 import fs from 'node:fs';
@@ -50,8 +55,9 @@ async function readTif(file) {
   return { a, nd };
 }
 
-// mean of valid pixels per 3x3 block; count = number of valid pixels (0..9)
-function blockMean({ a, nd }, count) {
+// mean of valid pixels per 3x3 block; count = number of valid pixels (0..9).
+// bad: optional Uint8Array(SW*SHH), 1 = source pixel to ignore (see BOGUS below).
+function blockMean({ a, nd }, bad = null) {
   const mean = new Float32Array(N);
   const cnt = new Uint8Array(N);
   for (let y = 0; y < H; y++) {
@@ -62,6 +68,7 @@ function blockMean({ a, nd }, count) {
         for (let dx = 0; dx < B; dx++) {
           const v = a[row + dx];
           if (v === nd || !(v > -1e30) || !Number.isFinite(v)) continue;
+          if (bad && bad[row + dx]) continue;
           s += v; n++;
         }
       }
@@ -70,7 +77,6 @@ function blockMean({ a, nd }, count) {
       mean[i] = n ? s / n : NaN;
     }
   }
-  if (count) count.set(cnt);
   return { mean, cnt };
 }
 
@@ -96,6 +102,7 @@ function interpProfile(tab, lat, col) {
   }
   return tab[tab.length - 1][col];
 }
+const smooth01 = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
 const dlon = (a, b) => { let d = a - b; while (d > 180) d -= 360; while (d < -180) d += 360; return d; };
 const gauss2 = (lat, lon, la, lo, sla, slo) => {
   const u = (lat - la) / sla, v = dlon(lon, lo) / slo;
@@ -106,6 +113,7 @@ const gauss2 = (lat, lon, la, lo, sla, slo) => {
 // winter anomaly, summer anomaly] (NH winter = Jan; for SH entries "winter" = Jul).
 const CURRENTS = [
   [66, 5, 10, 28, 15, 5],      // North Atlantic Drift (Norwegian Sea ice-free in winter)
+  [50, -25, 12, 25, 6.5, 1.5], // North Atlantic Current (ocean weather ships I/J/K/C: Jan air 7–13 °C)
   [73, 30, 5, 18, 12, 3],      // its Barents-Sea branch
   [38, -60, 6, 18, 3, 1],      // Gulf Stream
   [35, 145, 6, 15, 3, 1],      // Kuroshio
@@ -120,9 +128,12 @@ const CURRENTS = [
 
 function seaT(lat, lon, m) {
   const ann = interpProfile(SEA_T, lat, 1), amp = interpProfile(SEA_T, lat, 2);
-  const peak = lat >= 0 ? 7.2 : 1.2; // months (0-based, centre at m+0.5): ~Aug / ~Feb
-  const c = Math.cos(2 * Math.PI * (m + 0.5 - peak) / 12);
-  let t = ann + amp * c;
+  // seasonal cycle peaks ~Aug in the north and ~Feb in the south (half a year apart, i.e. the
+  // same cosine with the opposite sign); the sign is blended smoothly across 10°S..10°N so the
+  // target field has no step at the equator
+  const c = Math.cos(2 * Math.PI * (m + 0.5 - 7.2) / 12);
+  const hemi = 2 * smooth01((lat + 10) / 20) - 1;
+  let t = ann + amp * hemi * c;
   // winterness 1 in NH Jan / SH Jul
   const wNH = (1 - Math.cos(2 * Math.PI * (m + 0.5 - 7) / 12)) / 2; // 1 near Jan
   for (const [la, lo, sla, slo, aw, as] of CURRENTS) {
@@ -202,17 +213,47 @@ function solveFill(field, isWater, target, k, init, iters = 500, omega = 1.6) {
 
 // ------------------------------------------------------------------ main
 log('reading WorldClim 2.1 10m GeoTIFFs');
-const tavg = [], prec = [];
-let landCount = null;
+const tavgRaw = [], precRaw = [];
 for (let m = 1; m <= 12; m++) {
   const mm = String(m).padStart(2, '0');
-  const t = blockMean(await readTif(path.join(RAW, 'tavg', `wc2.1_10m_tavg_${mm}.tif`)));
-  const p = blockMean(await readTif(path.join(RAW, 'prec', `wc2.1_10m_prec_${mm}.tif`)));
+  tavgRaw.push(await readTif(path.join(RAW, 'tavg', `wc2.1_10m_tavg_${mm}.tif`)));
+  precRaw.push(await readTif(path.join(RAW, 'prec', `wc2.1_10m_prec_${mm}.tif`)));
+}
+// WorldClim 2.1 (10′) has ~1500 pixels whose tavg is exactly 0.0 °C in all 12 months: small
+// Arctic islands (e.g. the Belcher Islands, Jan ≈ -24 °C in reality), Severnaya Zemlya, northern
+// Greenland and the Antarctic coast / ice-shelf edges. A year without any seasonal cycle is
+// impossible, so these are zero-filled gaps, not data. Around them WorldClim's interpolation
+// leaves a halo pulled towards 0 °C (e.g. Ross Ice Shelf pixels -0.1 .. -0.9 °C all year, where
+// July is really ≈ -30 °C): polar pixels whose warmest month is below 3 °C and whose annual range
+// is below a latitude-dependent minimum (5 °C at 60°, 18 °C at 80°; genuine polar stations have
+// 10–36 °C, e.g. Faraday 10, Mawson 18, McMurdo 24, Alert 36) are treated the same way. All of
+// them are masked for every variable; otherwise one such pixel warms a polar 0.5° cell by
+// 10–35 °C (before this mask 224 SIM cells were exactly 0.0 °C all year).
+const BOGUS = new Uint8Array(SW * SHH);
+const RANGE_MIN = [[55, 3], [60, 5], [65, 7], [70, 10], [75, 15], [80, 18]];
+let nBogus = 0, nHalo = 0;
+for (let py = 0; py < SHH; py++) {
+  const alat = Math.abs(90 - (py + 0.5) / 6);
+  const rMin = alat < 55 ? -1 : interpProfile(RANGE_MIN, alat, 1);
+  for (let px = 0; px < SW; px++) {
+    const i = py * SW + px;
+    const v0 = tavgRaw[0].a[i];
+    if (!(v0 > -1e30)) continue;
+    let mn = v0, mx = v0;
+    for (let m = 1; m < 12; m++) { const v = tavgRaw[m].a[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    if (mn === 0 && mx === 0) { BOGUS[i] = 1; nBogus++; } else if (mx < 3 && mx - mn < rMin) { BOGUS[i] = 1; nHalo++; }
+  }
+}
+const tavg = [], prec = [];
+let landCount = null;
+for (let m = 0; m < 12; m++) {
+  const t = blockMean(tavgRaw[m], BOGUS), p = blockMean(precRaw[m], BOGUS);
   tavg.push(t.mean); prec.push(p.mean);
   if (!landCount) landCount = t.cnt;
 }
-const elevB = blockMean(await readTif(path.join(RAW, 'elev', 'wc2.1_10m_elev.tif')));
-log('block means done');
+tavgRaw.length = 0; precRaw.length = 0;
+const elevB = blockMean(await readTif(path.join(RAW, 'elev', 'wc2.1_10m_elev.tif')), BOGUS);
+log(`block means done (masked WorldClim pixels: ${nBogus} zero-filled, ${nHalo} zero-halo)`);
 
 // ------------------------------------------------------------------ Antarctic plateau correction
 // WorldClim has almost no stations on the East Antarctic plateau and is far too warm there
@@ -287,7 +328,8 @@ function shoreMin(field) {
 }
 
 // elevation: open ocean = 0 m (sea surface); enclosed water = its lowest shore cell
-// (Black Sea ~ sea level, Caspian ~ -28 m where WorldClim marks it as nodata, lakes ~ shore level)
+// (Black Sea ~ sea level, lakes ~ shore level; WorldClim has data over the Caspian, whose
+// elevation it gives as 0..-28 m, and over the large lakes, so those are not filled here)
 const elev = elevB.mean;
 {
   const smin = shoreMin(elev);
@@ -297,34 +339,65 @@ log('elevation filled');
 
 const LAPSE = 0.0065; // °C per m: temperature is filled as a sea-level-reduced field
 const LT = 3.5, LP = 5; // coastal influence length, cells (0.5° each)
-const kT = new Float32Array(N), kP = new Float32Array(N);
+// Sea ice: air over pack ice is continental, not maritime. Where the first temperature pass is
+// below ICE_T0 (ice fraction fi rising smoothly to 1 at ICE_T1) the sea target is pulled down to
+// a long-range (LT_ICE cells) extension of the surrounding coasts when that is colder than the
+// zonal formula (Sea of Okhotsk, Bering and Chukchi Seas, Beaufort Sea, Antarctic sea-ice zone in
+// winter). It only ever cools: where the zonal formula is colder (central Arctic) it is kept.
+const LT_ICE = 25, ICE_T0 = -1, ICE_T1 = -7;
+const kT = new Float32Array(N), kP = new Float32Array(N), kLong = new Float32Array(N);
 for (let i = 0; i < N; i++) {
   kT[i] = inland[i] ? 0 : 1 / (LT * LT);
   kP[i] = inland[i] ? 0 : 1 / (LP * LP);
+  kLong[i] = inland[i] ? 0 : 1 / (LT_ICE * LT_ICE);
 }
 
 const target = new Float32Array(N), init = new Float32Array(N);
+const T1 = new Float32Array(N), TL = new Float32Array(N);
+function setTarget(fn, m) {
+  for (let y = 0; y < H; y++) {
+    const lat = rowLat(y);
+    for (let x = 0; x < W; x++) target[y * W + x] = fn(lat, colLon(x), m);
+  }
+}
+function setInit(field) {
+  const sh = shoreInit(field);
+  for (let i = 0; i < N; i++) {
+    if (!isWater[i]) continue;
+    const v = inland[i] ? sh(label[i]) : NaN;
+    init[i] = Number.isFinite(v) ? v : target[i];
+  }
+}
+let iceCells = 0;
 for (let m = 0; m < 12; m++) {
   // reduce land temperatures to sea level so high coastal cells (Norway, Andes, Antarctica)
   // do not chill the neighbouring sea; restored after the fill
   const T = tavg[m];
   for (let i = 0; i < N; i++) if (!isWater[i]) T[i] += LAPSE * Math.max(0, elev[i]);
-  for (const [field, fn, k] of [[T, seaT, kT], [prec[m], seaP, kP]]) {
-    for (let y = 0; y < H; y++) {
-      const lat = rowLat(y);
-      for (let x = 0; x < W; x++) target[y * W + x] = fn(lat, colLon(x), m);
-    }
-    const sh = shoreInit(field);
-    for (let i = 0; i < N; i++) {
-      if (!isWater[i]) continue;
-      const v = inland[i] ? sh(label[i]) : NaN;
-      init[i] = Number.isFinite(v) ? v : target[i];
-    }
-    solveFill(field, isWater, target, k, init);
+  // temperature, pass 1: open-sea screening everywhere
+  setTarget(seaT, m);
+  setInit(T);
+  solveFill(T, isWater, target, kT, init);
+  // long-range extension of the coasts (warm-started from pass 1)
+  T1.set(T); TL.set(T);
+  solveFill(TL, isWater, target, kLong, T1, 800);
+  // temperature, pass 2: over (pass-1) frozen seas the target is min(formula, coast extension)
+  for (let i = 0; i < N; i++) {
+    if (!isWater[i] || inland[i]) continue;
+    const fi = smooth01((ICE_T0 - T1[i]) / (ICE_T0 - ICE_T1));
+    if (fi <= 0) continue;
+    if (fi > 0.5) iceCells++;
+    target[i] += fi * (Math.min(target[i], TL[i]) - target[i]);
   }
+  solveFill(T, isWater, target, kT, T1);
+  // precipitation
+  setTarget(seaP, m);
+  setInit(prec[m]);
+  solveFill(prec[m], isWater, target, kP, init);
   for (let i = 0; i < N; i++) T[i] -= LAPSE * Math.max(0, elev[i]);
   log(`month ${m + 1} filled`);
 }
+log(`sea-ice cells (fi > 0.5), summed over months: ${iceCells}`);
 
 // ------------------------------------------------------------------ pack
 const PLANE = N;
@@ -401,11 +474,13 @@ let landfracInfo = null;
 const header = {
   format: 'passionaris-climate-normals',
   version: 1,
-  generated: new Date().toISOString(),
   file: 'normals.bin.gz',
   compression: 'gzip',
   byteOrder: 'little-endian',
   totalBytes: total,
+  // byte offsets of the sections inside the decompressed blob (same as sections[].offset;
+  // this shape is what src/sim/weather/grid.js parseNormals(buffer, header) reads)
+  offsets: Object.fromEntries(sections.map(s => [s.name, s.offset])),
   grid: {
     W, H, resolutionDeg: 0.5, cell: 'y * 720 + x',
     rows: 'row 0 = 90°N .. 89.5°N (centre lat = 90 - (y + 0.5) * 0.5)',
@@ -423,7 +498,8 @@ const header = {
   },
   processing: {
     resample: '3x3 block mean of valid 10′ pixels -> 0.5°',
-    oceanFill: `screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T ${LT} cells, P ${LP} cells; enclosed water bodies < ${INLAND_MAX} cells: Laplace fill from shores`,
+    maskedPixels: `${nBogus} WorldClim pixels with tavg exactly 0.0 °C in all 12 months (zero-filled gaps) and ${nHalo} polar halo pixels around them (warmest month < 3 °C, annual range below ${RANGE_MIN.map(([l, r]) => `${r} °C at ${l}°`).join(', ')}) ignored for every variable`,
+    oceanFill: `screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T ${LT} cells, P ${LP} cells; second temperature pass over frozen seas (ice weight 0..1 for pass-1 T ${ICE_T0}..${ICE_T1} °C): target = min(formula, ${LT_ICE}-cell coast extension); enclosed water bodies < ${INLAND_MAX} cells: Laplace fill from shores`,
     antarctic: `land cells south of 60°S above 1000 m blended (weight smoothstep((z-1000)/1500)) towards Fortuin & Oerlemans 1990 T = 34.46 - 0.00914 z - 0.688|lat| + South Pole seasonal cycle; accumulation towards (600 e^(-z/700) + 20)/12 mm/month; ${antCells} cells`,
     waterCells: nWater,
     enclosedCells: inland.reduce((a, b) => a + b, 0),

@@ -34,6 +34,55 @@ test('normals: array sizes and header', () => {
   assert.deepEqual(hdr.sections.map(s => s.offset), [0, 12 * N * 2, 24 * N * 2]);
   assert.equal(hdr.grid.W, 720);
   assert.equal(hdr.grid.H, 360);
+  // the weather module's parseNormals(buffer, header) reads header.offsets
+  assert.deepEqual(hdr.offsets, { tavg: 0, prec: 12 * N * 2, elev: 24 * N * 2 });
+  // reproducible bakes: no timestamps in the generated headers
+  assert.equal(hdr.generated, undefined);
+  const bj = JSON.parse(fs.readFileSync(path.join(CLIMATE, 'biomes.json'), 'utf8'));
+  assert.equal(bj.generated, undefined);
+});
+
+test('normals: WorldClim zero-filled gaps are masked (no cell sits at 0.0 °C all year)', () => {
+  let flat = 0;
+  for (let i = 0; i < N; i++) {
+    let z = true;
+    for (let m = 0; m < 12 && z; m++) z = nm.tavg[m * N + i] === 0;
+    if (z) flat++;
+  }
+  assert.equal(flat, 0, 'cells with tavg exactly 0 in all months');
+  // their halo too: polar winters stay polar (before the fix: 0.0 °C on N Greenland / Ross Ice Shelf)
+  for (let y = 0; y < 22; y++) for (let x = 0; x < W; x++) {
+    if (nm.tavg[y * W + x] > -90) assert.fail(`January ${90 - (y + 0.5) * 0.5}N ${-180 + (x + 0.5) * 0.5}: ${nm.tavg[y * W + x] / 10}`);
+  }
+  for (let y = H - 30; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = nm.tavg[6 * N + y * W + x];
+    if (v > -150) assert.fail(`July ${90 - (y + 0.5) * 0.5}S ${-180 + (x + 0.5) * 0.5}: ${v / 10}`);
+  }
+  assert.ok(T(56.25, -79.25, 0) < -15, 'Belcher Islands / Hudson Bay in January');
+});
+
+test('ocean fill: frozen seas are continental in winter, the North Atlantic Current is mild', () => {
+  assert.ok(T(60, -85, 0) < -20, `Hudson Bay Jan ${T(60, -85, 0)}`);
+  assert.ok(T(55, 148, 0) < -10, `Sea of Okhotsk Jan ${T(55, 148, 0)}`);
+  assert.ok(T(73, -140, 0) < -22, `Beaufort Sea Jan ${T(73, -140, 0)}`);
+  assert.ok(T(76, 125, 0) < -25, `Laptev Sea Jan ${T(76, 125, 0)}`);
+  assert.ok(T(52.5, -20, 0) > 6, `ocean weather ship J (52.5N 20W) Jan ${T(52.5, -20, 0)}`);
+  assert.ok(T(45, -16, 0) > 9, `ocean weather ship K (45N 16W) Jan ${T(45, -16, 0)}`);
+  assert.ok(T(-75, -175, 6) < -20, `Ross Sea July ${T(-75, -175, 6)}`);
+});
+
+test('ocean fill: no seam at the equator (hemispheric seasonal cycle blended smoothly)', () => {
+  const meanStep = y => {
+    let s = 0, n = 0;
+    for (let m = 0; m < 12; m++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (nm.elev[i] !== 0 || nm.elev[i + W] !== 0) continue;
+      s += Math.abs(nm.tavg[m * N + i + W] - nm.tavg[m * N + i]) / 10; n++;
+    }
+    return s / n;
+  };
+  const eq = meanStep(179), north = meanStep(174), south = meanStep(184);
+  assert.ok(eq < 1.5 * Math.max(north, south), `row step across the equator ${eq} vs ${north} / ${south}`);
 });
 
 test('normals: loader accepts a path and raw bytes with identical results', async () => {
@@ -237,6 +286,33 @@ test('biome spot checks', () => {
   assert.equal(bAt(72, 80), BIOME.TUNDRA, 'Yamal / Gydan tundra');
 });
 
+// majority class in a 5x5-pixel (~25 km) window, robust to single-pixel speckle
+const bMaj = (lat, lon) => {
+  const c = new Uint32Array(BIOMES.length);
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) c[bAt(lat + dy * 180 / MH, lon + dx * 360 / MW)]++;
+  let b = 0;
+  for (let k = 1; k < c.length; k++) if (c[k] > c[b]) b = k;
+  return b;
+};
+
+test('biome spot checks: Arctic tree line and boreal interiors', () => {
+  // warmest month 11–12 °C but too little summer heat for trees (GDD5 < 400)
+  assert.equal(bMaj(64.3, -96.1), BIOME.TUNDRA, 'Baker Lake (Kivalliq)');
+  assert.equal(bMaj(72, 100), BIOME.TUNDRA, 'Taimyr');
+  assert.equal(bMaj(66, 175), BIOME.TUNDRA, 'Chukotka');
+  assert.equal(bMaj(69.5, -152), BIOME.TUNDRA, 'Alaskan North Slope');
+  // forest-tundra / boreal forest stays forest
+  assert.equal(bMaj(64.84, -147.7), BIOME.TAIGA, 'Fairbanks');
+  assert.equal(bMaj(68.4, -133.7), BIOME.TAIGA, 'Inuvik');
+  assert.equal(bMaj(67.5, 64), BIOME.TAIGA, 'Vorkuta (forest-tundra)');
+  // dry but cold interior Alaska is boreal forest, not steppe
+  assert.equal(bMaj(66.6, -145.3), BIOME.TAIGA, 'Yukon Flats');
+  // ice-free coastal valleys keep their own (low) height: forest, not tundra
+  assert.equal(bMaj(61.13, -146.35), BIOME.TAIGA, 'Valdez');
+  assert.equal(bMaj(61.9, 6.72), BIOME.TAIGA, 'Stryn (Nordfjord)');
+  assert.equal(bMaj(60.38, 6.15), BIOME.TEMPERATE_FOREST, 'Kvam (Hardangerfjord)');
+});
+
 test('classifier on synthetic climates', () => {
   const run = (t, p, lat, h = 100) => classifyBiome(climateStats(t, p, lat, {}), h);
   const fill = v => new Array(12).fill(v);
@@ -248,4 +324,15 @@ test('classifier on synthetic climates', () => {
   assert.equal(run(tundraT, fill(20), 40, 3500), BIOME.HIGHLAND);
   const medT = [10, 11, 13, 15, 19, 23, 26, 26, 23, 19, 15, 11], medP = [90, 80, 70, 50, 30, 10, 5, 10, 40, 90, 110, 100];
   assert.equal(run(medT, medP, 38), BIOME.MEDITERRANEAN);
+  // tree line by GDD5: July 11.5 °C but a short summer -> tundra; a longer one -> taiga
+  const shortSummer = [-32, -31, -27, -18, -7, 3, 11.5, 9, 1, -10, -22, -29];
+  assert.equal(run(shortSummer, fill(20), 64), BIOME.TUNDRA);
+  const longerSummer = [-28, -26, -20, -9, 1, 9, 14, 11, 5, -4, -18, -25];
+  assert.equal(run(longerSummer, fill(30), 64), BIOME.TAIGA);
+  // cold and dry (aridity ratio 1..1.5) with GDD5 < 800 -> taiga, not steppe
+  const coldDry = [-23, -20, -13, -2, 5, 12, 14, 11, 4, -4, -16, -22];
+  const coldDryP = [9, 8, 7, 7, 15, 30, 45, 40, 22, 15, 12, 10];
+  const s = climateStats(coldDry, coldDryP, 66, {});
+  assert.ok(s.aridity >= 1 && s.aridity < 1.5 && s.gdd5 < 800, `synthetic Yukon Flats ${s.aridity} ${s.gdd5}`);
+  assert.equal(classifyBiome(s, 150), BIOME.TAIGA);
 });

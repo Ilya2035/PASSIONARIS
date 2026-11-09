@@ -156,7 +156,7 @@ export async function createRegions({ globe, scene, settings, infoW }) {
       if (show) {
         roads.mat.uniforms.uLift.value = gcam.alt * 0.0015;
         const k = Math.min(1, Math.max(0, (Math.log(0.5) - Math.log(gcam.alt)) / (Math.log(0.5) - Math.log(0.12))));
-        roads.mat.uniforms.uOpacity.value = 0.38 * k;
+        roads.mat.uniforms.uOpacity.value = (mode === 'regions' ? 0.42 : 0.2) * k;
       }
     },
     // info window rows + title for a point (regions mode shows the district as the title)

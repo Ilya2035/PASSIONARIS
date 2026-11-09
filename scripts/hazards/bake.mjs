@@ -14,7 +14,7 @@ import { daysInMonth } from '../../src/sim/hazards/time.js';
 import {
   SIM_W, SIM_H, simLat, simLon, distKm, quakeIntensityAt, magnitudeFromIntensity, intensityToLevel,
   tsunamiLevelFromHeight, volcanoLevelAt, meteoriteLevelFromMass, airburstLevel, quakeIntensityObserved,
-  MAG_FROM_I0_CAP, SLOPE_CLASS_MKM, landslideSusceptibility,
+  MAG_FROM_I0_CAP, SLOPE_CLASS_MKM, landslideSusceptibility, EARTH_KM,
 } from '../../src/sim/hazards/physics.js';
 import { createNamer, volcanoTypeRu, transliterate } from './names-ru.mjs';
 
@@ -166,7 +166,7 @@ for (const e of nceiEq) {
     y, m, d, h: e.hour ?? -1, mi: e.minute ?? -1, s: e.second ?? 0,
     lat: e.latitude, lon: e.longitude, mag, dep: num(e.eqDepth), I0,
     deaths: e.deathsTotal ?? e.deaths ?? 0, ts: e.tsunamiEventId || 0, ncei: e.id, usgs: null,
-    name: namer.nceiLocation(e.locationName, e.country), usgsTsunami: 0, flagI0,
+    name: namer.nceiLocation(e.locationName, e.country), usgsTsunami: 0, flagI0, country: e.country || '',
   });
 }
 // index USGS by UTC day for matching
@@ -226,11 +226,32 @@ for (const u of usgsRows) {
 // sizes: magnitude estimated from intensity where missing; unknown size -> assumed damaging (I0 = 7):
 // every NCEI "significant" event caused damage, deaths, a tsunami or MMI >= X by definition.
 const I0_ASSUMED = 7;
+// Magnitude from epicentral intensity, calibrated on the catalogue itself: the median magnitude of
+// NCEI events of the same country with the same (rounded) I0 and a known magnitude (shallow, <= 40 km),
+// when there are at least 5 of them; otherwise Shebalin (1968). Regional I0–M scaling differs a lot
+// (I0 = X: Italy M 6.2, Greece 6.7, Turkey 7.0, Mexico 7.8), and the global formula alone made
+// every Italian I0 = X event an M 7.4 with an 80 km rupture.
+const I0M = new Map();
+for (const e of nceiEq) {
+  const M = num(e.eqMagnitude), I = num(e.intensity), dep = num(e.eqDepth);
+  if (M == null || I == null || (dep != null && dep > 40)) continue;
+  const k = (e.country || '') + '|' + Math.round(I);
+  if (!I0M.has(k)) I0M.set(k, []);
+  I0M.get(k).push(M);
+}
+for (const [k, a] of I0M) { a.sort((p, q) => p - q); I0M.set(k, a.length >= 5 ? a[a.length >> 1] : null); }
+let calibrated = 0;
+const magFromI0 = (I0, h, country) => {
+  const Mr = I0M.get((country || '') + '|' + Math.round(I0));
+  if (Mr != null) { calibrated++; return Mr; }
+  return magnitudeFromIntensity(I0, h);
+};
 for (const q of quakes) {
   q.flags = (q.ncei ? 1 : 0) | (q.usgs ? 2 : 0) | (q.ts || q.usgsTsunami ? 16 : 0) | (q.flagI0 || 0);
   const h = q.dep ?? 15;
   if (q.mag == null) {
-    if (q.I0 != null) { q.mag = magnitudeFromIntensity(q.I0, h); q.flags |= 4; }
+    if (q.I0 != null) { q.mag = magFromI0(q.I0, h, q.country); q.flags |= 4; }
+    // nothing is known about these: the regional medians (dominated by large felt events) do not apply
     else { q.I0 = I0_ASSUMED; q.mag = magnitudeFromIntensity(I0_ASSUMED, h); q.flags |= 4 | 8; }
   }
   const Ipred = quakeIntensityAt(q.mag, 0, h);
@@ -238,7 +259,7 @@ for (const q of quakes) {
   q.level = intensityToLevel(q.Iepi);
 }
 quakes.sort((a, b) => dayKey(a.y, a.m, a.d) - dayKey(b.y, b.m, b.d) || (a.h - b.h) || (a.mi - b.mi));
-log('earthquakes: NCEI', nceiEq.length, 'USGS', usgsEq.length, 'matched', matched, 'merged', quakes.length);
+log('earthquakes: NCEI', nceiEq.length, 'USGS', usgsEq.length, 'matched', matched, 'merged', quakes.length, 'implausible I0 dropped', droppedI0, 'M from regional I0 calibration', calibrated);
 
 // =================================================================== tsunamis
 const tsEvents = readJSON('ncei_tsunami_events.json').items;
@@ -342,6 +363,7 @@ const provCountry = new Int32Array(world.provinces.length + 1);
 for (const p of world.provinces) if (p && p.id != null) provCountry[p.id] = p.country || 0;
 const distProv = world.districts.province;
 
+const hLand = i => { const v = height[i]; return v > 0 ? v : 0; };
 const landFrac = new Float32Array(N), oceanFrac = new Float32Array(N), slope = new Float32Array(N);
 const country = new Uint16Array(N);
 {
@@ -366,9 +388,11 @@ const country = new Uint16Array(N);
           const cn = provCountry[distProv[c] || 0] || 0;
           counts.set(cn, (counts.get(cn) || 0) + 1);
           if (py > 0 && py < MH - 1) {
+            // land-surface gradient: heights are clamped at sea level so that the bathymetry of
+            // neighbouring sea pixels (the grid stores metres incl. bathymetry) is not counted as slope
             const xl = px > 0 ? px - 1 : MW - 1, xr = px < MW - 1 ? px + 1 : 0;
-            const gx = (height[row + xr] - height[row + xl]) / dx;
-            const gy = (height[row + MW + px] - height[row - MW + px]) / (2 * KM_PER_PX);
+            const gx = (hLand(row + xr) - hLand(row + xl)) / dx;
+            const gy = (hLand(row + MW + px) - hLand(row - MW + px)) / (2 * KM_PER_PX);
             gsum += Math.sqrt(gx * gx + gy * gy); gn++;
           }
         }
@@ -412,16 +436,27 @@ const cellLat = new Float64Array(SIM_H), cellLon = new Float64Array(SIM_W);
 for (let y = 0; y < SIM_H; y++) cellLat[y] = simLat(y);
 for (let x = 0; x < SIM_W; x++) cellLon[x] = simLon(x);
 /** Calls fn(cellIndex, distanceKm) for every SIM cell centre within rKm of (lat, lon). */
+const RAD = Math.PI / 180;
 function forCellsWithin(lat, lon, rKm, fn) {
-  const dLat = rKm / 111.2 + 0.5;
+  const dr = rKm / EARTH_KM;                              // angular radius
+  const dLat = dr / RAD + 0.5;
   const y0 = Math.max(0, Math.floor((90 - (lat + dLat)) / 0.5)), y1 = Math.min(SIM_H - 1, Math.floor((90 - (lat - dLat)) / 0.5));
+  const s0 = Math.sin(lat * RAD), c0 = Math.cos(lat * RAD), cdr = Math.cos(dr);
   for (let y = y0; y <= y1; y++) {
-    const cl = Math.cos(cellLat[y] * Math.PI / 180);
-    const dLon = cl < 1e-3 ? 360 : rKm / (111.2 * cl) + 0.5;
-    if (dLon >= 180) {
+    // exact half-width in longitude of the spherical cap on this row (the small-angle
+    // r/cos(lat) estimate is too narrow at high latitudes): cos dλ = (cos δ − sinφ sinφ0)/(cosφ cosφ0)
+    const p = cellLat[y] * RAD, cc = Math.cos(p) * c0;
+    let dLon = 360;
+    if (cc > 1e-9) {
+      const a = (cdr - Math.sin(p) * s0) / cc;
+      if (a > 1) continue;                                 // no cell centre of this row is within reach
+      if (a > -1) dLon = Math.acos(a) / RAD + 0.5;
+    }
+    const nx = Math.ceil(dLon / 0.5);
+    if (2 * nx + 1 >= SIM_W) {
       for (let x = 0; x < SIM_W; x++) { const d = distKm(lat, lon, cellLat[y], cellLon[x]); if (d <= rKm) fn(y * SIM_W + x, d); }
     } else {
-      const xc = Math.floor((lon + 180) / 0.5), nx = Math.ceil(dLon / 0.5);
+      const xc = Math.floor((lon + 180) / 0.5);
       for (let k = -nx; k <= nx; k++) {
         const x = (((xc + k) % SIM_W) + SIM_W) % SIM_W;
         const d = distKm(lat, lon, cellLat[y], cellLon[x]);
@@ -584,7 +619,7 @@ writeJSON('earthquakes.json', {
   version: 1, generated,
   source: 'NOAA NCEI Global Significant Earthquake Database (2150 BC–present) merged with USGS ComCat M>=6 (1900–present)',
   fields: ['y', 'm', 'd', 'h', 'mi', 'lat', 'lon', 'mag', 'dep', 'I0', 'level', 'deaths', 'flags', 'place', 'ts'],
-  notes: `h/mi -1 = unknown (UTC). mag: preferred magnitude (estimated from intensity when flags&4). dep km (-1 unknown). I0 = epicentral intensity (reported MMI, or predicted by Allen et al. 2012 when larger/missing). level = user scale 0-5 of I0. flags: 1 NCEI, 2 USGS, 4 magnitude estimated, 8 size assumed (no magnitude/intensity: I0=7), 16 tsunami reported. place = index into places[] (shared with tsunamis.json). ts = NCEI tsunami event id. ${DATE_NOTE}`,
+  notes: `h/mi -1 = unknown (UTC). mag: preferred magnitude (estimated from intensity when flags&4). dep km (-1 unknown). I0 = epicentral intensity (reported MMI, or predicted by Allen et al. 2012 when larger/missing). level = user scale 0-5 of I0. flags: 1 NCEI, 2 USGS, 4 magnitude estimated, 8 size assumed (no magnitude/intensity: I0=7), 16 tsunami reported, 32 NCEI intensity XII without magnitude or any recorded impact discarded as implausible. place = index into places[] (shared with tsunamis.json). ts = NCEI tsunami event id. ${DATE_NOTE}`,
   places: places.list,
   rows: quakeRows,
 });
@@ -608,7 +643,7 @@ const layers = [
   ['landslide', landslideLevel, 'Landslide susceptibility 0-5'],
   ['quakeI10', quakeI10, 'Max plausible MMI x10'],
   ['tsunamiH', Uint8Array.from(tsunamiH, h => Math.min(255, Math.round(h * 2))), 'Max recorded run-up within 75 km, metres x2 (capped 127.5 m)'],
-  ['slope', Uint8Array.from(slope, g => Math.min(255, Math.round(g))), 'Mean terrain gradient of land, m/km (~5 km relief)'],
+  ['slope', Uint8Array.from(slope, g => Math.min(255, Math.round(g))), 'Mean terrain gradient of land, m/km (~5 km relief, heights clamped at sea level)'],
   ['land', Uint8Array.from(landFrac, f => Math.round(f * 255)), 'Land fraction x255'],
   ['coast', coast, 'Coastal cell flag'],
   ['wet', Uint8Array.from(wet, w => Math.round(w * 255)), 'Wetness proxy x255 (Blue Marble greenness)'],
@@ -627,16 +662,16 @@ writeJSON('hazardLevels.json', {
   file: 'hazardLevels.bin.gz', type: 'Uint8', layerBytes: N,
   layers: layers.map(([name, , desc], k) => ({ name, index: k, offset: k * N, desc })),
   scales: {
-    quake: 'level 1 = intensity 2–4, 2 = 4–6, 3 = 6–8, 4 = 8–10, 5 = >10 (MMI/MSK-64 points, half-open bins)',
+    quake: 'level 1 = intensity 2–4, 2 = 4–6, 3 = 6–8, 4 = 8–10, 5 = >10 (MMI/MSK-64 points; bins [lo, hi) except 4 = [8, 10] and 5 = I > 10, as the scale says)',
     tsunami: 'Soloviev–Imamura intensity I = log2(√2·H): level 1 = I<1 (H<1.4 m), 2 = 1–2 (<2.8 m), 3 = 2–3 (<5.7 m), 4 = 3–4 (<11.3 m), 5 = I≥4',
     volcano: 'by distance to Holocene volcanoes and their max VEI: ≤30 km / ≤100 km / ≤300 km / ≤1000 km bands (see method)',
     landslide: 'slope class 1–5 (gradient thresholds ' + SLOPE_CLASS.join('/') + ' m/km) × trigger factor (0.45 + 0.35·wet + 0.25·min(1, quake/4))',
   },
   method: {
-    quake: 'For every catalogued epicentre (NCEI significant 2150 BC–present + USGS M>=6 1900–present, merged): intensity at each cell centre by the Allen, Wald & Worden (2012) hypocentral IPE for active crustal regions (J. Seismol. 16:409–433), with distance measured to the nearest point of a rupture of length L(M) from Wells & Coppersmith (1994, subsurface rupture length), an anelastic far-field term −0.0012·(R − 300 km) beyond 300 km (model assumption, form as in Atkinson & Wald 2007), and reduced by 30 km for cell size/location uncertainty; when NCEI reports a higher epicentral intensity the excess is added near the source and tapered as 25/(25+r) with rupture distance r. Magnitudes of pre-instrumental events without one are estimated from I0 by Shebalin (1968): I0 = 1.5M − 3.5·lg h + 3 (capped at M ' + MAG_FROM_I0_CAP + '). Cell value = max over all events ("max plausible intensity").',
+    quake: 'For every catalogued epicentre (NCEI significant 2150 BC–present + USGS M>=6 1900–present, merged): intensity at each cell centre by the Allen, Wald & Worden (2012) hypocentral IPE for active crustal regions (J. Seismol. 16:409–433), with distance measured to the nearest point of a rupture of length L(M) from Wells & Coppersmith (1994, subsurface rupture length), an anelastic far-field term −0.0012·(R − 300 km) beyond 300 km (model assumption, form as in Atkinson & Wald 2007), and reduced by 30 km for cell size/location uncertainty; when NCEI reports a higher epicentral intensity the excess is added near the source and tapered as 25/(25+r) with rupture distance r. Magnitudes of pre-instrumental events without one are estimated from I0: the median M of NCEI events of the same country with the same I0 and a known magnitude (depth <= 40 km, at least 5 events), otherwise Shebalin (1968): I0 = 1.5M − 3.5·lg h + 3 (capped at M ' + MAG_FROM_I0_CAP + '). Events without magnitude and intensity are assumed I0 = 7; NCEI intensity XII entries without magnitude or any recorded impact are treated as unknown size. Cell value = max over all events ("max plausible intensity").',
     tsunami: 'Coastal cells only. Run-ups (NCEI, non-doubtful): level of the run-up height within 75 km, minus 1 within 200 km, minus 2 within 400 km. Source events with max water height: full level within 50 km, minus 1 within 150 km. Shallow (<=70 km) offshore M>=7.5 epicentres: at least level 2 (3 for M>=8.5) within 150·2^(M−7.5) km.',
     volcano: 'For each GVP Holocene volcano with max Holocene VEI v (unknown -> treated as VEI 1): ≤30 km: 5 if v≥4, 4 if v≥2, else 3; ≤100 km: 4 if v≥5, 3 if v≥3, else 2; ≤300 km: 3 if v≥6, 2 if v≥4, 1 if v≥2; ≤1000 km: 2 if v≥7, 1 if v≥6. Minus 1 for volcanoes without eruptions since 5000 BC. Distance bands after the 10/30/100 km Volcano Population Exposure Index radii (Brown et al. 2015) extended for far-field tephra.',
-    landslide: 'Mean gradient of the ~5 km map relief (public/assets/map/height) on land in each cell -> slope class; trigger factor from the earthquake level and a wetness proxy (vegetation greenness of the NASA Blue Marble June composite; replace with climate precipitation when available, see scheduler option annualPrecip).',
+    landslide: 'Mean gradient of the ~5 km map relief (public/assets/map/height, clamped at sea level so that coastal bathymetry does not count) on land in each cell -> slope class; trigger factor from the earthquake level and a wetness proxy (vegetation greenness of the NASA Blue Marble June composite; replace with climate precipitation when available, see scheduler option annualPrecip).',
   },
   stats: {
     volcanoes: volcanoes.length, eruptions: eruptions.length, earthquakes: quakes.length, tsunamis: tsunamis.length,

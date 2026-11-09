@@ -27,6 +27,10 @@ export const BIOMES = Object.freeze([
 ]);
 
 export const LAPSE_RATE = 0.0065; // °C per metre
+/** Minimum growing degree-days above 5 °C (from monthly means) for forest; below it tundra. */
+export const TREE_GDD5 = 400;
+/** Minimum GDD5 for the moist steppe / forest-steppe band (aridity ratio 1..1.5). */
+export const STEPPE_GDD5 = 800;
 
 const MONTH_DAYS = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const MID_DOY = [15.5, 45.1, 74.6, 105.1, 135.6, 166.1, 196.6, 227.6, 258.1, 288.6, 319.1, 349.6];
@@ -63,11 +67,11 @@ export function thornthwaitePET(T, dayLen) {
 
 /**
  * Summary statistics of a 12-month climate (°C, mm/month) used by the classifier.
- * Summer half-year: Apr–Sep in the north, Oct–Mar in the south.
+ * Summer half-year: Apr–Sep in the north, Oct–Mar in the south (blended across the equator).
  */
 export function climateStats(T, P, lat, s = {}) {
   let tSum = 0, tMin = Infinity, tMax = -Infinity, pAnn = 0, pDry = Infinity, gdd5 = 0;
-  let pSum = 0, pWin = 0, pDrySummer = Infinity, pWetWinter = 0;
+  let pAprSep = 0, pDrySummer = Infinity, pWetWinter = 0;
   for (let m = 0; m < 12; m++) {
     const t = T[m], p = P[m];
     tSum += t * MONTH_DAYS[m];
@@ -76,9 +80,15 @@ export function climateStats(T, P, lat, s = {}) {
     pAnn += p;
     if (p < pDry) pDry = p;
     if (t > 5) gdd5 += (t - 5) * MONTH_DAYS[m];
-    const summer = lat >= 0 ? (m >= 3 && m <= 8) : (m <= 2 || m >= 9);
-    if (summer) { pSum += p; if (p < pDrySummer) pDrySummer = p; } else { pWin += p; if (p > pWetWinter) pWetWinter = p; }
+    const aprSep = m >= 3 && m <= 8;
+    if (aprSep) pAprSep += p;
+    const summer = lat >= 0 ? aprSep : !aprSep;
+    if (summer) { if (p < pDrySummer) pDrySummer = p; } else if (p > pWetWinter) pWetWinter = p;
   }
+  // Summer half-year rain for the Köppen aridity threshold: Apr–Sep in the north, Oct–Mar in the
+  // south, blended over 5°S..5°N so the classification has no seam along the equator.
+  const wN = lat >= 5 ? 1 : lat <= -5 ? 0 : (lat + 5) / 10;
+  const pSum = wN * pAprSep + (1 - wN) * (pAnn - pAprSep), pWin = pAnn - pSum;
   s.absLat = Math.abs(lat);
   s.tAnn = tSum / 365.25; s.tMin = tMin; s.tMax = tMax; s.pAnn = pAnn; s.pDry = pDry; s.gdd5 = gdd5;
   s.pSummer = pSum; s.pWinter = pWin; s.pDrySummer = pDrySummer; s.pWetWinter = pWetWinter;
@@ -103,7 +113,13 @@ export function classifyBiome(s, h, flatLow = false, T = null, dayLen = null) {
   // Cs: dry summer in the subtropics / mid-latitudes (not the equatorial dry season)
   const medit = !tropical && s.tMin > -3 && s.absLat >= 25 && s.pDrySummer < 40 && s.pDrySummer < s.pWetWinter / 3;
   const r = s.aridity;
-  if (s.tMax < 10) {                                      // ET; above the tree line in mountains
+  // ET (warmest month < 10 °C), or too little summer heat for trees: the Arctic tree line follows
+  // a growing-degree-day limit better than the 10 °C July isotherm (BIOME, Prentice et al. 1992:
+  // boreal trees need GDD5 >= ~350 from daily temperatures; GDD5 from monthly means runs lower
+  // near the limit, hence TREE_GDD5 = 400). Baker Lake, Taimyr, Chukotka, the Alaskan North Slope
+  // have warmest months of 11–12 °C but GDD5 of 300–390 and are tundra; Kuujjuaq, Vorkuta, Inuvik
+  // (430–600) keep their forest-tundra / taiga.
+  if (s.tMax < 10 || s.gdd5 < TREE_GDD5) {               // above the tree line in mountains
     if (h >= 1500) return BIOME.HIGHLAND;
     b = BIOME.TUNDRA;
   } else if (h >= 3000) return BIOME.HIGHLAND;            // high plateaus (Tibet, Altiplano)
@@ -114,7 +130,10 @@ export function classifyBiome(s, h, flatLow = false, T = null, dayLen = null) {
     // Af / Am, or very wet monsoon climates -> forest; Aw / As -> savanna
     b = (s.pDry >= 60 || s.pDry >= 100 - s.pAnn / 25 || s.pAnn >= 1700) ? BIOME.TROPICAL_FOREST : BIOME.SAVANNA;
   } else if (medit) b = BIOME.MEDITERRANEAN;
-  else if (r < 1.5) b = BIOME.STEPPE;
+  // forest-steppe margin (1 <= r < 1.5) only where summers are warm enough for grassland to
+  // out-compete trees; in cold boreal climates the Köppen threshold 20·T + 280 is tiny, so dry
+  // interior Alaska / the Yukon Flats (r ≈ 1.2, GDD5 < 800) stay taiga
+  else if (r < 1.5 && s.gdd5 >= STEPPE_GDD5) b = BIOME.STEPPE;
   else if ((s.tMin < -2 && s.gdd5 < 1400) || s.gdd5 < 700) b = BIOME.TAIGA;
   else b = BIOME.TEMPERATE_FOREST;
 

@@ -65,6 +65,12 @@ export const SKIP = new Set([
   'capezhelaniya', 'capechelyuskin', 'camaupoint', 'entrerios',
 ]);
 
+// Capes and points are not zones — but "Cape York Peninsula" is a peninsula, not a cape.
+export function isCapePoint(name) {
+  const s = String(name ?? '');
+  return /^(cape|point|cabo|pointe)\b/i.test(s) && !/\b(pen\.?|peninsula|península|péninsule)(\s|$)/i.test(s);
+}
+
 export const KIND_OVERRIDE = {
   hardangervidda: 'plateau',
   vatnajokull: 'other',
@@ -107,6 +113,10 @@ export const MARINE_CLASS = {
   river: null,        // river mouths, the rivers module draws those
 };
 export const MARINE_SKIP = new Set(['saintlawrenceriver']);
+// Natural Earth files the Skagerrak as a fjord; it is a strait between the North Sea and the Kattegat.
+export const MARINE_KIND_OVERRIDE = {
+  skagerrak: 'strait',
+};
 
 // ------------------------------------------------------------------ Russian names (hand-checked)
 export const RU = {
@@ -396,6 +406,13 @@ export const RU = {
   brasdorlake: 'озеро Бра-д’Ор',
   ozeromogotoyevo: 'озеро Моготоево',
   alboransea: 'море Альборан',
+  // NAME_RU repeats the English generic word ("залив Дарнли-Бэй") or keeps "Seno" (= sound) as a name
+  darnleybay: 'залив Дарнли',
+  hadleybay: 'залив Хадли',
+  cordovabay: 'залив Кордова',
+  senootway: 'залив Отуэй',
+  senodeskyring: 'залив Скайринг',
+  oresund: 'пролив Эресунн',
 };
 
 // Leading generic words that Russian cartography writes in lower case ("море Лаптевых").
@@ -425,10 +442,21 @@ export function cleanRu(s) {
 // Natural Earth 1:10m ships these as tiny/degenerate polygons in the wrong place
 // (Scotia Sea = an 8-vertex speck near Elephant Island, Luzon Strait = 4 vertices,
 // Drake Passage = slivers). Hand-placed label lines [lon, lat], west -> east.
+// The second group are coast-tracing slivers whose vertex axis runs ACROSS the strait from shore
+// to shore (ends on land); their lines follow the water passage instead. Every point was checked
+// to lie on water in the game's own grid (public/assets/map/cells.bin.gz).
 export const MANUAL_PATH = {
   scotiasea: [[-56.0, -57.0], [-46.0, -57.6], [-36.0, -57.2]],
   drakepassage: [[-68.5, -57.8], [-63.5, -58.7], [-58.5, -59.4]],
   luzonstrait: [[119.9, 20.3], [121.0, 20.45], [122.1, 20.5]],
+  // Soya / La Pérouse: Sea of Japan -> Sea of Okhotsk between Cape Soya and Cape Crillon
+  laperousestrait: [[141.45, 45.71], [141.95, 45.73], [142.45, 45.71]],
+  // Bab-el-Mandeb: Red Sea -> Gulf of Aden, along the channel
+  babelmandeb: [[42.9, 13.15], [43.27, 12.72], [43.7, 12.45]],
+  // Kara Gates: Pechora Sea -> Kara Sea between Vaygach and Novaya Zemlya
+  karskiyestrait: [[57.3, 70.38], [58.15, 70.56], [59.0, 70.73]],
+  // St Helena Bay: the bay between Cape Columbine and Elands Bay (the sliver ran 120 km up the coast)
+  sthelenabay: [[17.97, -32.66], [18.1, -32.5], [18.24, -32.33]],
 };
 
 // English names where Natural Earth's NAME_EN points at the wrong thing.
@@ -445,4 +473,17 @@ export const EN = {
   muusdesert: 'Mu Us Desert',
   northernkarroo: 'Northern Karoo',
   somalipeninsula: 'Somali Peninsula',
+  nigerdelta: 'Niger Delta',                       // NAME_EN: "Enugu Nigeria"
+  peninsuladetaitao: 'Taitao Peninsula',           // "Taitailei"
+  ahaggarmts: 'Ahaggar Mountains',                 // "Ahag"
+  appennini: 'Apennines',                          // "Appennino Ligure" (only one section of the range)
+  serradoespinhaco: 'Serra do Espinhaço',          // "Serra do Espinho"
+  serradamantiqueira: 'Serra da Mantiqueira',      // "Serra da Mantiquiera"
+  nullarborplain: 'Nullarbor Plain',               // "Nullabor Plain"
+  selwynra: 'Selwyn Range',                        // Queensland; "Selwyn Mountains" is the Yukon range
+  okhotskkolymaupland: 'Okhotsk-Kolyma Upland',    // "Kolyma Mountains" (= the KOLYMA RANGE feature)
+  stanovoyupland: 'Stanovoy Highlands',            // "Stanovoy Range" (= the STANOVOY RANGE feature)
+  guianashield: 'Guiana Shield',                   // "Guiana Highlands" (= the GUIANA HIGHLANDS feature)
+  crystalmountains: 'Crystal Mountains',
+  kolapeninsula: 'Kola Peninsula',
 };

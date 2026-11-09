@@ -9,7 +9,11 @@
 // Downscaling: monthly temperature is bilinearly interpolated from the 0.5° normals and
 // corrected with a 6.5 °C/km lapse rate for the difference between the map height and the
 // interpolated cell elevation; precipitation is bilinear. Classification: biomes.js.
-// Wetlands: low (< 300 m), very flat (local relief <= 10 m over ~20 km) and humid (P/PET >= 1.1).
+// Ice sheets: the map height is bedrock under the Greenland / Antarctic ice and the Arctic ice
+// caps; where the coarse climate is glacial the climate-grid (ice-surface) elevation is used.
+// Wetlands: low (< WETLAND_MAX_ELEV = 200 m), flat (local relief <= WETLAND_RELIEF = 35 m over
+// ~20 km) and humid (Thornthwaite P/PET >= WETLAND_MOISTURE = 1.1); see biomes.js.
+// Deterministic: no timestamps in the outputs.
 //
 // Run: tools/node/node.exe scripts/climate/bake-biomes.mjs
 import fs from 'node:fs';
@@ -26,6 +30,8 @@ const OUT = path.join(ROOT, 'public', 'assets', 'climate');
 const MW = 8192, MH = 4096, SN = SW * SH;
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
+const smooth01 = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+const ICE_TMAX_NONE = 4; // °C: coarse warmest month above which the map height is never replaced
 const gunzipTyped = (file, Type) => {
   const b = zlib.gunzipSync(fs.readFileSync(path.join(MAP, file)));
   const copy = new Uint8Array(b.byteLength); copy.set(b);
@@ -105,10 +111,21 @@ for (let y = 0; y < MH; y++) {
     if (cells[i] < 2) { biome[i] = BIOME.WATER; continue; }
     const x0 = X0[x], x1 = X1[x], tx = TX[x];
     const eB = rowE[x0] + (rowE[x1] - rowE[x0]) * tx;
-    // The map height is bedrock under the Greenland / Antarctic / Arctic ice sheets
-    // (e.g. -20 m at 72N 40W vs ~3000 m ice surface): there the climate elevation is the surface.
+    // The map height is bedrock under the Greenland / Antarctic ice sheets and the Arctic ice
+    // caps (e.g. -20 m at 72N 40W vs ~3000 m ice surface): there the climate elevation is the
+    // surface. Only where the coarse climate itself is glacial (warmest month <= 0 °C, fading out
+    // by 4 °C) — ice-free valleys and fjords (Alaska, Yukon, Norway, Siberia) are genuinely
+    // lower than the 0.5° cell mean and keep their own height. Both weights are smooth.
     let h = Math.max(-450, height[i]);
-    if (ICE_LAT && eB - h > 300) h = eB;
+    if (ICE_LAT && eB - h > 150) {
+      let tMaxC = -Infinity;
+      for (let m = 0; m < 12; m++) {
+        const o = m * SW, t = rowT[o + x0] + (rowT[o + x1] - rowT[o + x0]) * tx;
+        if (t > tMaxC) tMaxC = t;
+      }
+      const w = smooth01((ICE_TMAX_NONE - tMaxC) / ICE_TMAX_NONE) * smooth01((eB - h - 150) / 300);
+      h += w * (eB - h);
+    }
     const dT = -LAPSE_RATE * (h - eB);
     for (let m = 0; m < 12; m++) {
       const o = m * SW;
@@ -166,12 +183,11 @@ const landArea = area.reduce((s, v, k) => s + (k ? v : 0), 0);
 const json = {
   format: 'passionaris-biomes',
   version: 1,
-  generated: new Date().toISOString(),
   file: 'biome.bin.gz',
   compression: 'gzip',
   type: 'Uint8',
   grid: { W: MW, H: MH, note: 'MAP grid: row 0 = 90°N, col 0 = 180°W, same as public/assets/map/cells.bin.gz' },
-  method: 'WorldClim 1970–2000 normals, lapse-rate (6.5 °C/km) temperature downscaling to the map height, bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules (src/sim/climate/biomes.js); wetlands = flat humid lowlands',
+  method: 'WorldClim 1970–2000 normals, lapse-rate (6.5 °C/km) temperature downscaling to the map height (climate-grid ice-surface height over ice sheets), bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules and a GDD5 tree line (src/sim/climate/biomes.js); wetlands = flat humid lowlands',
   classes: BIOMES.map(c => ({ ...c, landShare: c.id ? +(area[c.id] / landArea).toFixed(4) : undefined })),
 };
 fs.writeFileSync(path.join(OUT, 'biomes.json'), JSON.stringify(json, null, 2));
@@ -179,7 +195,8 @@ for (const c of BIOMES) if (c.id) log(`${c.key.padEnd(17)} ${(100 * area[c.id] /
 
 const at = (lat, lon) => biome[Math.min(MH - 1, Math.floor((90 - lat) / 180 * MH)) * MW + Math.floor(((lon + 180) / 360 * MW) % MW)];
 for (const [n, la, lo] of [['Sahara', 23, 10], ['Amazon', -3, -60], ['Yakutia', 62, 125], ['Greenland', 72, -40], ['Moscow', 55.75, 37.6],
-  ['Kazakh steppe', 50, 70], ['Rome', 41.9, 12.5], ['Congo', 0, 22], ['Serengeti', -2.5, 35], ['Tibet', 33, 88], ['W Siberia bog', 58, 78], ['Pripyat', 52, 27]]) {
+  ['Kazakh steppe', 50, 70], ['Rome', 41.9, 12.5], ['Congo', 0, 22], ['Serengeti', -2.5, 35], ['Tibet', 33, 88], ['W Siberia bog', 58, 78], ['Pripyat', 52, 27],
+  ['Baker Lake', 64.3, -96.1], ['Taimyr', 72, 100], ['Sognefjord', 61.2, 7.1]]) {
   log(`spot ${n.padEnd(14)} -> ${BIOMES[at(la, lo)].key}`);
 }
 log('done');

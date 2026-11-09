@@ -1,7 +1,6 @@
 {
   "format": "passionaris-biomes",
   "version": 1,
-  "generated": "2026-11-09T23:02:24.648Z",
   "file": "biome.bin.gz",
   "compression": "gzip",
   "type": "Uint8",
@@ -10,7 +9,7 @@
     "H": 4096,
     "note": "MAP grid: row 0 = 90°N, col 0 = 180°W, same as public/assets/map/cells.bin.gz"
   },
-  "method": "WorldClim 1970–2000 normals, lapse-rate (6.5 °C/km) temperature downscaling to the map height, bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules (src/sim/climate/biomes.js); wetlands = flat humid lowlands",
+  "method": "WorldClim 1970–2000 normals, lapse-rate (6.5 °C/km) temperature downscaling to the map height (climate-grid ice-surface height over ice sheets), bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules and a GDD5 tree line (src/sim/climate/biomes.js); wetlands = flat humid lowlands",
   "classes": [
     {
       "id": 0,
@@ -25,7 +24,7 @@
       "nameRu": "Льды",
       "description": "Ледниковые щиты и вечные льды: даже летом ниже нуля.",
       "color": "#e8e6df",
-      "landShare": 0.0967
+      "landShare": 0.0966
     },
     {
       "id": 2,
@@ -33,7 +32,7 @@
       "nameRu": "Тундра",
       "description": "Холодная безлесная равнина: мхи, лишайники, карликовые кустарники, вечная мерзлота.",
       "color": "#b8b6a2",
-      "landShare": 0.0288
+      "landShare": 0.042
     },
     {
       "id": 3,
@@ -41,7 +40,7 @@
       "nameRu": "Тайга",
       "description": "Северный хвойный лес с долгой суровой зимой и коротким летом.",
       "color": "#7b866e",
-      "landShare": 0.145
+      "landShare": 0.1323
     },
     {
       "id": 4,
@@ -49,7 +48,7 @@
       "nameRu": "Умеренный лес",
       "description": "Широколиственные и смешанные леса умеренного пояса с выраженными сезонами.",
       "color": "#929c78",
-      "landShare": 0.1101
+      "landShare": 0.1102
     },
     {
       "id": 5,
@@ -57,7 +56,7 @@
       "nameRu": "Степь и луга",
       "description": "Травянистые равнины умеренного пояса с засушливым летом или малым количеством осадков.",
       "color": "#c6bf92",
-      "landShare": 0.069
+      "landShare": 0.0677
     },
     {
       "id": 6,
@@ -81,7 +80,7 @@
       "nameRu": "Полупустыня",
       "description": "Сухие кустарники и редкая трава на границе пустыни.",
       "color": "#d3c59f",
-      "landShare": 0.0549
+      "landShare": 0.0548
     },
     {
       "id": 9,
@@ -89,7 +88,7 @@
       "nameRu": "Саванна",
       "description": "Жаркие травяные равнины с редкими деревьями, долгим сухим сезоном и сезоном дождей.",
       "color": "#c8b27e",
-      "landShare": 0.1417
+      "landShare": 0.1419
     },
     {
       "id": 10,
@@ -113,7 +112,7 @@
       "nameRu": "Высокогорье",
       "description": "Горы выше границы леса и высокие плато: альпийские луга, камни, снега.",
       "color": "#a39c8e",
-      "landShare": 0.0316
+      "landShare": 0.0324
     }
   ]
 }

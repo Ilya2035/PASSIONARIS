@@ -198,3 +198,44 @@ test('roads connect only neighbouring land districts and stay off open ocean', (
   }
   assert.equal(bad, 0, `${bad} of ${samples} road samples over open ocean`);
 });
+
+test('names are unique Russian strings across land, lakes and seas', () => {
+  const seen = new Map();
+  for (const d of D) {
+    assert.ok(!seen.has(d.nameRu), `duplicate district name "${d.nameRu}" (${seen.get(d.nameRu)} and ${d.id})`);
+    seen.set(d.nameRu, d.id);
+  }
+  const all = [...D, ...data.provinces, ...data.regions];
+  for (const x of all) {
+    // Latin letters only as Roman numerals inside proper names (Земля Кристиана IX)
+    assert.ok(!/[A-Za-z]/.test(x.nameRu.replace(/\b[IVXLCM]+\b/g, '')), `Latin letters in "${x.nameRu}"`);
+    assert.ok(!/\s{2}|^\s|\s$|\.\s|undefined|null|NaN/.test(x.nameRu), `malformed name "${x.nameRu}"`);
+    // never two compass adjectives in a row ("Восточный Западный Саян"); compound
+    // proper adjectives ("Северная Западно-Сибирская равнина") are fine
+    assert.ok(!/^\S+(ый|ий|ая|ое|ые|ее|яя|ие) ((Северн|Южн|Западн|Восточн|Центральн)|((Северо|Юго)-(Западн|Восточн)))(ый|ий|ая|ое|ые|ее|яя|ие) /.test(x.nameRu), `double compass in "${x.nameRu}"`);
+  }
+  // water bodies carry their generic noun, so they cannot be confused with islands
+  assert.equal(byId(districtAtLL(33, -1)).type, 'lake');
+  assert.match(byId(districtAtLL(33, -1)).nameRu, /озеро Виктория|Озеро Виктория/);
+});
+
+function districtAtLL(lon, lat) { return map[grid.texelOf(lon, lat)]; }
+
+test('province and region label points lie inside their own group', () => {
+  for (const p of data.provinces) assert.equal(byId(districtAtLL(p.lon, p.lat)).province, p.id, `province ${p.id} ${p.nameRu}`);
+  for (const r of data.regions) assert.equal(byId(districtAtLL(r.lon, r.lat)).region, r.id, `region ${r.id} ${r.nameRu}`);
+});
+
+test('ice-sheet sizing only on Greenland / Antarctica; big islands keep their own regions', () => {
+  // Iceland (~103,000 km2) is not an ice sheet: ~10,000 km2 districts, not ~25,000
+  const ice = D.filter(d => isLand(d.type) && d.lon > -25 && d.lon < -13 && d.lat > 63 && d.lat < 67);
+  assert.ok(ice.length >= 7, `Iceland districts: ${ice.length}`);
+  // Great Britain does not share a region with continental Europe across the Channel
+  const london = byId(districtAtLL(-0.1, 51.5)), paris = byId(districtAtLL(2.35, 48.85));
+  assert.notEqual(london.region, paris.region);
+});
+
+test('regions.json is reproducible (no timestamps or timings)', () => {
+  assert.equal(data.generated, undefined);
+  assert.equal(data.stats.timingsSec, undefined);
+});

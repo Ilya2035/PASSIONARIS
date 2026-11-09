@@ -143,8 +143,8 @@ const COUNTRY_ALIASES = {
 const COUNTRY_RU_DIRECT = {
   'USA TERRITORY': 'территории США', 'UK TERRITORY': 'британские территории', 'KOREA': 'Корея', 'SCOTLAND': 'Шотландия',
   'GUADELOUPE': 'Гваделупа', 'GUADELOUPE (FRENCH TERRITORY)': 'Гваделупа', 'MARTINIQUE': 'Мартиника', 'MARTINIQUE (FRENCH TERRITORY)': 'Мартиника',
-  'FRENCH GUIANA': 'Французская Гвиана', 'REUNION': 'Реюньон', 'MAYOTTE': 'Майотта', 'AZORES (PORTUGAL)': 'Азорские острова (Португалия)',
-  'MADEIRA ISLANDS (PORTUGAL)': 'Мадейра (Португалия)', 'KERMADEC ISLANDS (NEW ZEALAND)': 'острова Кермадек (Новая Зеландия)',
+  'FRENCH GUIANA': 'Французская Гвиана', 'REUNION': 'Реюньон', 'MAYOTTE': 'Майотта', 'AZORES (PORTUGAL)': 'Азорские острова, Португалия',
+  'MADEIRA ISLANDS (PORTUGAL)': 'Мадейра, Португалия', 'KERMADEC ISLANDS (NEW ZEALAND)': 'острова Кермадек, Новая Зеландия',
   'TIMOR-LESTE': 'Восточный Тимор', 'MARQUESAS ISLANDS': 'Маркизские острова',
 };
 
@@ -287,6 +287,10 @@ export function createNamer(world) {
       if (t === 'ISLANDS' || t === 'KEPULAUAN') { island = 2; return false; }
       return !DROP_WORDS.has(t);
     });
+    // direction words freed by the removal above ("OFF NORTHEAST COAST HONSHU" -> HONSHU, north-east)
+    while (toks.length > 1 && DIR_TOKENS[toks[0]]) { dir = DIR_TOKENS[toks[0]]; toks.shift(); }
+    while (toks.length > 1 && DIR_TOKENS[toks[toks.length - 1]]) { dir = DIR_TOKENS[toks.pop()]; }
+    if (toks.length === 1 && DIR_TOKENS[toks[0]]) { dir = DIR_TOKENS[toks[0]]; toks = []; }
     if (!toks.length) return dir ? { base: '', dir, coast } : null;
     const k = toks.join(' ');
     let base = PHRASES[k] || CITIES[k] || (isCountry(k) ? country(k) : null);
@@ -327,8 +331,9 @@ export function createNamer(world) {
     }
     const region = parsed.length ? parsed[parsed.length - 1] : null;
     let name = fmt(main);
-    if (region?.base && main?.base && region.base !== main.base && !region.isCountry) name = `${name}; ${region.base}`;
-    if (!name || name === c) return c;
+    if (region?.base && main?.base && region.base !== main.base && !region.isCountry && !(c && c.includes(region.base))) name = `${name}; ${region.base}`;
+    // the place is the territory itself ("AZORES (PORTUGAL): AZORES") -> just the territory
+    if (!name || name === c || (c && c.startsWith(name + ','))) return c;
     return c ? `${name} (${c})` : name;
   }
 
@@ -361,7 +366,8 @@ export function createNamer(world) {
     const KIND = [[/ Volcanic Field$/i, 'вулканическое поле'], [/ Volcanic Complex$/i, 'вулканический комплекс'], [/ Caldera$/i, 'кальдера'],
       [/ Seamounts?$/i, 'подводная гора'], [/ Islands$/i, 'острова'], [/ Island$/i, 'остров'], [/ Mountains?$/i, 'гора'], [/ Lake$/i, 'озеро'],
       [/ Depression$/i, 'впадина'], [/ Ridge$/i, 'хребет'], [/ Peak$/i, 'пик'], [/ Hills?$/i, 'холмы'], [/ Craters?$/i, 'кратер'],
-      [/ Volcano$/i, 'вулкан'], [/ Lava Field$/i, 'лавовое поле'], [/ Cones?$/i, 'конус']];
+      [/ Volcano$/i, 'вулкан'], [/ Lava Field$/i, 'лавовое поле'], [/ Cones?$/i, 'конус'], [/ Field$/i, 'вулканическое поле'],
+      [/ Group$/i, 'группа вулканов']];
     for (const [re, ru] of KIND) {
       if (re.test(s)) return `${ru} ${transliterate(s.replace(re, ''), lang)}`;
     }

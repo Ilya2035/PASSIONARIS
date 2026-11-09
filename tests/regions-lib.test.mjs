@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeGrid, Heap, components, mulberry32 } from '../scripts/regions/grid.mjs';
 import { grow, lloyd, jitteredPoints } from '../scripts/regions/partition.mjs';
-import { genitive, translit, qualify, compassLabels, disambiguate, buildRiverNamer, genderOf } from '../scripts/regions/names.mjs';
+import { genitive, translit, qualify, compassLabels, disambiguate, buildRiverNamer, genderOf, featureGender } from '../scripts/regions/names.mjs';
 import { simplifyDP, polylineKm } from '../scripts/regions/roads.mjs';
 import { groupGraph } from '../scripts/regions/group.mjs';
 import { distanceKm, seaSideKm } from '../scripts/regions/water.mjs';
@@ -174,4 +174,45 @@ test('distance transform and sea-zone sizing', () => {
   assert.equal(seaSideKm(0), 200);
   assert.equal(seaSideKm(5000), 800);
   assert.ok(seaSideKm(600) > 200 && seaSideKm(600) < 800);
+});
+
+test('ice-sheet zone is Greenland and Antarctica only', async () => {
+  const { iceZone } = await import('../scripts/regions/terrain.mjs');
+  for (const [lon, lat] of [[-40, 72], [-51, 64.2], [-69, 77.5], [-30, 82.8], [-22, 71], [-43.8, 59.9], [0, -80], [140, -66.5]]) assert.ok(iceZone(lon, lat), `${lon},${lat}`);
+  // Iceland, east Baffin Island, Ellesmere Island, northern Quebec, Svalbard, Jan Mayen
+  for (const [lon, lat] of [[-19, 65], [-64, 67], [-72, 80], [-66, 82.5], [-70, 61.5], [15, 78], [-8.5, 71], [-61, 82.2]]) assert.ok(!iceZone(lon, lat), `${lon},${lat}`);
+});
+
+test('river forks take the parent name; abbreviations never leak into Russian names', () => {
+  const name = buildRiverNamer();
+  assert.equal(name('S.  Fk.  S.  Br.  Potomac').ru, 'Потомак');
+  assert.equal(name('Clarks Fk.  Yellowstone').ru, 'Йеллоустон');
+  for (const raw of ['E.  Fk.  Andreafsky', 'Locust Fk.  of the Black Warrior', 'S.  Fk.   of the Grand', 'W.  Br.  St. Joseph', 'S.W.  Miramichi', 'Tonawanda Cr.']) {
+    const r = name(raw);
+    assert.ok(!/[.A-Za-z]|\s{2}/.test(r.ru) && !/[.A-Za-z]|\s{2}/.test(r.gen), `${raw} -> ${r.ru} / ${r.gen}`);
+  }
+  assert.equal(name('Thjórsá').ru, 'Тьоурсау');
+});
+
+test('compass qualifiers: no doubled compass words, class-based gender of indeclinable names', () => {
+  assert.equal(qualify('Западный Саян', 'E'), 'Западный Саян (восток)');
+  assert.equal(qualify('Центральная долина Чили', 'C'), 'Центральная долина Чили (центр)');
+  assert.equal(qualify('Западно-Сибирская равнина', 'N'), 'Северная Западно-Сибирская равнина');
+  assert.equal(qualify('Западно-Сибирская равнина', 'W'), 'Западно-Сибирская равнина (запад)');
+  assert.equal(qualify('Калахари', 'N', { gender: featureGender('Калахари', 'Desert') }), 'Северная Калахари');
+  assert.equal(qualify('Сибирь', 'W', { gender: featureGender('Сибирь', 'Geoarea') }), 'Западная Сибирь');
+  assert.equal(qualify('Куньлунь', 'W', { gender: featureGender('Куньлунь', 'Range/mtn') }), 'Западный Куньлунь');
+  assert.equal(qualify('Пиренеи', 'W', { gender: featureGender('Пиренеи', 'Range/mtn') }), 'Западные Пиренеи');
+  assert.equal(qualify('Гаити', 'N', { gender: featureGender('Гаити', 'Island') }), 'Северный Гаити');
+  assert.equal(qualify('Кордильера-Реаль', 'NW', { gender: featureGender('Кордильера-Реаль', 'Range/mtn') }), 'Северо-Западная Кордильера-Реаль');
+});
+
+test('water names carry a generic noun', async () => {
+  const { marineRu } = await import('../scripts/regions/features.mjs');
+  assert.equal(marineRu('Сулавеси', 'sea', 'Celebes Sea'), 'Море Сулавеси');
+  assert.equal(marineRu('Джеймс', 'bay', 'James Bay'), 'Залив Джеймс');
+  assert.equal(marineRu('Ла-Манш', 'channel', 'English Channel'), 'Пролив Ла-Манш');
+  assert.equal(marineRu('Амазонка', 'river', 'Amazon River'), 'Устье Амазонки');
+  assert.equal(marineRu('Чёрное море', 'sea', 'Black Sea'), 'Чёрное море');
+  assert.equal(genitive('Море Сулавеси'.replace(/^Море/, 'море')), 'моря Сулавеси');
 });

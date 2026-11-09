@@ -154,8 +154,9 @@ export async function createWorldSystems(ctx) {
   const labMod = await load('../fx/labels.js');
   if (labMod) {
     try {
-      sys.labels = new labMod.ZoneLabels(ctx.scene, globe, { palette: ctx.settings.palette, renderer: ctx.renderer });
-      sys.labels.setVisible(ctx.settings.showLabels !== false);
+      sys.labels = new labMod.ZoneLabels(ctx.scene, globe, { palette: ctx.settings.palette, renderer: ctx.renderer, maxLetterPx: 58 });
+      if (globe.clean) sys.labels.setVisible(false);
+      if (!globe.clean) sys.labels.setVisible(ctx.settings.showLabels !== false);
       features.add('labels');
     } catch (e) { console.warn('labels', e); sys.labels = null; }
   }

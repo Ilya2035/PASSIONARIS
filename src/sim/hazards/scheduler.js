@@ -7,9 +7,9 @@
 // Documented events come from the baked catalogues (GVP, NOAA NCEI, USGS, NASA). Gaps are filled
 // stochastically and deterministically (seeded, keyed per year), so any window can be queried in
 // any order with identical results and the scheduler state is fully described by the seed:
-//   - earthquakes: instrumental (USGS 1900–2025, M>=6) rates per 5°x5° zone; before 1900 only the
-//     per-century deficit relative to the documented record is added; after the catalogue end the
-//     full rate. Locations bootstrap instrumental epicentres, magnitudes follow Gutenberg–Richter (b=1)
+//   - earthquakes: instrumental (USGS 1900–2025, M>=6) rates per 5°x5° zone, scaled to the complete
+//     1964–2025 global rate (completeness factor); before 1900 only the per-century deficit relative
+//     to the documented record is added; after the catalogue end the full rate. Locations bootstrap instrumental epicentres, magnitudes follow Gutenberg–Richter (b=1)
 //     truncated at the zone maximum.
 //   - eruptions: per VEI class global rates over the period in which the GVP record is near complete
 //     (VEI<=2: 1960+, 3: 1900+, 4: 1800+, 5: 1500+, 6: 1 AD+, 7: whole window); deficits before that,
@@ -20,8 +20,9 @@
 //     Brown et al. (2002) flux N(>E) = 3.7·E^-0.9 per year.
 //   - landslides: Froude & Petley (2018) global rate distributed over steep, wet, seismic cells, plus
 //     co-seismic landslides after M>=6.5 earthquakes on susceptible ground.
-// Stochastic events never coincide with documented ones (same volcano within a year, or an
-// earthquake within 30 days and 150 km of a documented one, are rejected).
+// Stochastic events never coincide with documented ones (the same volcano within a year of a
+// documented eruption, counted from its onset to its paroxysm, or an earthquake within 30 days and
+// 150 km of a documented one, are rejected).
 //
 // Returned event objects are frozen and shared between calls; treat them as read-only.
 import { ymdToT, tToYmd, yearStartT, daysInMonth, daysInYear, START_YEAR, END_YEAR, T_END } from './time.js';
@@ -44,7 +45,7 @@ export const MAGNITUDE_UNITS = Object.freeze({
 });
 
 const K_ER = 1, K_EQ = 2, K_TS = 3, K_MT = 4, K_LS = 5;
-const INSTR_Y0 = 1900, INSTR_Y1 = 2025;
+const INSTR_Y0 = 1900, INSTR_Y1 = 2025, COMPLETE_Y0 = 1964;
 const T_1900 = ymdToT(1900, 1, 1);
 const MIN10 = 10 / 1440;
 // Documented history is the same in every world: unknown date parts are placed with a fixed salt.
@@ -114,7 +115,7 @@ export function createScheduler({ data, seed = 1, options = {} } = {}) {
   const docs = [];
   const V = table(data.volcanoes), vf = V.f;
   const vol = V.rows.map(r => ({ gvp: r[vf.gvp], name: r[vf.name], lat: r[vf.lat], lon: r[vf.lon], maxVei: r[vf.maxVei] }));
-  const erTimes = vol.map(() => []);
+  const erIv = vol.map(() => []);                          // documented [onset, paroxysm] spans per volcano
 
   const E = table(data.eruptions), ef = E.f;
   const erDocs = [];
@@ -128,9 +129,14 @@ export function createScheduler({ data, seed = 1, options = {} } = {}) {
       id: `er:${i}`, type: 'eruption', t, lat: v.lat, lon: v.lon, magnitude: vei, vei, level: eruptionLevel(vei), name: v.name,
       documented: true, src: 'GVP', volcano: r[ef.v], gvp: v.gvp, tStart: t0, uncertain: (fl & 1) !== 0, deaths: r[ef.deaths] || 0,
     };
-    docs.push(ev); erDocs.push(ev); erTimes[r[ef.v]].push(t);
+    docs.push(ev); erDocs.push(ev); erIv[r[ef.v]].push([Math.min(t0, t), Math.max(t0, t)]);
   });
-  for (const a of erTimes) a.sort((p, q) => p - q);
+  const erStart = [], erEnd = [], erMaxLen = new Float64Array(vol.length);
+  erIv.forEach((iv, k) => {
+    iv.sort((p, q) => p[0] - q[0]);
+    erStart.push(Float64Array.from(iv, p => p[0])); erEnd.push(Float64Array.from(iv, p => p[1]));
+    for (const p of iv) erMaxLen[k] = Math.max(erMaxLen[k], p[1] - p[0]);
+  });
 
   const Q = table(data.earthquakes), qf = Q.f, qPlaces = data.earthquakes.places || [];
   const eqDocs = [];
@@ -215,8 +221,15 @@ export function createScheduler({ data, seed = 1, options = {} } = {}) {
     if (q.year >= INSTR_Y0 && q.year <= INSTR_Y1 && q.src !== 'NCEI') instr[z].push(q);
     else if (q.year < INSTR_Y0 && q.year >= START_YEAR) eqDef[z * NCENT + centuryOf(q.year)]++;
   }
+  // The M>=6 record is incomplete before the ISC era (1900s: ~35/yr, 1964–2025: ~135/yr), so the
+  // 1900–2025 zone counts give the spatial pattern and a global completeness factor (rate over
+  // COMPLETE_Y0–INSTR_Y1 / rate over the whole span) restores the modern annual rate.
+  let nAllInstr = 0, nComplete = 0;
+  for (let z = 0; z < NZ; z++) for (const q of instr[z]) { nAllInstr++; if (q.year >= COMPLETE_Y0) nComplete++; }
+  const completeness = nAllInstr && nComplete
+    ? (nComplete / (INSTR_Y1 - COMPLETE_Y0 + 1)) / (nAllInstr / (INSTR_Y1 - INSTR_Y0 + 1)) : 1;
   const lambda = new Float64Array(NZ);
-  for (let z = 0; z < NZ; z++) lambda[z] = instr[z].length / (INSTR_Y1 - INSTR_Y0 + 1);
+  for (let z = 0; z < NZ; z++) lambda[z] = completeness * instr[z].length / (INSTR_Y1 - INSTR_Y0 + 1);
   const zMmax = Float32Array.from(zMax, m => Math.min(9.5, Math.max(minMag + 0.5, m + 0.3)));
   const eqFuture = buildCdf(lambda);
   const eqCentury = new Map();
@@ -379,10 +392,11 @@ export function createScheduler({ data, seed = 1, options = {} } = {}) {
       }
     }
   }
+  /** True when t is within a year of a documented eruption of volcano vi (onset .. paroxysm). */
   function clashesWithDocumented(vi, t) {
-    const a = erTimes[vi];
-    const i = lowerBound(a, t - 365);
-    return i < a.length && a[i] <= t + 365;
+    const a = erStart[vi], e = erEnd[vi], lo = t - 365 - erMaxLen[vi];
+    for (let j = lowerBound(a, t + 365 + 1e-9) - 1; j >= 0 && a[j] >= lo; j--) if (e[j] >= t - 365) return true;
+    return false;
   }
 
   function genMeteorites(y, out) {
@@ -526,7 +540,7 @@ export function createScheduler({ data, seed = 1, options = {} } = {}) {
       seed: SEED, documented: docs.length,
       catalogueEnd: { earthquakes: tToYmd(T_EQ_END), eruptions: tToYmd(T_ER_END), meteoriteFalls: lastFallYear },
       ratesPerYear: {
-        earthquakesInstrumental: eqFuture.total, earthquakeDeficitYear1000: pre,
+        earthquakesInstrumental: eqFuture.total, earthquakeCompleteness: completeness, earthquakeDeficitYear1000: pre,
         eruptionsByClass: Array.from(erRate), meteoriteFalls: fallRate, airbursts: airburstRate, landslides: opt.landslidesPerYear,
       },
       tsunamiProbability: tsProb,
