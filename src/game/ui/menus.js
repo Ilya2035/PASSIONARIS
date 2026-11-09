@@ -14,10 +14,10 @@ for (const back of document.querySelectorAll('.modal-back')) back.addEventListen
 // apply(key, value) is called live; keys marked reload:true take effect after restart.
 const FIELDS = [
   { key: 'windowMode', label: 'Режим окна', type: 'select', options: [['fullscreen', 'Полный экран'], ['maximized', 'Окно на весь экран'], ['window', 'Окно']], reload: true },
-  { key: 'renderScale', label: 'Масштаб рендеринга', type: 'select', options: [['0.5', '50% — максимум FPS'], ['0.67', '67%'], ['0.8', '80%'], ['1', '100% — максимум чёткости']] },
+  { key: 'renderScale', label: 'Масштаб рендеринга', type: 'select', options: [['auto', 'Авто — держит частоту кадров'], ['0.5', '50% — максимум FPS'], ['0.67', '67%'], ['0.8', '80%'], ['1', '100% — максимум чёткости']] },
   { key: 'sharpen', label: 'Резкость апскейла', type: 'range', min: 0, max: 1, step: 0.05 },
   { key: 'brightness', label: 'Яркость', type: 'range', min: 0.7, max: 1.3, step: 0.01 },
-  { key: 'quality', label: 'Детализация сетки', type: 'select', options: [['low', 'Низкая'], ['medium', 'Средняя'], ['high', 'Высокая']], reload: true },
+  { key: 'quality', label: 'Детализация сетки', type: 'select', options: [['auto', 'Авто'], ['low', 'Низкая'], ['medium', 'Средняя'], ['high', 'Высокая']], reload: true },
   { key: 'reliefScale', label: 'Высота рельефа (1 = как в жизни)', type: 'range', min: 1, max: 10, step: 0.5 },
   { key: 'unroll', label: 'Разворачивание глобуса', type: 'range', min: 0, max: 1, step: 0.01 },
   { key: 'showWeather', label: 'Погода: облака, снег, засуха', type: 'check' },

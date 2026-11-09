@@ -4,16 +4,20 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 
-// laptops with two GPUs: ask for the discrete one
-if (process.env.PASSIONARIS_GPU === 'discrete') app.commandLine.appendSwitch('force_high_performance_gpu');
-// Some systems (restricted accounts, sandboxed shells) kill Chromium's GPU sandbox at start-up.
-// If the GPU process keeps crashing, restart once without the GPU sandbox instead of running without WebGL.
+// Laptops with two GPUs: ask Chromium for the discrete one (settings "gpu": 'discrete' (default) | 'auto').
+const startupSettings = (() => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8')); } catch { return {}; } })();
+const gpuPref = process.env.PASSIONARIS_GPU || startupSettings.gpu || 'discrete';
+const safeGpu = process.argv.includes('--passionaris-safe-gpu');
+if (gpuPref === 'discrete' && !safeGpu) app.commandLine.appendSwitch('force_high_performance_gpu');
+// Some systems (restricted accounts, sandboxed shells, odd drivers) crash Chromium's GPU process at start-up.
+// If it keeps crashing, restart once in "safe GPU" mode: no forced adapter, no GPU sandbox — instead of running without WebGL.
 let gpuCrashes = 0;
 app.on('child-process-gone', (_e, d) => {
   if (process.env.PASSIONARIS_GPU_DEBUG) console.log('[gpu]', d.type, d.reason, d.exitCode);
   if (d.type !== 'GPU' || d.reason === 'clean-exit') return;
-  if (++gpuCrashes >= 2 && !app.commandLine.hasSwitch('disable-gpu-sandbox')) {
-    app.relaunch({ args: process.argv.slice(1).concat(['--disable-gpu-sandbox']) });
+  if (++gpuCrashes >= 2 && !safeGpu) {
+    const args = process.argv.slice(1).filter(a => a !== '--disable-gpu-sandbox');
+    app.relaunch({ args: args.concat(['--disable-gpu-sandbox', '--passionaris-safe-gpu']) });
     app.exit(0);
   }
 });
@@ -142,8 +146,18 @@ async function smokeTest() {
     }
     await wait(3000);
     const gpu = await game.webContents.executeJavaScript(`(() => { const gl = window.__game.renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })()`);
-    const fps = await game.webContents.executeJavaScript("document.getElementById('fps').textContent");
+    const fps = await game.webContents.executeJavaScript("(window.__game && window.__game.ready) ? 'ready' : 'not ready'");
     log('gpu:', gpu, '| fps:', fps);
+    // frame-rate probe: globe view, then a close tilted view with the detail window
+    const probe = q => game.webContents.executeJavaScript(`(async () => { const g = window.__game; ${q}; await new Promise(r => setTimeout(r, 1500)); let n = 0; const t0 = performance.now(); await new Promise(r => { const f = () => { n++; performance.now() - t0 < 3000 ? requestAnimationFrame(f) : r(); }; requestAnimationFrame(f); }); return (n / ((performance.now() - t0) / 1000)).toFixed(1); })()`);
+    log('fps globe:', await probe('g.gcam.lookAt(30, 20, 2.2); g.gcam.alt = 2.2'));
+    log('fps close:', await probe('g.gcam.lookAt(46.4, 9, 0.012); g.gcam.alt = 0.012'));
+    if (process.env.PASSIONARIS_PERF) {
+      log('settings:', await game.webContents.executeJavaScript('JSON.stringify({q: window.__game.settings.qualityResolved, rs: window.__game.settings.renderScale, dyn: window.__game.dynScale, size: [innerWidth, innerHeight, devicePixelRatio]})'));
+      log('fps close @50%:', await probe('g.settings.renderScale = 0.5'));
+      log('fps close @50% no detail:', await probe('g.detail.update = () => { g.globe.shared.uDetailOn.value = 0; }'));
+      log('fps close @50% no detail, mesh hidden:', await probe('g.globe.terrain.visible = false'));
+    }
     await shot(game, 'smoke-game.png');
     log('game ok');
   } catch (e) {

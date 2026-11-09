@@ -1,5 +1,5 @@
-import '@fontsource/cormorant-garamond/500.css';
-import '@fontsource/cormorant-garamond/500-italic.css';
+import '@fontsource/alegreya-sc/500.css';
+import '@fontsource/alegreya-sc/700.css';
 import '@fontsource/cormorant-garamond/600.css';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/600.css';
@@ -9,6 +9,8 @@ import changelogMd from '../../CHANGELOG.md?raw';
 import { APP_NAME, VERSION, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
 import { loadSettings, saveSettings, isElectron, DEFAULT_SETTINGS } from '../shared/settings.js';
 import { PALETTES, applyUiPalette } from '../shared/palettes.js';
+import { applyStippleTheme } from '../shared/stipple.js';
+applyStippleTheme();
 
 const $ = id => document.getElementById(id);
 if (!isElectron) document.body.classList.add('browser');
@@ -70,9 +72,11 @@ for (const [id, p] of Object.entries(PALETTES)) {
 }
 const fields = [
   ['s-palette', 'palette', String],
+  ['s-gpu', 'gpu', String],
   ['s-window', 'windowMode', String],
   ['s-quality', 'quality', String],
-  ['s-pixel', 'pixelRatio', Number],
+  ['s-scale', 'renderScale', v => (v === 'auto' ? 'auto' : Number(v))],
+  ['s-bright', 'brightness', Number],
   ['s-relief', 'reliefScale', Number],
   ['s-unroll', 'unroll', Number],
 ];
@@ -101,3 +105,37 @@ $('win-min').onclick = () => window.passionaris?.minimize();
 const MENU_ART = "assets/ui/menu-nile-delta";
 $("bg").style.backgroundImage = `url("${MENU_ART}.jpg")`;
 fetch(`${MENU_ART}.json`).then(r => r.ok ? r.json() : null).then(j => { if (j?.caption) $("art-caption").textContent = j.caption; }).catch(() => {});
+
+// ------------------------------------------------------------- logo: light-gothic letters filled with bronze stipple
+document.fonts.load('700 80px "Alegreya SC"').then(() => {
+  const cv = $('logo');
+  const d = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * d; cv.height = h * d;
+  const c = cv.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0);
+  // measure with letter spacing applied, then fit the width (two passes: spacing scales with size)
+  let fs = 92;
+  const setFont = size => { c.font = `700 ${size}px "Alegreya SC"`; if (c.letterSpacing !== undefined) c.letterSpacing = `${size * 0.04}px`; };
+  setFont(fs);
+  for (let k = 0; k < 2; k++) { fs = Math.min(96, fs * (w - 14) / c.measureText('PASSIONARIS').width); setFont(fs); }
+  const tw = c.measureText('PASSIONARIS').width;
+  const x0 = 2, yb = h * 0.62;
+  const m = document.createElement('canvas'); m.width = cv.width; m.height = cv.height;
+  const mc = m.getContext('2d'); mc.setTransform(d, 0, 0, d, 0, 0); mc.font = c.font; if (mc.letterSpacing !== undefined) mc.letterSpacing = c.letterSpacing;
+  mc.fillText('PASSIONARIS', x0, yb);
+  const md = mc.getImageData(0, 0, m.width, m.height).data;
+  c.fillStyle = 'rgba(0,0,0,.45)'; c.fillText('PASSIONARIS', x0 + 2, yb + 3);
+  c.fillStyle = '#5a4026'; c.fillText('PASSIONARIS', x0, yb);
+  let s = 77; const R = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const top = [242, 222, 172], bot = [140, 98, 52];
+  for (let i = 0; i < w * h * 1.6; i++) {
+    const x = R() * w, y = R() * h; const px = Math.floor(x * d), py = Math.floor(y * d);
+    if (md[(py * m.width + px) * 4 + 3] < 128) continue;
+    const t = Math.min(1, Math.max(0, (y - (yb - fs * 0.75)) / (fs * 0.8)));
+    const col = top.map((v, k) => Math.round(v + (bot[k] - v) * t));
+    c.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},.95)`; c.fillRect(x, y, 0.9, 0.9);
+  }
+  c.lineWidth = 0.7; c.strokeStyle = 'rgba(30,20,10,.8)'; c.strokeText('PASSIONARIS', x0, yb);
+  const ly = yb + fs * 0.24; c.strokeStyle = '#b58a52'; c.lineWidth = 1.2;
+  c.beginPath(); c.moveTo(x0, ly); c.lineTo(x0 + tw * 0.44, ly); c.moveTo(x0 + tw * 0.56, ly); c.lineTo(x0 + tw, ly); c.stroke();
+  c.fillStyle = '#d9b77c'; c.beginPath(); c.moveTo(x0 + tw / 2, ly - 6); c.lineTo(x0 + tw / 2 + 8, ly); c.lineTo(x0 + tw / 2, ly + 6); c.lineTo(x0 + tw / 2 - 8, ly); c.closePath(); c.fill();
+});

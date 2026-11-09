@@ -68,7 +68,7 @@ out vec3 vUp;
 void main() {
   float t = position.x;
   float az = position.y;
-  float s = min(uRingA * sinh(t * uRingB), PI);
+  float s = min(uRingA * sinh(t * uRingB), PI); // reaches sMax (horizon) at t = 1
   vec3 T = uR * cos(az) + uU * sin(az);
   vec3 g = uF * cos(s) + T * sin(s);
 
@@ -119,6 +119,7 @@ uniform float uHasSim;
 uniform sampler2D uWeather;   // 720x360 RGBA: R snow/ice, G clouds/precip, B T anomaly, A drought
 uniform float uHasWeather;
 uniform float uCloudAmt;
+uniform float uNeedInfo;      // 1 only when district/province/country lines are drawn (saves ~10 fetches/pixel)
 
 in vec3 vGeo;
 in vec3 vWorld;
@@ -243,8 +244,8 @@ void main() {
   if (texPerPx > 1.0) win = cellAt(ivec2(floor(uv * uGrid)));
 
   bool land = win >= 2u;
-  uvec2 wi = infoOf(win);
-  uvec2 i0 = infoOf(id0), i1 = infoOf(id1), i2 = infoOf(id2), i3 = infoOf(id3);
+  uvec2 wi = uvec2(0u), i0 = uvec2(0u), i1 = uvec2(0u), i2 = uvec2(0u), i3 = uvec2(0u);
+  if (uNeedInfo > 0.5) { wi = infoOf(win); i0 = infoOf(id0); i1 = infoOf(id1); i2 = infoOf(id2); i3 = infoOf(id3); }
 
   // ---------------------------------------------------------------- base colour
   // Modes: 0 relief (hypsometric), 1 terrain (biomes), 2 temperature, 3 precipitation, 4 hazards, 5 regions, 9 political.
@@ -335,7 +336,7 @@ void main() {
     float L0 = id0 >= 2u ? 1.0 : 0.0, L1 = id1 >= 2u ? 1.0 : 0.0, L2 = id2 >= 2u ? 1.0 : 0.0, L3 = id3 >= 2u ? 1.0 : 0.0;
     float dCoast = isoDistPx(L0, L1, L2, L3, f, jx, jy);
     float aMag = 1.0 - smoothstep(0.7, 1.2, texPerPx);
-    if (land) {
+    if (land && uNeedInfo > 0.5) {
       // water samples count as "same" so coasts don't get political borders
       float C0 = (id0 < 2u || i0.y == wi.y) ? 1.0 : 0.0, C1 = (id1 < 2u || i1.y == wi.y) ? 1.0 : 0.0;
       float C2 = (id2 < 2u || i2.y == wi.y) ? 1.0 : 0.0, C3 = (id3 < 2u || i3.y == wi.y) ? 1.0 : 0.0;
@@ -362,11 +363,11 @@ void main() {
       uint c0 = win;
       uint n1 = cellAt(ivec2(floor((uv + px) * uGrid))), n2 = cellAt(ivec2(floor((uv - px) * uGrid)));
       uint n3 = cellAt(ivec2(floor((uv + py) * uGrid))), n4 = cellAt(ivec2(floor((uv - py) * uGrid)));
-      uvec2 c0i = infoOf(c0);
-      uvec2 a1 = infoOf(n1), a2 = infoOf(n2), a3 = infoOf(n3), a4 = infoOf(n4);
       bool L = c0 >= 2u;
       float cb = 0.0, pb = 0.0, cs = 0.0;
-      if (L) {
+      if (L && uNeedInfo > 0.5) {
+        uvec2 c0i = infoOf(c0);
+        uvec2 a1 = infoOf(n1), a2 = infoOf(n2), a3 = infoOf(n3), a4 = infoOf(n4);
         cb = float((n1 >= 2u && a1.y != c0i.y) || (n2 >= 2u && a2.y != c0i.y) || (n3 >= 2u && a3.y != c0i.y) || (n4 >= 2u && a4.y != c0i.y));
         pb = float((n1 >= 2u && a1.x != c0i.x) || (n2 >= 2u && a2.x != c0i.x) || (n3 >= 2u && a3.x != c0i.x) || (n4 >= 2u && a4.x != c0i.x));
       }

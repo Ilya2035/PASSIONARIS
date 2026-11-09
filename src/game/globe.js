@@ -4,9 +4,9 @@ import { makeHeightTexture, makeCellTexture, makeInfoTexture, makeColorTexture, 
 import { getPalette } from '../shared/palettes.js';
 
 const QUALITY = {
-  low: { az: 512, rings: 360 },
-  medium: { az: 1024, rings: 600 },
-  high: { az: 1536, rings: 900 },
+  low: { az: 512, rings: 300 },
+  medium: { az: 768, rings: 480 },
+  high: { az: 1280, rings: 720 },
 };
 
 function dummyU8() {
@@ -75,7 +75,7 @@ export class Globe {
     data.albedo.flipY = false; // row 0 = north, like every other map layer
     data.albedo.needsUpdate = true;
 
-    const q = QUALITY[settings.quality] || QUALITY.high;
+    const q = QUALITY[settings.qualityResolved || settings.quality] || QUALITY.high;
     this.rings = q.rings;
     const pal = getPalette(settings.palette).map;
     const col = c => new THREE.Color(c[0], c[1], c[2]);
@@ -128,6 +128,7 @@ export class Globe {
         uSim: { value: dummyRGBA() }, uHasSim: { value: 0 },
         uWeather: { value: dummyRGBA() }, uHasWeather: { value: 0 },
         uCloudAmt: { value: 1 },
+        uNeedInfo: { value: 0 },
       },
     });
     this.terrain = new THREE.Mesh(polarGrid(q.az, q.rings), this.terrainMat);
@@ -137,10 +138,14 @@ export class Globe {
     // rivers (vector, Natural Earth centre lines)
     const segs = data.rivers, ranks = data.riverRank;
     const n = ranks.length;
+    // sorted by rank so that a zoom level draws only a prefix (drawRange) instead of discarding in the shader
+    const order = Array.from({ length: n }, (_, i) => i).sort((p, q) => ranks[p] - ranks[q]);
     const rp = new Float32Array(n * 2 * 3);
-    for (let s = 0; s < n; s++) {
-      rp.set([segs[s * 4], segs[s * 4 + 1], ranks[s], segs[s * 4 + 2], segs[s * 4 + 3], ranks[s]], s * 6);
-    }
+    this.riverRankEnd = new Int32Array(16).fill(n * 2);
+    order.forEach((s, k) => {
+      rp.set([segs[s * 4], segs[s * 4 + 1], ranks[s], segs[s * 4 + 2], segs[s * 4 + 3], ranks[s]], k * 6);
+    });
+    for (let r = 0; r < 16; r++) { let k = 0; while (k < n && ranks[order[k]] <= r) k++; this.riverRankEnd[r] = k * 2; }
     const rg = new THREE.BufferGeometry();
     rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
     this.riverMat = new THREE.ShaderMaterial({
@@ -226,10 +231,15 @@ export class Globe {
     s.uR.value.copy(gcam.R);
     s.uCurv.value = p.curv;
     s.uExag.value = p.exag / 6371000;
+    this.dispMax = 9000 * p.exag / 6371000;
 
     // ring distribution: s(t) = a*sinh(t*b), s(1) = PI, a ~ camera distance
+    // rings reach only a little beyond the visible horizon (on the unrolled sphere of radius 1/c)
     const a = Math.max(gcam.alt * 0.8, 1e-4);
-    const b = Math.asinh(Math.PI / a);
+    const rho = 1 / p.curv;
+    const horizon = Math.acos(Math.min(1, rho / (rho + gcam.alt + this.dispMax))) / p.curv;
+    const sMax = Math.min(Math.PI, horizon * 1.25 + 0.04);
+    const b = Math.asinh(sMax / a);
     const u = this.terrainMat.uniforms;
     u.uRingA.value = a; u.uRingB.value = b;
     u.uTime.value = time;
@@ -240,6 +250,7 @@ export class Globe {
     const fade = (a0, a1) => 1 - Math.min(1, Math.max(0, (Math.log(alt) - Math.log(a0)) / (Math.log(a1) - Math.log(a0))));
     // no nations yet: political lines only in the legacy political mode; district lines in the regions mode
     const political = this.mode === 'political';
+    u.uNeedInfo.value = (political || this.mode === 'regions') && !this.clean ? 1 : 0;
     u.uLineProv.value = this.clean || !political ? 0 : fade(0.35, 1.1);
     u.uLineCountry.value = this.clean || !political ? 0 : 1;
     u.uLineDist.value = this.settings.showDistricts && !this.clean && (political || this.mode === 'regions') ? fade(0.12, 0.6) : 0;
@@ -262,7 +273,9 @@ export class Globe {
     u.uFogAmt.value = 0.85 * (1 - p.globe) * Math.min(1, p.tilt / 0.5);
 
     this.riverMat.uniforms.uLift.value = alt * 0.0015;
-    this.riverMat.uniforms.uMaxRank.value = this.settings.showRivers ? (alt < 0.05 ? 12 : alt < 0.2 ? 9 : alt < 0.8 ? 6 : 3) : -1;
+    const maxRank = this.settings.showRivers ? (alt < 0.05 ? 12 : alt < 0.2 ? 9 : alt < 0.8 ? 6 : 3) : -1;
+    this.riverMat.uniforms.uMaxRank.value = maxRank;
+    this.rivers.geometry.setDrawRange(0, maxRank < 0 ? 0 : this.riverRankEnd[Math.min(15, maxRank)]);
     this.riverMat.uniforms.uOpacity.value = 0.55 + 0.35 * (1 - p.globe);
 
     this.atmoMat.uniforms.uOpacity.value = Math.max(0, (p.curv - 0.8) / 0.2);

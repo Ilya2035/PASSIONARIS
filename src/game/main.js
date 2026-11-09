@@ -37,6 +37,11 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 renderer.setPixelRatio(Math.min(2, (window.devicePixelRatio || 1) * (settings.pixelRatio || 1)));
 renderer.setSize(window.innerWidth, window.innerHeight);
 const upscaler = new Upscaler(renderer);
+// GPU class: integrated GPUs get lighter defaults; "auto" settings adapt at runtime
+const gpuName = (() => { const gl = renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; })();
+const integratedGpu = /Intel|UHD|Iris|Radeon\(TM\) Graphics|Radeon Graphics|Vega \d+ Graphics|Microsoft Basic|SwiftShader/i.test(gpuName) && !/RTX|GTX|Radeon RX|Arc A/i.test(gpuName);
+settings.qualityResolved = settings.quality === 'auto' ? (integratedGpu ? 'medium' : 'high') : settings.quality;
+let dynScale = integratedGpu ? 0.75 : 1, frameEma = 16, dynT = 0;
 const scene = new THREE.Scene();
 const SPACE = new THREE.Color(...PAL.space);
 const SKY = new THREE.Color(...PAL.haze);
@@ -232,7 +237,16 @@ function frame(ts) {
   scene.background.copy(SPACE).lerp(SKY, (1 - p.globe) * Math.min(1, p.tilt / 0.6) * 0.9);
   stars.material.opacity = 0.7 * p.globe;
 
-  upscaler.render(scene, camera, settings);
+  // dynamic resolution: keep ~50 FPS by moving the internal render scale between 50% and 100%
+  frameEma = frameEma * 0.92 + dt * 1000 * 0.08;
+  dynT += dt;
+  if (settings.renderScale === 'auto' && dynT > 0.5) {
+    dynT = 0;
+    if (frameEma > 21) dynScale = Math.max(0.5, dynScale - 0.05);
+    else if (frameEma < 14.5) dynScale = Math.min(1, dynScale + 0.025);
+  }
+  const renderScale = settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1;
+  upscaler.render(scene, camera, { renderScale, sharpen: settings.sharpen, brightness: settings.brightness });
 
   hudT += dt;
   if (hudT > 0.05) {
@@ -251,6 +265,6 @@ setTimeout(() => $('loading')?.classList.add('done'), SHOT ? 0 : 150);
 if (SHOT) $('loading')?.remove();
 
 // debug hooks for automated checks
-window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, ready: false, rebuildModes };
+window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, gpuName, integratedGpu, get dynScale() { return dynScale; }, ready: false, rebuildModes };
 let framesDrawn = 0;
 (function markReady() { if (++framesDrawn > 20) window.__game.ready = true; else requestAnimationFrame(markReady); })();
