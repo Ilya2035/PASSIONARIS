@@ -79,7 +79,7 @@ if (SHOT) {
 
 // ------------------------------------------------------------------ world systems (time, climate, weather, hazards, fx…)
 loadText.textContent = 'Заводим часы мира…';
-const world = await createWorldSystems({ scene, globe, gcam, settings, hud, onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
+const world = await createWorldSystems({ scene, globe, gcam, camera, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
 fill.style.width = '100%';
 
 // ------------------------------------------------------------------ map modes
@@ -93,6 +93,22 @@ function setMode(id) {
 function rebuildModes() { hud.buildModes(setMode, world.features); hud.markMode(mode); }
 rebuildModes();
 setMode(params.get('mode') || 'terrain');
+
+// ?fxdemo=<seconds>: a sample of every event effect around the view centre, pre-aged (captures, style checks)
+if (params.has('fxdemo') && world.fx) {
+  const la = +params.get('lat') || 0, lo = +params.get('lon') || 0, d = Math.max(0.6, gcam.altTarget * 9);
+  const at = (dy, dx, ev) => world.fx.spawn({ lat: la + dy * d, lon: lo + dx * d / Math.max(0.2, Math.cos(la * Math.PI / 180)), ...ev });
+  at(0.15, 0.1, { type: 'eruption', vei: 4 });
+  at(-0.6, -1.2, { type: 'earthquake', level: 4 });
+  at(-0.9, 1.0, { type: 'tsunami', level: 3 });
+  at(0.8, -0.9, { type: 'wildfire', level: 3 });
+  at(1.0, 1.1, { type: 'flood', level: 3 });
+  at(-0.2, 2.2, { type: 'storm', level: 3 });
+  at(0.3, -2.2, { type: 'heatwave', level: 3 });
+  world.fx.now += +params.get('fxdemo') || 2;
+  at(-1.3, 0.1, { type: 'meteorite', level: 3 });
+  world.fx.now += 0.3;
+}
 
 // ------------------------------------------------------------------ helpers
 const fmtLat = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'с.ш.' : 'ю.ш.'}`;

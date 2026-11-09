@@ -51,14 +51,16 @@ export function showTooltip(html, x, y) {
 export function hideTooltip() { $('tooltip').classList.add('hidden'); }
 
 // Event toasts (eruptions, quakes …): small paper slips that fade away
-export function toast(html, ms = 5000) {
+export function toast(html, ms = 5000, onClick = null) {
   const box = $('toasts');
   const el = document.createElement('div');
-  el.className = 'toast';
+  el.className = onClick ? 'toast link' : 'toast';
   el.innerHTML = html;
+  if (onClick) el.onclick = onClick;
   box.prepend(el);
   while (box.children.length > 5) box.lastChild.remove();
   setTimeout(() => { el.style.transition = 'opacity .5s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 500); }, ms);
+  return el;
 }
 
 export function updateCompassAndScale(heading, kmPerPixel) {

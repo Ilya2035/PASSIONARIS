@@ -69,6 +69,7 @@ export function createTime({ cal, clk, save, hud, settings }) {
 
   return {
     clock, registry, storage,
+    get running() { return !clock.paused && !menuPaused; },
     update(dt) {
       clock.advance(menuPaused ? 0 : dt);
       autosave.tick();

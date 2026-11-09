@@ -53,7 +53,15 @@ export class GlobeCamera {
   lookAt(latDeg, lonDeg, alt) {
     geoToVec(latDeg, lonDeg, this.F);
     this.resetNorth();
+    this.flyTarget = null;
     if (alt) this.altTarget = alt;
+  }
+
+  // smooth flight to a point (toasts about events, search); any drag / pan cancels it
+  flyTo(latDeg, lonDeg, alt) {
+    this.flyTarget = geoToVec(latDeg, lonDeg, new THREE.Vector3());
+    if (alt) this.altTarget = Math.max(this.ALT_MIN, Math.min(this.ALT_MAX, alt));
+    this.anchor = null;
   }
 
   // ---- zoom-dependent parameters
@@ -78,6 +86,7 @@ export class GlobeCamera {
 
   // move focus by an arc (radians) along screen axes
   pan(dx, dy) {
+    this.flyTarget = null;
     const R = this.R;
     const dir = R.multiplyScalar(dx).addScaledVector(this.U, dy);
     const a = dir.length();
@@ -90,6 +99,7 @@ export class GlobeCamera {
   // rotate the state so that geo point `cur` (now under the cursor) becomes `target`
   drag(cur, target) {
     if (!cur || !target) return;
+    this.flyTarget = null;
     if (cur.distanceToSquared(target) < 1e-16) return;
     this.rotateState(tmpQ.setFromUnitVectors(cur, target));
   }
@@ -97,6 +107,7 @@ export class GlobeCamera {
   zoom(factor, anchorGeo, ndc) {
     this.altTarget = Math.max(this.ALT_MIN, Math.min(this.ALT_MAX, this.altTarget * factor));
     this.anchor = factor < 1 && anchorGeo ? { geo: anchorGeo.clone(), ndc: ndc.clone() } : null;
+    if (this.anchor) this.flyTarget = null;
   }
 
   // ray -> geographic point on the (morphed, height-free) surface
@@ -128,6 +139,17 @@ export class GlobeCamera {
     const k = 1 - Math.exp(-dt * 7);
     this.alt = Math.exp(Math.log(this.alt) + (Math.log(this.altTarget) - Math.log(this.alt)) * (dt ? k : 1));
     const p = this.params();
+
+    // flight: rotate the focus toward the target along the great circle
+    if (this.flyTarget && dt > 0) {
+      const ang = this.F.angleTo(this.flyTarget);
+      if (ang < 2e-5) this.flyTarget = null;
+      else {
+        const axis = new THREE.Vector3().crossVectors(this.F, this.flyTarget);
+        if (axis.lengthSq() < 1e-14) axis.copy(this.U);
+        this.rotateState(tmpQ.setFromAxisAngle(axis.normalize(), ang * (1 - Math.exp(-dt * 3.2))));
+      }
+    }
 
     // slow north-up relaxation
     const north = tmpV.copy(Y).addScaledVector(this.F, -this.F.y);

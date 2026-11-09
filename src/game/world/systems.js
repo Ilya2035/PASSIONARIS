@@ -11,6 +11,7 @@ const OPT = import.meta.glob([
 import { loadBiomes } from './biomes.js';
 import { createTime } from './time.js';
 import { createClimate } from './climate.js';
+import { createHazards } from './hazards.js';
 
 const has = p => !!OPT[p];
 const load = async p => (OPT[p] ? OPT[p]() : null);
@@ -19,8 +20,10 @@ export async function createWorldSystems(ctx) {
   const { hud, globe } = ctx;
   const features = new Set();
   const updaters = [];
+  let mode = 'terrain';
   const sys = {
     features,
+    onModeChange(id) { mode = id; },
     liveInfo: false,
     update() {},
     renderClock(extra) { hud.renderClock({ date: '—', time: extra || '' }, 0); },
@@ -39,6 +42,7 @@ export async function createWorldSystems(ctx) {
       if (b) { kicker = b.nameRu; rows.push(['Местность', b.nameRu]); }
     }
     if (sys.climate) rows.push(...sys.climate.describe(geo.lat, geo.lon));
+    if (sys.hazards && mode === 'hazards') rows.push(...sys.hazards.describe(geo.lat, geo.lon));
     return { kicker, rows, tip: kicker };
   };
 
@@ -69,8 +73,34 @@ export async function createWorldSystems(ctx) {
     }
   }
 
+  // ---- light effects for events (eruptions, quakes, tsunamis, meteorites, fires, weather spells)
+  const fxMod = await load('../fx/events.js');
+  if (fxMod) {
+    sys.fx = new fxMod.EventFx(ctx.scene, globe);
+    sys.fx.setVisible(ctx.settings.effects !== false);
+    features.add('fx');
+    const prevSetting = sys.onSetting;
+    sys.onSetting = (k, v) => { if (k === 'effects') sys.fx.setVisible(v !== false); prevSetting?.(k, v); };
+  }
+
+  // ---- natural hazards (needs the clock; effects and the hazard layer are optional)
+  if (sys.clock) {
+    const hz = await load('../../sim/hazards/index.js');
+    if (hz) {
+      sys.hazards = await createHazards({ mod: hz, clock: sys.clock, cal, climate: sys.climate, fx: sys.fx, hud, gcam: ctx.gcam })
+        .catch(e => { console.warn('hazards', e); return null; });
+      if (sys.hazards) {
+        features.add('hazards');
+        sys.time?.onLoad(() => sys.hazards.reset());
+      }
+    }
+  }
+
+  const running = () => !!sys.time?.running;
   sys.update = (dt, t, p) => {
     sys.time?.update(dt);
+    sys.hazards?.update(dt, running());
+    sys.fx?.update(ctx.gcam, t, { running: running(), heightPx: ctx.renderHeight?.(), fov: ctx.camera?.fov });
     for (const u of updaters) u(dt, t, p);
   };
 
