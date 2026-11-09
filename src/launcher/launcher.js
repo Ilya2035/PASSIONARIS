@@ -5,10 +5,10 @@ import '@fontsource/inter/400.css';
 import '@fontsource/inter/600.css';
 import '../shared/theme.css';
 import './launcher.css';
-import * as THREE from 'three';
 import changelogMd from '../../CHANGELOG.md?raw';
 import { APP_NAME, VERSION, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
 import { loadSettings, saveSettings, isElectron, DEFAULT_SETTINGS } from '../shared/settings.js';
+import { PALETTES, applyUiPalette } from '../shared/palettes.js';
 
 const $ = id => document.getElementById(id);
 if (!isElectron) document.body.classList.add('browser');
@@ -49,8 +49,9 @@ showVersion(VERSION);
 const ROADMAP = [
   ['Обёртка (Electron) и лаунчер', 'done'],
   ['Глобус и 3D-карта высот', 'done'],
-  ['Природные области (реки, горы)', ''],
-  ['Куски ~100 км² и морские зоны', ''],
+  ['Чёткая потоковая карта', 'wip'],
+  ['Территории 10×10 км и районы', 'wip'],
+  ['Провинции и регионы', ''],
   ['Границы всех эпох', ''],
   ['Погода и климат', ''],
   ['Визуализация и стиль', 'wip'],
@@ -63,7 +64,12 @@ $('roadmap').innerHTML = ROADMAP.map(([t, s]) => `<li class="${s}">${t}</li>`).j
 
 // ------------------------------------------------------------- settings
 const settings = await loadSettings();
+applyUiPalette(settings.palette);
+for (const [id, p] of Object.entries(PALETTES)) {
+  const o = document.createElement('option'); o.value = id; o.textContent = p.name; $('s-palette').appendChild(o);
+}
 const fields = [
+  ['s-palette', 'palette', String],
   ['s-window', 'windowMode', String],
   ['s-quality', 'quality', String],
   ['s-pixel', 'pixelRatio', Number],
@@ -73,6 +79,8 @@ const fields = [
 const syncFields = () => { for (const [id, key] of fields) $(id).value = String(settings[key]); };
 syncFields();
 for (const [id, key, parse] of fields) $(id).addEventListener('input', () => { settings[key] = parse($(id).value); saveSettings(settings); });
+// palette change: restyle instantly (the background globe picks it up on next launch of the page)
+$('s-palette').addEventListener('input', () => applyUiPalette(settings.palette));
 $('open-settings').onclick = () => $('settings').classList.add('open');
 $('s-close').onclick = () => $('settings').classList.remove('open');
 $('s-reset').onclick = () => { Object.assign(settings, DEFAULT_SETTINGS); syncFields(); saveSettings(settings); };
@@ -81,74 +89,15 @@ $('settings').addEventListener('click', e => { if (e.target === $('settings')) $
 // ------------------------------------------------------------- actions
 $('play').onclick = async () => {
   await saveSettings(settings);
-  if (isElectron) window.orbis.launch(settings);
+  if (isElectron) window.passionaris.launch(settings);
   else location.href = './game.html';
 };
-$('quit').onclick = () => { if (isElectron) window.orbis.quit(); else window.close(); };
-$('win-close').onclick = () => window.orbis?.quit();
-$('win-min').onclick = () => window.orbis?.minimize();
+$('quit').onclick = () => { if (isElectron) window.passionaris.quit(); else window.close(); };
+$('win-close').onclick = () => window.passionaris?.quit();
+$('win-min').onclick = () => window.passionaris?.minimize();
 
-// ------------------------------------------------------------- background globe
-const canvas = $('bg');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-const scene = new THREE.Scene();
-scene.background = new THREE.Color('#04070d');
-const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-camera.position.set(0, 0, 5.4);
-
-const tex = new THREE.TextureLoader().load('assets/map/albedo-2k.jpg');
-tex.anisotropy = 8;
-const globeMat = new THREE.ShaderMaterial({
-  glslVersion: THREE.GLSL3,
-  uniforms: { uTex: { value: tex } },
-  vertexShader: `out vec2 vUv; out vec3 vN; out vec3 vW;
-    void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-  fragmentShader: `precision highp float; uniform sampler2D uTex; in vec2 vUv; in vec3 vN; in vec3 vW; layout(location=0) out vec4 o;
-    void main(){
-      vec3 c = pow(texture(uTex, vUv).rgb, vec3(0.85));
-      vec3 N = normalize(vN); vec3 V = normalize(cameraPosition - vW);
-      vec3 L = normalize(vec3(-0.6, 0.45, 0.65));
-      float d = clamp(dot(N, L), 0.0, 1.0);
-      float lit = 0.08 + 1.05 * d;
-      float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
-      vec3 col = c * lit + vec3(0.35, 0.55, 0.95) * rim * (0.25 + 0.75 * d);
-      o = vec4(col, 1.0);
-    }`,
-});
-const globe = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), globeMat);
-const tiltGroup = new THREE.Group();
-tiltGroup.rotation.z = THREE.MathUtils.degToRad(23.4);
-tiltGroup.add(globe);
-scene.add(tiltGroup);
-const halo = new THREE.Mesh(new THREE.SphereGeometry(1.08, 64, 32), new THREE.ShaderMaterial({
-  glslVersion: THREE.GLSL3,
-  side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-  vertexShader: `out vec3 vN; out vec3 vW; void main(){ vN = normalize(normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-  fragmentShader: `precision highp float; in vec3 vN; in vec3 vW; layout(location=0) out vec4 o;
-    void main(){ float r = 1.0 - abs(dot(normalize(vN), normalize(cameraPosition - vW))); float a = pow(r, 4.0) * 1.1; o = vec4(vec3(0.4,0.62,1.0)*a, a); }`,
-}));
-scene.add(halo);
-{
-  const n = 3500, pos = new Float32Array(n * 3), v = new THREE.Vector3();
-  for (let i = 0; i < n; i++) { v.randomDirection().multiplyScalar(30); pos.set([v.x, v.y, v.z], i * 3); }
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xc8d0e0, size: 1.1, sizeAttenuation: false, transparent: true, opacity: 0.7 })));
-}
-
-function resize() {
-  const w = window.innerWidth, h = window.innerHeight;
-  renderer.setSize(w, h);
-  camera.aspect = w / h;
-  // keep the globe on the right side of the window
-  camera.setViewOffset(w, h, -w * 0.18, 0, w, h);
-  camera.updateProjectionMatrix();
-}
-window.addEventListener('resize', resize);
-resize();
-const timer = new THREE.Timer();
-renderer.setAnimationLoop(ts => {
-  timer.update(ts);
-  globe.rotation.y = 2.2 + timer.getElapsed() * 0.04;
-  renderer.render(scene, camera);
-});
+// ------------------------------------------------------------- menu art
+// Rendered by the game engine itself (scripts/render-menu-art.mjs) — v1: the Nile Delta.
+const MENU_ART = "assets/ui/menu-nile-delta";
+$("bg").style.backgroundImage = `url("${MENU_ART}.jpg")`;
+fetch(`${MENU_ART}.json`).then(r => r.ok ? r.json() : null).then(j => { if (j?.caption) $("art-caption").textContent = j.caption; }).catch(() => {});

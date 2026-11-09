@@ -63,7 +63,7 @@ export class GlobeCamera {
     const cMin = 1 - 0.92 * unroll;
     const u = smooth(Math.log(0.03), Math.log(1.25), la);
     const curv = cMin + (1 - cMin) * u;
-    const tilt = THREE.MathUtils.degToRad(46) * (1 - smooth(Math.log(0.012), Math.log(0.6), la));
+    const tilt = this.tiltOverride ?? THREE.MathUtils.degToRad(46) * (1 - smooth(Math.log(0.012), Math.log(0.6), la));
     const relief = (this.settings.reliefScale ?? 1);
     const exag = (9 + 26 * smooth(Math.log(0.05), Math.log(2.0), la)) * relief;
     return { curv, tilt, exag, globe: smooth(Math.log(0.45), Math.log(1.6), la) };

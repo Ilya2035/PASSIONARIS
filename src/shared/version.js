@@ -3,7 +3,7 @@
 //   EPOCH  — global era of the game (0 = foundation, 1 = first epoch, ...)
 //   UPDATE — big update / new system
 //   STEP   — small step inside an update
-export const APP_NAME = typeof __APP_NAME__ !== 'undefined' ? __APP_NAME__ : 'ORBIS';
+export const APP_NAME = typeof __APP_NAME__ !== 'undefined' ? __APP_NAME__ : 'Passionaris';
 export const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
 
 const [epoch, update, step] = VERSION.split('.').map(Number);

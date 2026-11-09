@@ -7,6 +7,7 @@ import './game.css';
 import * as THREE from 'three';
 import { APP_NAME, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
 import { loadSettings, saveSettings, isElectron } from '../shared/settings.js';
+import { getPalette, applyUiPalette } from '../shared/palettes.js';
 import { loadWorld, fillMapMode, MAP_MODES } from './data.js';
 import { Globe } from './globe.js';
 import { GlobeCamera, vecToGeo } from './camera.js';
@@ -14,6 +15,9 @@ import { GlobeCamera, vecToGeo } from './camera.js';
 const $ = id => document.getElementById(id);
 const settings = await loadSettings();
 const params = new URLSearchParams(location.search);
+if (params.has('palette')) settings.palette = params.get('palette');
+applyUiPalette(settings.palette);
+const PAL = getPalette(settings.palette).map;
 
 document.title = `${APP_NAME} ${VERSION_LABEL}`;
 $('load-version').textContent = `${VERSION_LABEL} · ${EPOCH_LABEL}`;
@@ -27,8 +31,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 renderer.setPixelRatio(Math.min(2, (window.devicePixelRatio || 1) * (settings.pixelRatio || 1)));
 renderer.setSize(window.innerWidth, window.innerHeight);
 const scene = new THREE.Scene();
-const SPACE = new THREE.Color('#04070d');
-const SKY = new THREE.Color(0.62, 0.7, 0.78);
+const SPACE = new THREE.Color(...PAL.space);
+const SKY = new THREE.Color(...PAL.haze);
 scene.background = SPACE.clone();
 const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.001, 50);
 
@@ -51,6 +55,14 @@ fill.style.width = '100%';
 
 const gcam = new GlobeCamera(camera, settings);
 if (params.has('lat')) gcam.lookAt(+params.get('lat'), +params.get('lon'), +(params.get('alt') || 0.3));
+// "shot" mode: no UI, camera placed instantly — used to render menu art (scripts/render-menu-art.mjs)
+const SHOT = params.get('shot') === '1';
+if (SHOT) {
+  document.body.classList.add('shot');
+  gcam.alt = gcam.altTarget;
+  if (params.has('tilt')) gcam.tiltOverride = THREE.MathUtils.degToRad(+params.get('tilt'));
+  globe.clean = params.get('clean') === '1';
+}
 
 // ------------------------------------------------------------------ map modes
 let mode = 'political';
@@ -68,7 +80,7 @@ function setMode(id) {
   globe.overlayBase = id === 'terrain' ? 0 : 1;
   for (const b of modesEl.children) b.classList.toggle('active', b.dataset.mode === id);
 }
-setMode('political');
+setMode(params.get('mode') || 'political');
 
 // ------------------------------------------------------------------ lookup helpers
 const D = world.districts;
@@ -188,8 +200,8 @@ function toggleMenu(force) {
 }
 $('btn-menu').onclick = () => toggleMenu(true);
 $('menu-resume').onclick = () => toggleMenu(false);
-$('menu-launcher').onclick = () => { if (isElectron) window.orbis.exitToLauncher(); else location.href = './index.html'; };
-$('menu-quit').onclick = () => { if (isElectron) window.orbis.quit(); else location.href = './index.html'; };
+$('menu-launcher').onclick = () => { if (isElectron) window.passionaris.exitToLauncher(); else location.href = './index.html'; };
+$('menu-quit').onclick = () => { if (isElectron) window.passionaris.quit(); else location.href = './index.html'; };
 const bind = (id, key, prop = 'value', parse = Number) => {
   const el = $(id);
   el[prop] = settings[key];
@@ -253,7 +265,10 @@ function frame(ts) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-setTimeout(() => $('loading').classList.add('done'), 150);
+setTimeout(() => $('loading')?.classList.add('done'), SHOT ? 0 : 150);
+if (SHOT) $('loading').remove();
 
 // debug hooks for automated checks
-window.__orbis = { gcam, globe, camera, renderer, setMode, select, world };
+window.__game = { gcam, globe, camera, renderer, setMode, select, world, ready: false };
+let framesDrawn = 0;
+(function markReady() { if (++framesDrawn > 20) window.__game.ready = true; else requestAnimationFrame(markReady); })();

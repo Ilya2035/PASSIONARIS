@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TERRAIN_VERT, TERRAIN_FRAG, RIVER_VERT, RIVER_FRAG, ATMO_VERT, ATMO_FRAG } from './shaders.js';
 import { makeHeightTexture, makeCellTexture, makeInfoTexture, makeColorTexture, INFO_W } from './data.js';
+import { getPalette } from '../shared/palettes.js';
 
 const QUALITY = {
   low: { az: 512, rings: 360 },
@@ -49,6 +50,8 @@ export class Globe {
 
     const q = QUALITY[settings.quality] || QUALITY.high;
     this.rings = q.rings;
+    const pal = getPalette(settings.palette).map;
+    const col = c => new THREE.Color(c[0], c[1], c[2]);
 
     this.shared = {
       uF: { value: new THREE.Vector3(0, 0, 1) },
@@ -79,10 +82,16 @@ export class Globe {
         uGlobe: { value: 1 },
         uLineProv: { value: 1 },
         uLineDist: { value: 1 },
+        uLineCountry: { value: 1 },
         uTime: { value: 0 },
         uSunView: { value: new THREE.Vector3(0, 0, 1) },
         uFogNear: { value: 10 }, uFogFar: { value: 20 }, uFogAmt: { value: 0 },
-        uFogColor: { value: new THREE.Color(0.62, 0.7, 0.78) },
+        uFogColor: { value: col(pal.haze) },
+        uPaper: { value: col(pal.paper) }, uPaperDark: { value: col(pal.paperDark) },
+        uForest: { value: col(pal.forest) }, uDesert: { value: col(pal.desert) }, uSnow: { value: col(pal.snow) },
+        uShallow: { value: col(pal.shallow) }, uDeep: { value: col(pal.deep) }, uLake: { value: col(pal.lake) },
+        uInk: { value: col(pal.ink) }, uSelectC: { value: col(pal.select) },
+        uContour: { value: 500 }, uContourAmt: { value: 0 },
       },
     });
     this.terrain = new THREE.Mesh(polarGrid(q.az, q.rings), this.terrainMat);
@@ -102,7 +111,7 @@ export class Globe {
       glslVersion: THREE.GLSL3,
       vertexShader: RIVER_VERT,
       fragmentShader: RIVER_FRAG,
-      uniforms: { ...this.shared, uLift: { value: 0 }, uMaxRank: { value: 6 }, uOpacity: { value: 0.85 } },
+      uniforms: { ...this.shared, uLift: { value: 0 }, uMaxRank: { value: 6 }, uOpacity: { value: 0.85 }, uRiverC: { value: col(pal.river) } },
       transparent: true,
       depthWrite: false,
     });
@@ -116,7 +125,7 @@ export class Globe {
       glslVersion: THREE.GLSL3,
       vertexShader: ATMO_VERT,
       fragmentShader: ATMO_FRAG,
-      uniforms: { uOpacity: { value: 1 } },
+      uniforms: { uOpacity: { value: 1 }, uHaloC: { value: col(pal.haze) } },
       side: THREE.BackSide,
       transparent: true,
       depthWrite: false,
@@ -162,10 +171,14 @@ export class Globe {
     u.uShadeK.value = 3.0 + 1.8 * (1 - p.globe);
     const alt = gcam.alt;
     const fade = (a0, a1) => 1 - Math.min(1, Math.max(0, (Math.log(alt) - Math.log(a0)) / (Math.log(a1) - Math.log(a0))));
-    u.uLineProv.value = fade(0.35, 1.1);
-    u.uLineDist.value = this.settings.showDistricts ? fade(0.05, 0.16) : 0;
+    u.uLineProv.value = this.clean ? 0 : fade(0.35, 1.1);
+    u.uLineCountry.value = this.clean ? 0 : 1;
+    u.uLineDist.value = this.settings.showDistricts && !this.clean ? fade(0.05, 0.16) : 0;
     // political colours are strong from afar and give way to the terrain up close
     u.uOverlay.value = this.overlayBase * (0.3 + 0.7 * Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.015)) / (Math.log(0.6) - Math.log(0.015)))));
+    // contour interval follows the zoom; lines fade out at globe distance
+    u.uContour.value = alt < 0.012 ? 100 : alt < 0.03 ? 200 : alt < 0.09 ? 250 : 500;
+    u.uContourAmt.value = fade(0.12, 0.45);
 
     // light for the globe look: upper-left, toward the viewer
     const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);

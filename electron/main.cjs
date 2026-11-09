@@ -1,16 +1,16 @@
-// ORBIS desktop wrapper: launcher window -> game window.
+// Passionaris desktop wrapper: launcher window -> game window.
 const { app, BrowserWindow, ipcMain, protocol, net } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 
 // laptops with two GPUs: ask for the discrete one
-if (process.env.ORBIS_GPU === 'discrete') app.commandLine.appendSwitch('force_high_performance_gpu');
+if (process.env.PASSIONARIS_GPU === 'discrete') app.commandLine.appendSwitch('force_high_performance_gpu');
 // Some systems (restricted accounts, sandboxed shells) kill Chromium's GPU sandbox at start-up.
 // If the GPU process keeps crashing, restart once without the GPU sandbox instead of running without WebGL.
 let gpuCrashes = 0;
 app.on('child-process-gone', (_e, d) => {
-  if (process.env.ORBIS_GPU_DEBUG) console.log('[gpu]', d.type, d.reason, d.exitCode);
+  if (process.env.PASSIONARIS_GPU_DEBUG) console.log('[gpu]', d.type, d.reason, d.exitCode);
   if (d.type !== 'GPU' || d.reason === 'clean-exit') return;
   if (++gpuCrashes >= 2 && !app.commandLine.hasSwitch('disable-gpu-sandbox')) {
     app.relaunch({ args: process.argv.slice(1).concat(['--disable-gpu-sandbox']) });
@@ -25,8 +25,8 @@ protocol.registerSchemesAsPrivileged([
 const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const PUBLIC = path.join(ROOT, 'public');
-const DEV_URL = process.env.ORBIS_DEV_URL; // e.g. http://localhost:5173 for live reload
-const pageUrl = page => (DEV_URL ? `${DEV_URL}/${page}` : `app://orbis/${page}`);
+const DEV_URL = process.env.PASSIONARIS_DEV_URL; // e.g. http://localhost:5173 for live reload
+const pageUrl = page => (DEV_URL ? `${DEV_URL}/${page}` : `app://passionaris/${page}`);
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const readSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; } };
@@ -39,7 +39,7 @@ let game = null;
 function createLauncher() {
   launcher = new BrowserWindow({
     width: 1240, height: 740, minWidth: 960, minHeight: 600,
-    frame: false, backgroundColor: '#04070d', show: false, title: 'ORBIS', webPreferences,
+    frame: false, backgroundColor: '#121211', show: false, title: 'Passionaris', webPreferences,
   });
   launcher.once('ready-to-show', () => launcher.show());
   launcher.on('closed', () => { launcher = null; });
@@ -51,11 +51,11 @@ function createGame(settings) {
   game = new BrowserWindow({
     width: 1600, height: 900, minWidth: 1024, minHeight: 640,
     fullscreen: mode === 'fullscreen', autoHideMenuBar: true,
-    backgroundColor: '#04070d', show: false, title: 'ORBIS', webPreferences,
+    backgroundColor: '#121211', show: false, title: 'Passionaris', webPreferences,
   });
   game.once('ready-to-show', () => { if (mode === 'maximized') game.maximize(); game.show(); game.focus(); });
   game.on('closed', () => { game = null; });
-  if (process.env.ORBIS_SMOKE) game.webContents.on('console-message', e => console.log('[smoke] game console:', e.message));
+  if (process.env.PASSIONARIS_SMOKE) game.webContents.on('console-message', e => console.log('[smoke] game console:', e.message));
   game.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') { game.setFullScreen(!game.isFullScreen()); e.preventDefault(); }
   });
@@ -87,12 +87,31 @@ app.whenReady().then(() => {
   ipcMain.on('app:quit', () => app.quit());
   ipcMain.on('win:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());
 
+  if (CAPTURE) { captureShot(JSON.parse(CAPTURE)); return; }
   createLauncher();
   if (SMOKE) smokeTest();
 });
 
-// ORBIS_SMOKE=<folder>: open launcher -> press Play -> wait for the map -> save screenshots -> quit
-const SMOKE = process.env.ORBIS_SMOKE;
+// PASSIONARIS_CAPTURE={"query":"lat=..&lon=..","width":2560,"height":1440,"out":"file.png"}
+// renders game.html?shot=1&<query> in an offscreen-sized window and saves one frame (menu art, docs)
+const CAPTURE = process.env.PASSIONARIS_CAPTURE;
+async function captureShot({ query, width = 2560, height = 1440, out }) {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const win = new BrowserWindow({ width, height, useContentSize: true, show: false, frame: false, paintWhenInitiallyHidden: true, backgroundColor: '#121211', webPreferences });
+  win.webContents.on('console-message', e => { if (e.level === 'error') console.log('[capture] console:', e.message); });
+  await win.loadURL(`${pageUrl('game.html')}?shot=1&${query}`);
+  for (let i = 0; i < 240; i++) {
+    if (await win.webContents.executeJavaScript('!!(window.__game && window.__game.ready)').catch(() => false)) break;
+    await wait(250);
+  }
+  await wait(2500); // let streaming/fades settle
+  fs.writeFileSync(out, (await win.webContents.capturePage()).toPNG());
+  console.log('[capture] saved', out);
+  app.quit();
+}
+
+// PASSIONARIS_SMOKE=<folder>: open launcher -> press Play -> wait for the map -> save screenshots -> quit
+const SMOKE = process.env.PASSIONARIS_SMOKE;
 async function smokeTest() {
   const shot = async (win, name) => fs.writeFileSync(path.join(SMOKE, name), (await win.webContents.capturePage()).toPNG());
   const log = (...a) => console.log('[smoke]', ...a);
@@ -109,7 +128,7 @@ async function smokeTest() {
     game.webContents.on('did-fail-load', (_e, code, desc, url) => log('load failed', code, desc, url));
     for (let i = 0; i < 120; i++) {
       await wait(500);
-      const ready = await game.webContents.executeJavaScript('!!window.__orbis').catch(() => false);
+      const ready = await game.webContents.executeJavaScript('!!window.__game').catch(() => false);
       if (ready) break;
       if (i % 10 === 9) {
         log('waiting…', await game.webContents.executeJavaScript("document.getElementById('load-version')?.textContent + ' | ' + (document.getElementById('load-fill')?.style.width)").catch(e => e.message));
@@ -122,7 +141,7 @@ async function smokeTest() {
       }
     }
     await wait(3000);
-    const gpu = await game.webContents.executeJavaScript(`(() => { const gl = window.__orbis.renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })()`);
+    const gpu = await game.webContents.executeJavaScript(`(() => { const gl = window.__game.renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })()`);
     const fps = await game.webContents.executeJavaScript("document.getElementById('fps').textContent");
     log('gpu:', gpu, '| fps:', fps);
     await shot(game, 'smoke-game.png');

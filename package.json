@@ -1,8 +1,8 @@
 {
-  "name": "orbis",
-  "productName": "ORBIS",
-  "version": "0.1.0",
-  "description": "ORBIS — grand strategy on a living globe (working title)",
+  "name": "passionaris",
+  "productName": "Passionaris",
+  "version": "0.1.1",
+  "description": "Passionaris — grand strategy of the rise and fall of peoples on a living globe",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",

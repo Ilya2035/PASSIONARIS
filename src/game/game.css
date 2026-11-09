@@ -5,40 +5,40 @@ html, body { overflow: hidden; }
 
 /* loading */
 #loading { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at 50% 40%, #13213a 0%, #070b12 70%); transition: opacity .6s; }
+  background: radial-gradient(ellipse at 50% 40%, #2b2a26 0%, var(--ink) 72%); transition: opacity .6s; }
 #loading.done { opacity: 0; pointer-events: none; }
 .load-inner { width: min(420px, 80vw); text-align: center; }
-.load-title { font-size: 64px; letter-spacing: 0.32em; padding-left: 0.32em; color: var(--parch); }
-.load-sub { margin: 4px 0 26px; color: var(--brass-hi); letter-spacing: 0.1em; font-size: 12px; }
+.load-title { font-size: 50px; letter-spacing: 0.2em; padding-left: 0.2em; color: var(--text); }
+.load-sub { margin: 4px 0 26px; color: var(--accent-hi); letter-spacing: 0.1em; font-size: 12px; }
 .load-bar { height: 3px; background: rgba(255, 255, 255, 0.07); border-radius: 2px; overflow: hidden; margin-bottom: 12px; }
-#load-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--brass), var(--brass-hi)); transition: width .2s; }
+#load-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-hi)); transition: width .2s; }
 
 /* top bar */
 #topbar { position: fixed; top: 10px; left: 12px; right: 12px; height: 46px; z-index: 10;
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 12px; }
 .tb-left { display: flex; align-items: center; gap: 10px; }
-.emblem { width: 24px; height: 24px; color: var(--brass-hi); }
-.tb-name { font-size: 22px; letter-spacing: 0.28em; }
-.tb-center { font-size: 18px; letter-spacing: 0.08em; color: var(--parch-dim); }
+.emblem { width: 24px; height: 24px; color: var(--accent-hi); }
+.tb-name { font-size: 20px; letter-spacing: 0.2em; }
+.tb-center { font-size: 18px; letter-spacing: 0.08em; color: var(--text-dim); }
 .tb-right { display: flex; justify-content: flex-end; align-items: center; gap: 12px; font-size: 12px; }
 .btn.small { padding: 4px 10px; }
 
 /* info panel */
 #info { position: fixed; top: 70px; left: 12px; width: 320px; padding: 16px 18px 14px; z-index: 9; }
 #info h1 { font-size: 28px; margin: 2px 0 0; line-height: 1.1; }
-.info-kicker { text-transform: uppercase; letter-spacing: 0.18em; font-size: 10px; color: var(--brass-hi); }
+.info-kicker { text-transform: uppercase; letter-spacing: 0.18em; font-size: 10px; color: var(--accent-hi); }
 #info dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
 #info dt { color: var(--muted); }
 #info dd { margin: 0; text-align: right; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.5); }
 .info-note { font-size: 11px; margin-top: 12px; line-height: 1.45; }
 .close { position: absolute; top: 6px; right: 8px; background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; }
-.close:hover { color: var(--parch); }
+.close:hover { color: var(--text); }
 
 /* tooltip */
 #tooltip { position: fixed; z-index: 20; pointer-events: none; padding: 8px 11px; min-width: 160px; font-size: 12px; line-height: 1.5; }
 #tooltip b { font-family: var(--font-display); font-size: 17px; font-weight: 600; }
-#tooltip .t-sub { color: var(--parch-dim); }
+#tooltip .t-sub { color: var(--text-dim); }
 
 /* hud left */
 #hud-left { position: fixed; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 12px; padding: 8px 14px 8px 8px; z-index: 9; }
@@ -47,7 +47,7 @@ html, body { overflow: hidden; }
 #compass-needle { transform-origin: 24px 24px; }
 .hud-col { display: flex; flex-direction: column; gap: 5px; min-width: 150px; }
 .scale { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-#scale-bar { height: 6px; border: 1px solid var(--parch-dim); border-top: 0; }
+#scale-bar { height: 6px; border: 1px solid var(--text-dim); border-top: 0; }
 #coords { font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* map modes */
@@ -65,3 +65,7 @@ html, body { overflow: hidden; }
   #modes .btn { min-width: 0; padding: 6px 8px; }
   #hud-left { bottom: 72px; }
 }
+
+/* shot mode: clean frame for menu art */
+body.shot #topbar, body.shot #hud-left, body.shot #modes, body.shot #tooltip, body.shot #info, body.shot #loading { display: none !important; }
+body.shot::after { display: none; }

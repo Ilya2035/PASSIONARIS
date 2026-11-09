@@ -81,12 +81,17 @@ uniform float uShadeK;       // relief shading strength
 uniform float uGlobe;        // 1 = globe look (limb, atmosphere haze)
 uniform float uLineProv;     // province border visibility
 uniform float uLineDist;     // district border visibility
+uniform float uLineCountry;  // country border visibility
 uniform float uTime;
 uniform vec3 uSunView;       // globe-view light (world space)
 uniform float uFogNear;
 uniform float uFogFar;
 uniform float uFogAmt;
 uniform vec3 uFogColor;
+// palette (src/shared/palettes.js)
+uniform vec3 uPaper, uPaperDark, uForest, uDesert, uSnow, uShallow, uDeep, uLake, uInk, uSelectC;
+uniform float uContour;      // contour interval, metres
+uniform float uContourAmt;   // 0..1
 
 in vec3 vGeo;
 in vec3 vWorld;
@@ -176,30 +181,55 @@ void main() {
   uvec2 i0 = infoOf(id0), i1 = infoOf(id1), i2 = infoOf(id2), i3 = infoOf(id3);
 
   // ---------------------------------------------------------------- base colour
+  // Neutral "archival map" style: paper land tinted by biome, ink lines, soft relief,
+  // procedural contour lines (crisp at any zoom because they come from the filtered height field).
   vec3 alb = textureGrad(uAlbedo, uv, duvx, duvy).rgb;
+  float albL = dot(alb, vec3(0.299, 0.587, 0.114));
   vec3 col;
+  float hLand = max(hc, 0.0);
   if (land) {
-    vec3 c = pow(alb, vec3(0.82));
-    float l = dot(c, vec3(0.299, 0.587, 0.114));
-    c = mix(vec3(l), c, 1.18) * vec3(1.05, 1.0, 0.92);
+    // biome from imagery brightness: forest ~0.15, farmland/steppe ~0.3, desert ~0.65, ice ~0.95
+    float sat = max(alb.r, max(alb.g, alb.b)) - min(alb.r, min(alb.g, alb.b));
+    float ice = smoothstep(0.78, 0.92, albL) * (1.0 - smoothstep(0.08, 0.2, sat));
+    vec3 c = mix(uForest, uPaper, smoothstep(0.1, 0.36, albL));
+    c = mix(c, uDesert, smoothstep(0.42, 0.66, albL));
+    c = mix(c, uPaperDark, smoothstep(1400.0, 4800.0, hLand) * 0.3);
+    c = mix(c, uSnow, max(ice, smoothstep(4300.0, 5800.0, hLand) * 0.85));
     col = c * shade;
+    // contours: thin every uContour metres, stronger every 5th
+    if (uContourAmt > 0.0) {
+      float cv = hLand / uContour;
+      float fw = max(fwidth(cv), 1e-4);
+      float dl = abs(fract(cv - 0.5) - 0.5) / fw;
+      float idx = abs(fract(cv / 5.0 - 0.5) - 0.5) * 5.0 / fw;
+      float line = (1.0 - smoothstep(0.35, 1.1, dl)) * 0.55 + (1.0 - smoothstep(0.6, 1.5, idx)) * 0.45;
+      line *= smoothstep(0.02, 0.08, 1.0 / fw) * step(1.0, hLand);   // vanish when lines would crowd
+      col = mix(col, uInk, line * 0.22 * uContourAmt);
+    }
+    // political colours, muted so the map stays calm
     vec4 ov = colorOf(win);
-    float a = ov.a * uOverlay;
-    col = mix(col, ov.rgb * mix(1.0, shade, 0.55), a);
+    vec3 muted = mix(ov.rgb, vec3(dot(ov.rgb, vec3(0.333))), 0.3);
+    muted = mix(muted, uPaper, 0.15);
+    col = mix(col, muted * mix(1.0, shade, 0.6), ov.a * uOverlay);
   } else {
     float depth = max(-hc, 0.0);
-    vec3 shallow = vec3(0.30, 0.56, 0.58), mid = vec3(0.12, 0.33, 0.45), deep = vec3(0.05, 0.14, 0.25);
-    vec3 wc = mix(shallow, mid, smoothstep(0.0, 160.0, depth));
-    wc = mix(wc, deep, smoothstep(160.0, 5200.0, depth));
-    if (win == 1u) wc = vec3(0.17, 0.40, 0.48);
-    // sea ice from the imagery
-    float ice = smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
-    // animated ripples, faded out when they would alias
+    vec3 wc = mix(uShallow, uDeep, pow(smoothstep(0.0, 5000.0, depth), 0.55));
+    if (win == 1u) wc = uLake;
+    // isobaths: the shelf edge (200 m) and every 1000 m — engraved-chart look
+    float bv = depth / 1000.0;
+    float bw = max(fwidth(bv), 1e-4);
+    float iso = (1.0 - smoothstep(0.3, 1.1, abs(fract(bv - 0.5) - 0.5) / bw)) * step(500.0, depth);
+    float sv = depth / 200.0;
+    float sw = max(fwidth(sv), 1e-4);
+    float shelf = (1.0 - smoothstep(0.3, 1.2, abs(sv - 1.0) / sw));
+    float fadeIso = smoothstep(0.01, 0.05, 1.0 / bw);
+    wc = mix(wc, uInk, (iso * 0.1 + shelf * 0.16) * fadeIso * (win == 1u ? 0.0 : 1.0));
+    // faint moving sheen, faded out when it would alias
     vec2 q = uv * uGrid * 0.35;
-    float n = vnoise(q + vec2(uTime * 0.07, uTime * 0.05)) * 0.6 + vnoise(q * 2.7 - vec2(uTime * 0.11, 0.0)) * 0.4;
-    float rip = (n - 0.5) * (1.0 - smoothstep(0.6, 3.0, texPerPx));
-    wc *= 1.0 + rip * 0.18;
-    col = mix(wc, vec3(0.86, 0.9, 0.93) * shade, ice);
+    float n = vnoise(q + vec2(uTime * 0.05, uTime * 0.035)) * 0.6 + vnoise(q * 2.7 - vec2(uTime * 0.08, 0.0)) * 0.4;
+    wc *= 1.0 + (n - 0.5) * 0.08 * (1.0 - smoothstep(0.6, 3.0, texPerPx));
+    float ice = smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
+    col = mix(wc, uSnow * shade, ice);
   }
 
   // ---------------------------------------------------------------- borders
@@ -251,14 +281,14 @@ void main() {
       coast = max(coast, cs * k * 0.55);
     }
   }
-  col = mix(col, col * 0.55 + vec3(0.02, 0.03, 0.05), coast * 0.8);
-  col = mix(col, col * 0.62, lineDist * uLineDist * 0.55);
-  col = mix(col, col * 0.42, lineProv * uLineProv * 0.8);
-  col = mix(col, vec3(0.07, 0.05, 0.04), lineCountry * 0.92);
-  if (land && win == uHover) col = col * 1.12 + 0.03;
-  if (land && win == uSelected) col = mix(col, vec3(0.95, 0.78, 0.42), 0.22);
-  col = mix(col, vec3(1.0, 0.97, 0.88), hov * 0.75);
-  col = mix(col, vec3(1.0, 0.82, 0.38), sel);
+  col = mix(col, uInk, coast * 0.75);
+  col = mix(col, col * 0.7, lineDist * uLineDist * 0.5);
+  col = mix(col, mix(col, uInk, 0.55), lineProv * uLineProv * 0.75);
+  col = mix(col, uInk, lineCountry * 0.9 * uLineCountry);
+  if (land && win == uHover) col = col * 1.08 + 0.03;
+  if (land && win == uSelected) col = mix(col, uSelectC, 0.2);
+  col = mix(col, vec3(1.0, 0.98, 0.93), hov * 0.7);
+  col = mix(col, uSelectC, sel);
 
   // ---------------------------------------------------------------- globe look + haze
   vec3 V = normalize(cameraPosition - vWorld);
@@ -267,7 +297,7 @@ void main() {
   float sphereLight = 0.62 + 0.48 * clamp(dot(N, uSunView), -0.2, 1.0);
   col *= mix(1.0, sphereLight, uGlobe);
   float limb = 1.0 - smoothstep(0.0, 0.55, ndv);
-  col = mix(col, vec3(0.42, 0.62, 0.9), limb * 0.45 * uGlobe);
+  col = mix(col, uFogColor, limb * 0.5 * uGlobe);
 
   float dist = length(cameraPosition - vWorld);
   float fog = smoothstep(uFogNear, uFogFar, dist) * uFogAmt;
@@ -301,11 +331,12 @@ void main() {
 export const RIVER_FRAG = /* glsl */ `
 precision highp float;
 uniform float uOpacity;
+uniform vec3 uRiverC;
 in float vA;
 layout(location = 0) out vec4 fragColor;
 void main() {
   if (vA <= 0.0) discard;
-  fragColor = vec4(0.16, 0.36, 0.5, vA * uOpacity);
+  fragColor = vec4(uRiverC, vA * uOpacity);
 }
 `;
 
@@ -322,6 +353,7 @@ void main() {
 export const ATMO_FRAG = /* glsl */ `
 precision highp float;
 uniform float uOpacity;
+uniform vec3 uHaloC;
 in vec3 vN;
 in vec3 vP;
 layout(location = 0) out vec4 fragColor;
@@ -331,6 +363,6 @@ void main() {
   float a = pow(clamp(rim, 0.0, 1.0), 3.0);
   // only the outer halo: fade the part that overlaps the planet disc
   float glow = smoothstep(0.0, 1.0, a) * uOpacity;
-  fragColor = vec4(vec3(0.45, 0.66, 1.0) * glow, glow);
+  fragColor = vec4(uHaloC * glow, glow);
 }
 `;

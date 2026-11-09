@@ -1,4 +1,4 @@
-// ORBIS map baker.
+// Passionaris map baker.
 // Turns open data (data/raw) into the game's map assets (public/assets/map):
 //   height.bin.gz  Int16 meters, equirectangular W x H (land + bathymetry)
 //   cells.bin.gz   Uint32 per cell: 0 = ocean, 1 = lake, >=2 = district id

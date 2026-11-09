@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ORBIS — лаунчер</title>
+  <title>Passionaris — лаунчер</title>
 </head>
-<body>
-  <canvas id="bg"></canvas>
+<body class="grain">
+  <div id="bg" class="menu-art"></div>
   <div class="vignette"></div>
 
   <div id="titlebar">
-    <span class="tb-title">ORBIS · Лаунчер</span>
+    <span class="tb-title">Passionaris · Лаунчер</span>
     <div class="tb-buttons">
       <button id="win-min" title="Свернуть">—</button>
       <button id="win-close" title="Закрыть">✕</button>
@@ -26,7 +26,7 @@
           <path d="M5 32h54M9 19h46M9 45h46" stroke="currentColor" stroke-width="1" fill="none"/>
           <circle cx="32" cy="32" r="31" fill="none" stroke="currentColor" stroke-width="0.6" stroke-dasharray="1 3"/>
         </svg>
-        <h1 class="title-font">ORBIS</h1>
+        <h1 class="title-font">PASSIONARIS</h1>
       </div>
       <p class="tagline">Великая стратегия на живом глобусе</p>
       <div class="version-row">
@@ -60,7 +60,7 @@
 
   <footer class="foot muted">
     <span>Данные карты: Natural Earth, NASA Blue Marble, AWS Terrain Tiles</span>
-    <span id="foot-ver"></span>
+    <span><span id="art-caption" class="art-caption"></span> · <span id="foot-ver"></span></span>
   </footer>
 
   <div class="modal-back" id="settings">
@@ -68,6 +68,7 @@
       <h2>Настройки</h2>
       <div class="muted">Сохраняются между запусками</div>
       <hr class="rule" />
+      <div class="field"><label>Палитра</label><select id="s-palette"></select></div>
       <div class="field"><label>Режим окна</label>
         <select id="s-window"><option value="fullscreen">Полный экран</option><option value="maximized">Окно на весь экран</option><option value="window">Окно</option></select></div>
       <div class="field"><label>Детализация сетки рельефа</label>

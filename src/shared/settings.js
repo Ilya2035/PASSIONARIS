@@ -7,10 +7,11 @@ export const DEFAULT_SETTINGS = {
   unroll: 0.85,               // 0 = always a globe, 1 = almost flat when zoomed in
   showDistricts: true,
   showRivers: true,
+  palette: 'graphite',        // see src/shared/palettes.js
 };
 
-const KEY = 'orbis.settings';
-const bridge = typeof window !== 'undefined' ? window.orbis : undefined;
+const KEY = 'passionaris.settings';
+const bridge = typeof window !== 'undefined' ? window.passionaris : undefined;
 
 export async function loadSettings() {
   try {

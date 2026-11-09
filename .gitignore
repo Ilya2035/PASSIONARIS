@@ -7,3 +7,10 @@ public/assets/map/*.jpg
 public/assets/map/world.json
 *.log
 .claude/settings.local.json
+
+# secrets
+.env
+.env.*
+!.env.example
+
+art/drafts/
