@@ -96,11 +96,42 @@ export async function createWorldSystems(ctx) {
     }
   }
 
+  // ---- ocean currents (seasonal, Victoria-like streaks) and EU4-like natural zone labels
+  const curMod = await load('../fx/currents.js');
+  if (curMod) {
+    try {
+      sys.currents = new curMod.Currents(ctx.scene, globe, ctx.settings.palette);
+      await sys.currents.ready;
+      sys.currents.setVisible(ctx.settings.showCurrents !== false);
+      features.add('currents');
+    } catch (e) { console.warn('currents', e); sys.currents?.dispose?.(); sys.currents = null; }
+  }
+  const labMod = await load('../fx/labels.js');
+  if (labMod) {
+    try {
+      sys.labels = new labMod.ZoneLabels(ctx.scene, globe, { palette: ctx.settings.palette, renderer: ctx.renderer });
+      sys.labels.setVisible(ctx.settings.showLabels !== false);
+      features.add('labels');
+    } catch (e) { console.warn('labels', e); sys.labels = null; }
+  }
+  {
+    const prevSetting = sys.onSetting;
+    sys.onSetting = (k, v) => {
+      if (k === 'showCurrents') sys.currents?.setVisible(v !== false);
+      if (k === 'showLabels') sys.labels?.setVisible(v !== false);
+      prevSetting?.(k, v);
+    };
+  }
+  // fractional month for seasonal currents: m = middle of month m (1..12)
+  const monthOf = t => { const d = cal.toDate(t); return d.month + (d.day - 15.5) / 30.4; };
+
   const running = () => !!sys.time?.running;
   sys.update = (dt, t, p) => {
     sys.time?.update(dt);
     sys.hazards?.update(dt, running());
     sys.fx?.update(ctx.gcam, t, { running: running(), heightPx: ctx.renderHeight?.(), fov: ctx.camera?.fov });
+    if (sys.currents) { if (sys.clock) sys.currents.setMonth(monthOf(sys.clock.t)); sys.currents.update(ctx.gcam, t); }
+    sys.labels?.update(ctx.gcam, t);
     for (const u of updaters) u(dt, t, p);
   };
 

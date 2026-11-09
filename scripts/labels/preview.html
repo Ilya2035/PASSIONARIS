@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <base href="/" />
+  <title>Passionaris — подписи зон (превью)</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0b0a; overflow: hidden; }
+    #view { display: block; width: 100vw; height: 100vh; }
+    #hud { position: fixed; left: 8px; bottom: 8px; color: #ddd; font: 12px/1.4 Georgia, serif; background: rgba(0,0,0,.5); padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="hud">загрузка…</div>
+  <!-- Dev-only preview of src/game/fx/labels.js: http://localhost:5173/scripts/labels/preview.html?lat=25&lon=20&alt=1.2 -->
+  <script type="module" src="scripts/labels/preview.js"></script>
+</body>
+</html>

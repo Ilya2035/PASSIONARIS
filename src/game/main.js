@@ -79,7 +79,7 @@ if (SHOT) {
 
 // ------------------------------------------------------------------ world systems (time, climate, weather, hazards, fx…)
 loadText.textContent = 'Заводим часы мира…';
-const world = await createWorldSystems({ scene, globe, gcam, camera, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
+const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
 fill.style.width = '100%';
 
 // ------------------------------------------------------------------ map modes
