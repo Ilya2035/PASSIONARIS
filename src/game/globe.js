@@ -91,6 +91,7 @@ export class Globe {
       uDetail: { value: dummyHalf() },
       uDetailOrigin: { value: new THREE.Vector2(0, 0) },
       uDetailOn: { value: 0 },
+      uDetailMask: { value: dummyRGBA() },
     };
 
     this.terrainMat = new THREE.ShaderMaterial({

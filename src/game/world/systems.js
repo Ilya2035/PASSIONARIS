@@ -8,11 +8,13 @@ const OPT = import.meta.glob([
   '../fx/*.js',
   '../../save/*.js',
 ]);
+import { loadBiomes } from './biomes.js';
+
 const has = p => !!OPT[p];
 const load = async p => (OPT[p] ? OPT[p]() : null);
 
 export async function createWorldSystems(ctx) {
-  const { hud } = ctx;
+  const { hud, globe } = ctx;
   const features = new Set();
   const sys = {
     features,
@@ -21,6 +23,21 @@ export async function createWorldSystems(ctx) {
     renderClock(extra) { hud.renderClock({ date: '—', time: extra || '' }, 0); },
   };
   sys.available = Object.keys(OPT);
+
+  // ---- biomes (terrain mode)
+  const biomes = await loadBiomes(globe).catch(e => { console.warn('biomes', e); return null; });
+  if (biomes) features.add('biomes');
+
+  sys.describe = (g, geo, cell) => {
+    const rows = [];
+    let kicker;
+    if (biomes && cell >= 2) {
+      const b = biomes.at(geo.lat, geo.lon);
+      if (b) { kicker = b.nameRu; rows.push(['Местность', b.nameRu]); }
+    }
+    return { kicker, rows, tip: kicker };
+  };
+
   ctx.onProgress?.(1);
   return sys;
 }

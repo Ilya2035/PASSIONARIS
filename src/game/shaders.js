@@ -24,6 +24,7 @@ uniform vec2 uGrid;     // cell grid size (W, H)
 uniform sampler2D uDetail;     // streamed detail heights, toroidal 2048x2048 window (8x8 tiles of 256)
 uniform vec2 uDetailOrigin;    // window origin in detail tiles
 uniform float uDetailOn;
+uniform sampler2D uDetailMask; // land coverage 0..1 on the same toroidal window (NE 1:10m, anti-aliased)
 const vec2 DGRID = vec2(32768.0, 16384.0);
 const float DTILE = 256.0;
 const float DWIN = 2048.0;
@@ -38,6 +39,17 @@ float heightAt(vec2 uv, float lodG, float lodD) {
   float edge = min(min(rel.x, 8.0 - rel.x), min(rel.y, 8.0 - rel.y));
   float hd = textureLod(uDetail, gt / DWIN, lodD).r;
   return mix(hg, hd, smoothstep(0.3, 1.2, edge) * uDetailOn);
+}
+// land coverage from the detail window; returns -1 outside it (caller falls back to the coarse cells)
+float detailLand(vec2 uv, float lodD, float coarse) {
+  if (uDetailOn < 0.5) return -1.0;
+  vec2 gt = uv * DGRID;
+  vec2 rel = gt / DTILE - uDetailOrigin;
+  rel.x = mod(rel.x, DGRID.x / DTILE);
+  if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= 8.0 || rel.y >= 8.0) return -1.0;
+  float edge = min(min(rel.x, 8.0 - rel.x), min(rel.y, 8.0 - rel.y));
+  float cov = textureLod(uDetailMask, gt / DWIN, max(0.0, lodD - 0.5)).r;
+  return mix(coarse, cov, smoothstep(0.3, 1.2, edge));
 }
 
 vec2 geoToUV(vec3 g) {
@@ -189,9 +201,13 @@ vec3 biomeBlend(vec2 uv) {
   vec2 st = uv * uGrid - 0.5;
   ivec2 b = ivec2(floor(st));
   vec2 f = fract(st);
-  vec3 c0 = uBiomeCol[min(biomeAt(b), 15u)], c1 = uBiomeCol[min(biomeAt(b + ivec2(1, 0)), 15u)];
-  vec3 c2 = uBiomeCol[min(biomeAt(b + ivec2(0, 1)), 15u)], c3 = uBiomeCol[min(biomeAt(b + ivec2(1, 1)), 15u)];
-  return mix(mix(c0, c1, f.x), mix(c2, c3, f.x), f.y);
+  uint k0 = biomeAt(b), k1 = biomeAt(b + ivec2(1, 0)), k2 = biomeAt(b + ivec2(0, 1)), k3 = biomeAt(b + ivec2(1, 1));
+  // water (class 0) never tints land: renormalise the bilinear weights over land classes only
+  float w0 = (1.0 - f.x) * (1.0 - f.y) * float(k0 != 0u), w1 = f.x * (1.0 - f.y) * float(k1 != 0u);
+  float w2 = (1.0 - f.x) * f.y * float(k2 != 0u), w3 = f.x * f.y * float(k3 != 0u);
+  float ws = w0 + w1 + w2 + w3;
+  if (ws < 1e-4) return uPaper;
+  return (uBiomeCol[min(k0, 15u)] * w0 + uBiomeCol[min(k1, 15u)] * w1 + uBiomeCol[min(k2, 15u)] * w2 + uBiomeCol[min(k3, 15u)] * w3) / ws;
 }
 
 void main() {
@@ -244,6 +260,9 @@ void main() {
   if (texPerPx > 1.0) win = cellAt(ivec2(floor(uv * uGrid)));
 
   bool land = win >= 2u;
+  // crisp coasts from the 1.2 km coverage mask when the detail window is active
+  float cov = detailLand(uv, lodD, land ? 1.0 : 0.0);
+  if (cov >= 0.0) land = cov > 0.5;
   uvec2 wi = uvec2(0u), i0 = uvec2(0u), i1 = uvec2(0u), i2 = uvec2(0u), i3 = uvec2(0u);
   if (uNeedInfo > 0.5) { wi = infoOf(win); i0 = infoOf(id0); i1 = infoOf(id1); i2 = infoOf(id2); i3 = infoOf(id3); }
 
@@ -262,6 +281,9 @@ void main() {
       c = hypso(hLand);
     } else if (uHasBiome > 0.5) {
       c = biomeBlend(uv);
+      // river valleys, deltas and oases: where the imagery is clearly vegetated, green the climate biome
+      float veg = smoothstep(0.42, 0.26, albL) * smoothstep(0.0, 0.06, alb.g - alb.b);
+      c = mix(c, vec3(0.5, 0.62, 0.38), veg * 0.65);
     } else {
       float sat = max(alb.r, max(alb.g, alb.b)) - min(alb.r, min(alb.g, alb.b));
       float ice = smoothstep(0.78, 0.92, albL) * (1.0 - smoothstep(0.08, 0.2, sat));
@@ -356,6 +378,7 @@ void main() {
       if (H0 + H1 + H2 + H3 > 0.0 && H0 + H1 + H2 + H3 < 4.0) hov = lineA(isoDistPx(H0, H1, H2, H3, f, jx, jy), 1.8) * aMag;
     }
     coast = (L0 + L1 + L2 + L3 > 0.0 && L0 + L1 + L2 + L3 < 4.0) ? lineA(dCoast, 1.4) * aMag : 0.0;
+    if (cov >= 0.0) coast = lineA(abs(cov - 0.5) / max(fwidth(cov), 1e-5), 1.4);
 
     // screen-space neighbour test in the minified range (globe view)
     if (aMag < 1.0) {
@@ -375,7 +398,7 @@ void main() {
       float k = 1.0 - aMag;
       lineCountry = max(lineCountry, cb * k * 0.9);
       lineProv = max(lineProv, pb * k * 0.6);
-      coast = max(coast, cs * k * 0.55);
+      if (cov < 0.0) coast = max(coast, cs * k * 0.55);
     }
   }
   col = mix(col, uInk, coast * 0.75);

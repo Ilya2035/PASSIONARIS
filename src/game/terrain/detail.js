@@ -28,6 +28,7 @@ export class DetailTerrain {
     this.globe = globe;
     this.data = data; // { W, H, height: Int16Array }
     this.base = base;
+    this.maskBase = base.replace('/z7/', '/z7m/');
     this.index = null;
     this.kept = null;
     this.slotTile = new Int32Array(SLOTS * SLOTS).fill(-1);
@@ -42,11 +43,18 @@ export class DetailTerrain {
     tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     this.tex = tex;
+    // land coverage mask (R8, GPU mips)
+    this.mask = new Uint8Array(WIN * WIN);
+    const mt = new THREE.DataTexture(this.mask, WIN, WIN, THREE.RedFormat, THREE.UnsignedByteType);
+    mt.minFilter = THREE.LinearMipmapLinearFilter; mt.magFilter = THREE.LinearFilter;
+    mt.wrapS = mt.wrapT = THREE.RepeatWrapping; mt.generateMipmaps = true;
+    this.maskTex = mt;
     this.origin = null;
     this.queue = []; this.inflight = 0; this.dirty = false; this.lastUpload = 0;
     this.enabled = false;
     const sh = globe.shared;
     sh.uDetail.value = tex;
+    sh.uDetailMask.value = this.maskTex;
     this.ready = fetch(`${base}index.json`).then(r => (r.ok ? r.json() : null)).then(j => {
       if (!j) return;
       this.index = j; this.TX = j.tiles[0]; this.TY = j.tiles[1];
@@ -72,6 +80,16 @@ export class DetailTerrain {
         this.f32[row + x] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
       }
     }
+    // coarse land mask from the global cells until the 1.2 km mask arrives
+    const cells = this.data.cells;
+    for (let y = 0; y < T; y++) {
+      const cy = Math.min(H - 1, Math.floor((gy * T + y) / ratio));
+      for (let x = 0; x < T; x++) {
+        const cx = Math.floor((gx * T + x) / ratio) % W;
+        this.mask[(sy + y) * WIN + sx + x] = cells[cy * W + cx] >= 2 ? 255 : 0;
+      }
+    }
+    this.maskDirty = true;
     this.writeSlot(gx, gy);
   }
 
@@ -127,6 +145,11 @@ export class DetailTerrain {
         for (let x = 0; x < T; x++) { acc += d[y * T + x]; this.f32[row + x] = acc; }
       }
       this.writeSlot(gx, gy);
+      const mb = await fetchGz(this.maskBase + `${gx}_${gy}.bin.gz`).catch(() => null);
+      if (mb && mb.length === T * T && this.slotTile[(gy % SLOTS) * SLOTS + (gx % SLOTS)] === key) {
+        for (let y = 0; y < T; y++) this.mask.set(mb.subarray(y * T, y * T + T), (sy + y) * WIN + sx);
+        this.maskDirty = true;
+      }
     } catch { /* keep coarse prefill */ }
   }
 
@@ -167,6 +190,10 @@ export class DetailTerrain {
     const ox = ctx - 4, oy = Math.max(0, Math.min(this.TY - SLOTS, cty - 4));
     if (!this.origin || Math.abs(((ox - this.origin[0] + this.TX * 1.5) % this.TX) - this.TX / 2) >= 2 || Math.abs(oy - this.origin[1]) >= 2) this.retarget(ox, oy);
     sh.uDetailOrigin.value.set(this.origin[0], this.origin[1]);
-    if (this.dirty && timeMs - this.lastUpload > 250) { this.tex.needsUpdate = true; this.dirty = false; this.lastUpload = timeMs; }
+    if ((this.dirty || this.maskDirty) && timeMs - this.lastUpload > 250) {
+      if (this.dirty) { this.tex.needsUpdate = true; this.dirty = false; }
+      if (this.maskDirty) { this.maskTex.needsUpdate = true; this.maskDirty = false; }
+      this.lastUpload = timeMs;
+    }
   }
 }
