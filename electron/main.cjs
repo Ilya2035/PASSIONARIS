@@ -1,9 +1,13 @@
 // Passionaris desktop wrapper: launcher window -> game window.
-const { app, BrowserWindow, ipcMain, protocol, net, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, shell, screen } = require('electron');
 const { registerSaveIpc } = require('./saves.cjs');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
+
+// Tests and agents: PASSIONARIS_USERDATA=<dir> keeps settings and saves away from the player's own folder,
+// PASSIONARIS_DIST=<dir> serves a separately built copy of the pages (parallel builds do not clash).
+if (process.env.PASSIONARIS_USERDATA) app.setPath('userData', path.resolve(process.env.PASSIONARIS_USERDATA));
 
 // Laptops with two GPUs: ask Chromium for the discrete one (settings "gpu": 'discrete' (default) | 'auto').
 const startupSettings = (() => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8')); } catch { return {}; } })();
@@ -28,7 +32,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const ROOT = path.join(__dirname, '..');
-const DIST = path.join(ROOT, 'dist');
+const DIST = process.env.PASSIONARIS_DIST ? path.resolve(process.env.PASSIONARIS_DIST) : path.join(ROOT, 'dist');
 const PUBLIC = path.join(ROOT, 'public');
 const DEV_URL = process.env.PASSIONARIS_DEV_URL; // e.g. http://localhost:5173 for live reload
 const pageUrl = page => (DEV_URL ? `${DEV_URL}/${page}` : `app://passionaris/${page}`);
@@ -94,6 +98,10 @@ app.whenReady().then(() => {
     game?.close();
   });
   ipcMain.on('app:quit', () => app.quit());
+  // screens for the resolution list: logical size, scale factor (Windows display scaling), refresh rate
+  ipcMain.handle('app:displays', () => screen.getAllDisplays().map(d => ({ id: d.id, width: d.size.width, height: d.size.height, scale: d.scaleFactor, hz: d.displayFrequency, primary: d.id === screen.getPrimaryDisplay().id })));
+  ipcMain.handle('app:open-saves-folder', async () => { const dir = path.join(app.getPath('userData'), 'saves'); fs.mkdirSync(dir, { recursive: true }); return shell.openPath(dir); });
+  ipcMain.handle('app:info', () => ({ userData: app.getPath('userData'), version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome }));
   ipcMain.on('win:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());
 
   if (CAPTURE) { captureShot(JSON.parse(CAPTURE)); return; }

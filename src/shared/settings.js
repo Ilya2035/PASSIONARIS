@@ -1,6 +1,9 @@
 // Settings live in Electron's userData (via preload bridge) or localStorage in a plain browser.
 export const DEFAULT_SETTINGS = {
   windowMode: 'fullscreen',   // 'fullscreen' | 'maximized' | 'window'
+  resolution: 'native',     // 'native' or 'WxH' (e.g. '1920x1080'): window size in 'window' mode, render resolution otherwise
+  uiScale: 'auto',          // 'auto' (by screen size) or 0.75..1.6: size of the interface
+  fpsLimit: 0,                // 0 = no limit (display refresh), else 30 | 60 | 120 | 144
   quality: 'auto',            // mesh density: 'auto' | 'low' | 'medium' | 'high'
   pixelRatio: 1,              // legacy render scale multiplier
   renderScale: 'auto',        // 'auto' (dynamic resolution) or 0.5..1, upscaled with sharpening (FSR-like)
