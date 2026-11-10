@@ -1,8 +1,12 @@
 // Launcher settings modal, in tabs: Экран · Графика · Карта · Игра · Дополнения · Система.
-// Keys and defaults: src/shared/settings.js (DEFAULT_SETTINGS); labels follow the in-game settings
-// (src/game/ui/menus.js). Every change is saved at once; the game applies them when it starts.
-import { saveSettings, DEFAULT_SETTINGS, isElectron } from '../shared/settings.js';
-import { PALETTES, applyUiPalette } from '../shared/palettes.js';
+// Every setting — label, hint, section, list of values — comes from src/shared/settings.js (SETTING_FIELDS), the same
+// description the in-game menu (src/game/ui/menus.js) is built from. Every change is saved at once; the game applies
+// them when it starts.
+import {
+  saveSettings, DEFAULT_SETTINGS, isElectron, SETTING_SECTIONS, sectionFields, settingOptions, settingHint,
+  formatSetting, parseSetting, physicalSize, browserDisplays,
+} from '../shared/settings.js';
+import { applyUiPalette } from '../shared/palettes.js';
 import { applyPackData, isEnabled } from '../engine/packs.js';
 import { APP_NAME, VERSION_LABEL } from '../shared/version.js';
 import { createTabs } from './tabs.js';
@@ -11,96 +15,13 @@ import { confirmDialog, isConfirmOpen } from './dialog.js';
 const $ = id => document.getElementById(id);
 const bridge = window.passionaris;
 
-// ---------------------------------------------------------------- screens
-export const RESOLUTIONS = [[1280, 720], [1366, 768], [1600, 900], [1920, 1080], [1920, 1200], [2560, 1080], [2560, 1440], [3440, 1440], [3840, 2160]];
-const aspect = (w, h) => {
-  const r = w / h;
-  if (Math.abs(r - 16 / 9) < 0.02) return '16:9';
-  if (Math.abs(r - 1.6) < 0.02) return '16:10';
-  if (Math.abs(r - 4 / 3) < 0.02) return '4:3';
-  return r > 2.2 ? '21:9' : '';
-};
-/** Physical pixels of a display from window.passionaris.displays() (logical size × Windows scaling).
- *  Logical sizes are rounded (2560 px at 150% → 1707 → 2560.5), so a value within 2 px of a usual size snaps to it. */
-const USUAL = [720, 768, 800, 864, 900, 960, 1024, 1050, 1080, 1152, 1200, 1280, 1366, 1440, 1536, 1600, 1680, 1800, 1920, 2048, 2160, 2400, 2560, 2880, 3000, 3072, 3200, 3440, 3840, 4096, 4320, 5120, 7680];
-const snap = x => USUAL.find(k => Math.abs(k - x) <= 2) ?? Math.round(x);
-const physical = d => ({ w: snap(d.width * (d.scale || 1)), h: snap(d.height * (d.scale || 1)) });
-function browserScreens() {
-  const s = window.screen || { width: 1920, height: 1080 };
-  return [{ width: s.width, height: s.height, scale: window.devicePixelRatio || 1, hz: 0, primary: true }];
-}
-
-/** Options for «Разрешение»: native, then the common sizes that fit on at least one display. */
-export function resolutionOptions(displays) {
-  const ds = displays?.length ? displays : browserScreens();
-  const main = physical(ds.find(d => d.primary) || ds[0]);
-  const out = [['native', `Родное · ${main.w} × ${main.h}`]];
-  for (const [w, h] of RESOLUTIONS) {
-    if (!ds.some(d => { const p = physical(d); return w <= p.w && h <= p.h; })) continue;
-    const a = aspect(w, h);
-    out.push([`${w}x${h}`, `${w} × ${h}${a ? ` · ${a}` : ''}`]);
-  }
-  return out;
-}
-function fpsOptions(displays) {
-  const hz = Math.round(Math.max(0, ...(displays || []).map(d => Number(d.hz) || 0)));
-  return [['0', hz ? `Без ограничения — до ${hz} Гц экрана` : 'Без ограничения'],
-    ['30', '30 кадров/с'], ['60', '60 кадров/с'], ['120', '120 кадров/с'], ['144', '144 кадра/с']];
-}
-
-// ---------------------------------------------------------------- fields
-const pct = v => `${Math.round(Number(v) * 100)}%`;
+// tabs: the shared sections, with «Дополнения» (packs) before «Система»
 const RELOAD = '· после перезапуска';
 const TABS = [
-  { id: 'screen', label: 'Экран', fields: [
-    { key: 'windowMode', label: 'Режим окна', type: 'select', options: [['fullscreen', 'Полный экран'], ['maximized', 'Окно на весь экран'], ['window', 'Окно']],
-      hint: 'F11 — полный экран и обратно' },
-    { key: 'resolution', label: 'Разрешение', type: 'select', options: ctx => resolutionOptions(ctx.displays), custom: v => String(v).replace('x', ' × '),
-      hint: s => (s.windowMode === 'window' ? 'В оконном режиме — размер окна.' : 'На весь экран — разрешение отрисовки: картинка растягивается до экрана с повышением резкости.') },
-    { key: 'uiScale', label: 'Масштаб интерфейса', type: 'select', custom: pct,
-      options: [['auto', 'Авто — по размеру экрана'], ['0.75', '75%'], ['0.9', '90%'], ['1', '100%'], ['1.1', '110%'], ['1.25', '125%'], ['1.5', '150%']] },
-    { key: 'fpsLimit', label: 'Ограничение кадров', type: 'select', options: ctx => fpsOptions(ctx.displays), custom: v => `${v} кадров/с`,
-      hint: 'Меньше кадров — тише вентиляторы и дольше батарея' },
-    { key: 'showFps', label: 'Показывать FPS', type: 'check' },
-  ] },
-  { id: 'graphics', label: 'Графика', fields: [
-    { key: 'quality', label: 'Детализация сетки', type: 'select', options: [['auto', 'Авто'], ['low', 'Низкая'], ['medium', 'Средняя'], ['high', 'Высокая']] },
-    { key: 'renderScale', label: 'Масштаб рендеринга', type: 'select', custom: pct,
-      options: [['auto', 'Авто — держит частоту кадров'], ['0.5', '50% — максимум FPS'], ['0.67', '67%'], ['0.8', '80%'], ['1', '100% — максимум чёткости']] },
-    { key: 'sharpen', label: 'Резкость апскейла', type: 'range', min: 0, max: 1, step: 0.05, fmt: pct },
-    { key: 'shaders', label: 'Шейдеры', type: 'select', options: [['full', 'Полные — тени рельефа, рябь, изобаты'], ['simple', 'Простые — быстрее на слабой графике']] },
-    { key: 'brightness', label: 'Яркость', type: 'range', min: 0.7, max: 1.3, step: 0.01, fmt: pct },
-    { key: 'effects', label: 'Эффекты стихий', type: 'check', hint: 'Извержения, землетрясения, метеориты, пожары' },
-    { key: 'showWeather', label: 'Погода: облака, снег, засуха', type: 'check' },
-    { key: 'showWind', label: 'Ветры', type: 'check' },
-    { key: 'waterAnimation', label: 'Анимация воды', type: 'check' },
-  ] },
-  { id: 'map', label: 'Карта', fields: [
-    { key: 'palette', label: 'Палитра', type: 'select', options: () => paletteOptions() },
-    { key: 'reliefScale', label: 'Высота рельефа (1 = как в жизни)', type: 'range', min: 1, max: 10, step: 0.5, fmt: v => `×${Number(v) % 1 ? Number(v).toFixed(1) : Number(v)}` },
-    { key: 'unroll', label: 'Разворачивание глобуса', type: 'range', min: 0, max: 1, step: 0.01, fmt: pct, hint: 'Насколько глобус расправляется в плоскую карту при приближении' },
-    { key: 'showRivers', label: 'Реки', type: 'check' },
-    { key: 'showLabels', label: 'Подписи природных зон', type: 'check' },
-    { key: 'showRoads', label: 'Дороги', type: 'check' },
-    { key: 'showCurrents', label: 'Морские течения', type: 'check' },
-    { key: 'showDistricts', label: 'Границы районов', type: 'check' },
-  ] },
-  { id: 'game', label: 'Игра', fields: [
-    { key: 'autosaveMinutes', label: 'Автосохранение', type: 'select', custom: v => `Каждые ${v} мин`,
-      options: [['0', 'Выключено'], ['5', 'Каждые 5 минут'], ['10', 'Каждые 10 минут'], ['15', 'Каждые 15 минут'], ['30', 'Каждые 30 минут']] },
-    { key: 'autosaveSlots', label: 'Ячейки автосохранения', type: 'select', custom: v => `${v}`,
-      options: [['1', '1 ячейка'], ['2', '2 ячейки'], ['3', '3 ячейки'], ['4', '4 ячейки'], ['5', '5 ячеек']],
-      hint: 'Новое автосохранение заменяет самое старое' },
-  ], note: 'В игре: <kbd>F5</kbd> — быстрое сохранение, <kbd>F9</kbd> — быстрая загрузка, <kbd>Esc</kbd> — меню с сохранением и загрузкой.' },
+  ...SETTING_SECTIONS.filter(s => s.id !== 'system').map(s => ({ id: s.id, label: s.label, fields: sectionFields(s.id), note: s.note })),
   { id: 'packs', label: 'Дополнения' },
   { id: 'system', label: 'Система' },
 ];
-
-function paletteOptions() {
-  return Object.entries(PALETTES).map(([id, p]) => [id, p.pack ? `${p.name} · из дополнения` : p.name]);
-}
-
-const parseValue = (f, el) => f.type === 'check' ? el.checked : f.type === 'range' ? Number(el.value) : (isNaN(Number(el.value)) ? el.value : Number(el.value));
 
 // ---------------------------------------------------------------- panel
 /**
@@ -125,16 +46,11 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
     onChange?.(key, v);
   }
 
+  // a value the list does not offer (set by an older version, a mod or by hand) stays in the list: see settingOptions
   function fillOptions(select, f) {
-    const opts = typeof f.options === 'function' ? f.options(ctx) : f.options;
     select.innerHTML = '';
-    for (const [v, t] of opts) select.add(new Option(t, v));
-    // a value the list does not offer (set in the game, by an older version or a mod): keep it selectable
-    const cur = String(settings[f.key]);
-    if (!opts.some(([v]) => v === cur) && settings[f.key] !== undefined) {
-      select.add(new Option(f.custom ? f.custom(settings[f.key]) : cur, cur));
-    }
-    select.value = cur;
+    for (const [v, t] of settingOptions(f, settings[f.key], ctx)) select.add(new Option(t, v));
+    select.value = String(settings[f.key]);
   }
 
   function fieldRow(f) {
@@ -146,10 +62,11 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
     label.htmlFor = id;
     label.innerHTML = '<span class="lbl"></span>';
     label.firstChild.textContent = f.label;
-    if (f.reload) label.firstChild.append(' ', Object.assign(document.createElement('span'), { className: 'dim', textContent: RELOAD }));
+    // the launcher starts the game anew, so only what needs the whole application restarted is marked
+    if (f.reload === 'app') label.firstChild.append(' ', Object.assign(document.createElement('span'), { className: 'dim', textContent: RELOAD }));
     if (f.hint) {
       const small = Object.assign(document.createElement('small'), { className: 'hint' });
-      const fill = () => { small.textContent = typeof f.hint === 'function' ? f.hint(settings) : f.hint; };
+      const fill = () => { small.textContent = settingHint(f, settings, ctx); };
       fill();
       if (typeof f.hint === 'function') hints.push(fill);
       label.appendChild(small);
@@ -167,7 +84,7 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
       out = document.createElement('output');
       out.htmlFor = id;
       ctl.appendChild(out);
-      syncers.push(() => { el.value = String(settings[f.key]); out.textContent = f.fmt ? f.fmt(el.value) : el.value; });
+      syncers.push(() => { el.value = String(settings[f.key]); out.textContent = formatSetting(f, el.value); });
     } else {
       el = Object.assign(document.createElement('input'), { type: 'checkbox', className: 'toggle' });
       syncers.push(() => { el.checked = !!settings[f.key]; });
@@ -176,8 +93,8 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
     ctl.prepend(el);
     syncers[syncers.length - 1]();
     el.addEventListener('input', () => {
-      const v = parseValue(f, el);
-      if (out) out.textContent = f.fmt ? f.fmt(el.value) : el.value;
+      const v = parseSetting(f, f.type === 'check' ? el.checked : el.value);
+      if (out) out.textContent = formatSetting(f, el.value);
       setValue(f.key, v);
     });
     row.append(label, ctl);
@@ -191,7 +108,13 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
     const pane = document.createElement('div');
     pane.className = 's-pane';
     pane.dataset.pane = t.id;
-    if (t.fields) for (const f of t.fields) pane.appendChild(fieldRow(f));
+    let group = '';
+    for (const f of t.fields || []) {
+      if (f.electron && !isElectron) continue;
+      if (f.group && f.group !== group) pane.appendChild(Object.assign(document.createElement('h4'), { className: 's-group', textContent: f.group }));
+      group = f.group || '';
+      pane.appendChild(fieldRow(f));
+    }
     if (t.note) pane.appendChild(Object.assign(document.createElement('p'), { className: 'pane-note', innerHTML: t.note }));
     panes.set(t.id, pane);
     panesBox.appendChild(pane);
@@ -245,11 +168,7 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
 
   // ---- system: GPU choice, data folder, versions, screens, the GPU that draws now
   function buildSystem(pane) {
-    if (isElectron) {
-      pane.appendChild(fieldRow({ key: 'gpu', label: 'Видеокарта', type: 'select', reload: true,
-        options: [['discrete', 'Дискретная (быстрее)'], ['auto', 'Как решит система']],
-        hint: 'На ноутбуках с двумя видеокартами' }));
-    }
+    for (const f of sectionFields('system')) if (!f.electron || isElectron) pane.appendChild(fieldRow(f));
     const info = document.createElement('dl');
     info.className = 'sys-info';
     const add = (term, cls) => {
@@ -289,10 +208,10 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
     let revealed = false;
     return {
       setDisplays(ds) {
-        const list = ds || browserScreens();
+        const list = ds || browserDisplays();
         ddScreens.textContent = '';
         for (const d of list) {
-          const p = physical(d);
+          const p = physicalSize(d);
           const line = document.createElement('div');
           line.textContent = [`${p.w} × ${p.h}`, d.scale && d.scale !== 1 ? `масштаб ${Math.round(d.scale * 100)}%` : '',
             d.hz ? `${Math.round(d.hz)} Гц` : '', list.length > 1 && d.primary ? 'основной' : ''].filter(Boolean).join(' · ');

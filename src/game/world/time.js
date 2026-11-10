@@ -1,5 +1,10 @@
 // Time & saves integration: game clock (5000 BC → 2100), date/time HUD, speeds, pause, saves, autosave.
 import { openSaves } from '../ui/menus.js';
+import { requestMapSnapshot } from '../snapshot.js';
+
+// the autosave settings, read live (the in-game menu changes them; odd stored values fall back to the defaults)
+const autosaveMinutes = s => { const m = Number(s.autosaveMinutes ?? 10); return Number.isFinite(m) && m >= 0 ? m : 10; };
+const autosaveSlots = s => { const k = Math.floor(Number(s.autosaveSlots ?? 3)); return Number.isFinite(k) && k >= 1 ? Math.min(k, 99) : 3; };
 
 export function createTime({ cal, clk, save, hud, settings }) {
   const clock = clk.createClock({ t0: 0 }); // astronomical -4999-01-01 00:00, paused, speed 3 = 1 month/s in the first era
@@ -32,9 +37,11 @@ export function createTime({ cal, clk, save, hud, settings }) {
   const registry = new save.SaveRegistry();
   registry.register('clock', { save: () => clock.serialize(), load: s => clock.deserialize(s) });
   const collect = () => ({ meta: { t: clock.t, dateText: cal.formatRu(clock.t, 'day') }, sections: registry.collect() });
+  // every save carries a small picture of the map (meta.thumbnail) taken at the next drawn frame (src/game/snapshot.js)
+  const thumbnail = () => requestMapSnapshot();
   const autosave = save.createAutosave({
-    storage, collect,
-    intervalMinutes: Number(settings.autosaveMinutes ?? 10), slots: Number(settings.autosaveSlots ?? 3),
+    storage, collect, thumbnail,
+    intervalMinutes: autosaveMinutes(settings), slots: autosaveSlots(settings),
     getGameTime: () => clock.t,
     onSaved: () => hud.toast('<b>Автосохранение</b> записано', 2500),
     onError: e => hud.toast(`<b>Автосохранение не удалось</b><br>${e.message || e}`, 6000),
@@ -46,7 +53,10 @@ export function createTime({ cal, clk, save, hud, settings }) {
     try {
       const id = save.slugSaveId(name);
       const data = collect();
-      await save.saveGame(storage, id, { meta: { ...data.meta, name }, sections: data.sections });
+      // the state as it is now; the sim runs on while the thumbnail waits for a frame and the file is compressed
+      const sections = save.snapshotSections(data.sections);
+      const thumb = await save.withTimeout(thumbnail, 3000);
+      await save.saveGame(storage, id, { meta: { ...data.meta, ...(thumb ? { thumbnail: thumb } : {}), name }, sections });
       hud.toast(`<b>Сохранено</b> · ${hud.esc(name)}`, 2500);
     } catch (e) { hud.toast(`<b>Не удалось сохранить</b><br>${hud.esc(e.message || e)}`, 6000); }
   }
@@ -63,7 +73,7 @@ export function createTime({ cal, clk, save, hud, settings }) {
   const api = {
     list: async () => (await storage.list()).sort((a, b) => (b.modified || 0) - (a.modified || 0)).map(s => ({
       id: s.id, name: s.meta?.name || s.id,
-      meta: { dateText: s.meta?.dateText || (Number.isFinite(s.meta?.t) ? cal.formatRu(s.meta.t, 'day') : ''), saved: s.modified },
+      meta: { dateText: s.meta?.dateText || (Number.isFinite(s.meta?.t) ? cal.formatRu(s.meta.t, 'day') : ''), saved: s.modified, thumbnail: s.meta?.thumbnail || null },
     })),
     save: name => saveAs(name),
     load: id => loadId(id),
@@ -71,10 +81,13 @@ export function createTime({ cal, clk, save, hud, settings }) {
   };
 
   return {
-    clock, registry, storage,
+    clock, registry, storage, autosave,
     get running() { return !clock.paused && !menuPaused; },
     update(dt) {
       clock.advance(menuPaused ? 0 : dt);
+      const m = autosaveMinutes(settings), k = autosaveSlots(settings);
+      if (m !== autosave.intervalMinutes) autosave.setIntervalMinutes(m);
+      if (k !== autosave.slots) autosave.setSlots(k);
       autosave.tick();
     },
     render,
@@ -87,6 +100,6 @@ export function createTime({ cal, clk, save, hud, settings }) {
     loadId,
     quickSaveId: save.slugSaveId('Быстрое сохранение'),
     onLoad: fn => listeners.add(fn),
-    setAutosave(minutes) { autosave.setIntervalMinutes(Number(minutes)); },
+    setAutosave(minutes) { const m = autosaveMinutes({ autosaveMinutes: minutes }); autosave.setIntervalMinutes(m); },
   };
 }

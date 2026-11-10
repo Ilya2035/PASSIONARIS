@@ -3,7 +3,7 @@ export * from './saveSystem.js';
 export { createIndexedDbStorage } from './indexedDb.js';
 export { createElectronStorage, hasElectronSaves } from './electron.js';
 export { createMemoryStorage } from './memory.js';
-export { createAutosave, snapshotSections } from './autosave.js';
+export { createAutosave, snapshotSections, withTimeout } from './autosave.js';
 export { captureThumbnail } from './thumbnail.js';
 
 import { createIndexedDbStorage } from './indexedDb.js';

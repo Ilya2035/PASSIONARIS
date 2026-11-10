@@ -15,6 +15,16 @@ function copyBinary(v) {
   return v; // JSON values are serialised synchronously by encodeSave, no copy needed
 }
 
+/** fn() → its value, or null when it fails, gives no data:image URL or takes longer than ms. */
+export async function withTimeout(fn, ms) {
+  let timer = 0;
+  try {
+    // fn is called at once (not in a microtask): a map snapshot then waits for the frame being drawn now
+    const v = await Promise.race([new Promise(r => r(fn())), new Promise(r => { timer = setTimeout(() => r(null), ms); })]);
+    return typeof v === 'string' && v.startsWith('data:image/') ? v : null;
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
 /** Copy every binary section so the sim can keep mutating its arrays while the save is compressed. */
 export function snapshotSections(sections) {
   if (!sections) return sections;
@@ -39,10 +49,13 @@ export function snapshotSections(sections) {
  * @param {Function} [o.onError]             (error) => void   (default: console.warn)
  * @param {Function} [o.now]                 ms clock (default performance.now); injectable for tests
  * @param {string}   [o.name='Автосохранение'] display name prefix
+ * @param {Function} [o.thumbnail]           () => Promise<string|null>: meta.thumbnail (a data:image/… URL), asked
+ *                                           after the snapshot; null, an error or no answer in time = no thumbnail
+ * @param {number}   [o.thumbnailTimeoutMs=3000]
  */
 export function createAutosave({ storage, collect, intervalMinutes = 5, slots = 3, prefix = 'autosave',
   getGameTime = null, copy = true, encodeOptions = {}, onSaved = null, onError = null, now = defaultNow,
-  name = 'Автосохранение' } = {}) {
+  name = 'Автосохранение', thumbnail = null, thumbnailTimeoutMs = 3000 } = {}) {
   if (!storage || typeof storage.save !== 'function') throw new TypeError('createAutosave: storage is required');
   if (typeof collect !== 'function') throw new TypeError('createAutosave: collect() is required');
   checkSaveId(`${prefix}-1`);
@@ -73,7 +86,8 @@ export function createAutosave({ storage, collect, intervalMinutes = 5, slots = 
         if (data && typeof data.then === 'function') data = await data;
         if (!data || !data.meta) throw new SaveError('BAD_INPUT', 'Автосохранение: collect() должен вернуть {meta, sections}');
         const sections = copy ? snapshotSections(data.sections) : data.sections;
-        const meta = { ...data.meta, name: `${name} ${k}`, autosave: true, slot: k };
+        const thumb = thumbnail ? await withTimeout(thumbnail, thumbnailTimeoutMs) : null;
+        const meta = { ...data.meta, ...(thumb ? { thumbnail: thumb } : {}), name: `${name} ${k}`, autosave: true, slot: k };
         const info = await saveGame(storage, id, { meta, sections }, encodeOptions);
         next = (k % ring) + 1;
         lastSavedT = meta.t;

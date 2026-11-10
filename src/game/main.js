@@ -7,19 +7,21 @@ import '../shared/theme.css';
 import './game.css';
 import * as THREE from 'three';
 import { APP_NAME, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
-import { loadSettings, saveSettings, isElectron } from '../shared/settings.js';
+import { loadSettings, updateStoredSettings, isElectron } from '../shared/settings.js';
 import { getPalette, applyUiPalette } from '../shared/palettes.js';
 import { applyStippleTheme } from '../shared/stipple.js';
 import { loadWorld } from './data.js';
 import { Globe } from './globe.js';
 import { GlobeCamera, vecToGeo } from './camera.js';
 import { Upscaler } from './post.js';
+import { installMapSnapshot } from './snapshot.js';
 import { DetailTerrain } from './terrain/detail.js';
 import * as hud from './ui/hud.js';
 import { buildSettings, refreshSettingsView, openModal, closeModal, anyModalOpen } from './ui/menus.js';
 import { createWorldSystems } from './world/systems.js';
 import { openChronicle } from './ui/chronicle.js';
 import { showLegend } from './ui/legend.js';
+import { MODE_DEFS } from './ui/icons.js';
 import { applyPackData, runPackScripts } from '../engine/packs.js';
 import { BIOME_COLORS } from './world/biomes.js';
 import { VERSION } from '../shared/version.js';
@@ -56,6 +58,7 @@ const pixelRatio = () => Math.min(2, (window.devicePixelRatio || 1) * (settings.
 renderer.setPixelRatio(pixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
 const upscaler = new Upscaler(renderer);
+installMapSnapshot(renderer); // save thumbnails: a copy of the canvas right after a drawn frame (src/game/snapshot.js)
 // GPU class: integrated GPUs get lighter defaults; "auto" settings adapt at runtime
 const gpuName = (() => { const gl = renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; })();
 const integratedGpu = /Intel|UHD|Iris|Radeon\(TM\) Graphics|Radeon Graphics|Vega \d+ Graphics|Microsoft Basic|SwiftShader/i.test(gpuName) && !/RTX|GTX|Radeon RX|Arc A/i.test(gpuName);
@@ -186,9 +189,16 @@ function setMode(id) {
   hud.markMode(id);
   showLegend(id);
 }
-function rebuildModes() { hud.buildModes(setMode, world.features); hud.markMode(mode); }
+// the mode the player picks is remembered (settings.mapMode) and comes back at the next start; ?mode= in the address
+// wins (captures, checks), and shot mode (menu art) ignores the remembered one
+function pickMode(id) {
+  setMode(id);
+  if (settings.mapMode !== id) { settings.mapMode = id; updateStoredSettings({ mapMode: id }); }
+}
+const modeAvailable = id => MODE_DEFS.some(m => m.id === id && (!m.needs || world.features?.has?.(m.needs)));
+function rebuildModes() { hud.buildModes(pickMode, world.features); hud.markMode(mode); }
 rebuildModes();
-setMode(params.get('mode') || 'terrain');
+setMode(params.get('mode') || (!SHOT && modeAvailable(settings.mapMode) ? settings.mapMode : 'terrain'));
 
 // ?fxdemo=<seconds>: a sample of every event effect around the view centre, pre-aged (captures, style checks);
 // &fxkind=<type> shows just that event at the centre instead (&fxlevel=1..5, &fxvei=0..8, &fxair=1: an airburst)
