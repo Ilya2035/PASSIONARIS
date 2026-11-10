@@ -161,7 +161,15 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
     save: () => snapshot,
     load: async s => {
       if (!s?.buffers) return;
-      const f = await client.deserialize(s);
+      // A snapshot only fits the normals it was made with (the freezing-sea cell list follows them): saves from
+      // before the open climate data (v0.2.4 and older, WorldClim) restart the weather at the loaded date instead,
+      // exactly as a save without weather does — the rest of the save still loads.
+      let f;
+      try { f = await client.deserialize(s); } catch (e) {
+        console.warn('weather: saved weather does not fit these climate normals, restarting it', e.message || e);
+        snapshot = null; snapAt = -1e9; coolForce = true;   // no stale pre-load snapshot in the next save
+        return;
+      }
       lastT = f.t; lastDay = f.day; snapshot = s; show(f, true);
       coolForce = true;   // the next step (or the paused check in update) sends the cooling of the loaded aerosols
     },
