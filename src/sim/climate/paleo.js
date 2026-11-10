@@ -6,8 +6,9 @@
 // belongs to the weather module.
 //
 // Baselines
-// - Temperatures are anomalies (°C) relative to 1970–2000, the period of the WorldClim
-//   normals in public/assets/climate/normals.bin.gz, so `normal + regionalDT` is the climate
+// - Temperatures are anomalies (°C) relative to 1970–2000, the baseline of the climate
+//   normals in public/assets/climate/normals-open.bin.gz (CHELSA 1981–2010 shifted to 1970–2000 by
+//   this model when baked, scripts/climate/bake-normals.mjs), so `normal + regionalDT` is the climate
 //   of a given year. globalDTPreindustrial() gives the same curve relative to 1850–1900.
 // - precipFactor() multiplies the 1970–2000 precipitation normals.
 // - seaLevel() is metres relative to 1995–2014 (IPCC AR6 baseline ≈ "present").

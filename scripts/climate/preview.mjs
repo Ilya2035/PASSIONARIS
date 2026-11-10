@@ -38,7 +38,7 @@ for (const [m, name] of [[0, 'jan'], [6, 'jul']]) {
   }
   await png(rgb, W, H, 'normals-pann.png');
 }
-const bf = path.join(ROOT, 'public', 'assets', 'climate', 'biome.bin.gz');
+const bf = path.join(ROOT, 'public', 'assets', 'climate', JSON.parse(fs.readFileSync(path.join(ROOT, 'public', 'assets', 'climate', 'biomes.json'), 'utf8')).file);
 if (fs.existsSync(bf)) {
   const bio = zlib.gunzipSync(fs.readFileSync(bf));
   const table = JSON.parse(fs.readFileSync(path.join(ROOT, 'public', 'assets', 'climate', 'biomes.json'), 'utf8')).classes;

@@ -16,8 +16,10 @@ public/assets/map/world.json
 art/drafts/
 public/assets/terrain/
 
-# WorldClim 2.1 normals and data derived from them: the licence forbids redistribution without permission
-# (the repository is public). The bake recreates them locally: scripts/climate/bake-normals.mjs, bake-biomes.mjs.
+# Old WorldClim 2.1 normals and data derived from them: the licence forbids redistribution without permission
+# (the repository is public). They are no longer read; local copies may remain, so the names stay ignored.
+# The game uses the open CHELSA V2.1 + ETOPO 2022 (CC0) bakes instead, which ARE committed:
+# public/assets/climate/normals-open.bin.gz, biome-open.bin.gz (scripts/climate/download-open.mjs, bake-*.mjs).
 public/assets/climate/normals.bin.gz
 public/assets/climate/biome.bin.gz
 

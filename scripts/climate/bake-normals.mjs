@@ -1,41 +1,52 @@
 // Passionaris climate baker, step 1: monthly climate normals on the SIM grid.
 //
-// Input : WorldClim 2.1, 10 arc-minute monthly tavg / prec + elevation (1970–2000),
-//         unzipped into data/raw/climate/{tavg,prec,elev}/ (see data/sources/climate.md).
-//         public/assets/map/cells.bin.gz (map land/lake mask, only for landfrac.bin.gz).
-// Output: public/assets/climate/normals.bin.gz  one gzip blob, little-endian:
+// Input : data/raw/climate-open/ (scripts/climate/download-open.mjs, sources in data/sources/climate.md):
+//           CHELSA V2.1 climatologies 1981–2010, monthly tas / pr, 4′ overview of the 30″ COGs (CC0 1.0);
+//           ETOPO 2022 60″ surface elevation sampled every 3′ (CC0 1.0).
+//         public/assets/map/cells.bin.gz (map land/lake mask: elevation samples, landfrac.bin.gz).
+// Output: public/assets/climate/normals-open.bin.gz  one gzip blob, little-endian:
 //           Int16  tavg[12][360][720]  °C * 10
 //           Uint16 prec[12][360][720]  mm / month
 //           Int16  elev[360][720]      m (ocean = 0)
 //         public/assets/climate/landfrac.bin.gz  Uint8 [2][360][720] (land, lake) fraction * 255
 //         public/assets/climate/normals.json     layout, offsets, units, source
+// (The old WorldClim bake wrote normals.bin.gz; that name stays gitignored and is never read any more.)
 //
-// Resampling: 2160x1080 -> 720x360 by averaging the valid pixels of each 3x3 block.
-// Ocean (nodata in WorldClim) is filled by a screened Poisson solve: land cells are
-// fixed (Dirichlet), sea cells relax towards an SST-like air-temperature / precipitation
-// formula with a coastal influence length of a few cells; small enclosed water bodies
-// (Black Sea, Red Sea, Baltic if closed at 0.5°; WorldClim itself covers the Caspian and
-// the big lakes) are pure Laplace fills from their shores. Over seas that freeze in winter
-// (Okhotsk, Bering, the Arctic shelf seas, the Antarctic sea-ice zone) a second temperature
-// pass pulls the sea target towards a long-range extension of the (colder) coasts, because air
-// over sea ice is continental rather than maritime. Zero-filled WorldClim pixels are masked
-// (see BOGUS). The East Antarctic plateau, where WorldClim is
-// far too warm, is blended towards an elevation/latitude parametrisation (see below).
+// Resampling: CHELSA 5400x2610 (4′, 84°N..90°S) -> 720x360 by the area-weighted mean of the pixels
+// (7.5 x 7.5 pixels per 0.5° cell, the shared border pixels weighted by their overlap). CHELSA V2.1 downscales
+// the ERA5 reanalysis and covers the seas as well, so land and sea both come from it.
+// Elevation ("mean land elevation, open ocean = 0"): mean of the ETOPO samples (10 x 10 per cell) on map land
+// (cells.bin.gz); a sample below sea level in a cell that also holds sea counts as 0 m (map islands / fjords over
+// ETOPO sea floor); cells inside big lakes take the lowest neighbouring land height (≈ the lake surface); sea 0.
+// Baseline: the game's paleoclimate model (src/sim/climate/paleo.js) is relative to 1970–2000. CHELSA is
+// 1981–2010, so every cell is shifted by the model's own difference between the two periods:
+// T -= mean(regionalDT, 1981–2010) - mean(regionalDT, 1970–2000)   (0.13..0.67 °C: 0.18 °C x polar amplification),
+// P /= mean(precipFactor, 1981–2010) / mean(precipFactor, 1970–2000)   (0.99..1.02).
+// Antarctic plateau: CHELSA is 3–4 °C warmer than the stations (Dome C −50.7 vs −54.5 °C; mean error of the 4 plateau
+// stations 3.3 °C vs 4.3 °C for the old WorldClim + Fortuin & Oerlemans blend), so it is kept as it is (the bake logs
+// the station check).
+// North of 84°N (no CHELSA data, all sea) the cells are filled by a screened Poisson solve: the cells at 84°N are
+// fixed (Dirichlet), the cap relaxes towards an SST-like air-temperature / precipitation formula, with a second
+// temperature pass over frozen sea towards a long-range extension of the (colder) edge.
 // Everything is deterministic (no randomness, no timestamps in the outputs).
 //
-// Run: tools/node/node.exe scripts/climate/bake-normals.mjs
+// Run: tools/node/node.exe scripts/climate/download-open.mjs   (once, ~200 MB)
+//      tools/node/node.exe scripts/climate/bake-normals.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { fromFile } from 'geotiff';
+import { regionalDT, precipFactor } from '../../src/sim/climate/paleo.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
-const RAW = path.join(ROOT, 'data', 'raw', 'climate');
+const RAW = path.join(ROOT, 'data', 'raw', 'climate-open');
 const OUT = path.join(ROOT, 'public', 'assets', 'climate');
 const MAP = path.join(ROOT, 'public', 'assets', 'map');
+const NORMALS_OUT = 'normals-open.bin.gz';
 
-const SW = 2160, SHH = 1080, B = 3;            // source grid and block size
-const W = 720, H = 360, N = W * H;             // SIM grid
+const CW = 5400, CH = 2610, CLAT0 = 84, CPX = 15;   // CHELSA overview: px per degree, row 0 = 84°N
+const EW = 7200, EH = 3600, EPX = 20;              // ETOPO samples: px per degree, row 0 = 90°N
+const ND = 65535;
+const W = 720, H = 360, N = W * H;                 // SIM grid
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 const DEG = Math.PI / 180;
@@ -43,42 +54,154 @@ const rowLat = y => 90 - (y + 0.5) * 0.5;
 const colLon = x => -180 + (x + 0.5) * 0.5;
 
 fs.mkdirSync(OUT, { recursive: true });
+const manifest = JSON.parse(fs.readFileSync(path.join(RAW, 'manifest.json'), 'utf8'));
+const readRaw = (rel, Type, len) => {
+  const b = zlib.gunzipSync(fs.readFileSync(path.join(RAW, rel)));
+  const copy = new Uint8Array(b.byteLength); copy.set(b);
+  const a = new Type(copy.buffer);
+  if (a.length !== len) throw new Error(`${rel}: ${a.length} values, expected ${len}`);
+  return a;
+};
 
-// ------------------------------------------------------------------ read + block mean
-async function readTif(file) {
-  const tiff = await fromFile(file);
-  const im = await tiff.getImage();
-  if (im.getWidth() !== SW || im.getHeight() !== SHH) throw new Error(`${file}: unexpected size ${im.getWidth()}x${im.getHeight()}`);
-  const [a] = await im.readRasters();
-  const nd = im.getGDALNoData();
-  if (typeof tiff.close === 'function') await tiff.close();
-  return { a, nd };
+// ------------------------------------------------------------------ read + area-weighted block mean
+// overlap of SIM cell k (0.5°) with 4′ pixels: 7.5 pixels per cell, [k*7.5, (k+1)*7.5)
+function overlaps(k) {
+  const a = k * 7.5, b = a + 7.5, out = [];
+  for (let p = Math.floor(a); p < Math.ceil(b); p++) out.push([p, Math.min(p + 1, b) - Math.max(p, a)]);
+  return out;
 }
+const OX = Array.from({ length: W }, (_, x) => overlaps(x));
+const ROW_OFF = (90 - CLAT0) * 2;                  // SIM rows north of 84°N have no CHELSA data
+const OY = Array.from({ length: H }, (_, y) => (y < ROW_OFF ? [] : overlaps(y - ROW_OFF)));
 
-// mean of valid pixels per 3x3 block; count = number of valid pixels (0..9).
-// bad: optional Uint8Array(SW*SHH), 1 = source pixel to ignore (see BOGUS below).
-function blockMean({ a, nd }, bad = null) {
-  const mean = new Float32Array(N);
-  const cnt = new Uint8Array(N);
+// mean of valid pixels per cell (value = raw * scale + offset); cnt = valid area in pixels (0..56.25)
+function blockMean(a, scale, offset, lo, hi) {
+  const mean = new Float32Array(N).fill(NaN);
+  const cnt = new Float32Array(N);
+  let rejected = 0;
   for (let y = 0; y < H; y++) {
+    const oy = OY[y];
+    if (!oy.length) continue;
     for (let x = 0; x < W; x++) {
-      let s = 0, n = 0;
-      for (let dy = 0; dy < B; dy++) {
-        const row = (y * B + dy) * SW + x * B;
-        for (let dx = 0; dx < B; dx++) {
-          const v = a[row + dx];
-          if (v === nd || !(v > -1e30) || !Number.isFinite(v)) continue;
-          if (bad && bad[row + dx]) continue;
-          s += v; n++;
+      let s = 0, w = 0;
+      for (const [py, wy] of oy) {
+        const row = py * CW;
+        for (const [px, wx] of OX[x]) {
+          const v = a[row + px];
+          if (v === ND) continue;
+          if (v < lo || v > hi) { rejected++; continue; }
+          s += wy * wx * v; w += wy * wx;
         }
       }
       const i = y * W + x;
-      cnt[i] = n;
-      mean[i] = n ? s / n : NaN;
+      cnt[i] = w;
+      if (w > 0) mean[i] = (s / w) * scale + offset;
     }
   }
-  return { mean, cnt };
+  return { mean, cnt, rejected };
 }
+
+log('reading CHELSA V2.1 1981–2010 (4′ overviews)');
+const tavg = [], prec = [];
+let landCount = null, rejected = 0;
+for (let m = 1; m <= 12; m++) {
+  const mm = String(m).padStart(2, '0');
+  const ta = readRaw(`chelsa/tas_${mm}.u16.gz`, Uint16Array, CW * CH);
+  const pa = readRaw(`chelsa/pr_${mm}.u16.gz`, Uint16Array, CW * CH);
+  // plausible ranges: tas 170..340 K, pr 0..6000 mm/month (anything else would be a decoding error)
+  const t = blockMean(ta, 0.1, -273.15, 1700, 3400), p = blockMean(pa, 0.1, 0, 0, 60000);
+  rejected += t.rejected + p.rejected;
+  tavg.push(t.mean); prec.push(p.mean);
+  if (!landCount) landCount = t.cnt;
+}
+if (rejected) throw new Error(`${rejected} CHELSA pixels outside the plausible range`);
+log('block means done');
+
+// CHELSA V2.1 is a downscaling of the ERA5 reanalysis and covers the oceans too (south of 84°N); a cell has
+// data when the valid pixels cover at least half a 4′ pixel of it. Only the polar cap north of 84°N is filled.
+const LAND_MIN = 0.5;
+
+// ------------------------------------------------------------------ elevation (ETOPO 2022 surface on map land)
+// "mean land elevation of the cell; open ocean = 0": land, lakes and sea come from the game map (cells.bin.gz:
+// 0 ocean, 1 lake, >= 2 land), so the climate grid and the map agree on where the coast is.
+const mapCells = (() => {
+  const b = zlib.gunzipSync(fs.readFileSync(path.join(MAP, 'cells.bin.gz')));
+  const c = new Uint32Array(b.buffer, b.byteOffset, b.byteLength / 4);
+  if (c.length !== 8192 * 4096) throw new Error('cells.bin.gz: unexpected size');
+  return c;
+})();
+const etopo = readRaw('etopo/surface_3m.i16.gz', Int16Array, EW * EH);
+const elevMean = new Float32Array(N).fill(NaN);
+let lakeCells = 0;
+{
+  const sum = new Float64Array(N), cnt = new Uint16Array(N), lake = new Uint16Array(N), sea = new Uint16Array(N);
+  const below = new Float64Array(N);                    // sum of the below-sea-level part of the land samples
+  for (let ey = 0; ey < EH; ey++) {
+    const lat = 90 - (ey + 0.5) / EPX;
+    const my = Math.min(4095, Math.floor((90 - lat) / 180 * 4096));
+    const sy = Math.floor(ey / 10);
+    for (let ex = 0; ex < EW; ex++) {
+      const lon = -180 + (ex + 0.5) / EPX;
+      const mx = Math.min(8191, Math.floor((lon + 180) / 360 * 8192));
+      const c = mapCells[my * 8192 + mx], i = sy * W + Math.floor(ex / 10);
+      if (c === 0) { sea[i]++; continue; }
+      if (c === 1) { lake[i]++; continue; }             // lake bed in ETOPO: no land height sample
+      // the lowest dry land on Earth is the Dead Sea shore, −430 m
+      const z = Math.max(-430, etopo[ey * EW + ex]);
+      sum[i] += z; cnt[i]++;
+      if (z < 0) below[i] += z;
+    }
+  }
+  // Where the cell also holds sea, a land sample below sea level is the sea floor next to a small island, a reef
+  // or a fjord that the map draws as land (Bahamas: −880 m) — it counts as 0 m. Depressions away from the
+  // sea (Caspian lowland, Qattara, Turpan, Dead Sea) keep their height.
+  for (let i = 0; i < N; i++) if (sea[i] && below[i] < 0) sum[i] -= below[i];
+  for (let i = 0; i < N; i++) {
+    if (cnt[i]) elevMean[i] = sum[i] / cnt[i];
+    else if (lake[i] <= sea[i]) elevMean[i] = 0;        // open sea: the sea surface
+    else lakeCells++;                                   // a cell inside a big lake: filled below
+  }
+  // cells inside big lakes (Caspian, Superior, Victoria, Baikal, …): the lowest neighbouring land height,
+  // repeated inwards (≈ the lake surface)
+  let pending = 0, pass = 0;
+  do {
+    pending = 0;
+    const next = elevMean.slice();
+    for (let i = 0; i < N; i++) {
+      if (Number.isFinite(elevMean[i])) continue;
+      const y = (i / W) | 0, x = i - y * W;
+      let mn = Infinity;
+      for (const j of [y * W + ((x + 1) % W), y * W + ((x + W - 1) % W), y > 0 ? i - W : -1, y < H - 1 ? i + W : -1]) {
+        if (j >= 0 && Number.isFinite(elevMean[j]) && elevMean[j] < mn) mn = elevMean[j];
+      }
+      if (Number.isFinite(mn)) next[i] = mn; else pending++;
+    }
+    elevMean.set(next);
+  } while (pending && ++pass < 50);
+}
+const elevB = { mean: elevMean };
+log(`cells inside big lakes: ${lakeCells}`);
+log('elevation done (ETOPO 2022 surface)');
+
+// ------------------------------------------------------------------ baseline 1981–2010 -> 1970–2000
+let shiftT = [Infinity, -Infinity], shiftP = [Infinity, -Infinity];
+{
+  const meanOver = (f, y0, y1) => { let s = 0, n = 0; for (let yr = y0; yr <= y1 + 0.75; yr += 0.25) { s += f(yr); n++; } return s / n; };
+  for (let y = 0; y < H; y++) {
+    const lat = rowLat(y);
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!(landCount[i] >= LAND_MIN)) continue;
+      const lon = colLon(x);
+      const dT = meanOver(yr => regionalDT(yr, lat, lon), 1981, 2010) - meanOver(yr => regionalDT(yr, lat, lon), 1970, 2000);
+      const rP = meanOver(yr => precipFactor(yr, lat, lon), 1981, 2010) / meanOver(yr => precipFactor(yr, lat, lon), 1970, 2000);
+      for (let m = 0; m < 12; m++) { tavg[m][i] -= dT; prec[m][i] /= rP; }
+      shiftT = [Math.min(shiftT[0], dT), Math.max(shiftT[1], dT)];
+      shiftP = [Math.min(shiftP[0], rP), Math.max(shiftP[1], rP)];
+    }
+  }
+}
+log(`baseline shift to 1970–2000: T −${shiftT[0].toFixed(2)}..−${shiftT[1].toFixed(2)} °C, P ÷${shiftP[0].toFixed(3)}..${shiftP[1].toFixed(3)}`);
 
 // ------------------------------------------------------------------ sea formulas
 // Piecewise-linear zonal profiles of near-surface air temperature over open/ice-covered
@@ -211,85 +334,19 @@ function solveFill(field, isWater, target, k, init, iters = 500, omega = 1.6) {
   }
 }
 
-// ------------------------------------------------------------------ main
-log('reading WorldClim 2.1 10m GeoTIFFs');
-const tavgRaw = [], precRaw = [];
-for (let m = 1; m <= 12; m++) {
-  const mm = String(m).padStart(2, '0');
-  tavgRaw.push(await readTif(path.join(RAW, 'tavg', `wc2.1_10m_tavg_${mm}.tif`)));
-  precRaw.push(await readTif(path.join(RAW, 'prec', `wc2.1_10m_prec_${mm}.tif`)));
+// ------------------------------------------------------------------ Antarctic plateau check
+// (WorldClim needed a correction here; CHELSA is checked against the stations and left as it is.)
+const at = (lat, lon) => Math.floor((90 - lat) / 0.5) * W + Math.floor((lon + 180) / 0.5);
+const annualT = i => tavg.reduce((s, a) => s + a[i], 0) / 12;
+for (const [n, la, lo, obs] of [['Dome C', -75.1, 123.35, -54.5], ['Vostok', -78.46, 106.84, -55.2], ['South Pole', -89.99, 0, -49.4], ['Dome A', -80.37, 77.37, -54.5], ['Summit (Greenland)', 72.58, -38.46, -29.0]]) {
+  log(`station check ${n.padEnd(18)} annual ${annualT(at(la, lo)).toFixed(1)} °C (observed ≈ ${obs}), elev ${elevMean[at(la, lo)]?.toFixed(0)} m`);
 }
-// WorldClim 2.1 (10′) has ~1500 pixels whose tavg is exactly 0.0 °C in all 12 months: small
-// Arctic islands (e.g. the Belcher Islands, Jan ≈ -24 °C in reality), Severnaya Zemlya, northern
-// Greenland and the Antarctic coast / ice-shelf edges. A year without any seasonal cycle is
-// impossible, so these are zero-filled gaps, not data. Around them WorldClim's interpolation
-// leaves a halo pulled towards 0 °C (e.g. Ross Ice Shelf pixels -0.1 .. -0.9 °C all year, where
-// July is really ≈ -30 °C): polar pixels whose warmest month is below 3 °C and whose annual range
-// is below a latitude-dependent minimum (5 °C at 60°, 18 °C at 80°; genuine polar stations have
-// 10–36 °C, e.g. Faraday 10, Mawson 18, McMurdo 24, Alert 36) are treated the same way. All of
-// them are masked for every variable; otherwise one such pixel warms a polar 0.5° cell by
-// 10–35 °C (before this mask 224 SIM cells were exactly 0.0 °C all year).
-const BOGUS = new Uint8Array(SW * SHH);
-const RANGE_MIN = [[55, 3], [60, 5], [65, 7], [70, 10], [75, 15], [80, 18]];
-let nBogus = 0, nHalo = 0;
-for (let py = 0; py < SHH; py++) {
-  const alat = Math.abs(90 - (py + 0.5) / 6);
-  const rMin = alat < 55 ? -1 : interpProfile(RANGE_MIN, alat, 1);
-  for (let px = 0; px < SW; px++) {
-    const i = py * SW + px;
-    const v0 = tavgRaw[0].a[i];
-    if (!(v0 > -1e30)) continue;
-    let mn = v0, mx = v0;
-    for (let m = 1; m < 12; m++) { const v = tavgRaw[m].a[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
-    if (mn === 0 && mx === 0) { BOGUS[i] = 1; nBogus++; } else if (mx < 3 && mx - mn < rMin) { BOGUS[i] = 1; nHalo++; }
-  }
-}
-const tavg = [], prec = [];
-let landCount = null;
-for (let m = 0; m < 12; m++) {
-  const t = blockMean(tavgRaw[m], BOGUS), p = blockMean(precRaw[m], BOGUS);
-  tavg.push(t.mean); prec.push(p.mean);
-  if (!landCount) landCount = t.cnt;
-}
-tavgRaw.length = 0; precRaw.length = 0;
-const elevB = blockMean(await readTif(path.join(RAW, 'elev', 'wc2.1_10m_elev.tif')), BOGUS);
-log(`block means done (masked WorldClim pixels: ${nBogus} zero-filled, ${nHalo} zero-halo)`);
 
-// ------------------------------------------------------------------ Antarctic plateau correction
-// WorldClim has almost no stations on the East Antarctic plateau and is far too warm there
-// (Dome C annual ≈ -38 °C vs observed -54.5 °C) with zonal artifacts near the pole. Blend
-// towards the Fortuin & Oerlemans (1990, Ann. Glaciol. 14:64) parametrisation of annual mean
-// surface temperature of the ice sheet, T = 34.46 - 0.00914 z - 0.688 |lat|, with the South Pole
-// station seasonal cycle (coreless winter); weight grows with elevation (coasts keep the
-// station-based WorldClim values). Accumulation is blended towards ~25 mm/yr on the high plateau.
-const SP_ANOM = [21.1, 8.6, -4.2, -8.3, -8.5, -9.4, -10.3, -10.2, -9.6, -1.5, 11.3, 21.6];
-let antCells = 0;
-for (let y = 0; y < H; y++) {
-  const lat = rowLat(y);
-  if (lat > -60) continue;
-  for (let x = 0; x < W; x++) {
-    const i = y * W + x;
-    const z = elevB.mean[i];
-    if (!(landCount[i] > 0) || !Number.isFinite(z)) continue;
-    const u = Math.max(0, Math.min(1, (z - 1000) / 1500));
-    const w = u * u * (3 - 2 * u);
-    if (w <= 0) continue;
-    antCells++;
-    const tAnn = 34.46 - 0.00914 * z - 0.688 * Math.abs(lat);
-    const pMon = (600 * Math.exp(-z / 700) + 20) / 12;
-    for (let m = 0; m < 12; m++) {
-      tavg[m][i] = (1 - w) * tavg[m][i] + w * (tAnn + SP_ANOM[m]);
-      prec[m][i] = (1 - w) * prec[m][i] + w * pMon;
-    }
-  }
-}
-log(`Antarctic plateau correction: ${antCells} cells`);
-
-// water = no valid WorldClim pixel in any month / field
+// water = (almost) no valid CHELSA pixel, or no value in some month / field
 const isWater = new Uint8Array(N);
 let nWater = 0;
 for (let i = 0; i < N; i++) {
-  let water = landCount[i] === 0;
+  let water = !(landCount[i] >= LAND_MIN);
   if (!water) for (let m = 0; m < 12; m++) if (!Number.isFinite(tavg[m][i]) || !Number.isFinite(prec[m][i])) { water = true; break; }
   if (!water && !Number.isFinite(elevB.mean[i])) water = true;
   isWater[i] = water ? 1 : 0;
@@ -328,8 +385,8 @@ function shoreMin(field) {
 }
 
 // elevation: open ocean = 0 m (sea surface); enclosed water = its lowest shore cell
-// (Black Sea ~ sea level, lakes ~ shore level; WorldClim has data over the Caspian, whose
-// elevation it gives as 0..-28 m, and over the large lakes, so those are not filled here)
+// (Black Sea ~ sea level, lakes ~ shore level; CHELSA covers the Caspian and the large lakes, whose
+// height came from their shores above)
 const elev = elevB.mean;
 {
   const smin = shoreMin(elev);
@@ -432,8 +489,8 @@ parts.forEach((a, k) => {
   off += a.byteLength;
 });
 const gz = zlib.gzipSync(blob, { level: 9 });
-fs.writeFileSync(path.join(OUT, 'normals.bin.gz'), gz);
-log(`normals.bin.gz ${(gz.length / 1e6).toFixed(2)} MB (raw ${(total / 1e6).toFixed(2)} MB)`);
+fs.writeFileSync(path.join(OUT, NORMALS_OUT), gz);
+log(`${NORMALS_OUT} ${(gz.length / 1e6).toFixed(2)} MB (raw ${(total / 1e6).toFixed(2)} MB)`);
 
 // ------------------------------------------------------------------ land / lake fraction from the game map
 let landfracInfo = null;
@@ -474,7 +531,7 @@ let landfracInfo = null;
 const header = {
   format: 'passionaris-climate-normals',
   version: 1,
-  file: 'normals.bin.gz',
+  file: NORMALS_OUT,
   compression: 'gzip',
   byteOrder: 'little-endian',
   totalBytes: total,
@@ -487,20 +544,25 @@ const header = {
     cols: 'col 0 = 180°W .. 179.5°W (centre lon = -180 + (x + 0.5) * 0.5)',
   },
   months: 'index 0 = January .. 11 = December',
-  baseline: '1970–2000 climatological normals',
+  baseline: '1970–2000 climatological normals (CHELSA 1981–2010 shifted with the game paleoclimate model, see processing.baseline)',
   sections,
   extras: landfracInfo ? { landfrac: landfracInfo } : {},
   source: {
-    name: 'WorldClim version 2.1, 10 arc-minute monthly tavg / prec / elev',
-    url: 'https://www.worldclim.org/data/worldclim21.html',
-    citation: 'Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2: new 1-km spatial resolution climate surfaces for global land areas. International Journal of Climatology 37 (12): 4302–4315.',
-    terms: 'See data/sources/climate.md: worldclim.org states free academic / non-commercial use; redistribution or commercial use requires prior permission.',
+    name: 'CHELSA V2.1 climatologies 1981–2010 (monthly tas, pr; 4′ overview of the 30″ COGs) + ETOPO 2022 v1 60″ surface elevation (sampled every 3′)',
+    url: ['https://www.chelsa-climate.org/datasets/chelsa_climatologies', 'https://www.ncei.noaa.gov/products/etopo-global-relief-model'],
+    citation: [
+      'Karger, D. N., Conrad, O., Böhner, J., Kawohl, T., Kreft, H., Soria-Auza, R. W., Zimmermann, N. E., Linder, H. P., Kessler, M. (2021). Climatologies at high resolution for the earth’s land surface areas. EnviDat. https://doi.org/10.16904/envidat.228',
+      'Karger, D. N. et al. (2017). Climatologies at high resolution for the earth’s land surface areas. Scientific Data 4, 170122. https://doi.org/10.1038/sdata.2017.122',
+      'NOAA National Centers for Environmental Information. 2022: ETOPO 2022 15 Arc-Second Global Relief Model. https://doi.org/10.25921/fd45-gt74',
+    ],
+    license: 'CC0 1.0 (both): https://creativecommons.org/publicdomain/zero/1.0/ — see data/sources/climate.md',
   },
   processing: {
-    resample: '3x3 block mean of valid 10′ pixels -> 0.5°',
-    maskedPixels: `${nBogus} WorldClim pixels with tavg exactly 0.0 °C in all 12 months (zero-filled gaps) and ${nHalo} polar halo pixels around them (warmest month < 3 °C, annual range below ${RANGE_MIN.map(([l, r]) => `${r} °C at ${l}°`).join(', ')}) ignored for every variable`,
-    oceanFill: `screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T ${LT} cells, P ${LP} cells; second temperature pass over frozen seas (ice weight 0..1 for pass-1 T ${ICE_T0}..${ICE_T1} °C): target = min(formula, ${LT_ICE}-cell coast extension); enclosed water bodies < ${INLAND_MAX} cells: Laplace fill from shores`,
-    antarctic: `land cells south of 60°S above 1000 m blended (weight smoothstep((z-1000)/1500)) towards Fortuin & Oerlemans 1990 T = 34.46 - 0.00914 z - 0.688|lat| + South Pole seasonal cycle; accumulation towards (600 e^(-z/700) + 20)/12 mm/month; ${antCells} cells`,
+    resample: 'area-weighted mean of the 4′ CHELSA pixels (7.5 x 7.5 per 0.5° cell, land and sea); a cell has data when the pixels cover >= ' + LAND_MIN + ' pixel; no data north of 84°N (sea, filled)',
+    elevation: 'mean of the ETOPO 2022 surface samples (3′, 10 x 10 per cell) on map land (cells.bin.gz id >= 2), floored at -430 m and at 0 m in cells that also hold sea; cells inside big lakes: lowest neighbouring land height; sea: 0',
+    antarctic: 'no correction: CHELSA annual Dome C -50.7, Vostok -52.4, South Pole -45.7 °C vs observed -54.5, -55.2, -49.4',
+    baseline: `CHELSA 1981–2010 -> 1970–2000: T -= mean regionalDT(1981–2010) - mean regionalDT(1970–2000) (${shiftT[0].toFixed(2)}..${shiftT[1].toFixed(2)} °C), P /= ratio of mean precipFactor (${shiftP[0].toFixed(3)}..${shiftP[1].toFixed(3)}); src/sim/climate/paleo.js`,
+    oceanFill: `only north of 84°N (no CHELSA data): screened Poisson fill from the 84°N edge towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T ${LT} cells, P ${LP} cells; second temperature pass over frozen seas (ice weight 0..1 for pass-1 T ${ICE_T0}..${ICE_T1} °C): target = min(formula, ${LT_ICE}-cell coast extension); enclosed water bodies < ${INLAND_MAX} cells: Laplace fill from shores`,
     waterCells: nWater,
     enclosedCells: inland.reduce((a, b) => a + b, 0),
     script: 'scripts/climate/bake-normals.mjs',

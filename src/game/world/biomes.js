@@ -34,7 +34,7 @@ export async function loadBiomes(globe, base = 'assets/climate/') {
   const meta = await fetch(`${base}biomes.json`).then(r => (r.ok ? r.json() : null)).catch(() => null);
   if (!meta) return null;
   const { W, H } = meta.grid;
-  const data = await fetchBytes(`${base}${meta.file || 'biome.bin.gz'}`);
+  const data = await fetchBytes(`${base}${meta.file || 'biome-open.bin.gz'}`);
   const colors = [];
   for (const c of meta.classes) colors[c.id] = hexToRgb(BIOME_COLORS[c.key] || c.color || '#cccccc');
   for (let i = 0; i < 16; i++) if (!colors[i]) colors[i] = [0.8, 0.8, 0.75];

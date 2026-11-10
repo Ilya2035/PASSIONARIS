@@ -1,9 +1,10 @@
 // Passionaris climate baker, step 2: biome map on the MAP grid (8192x4096).
 //
-// Input : public/assets/climate/normals.bin.gz (bake-normals.mjs),
+// Input : public/assets/climate/normals-open.bin.gz (bake-normals.mjs; CHELSA V2.1 + ETOPO 2022, CC0),
 //         public/assets/map/height.delta.bin.gz (Int16, rows delta-encoded, metres),
 //         public/assets/map/cells.bin.gz (Uint32: 0 ocean, 1 lake, >=2 land district).
-// Output: public/assets/climate/biome.bin.gz  Uint8 8192x4096, ids from src/sim/climate/biomes.js
+// Output: public/assets/climate/biome-open.bin.gz  Uint8 8192x4096, ids from src/sim/climate/biomes.js
+//         (the old WorldClim-derived biome.bin.gz stays gitignored and is never read any more)
 //         public/assets/climate/biomes.json   class table (id, key, nameRu, description, color)
 //
 // Downscaling: monthly temperature is bilinearly interpolated from the 0.5° normals and
@@ -31,6 +32,7 @@ const MW = 8192, MH = 4096, SN = SW * SH;
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 const smooth01 = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+const BIOME_OUT = 'biome-open.bin.gz';
 const ICE_TMAX_NONE = 4; // °C: coarse warmest month above which the map height is never replaced
 const gunzipTyped = (file, Type) => {
   const b = zlib.gunzipSync(fs.readFileSync(path.join(MAP, file)));
@@ -170,8 +172,8 @@ for (let y = 0; y < MH; y++) {
 
 // ------------------------------------------------------------------ write + report
 const gz = zlib.gzipSync(Buffer.from(biome.buffer), { level: 9 });
-fs.writeFileSync(path.join(OUT, 'biome.bin.gz'), gz);
-log(`biome.bin.gz ${(gz.length / 1e6).toFixed(2)} MB`);
+fs.writeFileSync(path.join(OUT, BIOME_OUT), gz);
+log(`${BIOME_OUT} ${(gz.length / 1e6).toFixed(2)} MB`);
 
 const area = new Float64Array(BIOMES.length);
 for (let y = 0; y < MH; y++) {
@@ -183,11 +185,11 @@ const landArea = area.reduce((s, v, k) => s + (k ? v : 0), 0);
 const json = {
   format: 'passionaris-biomes',
   version: 1,
-  file: 'biome.bin.gz',
+  file: BIOME_OUT,
   compression: 'gzip',
   type: 'Uint8',
   grid: { W: MW, H: MH, note: 'MAP grid: row 0 = 90°N, col 0 = 180°W, same as public/assets/map/cells.bin.gz' },
-  method: 'WorldClim 1970–2000 normals, lapse-rate (6.5 °C/km) temperature downscaling to the map height (climate-grid ice-surface height over ice sheets), bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules and a GDD5 tree line (src/sim/climate/biomes.js); wetlands = flat humid lowlands',
+  method: 'Open 1970–2000 normals (CHELSA V2.1 + ETOPO 2022, CC0; normals.json), lapse-rate (6.5 °C/km) temperature downscaling to the map height (climate-grid ice-surface height over ice sheets), bilinear precipitation; Köppen aridity / temperature thresholds + Whittaker-style rules and a GDD5 tree line (src/sim/climate/biomes.js); wetlands = flat humid lowlands',
   classes: BIOMES.map(c => ({ ...c, landShare: c.id ? +(area[c.id] / landArea).toFixed(4) : undefined })),
 };
 fs.writeFileSync(path.join(OUT, 'biomes.json'), JSON.stringify(json, null, 2));

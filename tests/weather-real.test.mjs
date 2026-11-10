@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { createWeather, fromDate, parseNormals, maskFromCells, N, W, LAND, OCEAN } from '../src/sim/weather/core.js';
 
 const ROOT = new URL('../', import.meta.url);
-const files = ['public/assets/climate/normals.bin.gz', 'public/assets/climate/normals.json', 'public/assets/map/cells.bin.gz'].map(p => new URL(p, ROOT));
+const files = ['public/assets/climate/normals-open.bin.gz', 'public/assets/climate/normals.json', 'public/assets/map/cells.bin.gz'].map(p => new URL(p, ROOT));
 const have = files.every(f => existsSync(f));
 
 test('real normals: sea ice and snow cover follow the observed seasonal cycle', { skip: !have && 'baked climate/map assets not found' }, () => {

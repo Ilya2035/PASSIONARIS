@@ -1,7 +1,7 @@
 {
   "format": "passionaris-climate-normals",
   "version": 1,
-  "file": "normals.bin.gz",
+  "file": "normals-open.bin.gz",
   "compression": "gzip",
   "byteOrder": "little-endian",
   "totalBytes": 12960000,
@@ -19,7 +19,7 @@
     "cols": "col 0 = 180°W .. 179.5°W (centre lon = -180 + (x + 0.5) * 0.5)"
   },
   "months": "index 0 = January .. 11 = December",
-  "baseline": "1970–2000 climatological normals",
+  "baseline": "1970–2000 climatological normals (CHELSA 1981–2010 shifted with the game paleoclimate model, see processing.baseline)",
   "sections": [
     {
       "name": "tavg",
@@ -82,18 +82,26 @@
     }
   },
   "source": {
-    "name": "WorldClim version 2.1, 10 arc-minute monthly tavg / prec / elev",
-    "url": "https://www.worldclim.org/data/worldclim21.html",
-    "citation": "Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2: new 1-km spatial resolution climate surfaces for global land areas. International Journal of Climatology 37 (12): 4302–4315.",
-    "terms": "See data/sources/climate.md: worldclim.org states free academic / non-commercial use; redistribution or commercial use requires prior permission."
+    "name": "CHELSA V2.1 climatologies 1981–2010 (monthly tas, pr; 4′ overview of the 30″ COGs) + ETOPO 2022 v1 60″ surface elevation (sampled every 3′)",
+    "url": [
+      "https://www.chelsa-climate.org/datasets/chelsa_climatologies",
+      "https://www.ncei.noaa.gov/products/etopo-global-relief-model"
+    ],
+    "citation": [
+      "Karger, D. N., Conrad, O., Böhner, J., Kawohl, T., Kreft, H., Soria-Auza, R. W., Zimmermann, N. E., Linder, H. P., Kessler, M. (2021). Climatologies at high resolution for the earth’s land surface areas. EnviDat. https://doi.org/10.16904/envidat.228",
+      "Karger, D. N. et al. (2017). Climatologies at high resolution for the earth’s land surface areas. Scientific Data 4, 170122. https://doi.org/10.1038/sdata.2017.122",
+      "NOAA National Centers for Environmental Information. 2022: ETOPO 2022 15 Arc-Second Global Relief Model. https://doi.org/10.25921/fd45-gt74"
+    ],
+    "license": "CC0 1.0 (both): https://creativecommons.org/publicdomain/zero/1.0/ — see data/sources/climate.md"
   },
   "processing": {
-    "resample": "3x3 block mean of valid 10′ pixels -> 0.5°",
-    "maskedPixels": "1471 WorldClim pixels with tavg exactly 0.0 °C in all 12 months (zero-filled gaps) and 1087 polar halo pixels around them (warmest month < 3 °C, annual range below 3 °C at 55°, 5 °C at 60°, 7 °C at 65°, 10 °C at 70°, 15 °C at 75°, 18 °C at 80°) ignored for every variable",
-    "oceanFill": "screened Poisson fill from coasts towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T 3.5 cells, P 5 cells; second temperature pass over frozen seas (ice weight 0..1 for pass-1 T -1..-7 °C): target = min(formula, 25-cell coast extension); enclosed water bodies < 600 cells: Laplace fill from shores",
-    "antarctic": "land cells south of 60°S above 1000 m blended (weight smoothstep((z-1000)/1500)) towards Fortuin & Oerlemans 1990 T = 34.46 - 0.00914 z - 0.688|lat| + South Pole seasonal cycle; accumulation towards (600 e^(-z/700) + 20)/12 mm/month; 21218 cells",
-    "waterCells": 164052,
-    "enclosedCells": 1652,
+    "resample": "area-weighted mean of the 4′ CHELSA pixels (7.5 x 7.5 per 0.5° cell, land and sea); a cell has data when the pixels cover >= 0.5 pixel; no data north of 84°N (sea, filled)",
+    "elevation": "mean of the ETOPO 2022 surface samples (3′, 10 x 10 per cell) on map land (cells.bin.gz id >= 2), floored at -430 m and at 0 m in cells that also hold sea; cells inside big lakes: lowest neighbouring land height; sea: 0",
+    "antarctic": "no correction: CHELSA annual Dome C -50.7, Vostok -52.4, South Pole -45.7 °C vs observed -54.5, -55.2, -49.4",
+    "baseline": "CHELSA 1981–2010 -> 1970–2000: T -= mean regionalDT(1981–2010) - mean regionalDT(1970–2000) (0.13..0.67 °C), P /= ratio of mean precipFactor (0.989..1.019); src/sim/climate/paleo.js",
+    "oceanFill": "only north of 84°N (no CHELSA data): screened Poisson fill from the 84°N edge towards a zonal/seasonal sea-surface air formula with current anomalies; influence length T 3.5 cells, P 5 cells; second temperature pass over frozen seas (ice weight 0..1 for pass-1 T -1..-7 °C): target = min(formula, 25-cell coast extension); enclosed water bodies < 600 cells: Laplace fill from shores",
+    "waterCells": 8640,
+    "enclosedCells": 0,
     "script": "scripts/climate/bake-normals.mjs"
   }
 }

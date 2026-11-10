@@ -37,9 +37,10 @@ JSON/бинарные паки данных. Симуляция пишется *
   позже — недели, дни, часы). Пауза, 5 скоростей, события `onDay/onMonth/onYear`, детерминированный шаг.
 
 ## Климат (`src/sim/climate/`)
-- Климатология: `public/assets/climate/normals.bin.gz` — Int16 `tavg[12][360][720]` (°C×10), Uint16 `prec[12][360][720]` (мм/мес),
-  Int16 `elev[360][720]` (м), заголовок JSON `normals.json` (формат, источник).
-- Биомы на MAP-сетке: `public/assets/climate/biome.bin.gz` — Uint8 8192×4096, классы в `biomes.json`
+- Климатология: `public/assets/climate/normals-open.bin.gz` — Int16 `tavg[12][360][720]` (°C×10), Uint16 `prec[12][360][720]` (мм/мес),
+  Int16 `elev[360][720]` (м), заголовок JSON `normals.json` (формат, источник). Данные открытые: CHELSA V2.1 1981–2010,
+  приведённые к 1970–2000, + ETOPO 2022 (оба CC0) — хранятся в git (`data/sources/climate.md`).
+- Биомы на MAP-сетке: `public/assets/climate/biome-open.bin.gz` — Uint8 8192×4096, классы в `biomes.json`
   (лёд, тундра, тайга, умеренный лес, степь/луг, средиземноморский, пустыня, полупустыня, саванна, тропический лес, болото, горы-высокогорье).
 - Палеоклимат `paleo.js`: `globalDT(year)`, `regionalDT(year, lat, lon)`, `precipFactor(year, lat, lon)`
   (зелёная Сахара до ~3000 г. до н.э., средневековый оптимум, малый ледниковый период, потепление до 2100),

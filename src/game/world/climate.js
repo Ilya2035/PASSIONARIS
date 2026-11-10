@@ -16,7 +16,7 @@ const ERA_BUDGET_MS = 5;   // per frame while the clock runs (one step ~2–4 ms
 // normals: already loaded (the weather starts from them early); deferEra: the caller builds the first era
 // statistics itself (tick(false)), e.g. while a worker spins up
 export async function createClimate({ climatology, paleo, globe, clock, cal, normals: given = null, deferEra = false }) {
-  const normals = given || await climatology.loadNormals('assets/climate/normals.bin.gz');
+  const normals = given || await climatology.loadNormals(climatology.NORMALS_URL);
   const layer = new Uint8Array(N * 4);
   const dT = new Float32Array(N), pF = new Float32Array(N).fill(1);
   const addMm = new Float32Array(N), addYear = new Float32Array(N), tmp = new Float32Array(N);

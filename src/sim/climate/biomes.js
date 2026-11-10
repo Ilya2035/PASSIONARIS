@@ -2,7 +2,7 @@
 // moisture / heat limits). Pure functions, no allocation in the hot path, so the same
 // rules can re-classify the world under a paleo-climate (see paleo.js) at runtime.
 //
-// The baked map public/assets/climate/biome.bin.gz (Uint8 8192x4096) stores these ids.
+// The baked map public/assets/climate/biome-open.bin.gz (Uint8 8192x4096) stores these ids.
 
 export const BIOME = Object.freeze({
   WATER: 0, ICE: 1, TUNDRA: 2, TAIGA: 3, TEMPERATE_FOREST: 4, STEPPE: 5, MEDITERRANEAN: 6,

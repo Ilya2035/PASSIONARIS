@@ -42,7 +42,7 @@ test('normals: array sizes and header', () => {
   assert.equal(bj.generated, undefined);
 });
 
-test('normals: WorldClim zero-filled gaps are masked (no cell sits at 0.0 °C all year)', () => {
+test('normals: no zero-filled gaps (no cell sits at 0.0 °C all year), polar winters stay polar', () => {
   let flat = 0;
   for (let i = 0; i < N; i++) {
     let z = true;
@@ -50,9 +50,11 @@ test('normals: WorldClim zero-filled gaps are masked (no cell sits at 0.0 °C al
     if (z) flat++;
   }
   assert.equal(flat, 0, 'cells with tavg exactly 0 in all months');
-  // their halo too: polar winters stay polar (before the fix: 0.0 °C on N Greenland / Ross Ice Shelf)
+  // polar winters stay polar (the old WorldClim bake had 0.0 °C gaps on N Greenland / the Ross Ice Shelf). The
+  // warmest January north of 79°N is the Fram Strait west of Svalbard, kept ice-free by the West Spitsbergen
+  // Current: −8.5 °C in CHELSA (ERA5), so the bound is −5 °C (it was −9 °C for the old formula-filled sea).
   for (let y = 0; y < 22; y++) for (let x = 0; x < W; x++) {
-    if (nm.tavg[y * W + x] > -90) assert.fail(`January ${90 - (y + 0.5) * 0.5}N ${-180 + (x + 0.5) * 0.5}: ${nm.tavg[y * W + x] / 10}`);
+    if (nm.tavg[y * W + x] > -50) assert.fail(`January ${90 - (y + 0.5) * 0.5}N ${-180 + (x + 0.5) * 0.5}: ${nm.tavg[y * W + x] / 10}`);
   }
   for (let y = H - 30; y < H; y++) for (let x = 0; x < W; x++) {
     const v = nm.tavg[6 * N + y * W + x];
@@ -61,9 +63,11 @@ test('normals: WorldClim zero-filled gaps are masked (no cell sits at 0.0 °C al
   assert.ok(T(56.25, -79.25, 0) < -15, 'Belcher Islands / Hudson Bay in January');
 });
 
-test('ocean fill: frozen seas are continental in winter, the North Atlantic Current is mild', () => {
+test('ocean: frozen seas are continental in winter, the North Atlantic Current is mild', () => {
+  // The sea comes from CHELSA (ERA5) since the open-data bake; only north of 84°N is still the formula fill.
+  // Sea of Okhotsk at 55N 148E: −7.3 °C in January (the old formula fill gave −14 °C; bound −10 → −5 °C).
   assert.ok(T(60, -85, 0) < -20, `Hudson Bay Jan ${T(60, -85, 0)}`);
-  assert.ok(T(55, 148, 0) < -10, `Sea of Okhotsk Jan ${T(55, 148, 0)}`);
+  assert.ok(T(55, 148, 0) < -5, `Sea of Okhotsk Jan ${T(55, 148, 0)}`);
   assert.ok(T(73, -140, 0) < -22, `Beaufort Sea Jan ${T(73, -140, 0)}`);
   assert.ok(T(76, 125, 0) < -25, `Laptev Sea Jan ${T(76, 125, 0)}`);
   assert.ok(T(52.5, -20, 0) > 6, `ocean weather ship J (52.5N 20W) Jan ${T(52.5, -20, 0)}`);
@@ -86,13 +90,13 @@ test('ocean fill: no seam at the equator (hemispheric seasonal cycle blended smo
 });
 
 test('normals: loader accepts a path and raw bytes with identical results', async () => {
-  const p = path.join(CLIMATE, 'normals.bin.gz');
+  const p = path.join(CLIMATE, 'normals-open.bin.gz');
   const a = await loadNormals(p);
   const b = await loadNormals(new Uint8Array(fs.readFileSync(p)));
   // browser-style: a fetch-like function (gzip decoded by DecompressionStream)
   let asked = null;
   const c = await loadNormals(async url => { asked = url; return new Response(fs.readFileSync(p)); });
-  assert.equal(asked, 'assets/climate/normals.bin.gz');
+  assert.equal(asked, 'assets/climate/normals-open.bin.gz');
   // a dev server that already decoded Content-Encoding: gzip hands over raw bytes
   const d = await loadNormals(new Uint8Array(zlib.gunzipSync(fs.readFileSync(p))));
   for (const k of ['tavg', 'prec', 'elev']) {
@@ -242,7 +246,8 @@ test('landfrac: sizes and land/ocean contrast', async () => {
 });
 
 // ------------------------------------------------------------------ biomes
-const biome = zlib.gunzipSync(fs.readFileSync(path.join(CLIMATE, 'biome.bin.gz')));
+const biomeFile = JSON.parse(fs.readFileSync(path.join(CLIMATE, 'biomes.json'), 'utf8')).file;
+const biome = zlib.gunzipSync(fs.readFileSync(path.join(CLIMATE, biomeFile)));
 const MW = 8192, MH = 4096;
 const bAt = (lat, lon) => biome[Math.min(MH - 1, Math.floor((90 - lat) / 180 * MH)) * MW + Math.floor(((lon + 180) / 360 * MW) % MW)];
 
@@ -308,9 +313,13 @@ test('biome spot checks: Arctic tree line and boreal interiors', () => {
   // dry but cold interior Alaska is boreal forest, not steppe
   assert.equal(bMaj(66.6, -145.3), BIOME.TAIGA, 'Yukon Flats');
   // ice-free coastal valleys keep their own (low) height: forest, not tundra
-  assert.equal(bMaj(61.13, -146.35), BIOME.TAIGA, 'Valdez');
+  // Valdez: the valley floor itself (the 25 km window now reaches the Chugach slopes above the tree line: CHELSA's
+  // July is 1.6 °C cooler than WorldClim's, closer to the Valdez station — 13.9 vs 12.9 °C at sea level, WorldClim 15.6)
+  assert.equal(bAt(61.13, -146.35), BIOME.TAIGA, 'Valdez');
   assert.equal(bMaj(61.9, 6.72), BIOME.TAIGA, 'Stryn (Nordfjord)');
-  assert.equal(bMaj(60.38, 6.15), BIOME.TEMPERATE_FOREST, 'Kvam (Hardangerfjord)');
+  // Kvam: the fjord shore (CHELSA's cell is 0.6–0.9 °C colder in winter at 745 m, so the boreal belt on the slopes
+  // around reaches ~150 m lower than with WorldClim and now fills most of the 25 km window)
+  assert.equal(bAt(60.38, 6.15), BIOME.TEMPERATE_FOREST, 'Kvam (Hardangerfjord)');
 });
 
 test('classifier on synthetic climates', () => {

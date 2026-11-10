@@ -1,7 +1,7 @@
 // Climatology: monthly normals (1970–2000) on the SIM grid 720x360 and smooth samplers.
 //
-// Data: public/assets/climate/normals.bin.gz (layout in normals.json, baked by
-// scripts/climate/bake-normals.mjs):
+// Data: public/assets/climate/normals-open.bin.gz (open data: CHELSA V2.1 + ETOPO 2022, both CC0; layout in
+// normals.json, baked by scripts/climate/bake-normals.mjs):
 //   Int16  tavg[12][360][720]  °C * 10
 //   Uint16 prec[12][360][720]  mm / month
 //   Int16  elev[360][720]      m (open ocean = 0)
@@ -23,6 +23,10 @@ const ELEV_BYTES = PLANE * 2;
 export const NORMALS_BYTES = TAVG_BYTES + PREC_BYTES + ELEV_BYTES;
 
 const BROWSER_BASE = 'assets/climate/';
+/** File name of the baked normals (the old WorldClim name normals.bin.gz is never read). */
+export const NORMALS_FILE = 'normals-open.bin.gz';
+/** Browser URL of the baked normals. */
+export const NORMALS_URL = BROWSER_BASE + NORMALS_FILE;
 const isNode = typeof process !== 'undefined' && !!process.versions?.node
   && typeof window === 'undefined' && typeof self === 'undefined';
 
@@ -56,7 +60,7 @@ async function gunzip(u8) {
  * a fetch-like function (called with 'assets/climate/<file>'), a Response, an ArrayBuffer /
  * Uint8Array (already loaded bytes), or undefined (default location).
  */
-export async function readAsset(src, defaultFile = 'normals.bin.gz') {
+export async function readAsset(src, defaultFile = NORMALS_FILE) {
   let bytes;
   if (src instanceof Uint8Array) bytes = src;
   else if (src instanceof ArrayBuffer) bytes = new Uint8Array(src);
@@ -93,15 +97,15 @@ export async function readAsset(src, defaultFile = 'normals.bin.gz') {
 /**
  * Load the monthly normals.
  * @param {string|Function|ArrayBuffer|Uint8Array|Response} [fetchOrPath]
- *   Browser: URL (default 'assets/climate/normals.bin.gz') or a fetch-like function.
- *   Node: file path (default <project>/public/assets/climate/normals.bin.gz).
+ *   Browser: URL (default NORMALS_URL = 'assets/climate/normals-open.bin.gz') or a fetch-like function.
+ *   Node: file path (default <project>/public/assets/climate/normals-open.bin.gz).
  * @returns {Promise<{W:number,H:number,tavg:Int16Array,prec:Uint16Array,elev:Int16Array}>}
  *   tavg °C*10 [month*N + cell], prec mm/month [month*N + cell], elev m [cell].
  */
 export async function loadNormals(fetchOrPath) {
-  const bytes = await readAsset(fetchOrPath, 'normals.bin.gz');
+  const bytes = await readAsset(fetchOrPath, NORMALS_FILE);
   if (bytes.byteLength !== NORMALS_BYTES) {
-    throw new Error(`normals.bin.gz: expected ${NORMALS_BYTES} bytes, got ${bytes.byteLength}`);
+    throw new Error(`${NORMALS_FILE}: expected ${NORMALS_BYTES} bytes, got ${bytes.byteLength}`);
   }
   const buf = bytes.buffer, o = bytes.byteOffset;
   return {

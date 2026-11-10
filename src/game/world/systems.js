@@ -127,7 +127,7 @@ export async function createWorldSystems(ctx) {
   let climatology = null, paleo = null, normals = null;
   if (sys.clock) {
     [climatology, paleo] = await Promise.all([load('../../sim/climate/climatology.js'), load('../../sim/climate/paleo.js')]);
-    if (climatology && paleo) normals = await climatology.loadNormals('assets/climate/normals.bin.gz').catch(e => { console.warn('climate', e); return null; });
+    if (climatology && paleo) normals = await climatology.loadNormals(climatology.NORMALS_URL).catch(e => { console.warn('climate', e); return null; });
   }
 
   // ---- daily weather (worker): snow, ice, clouds, rain, drought, weather spells.
