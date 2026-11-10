@@ -214,6 +214,8 @@ const settingsPanel = createSettingsPanel({
   onChange: key => { if ((key === 'autosaveMinutes' || key === '*') && !savesPanel.items.length) savesPanel.refresh(); },
 });
 $('open-settings').onclick = () => settingsPanel.open();
+// the graphics album (album.html, docs/ALBUM.md): its own window in the app, a plain page in a browser
+$('open-album').onclick = () => { if (isElectron) window.passionaris.openAlbum(); else location.href = 'album.html'; };
 
 $('play').onclick = () => launchGame(null);
 $('quit').onclick = () => { if (isElectron) window.passionaris.quit(); else window.close(); };

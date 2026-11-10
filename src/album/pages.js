@@ -1,0 +1,59 @@
+// The pages of the album: named sets of parameters (params.js) with a camera. The UI lists them by group; the owner
+// marks each as fitting or not. To add a page, add a line here.
+const P = { pyr: [42.63, .66], ebro: [40.72, .72], gib: [36.0, -5.5], mad: [40.6, -3.85], nev: [37.05, -3.35], tou: [43.6, 1.35], pic: [43.2, -4.85], lis: [38.75, -9.15] };
+const cam = (ll, h, tilt = 0, heading = 0) => ({ lat: ll[0], lon: ll[1], h, tilt, heading });
+
+export const PAGES = [
+  // ---- the land itself
+  { id: 'land-far', group: 'Земля', title: 'Натуральная: весь полуостров', note: 'Вид с 1700 км: леса, сухие равнины Эбро и юго-востока, снег на Пиренеях, отмели у берегов.', p: { look: 'natural' }, cam: cam([40.2, -3.4], 1700) },
+  { id: 'land-200', group: 'Земля', title: 'Натуральная: Пиренеи с 200 км', note: 'Обычная игровая высота. Смотрите на рельеф, тени и границу леса.', p: { look: 'natural' }, cam: cam(P.pyr, 200, 48, 15) },
+  { id: 'land-20', group: 'Земля', title: 'Натуральная: Пиренеи с 25 км', note: 'Почти самая близкая высота. Скалы, снег, объёмные деревья.', p: { look: 'natural' }, cam: cam(P.pyr, 25, 58, 160) },
+  { id: 'land-vivid', group: 'Земля', title: 'Яркая: Гибралтарский пролив', note: 'Те же данные, но цвета насыщеннее и свет теплее.', p: { look: 'vivid' }, cam: cam(P.gib, 180, 45, -30) },
+  { id: 'land-autumn', group: 'Земля', title: 'Осень: Пикос-де-Эуропа', note: 'Широколиственный лес желтеет, снег опускается ниже.', p: { look: 'autumn' }, cam: cam(P.pic, 70, 55, 170) },
+  { id: 'land-winter', group: 'Земля', title: 'Зима: Сьерра-Невада', note: 'Снеговая линия опущена на два километра.', p: { look: 'winter' }, cam: cam(P.nev, 120, 50, 20) },
+  { id: 'land-atlas', group: 'Земля', title: 'Атлас: высоты цветом и горизонтали', note: 'Вид школьного атласа: зелёные низины, бурые горы, линии через 200 м.', p: { look: 'atlas', forest3d: 0 }, cam: cam([41.0, -1.5], 520, 20, 0) },
+  { id: 'land-night', group: 'Земля', title: 'Ночной сланец', note: 'Тёмная карта с золотым светом по рельефу, в тон интерфейсу.', p: { look: 'night', forest3d: 0 }, cam: cam(P.pyr, 300, 40, 10) },
+  // ---- how much larger than life things are drawn
+  { id: 'scale-real', group: 'Масштаб объектов', title: 'Почти в настоящую величину', note: 'Деревья, дома, дороги и реки увеличены совсем чуть-чуть. Честно, но мелко.', p: { trees: .4, houses: .4, roads: .5, rivers: .5 }, cam: cam(P.mad, 45, 52, -20) },
+  { id: 'scale-mid', group: 'Масштаб объектов', title: 'Умеренное увеличение', note: 'Средний вариант: объекты читаются, но не закрывают землю.', p: {}, cam: cam(P.mad, 45, 52, -20) },
+  { id: 'scale-big', group: 'Масштаб объектов', title: 'Сильное увеличение, как на игровой карте', note: 'Всё крупное и заметное с любой высоты.', p: { trees: 1.7, houses: 1.9, roads: 1.8, rivers: 1.6 }, cam: cam(P.mad, 45, 52, -20) },
+  { id: 'relief-1', group: 'Масштаб объектов', title: 'Рельеф без преувеличения', note: 'Высоты в масштабе один к одному.', p: { exag: 1 }, cam: cam(P.nev, 90, 62, 200) },
+  { id: 'relief-3', group: 'Масштаб объектов', title: 'Рельеф втрое выше', note: 'Горы подняты втрое: выразительнее, но менее правдиво.', p: { exag: 3 }, cam: cam(P.nev, 90, 62, 200) },
+  // ---- forest
+  { id: 'forest-paint', group: 'Лес', title: 'Лес только краской', note: 'Лес показан цветом и рисунком крон на земле, без объёмных деревьев.', p: { forest3d: 0 }, cam: cam(P.pic, 35, 55, 150) },
+  { id: 'forest-3d', group: 'Лес', title: 'Лес объёмными кронами', note: 'Поверх краски стоят увеличенные деревья: лиственные круглые, хвойные острые.', p: { forest3d: 1 }, cam: cam(P.pic, 35, 55, 150) },
+  { id: 'forest-open', group: 'Лес', title: 'Редколесье и поляны', note: 'Густота леса снижена: больше открытых мест.', p: { forest: .6 }, cam: cam(P.mad, 60, 50, 30) },
+  // ---- water and light
+  { id: 'sea-delta', group: 'Вода и свет', title: 'Берег и отмели: дельта Эбро', note: 'Глубина видна цветом, у берега пена.', p: {}, cam: cam(P.ebro, 60, 40, -40) },
+  { id: 'light-morning', group: 'Вода и свет', title: 'Утро над Пиренеями', note: 'Низкое солнце с востока, длинные тени.', p: { hour: 7.5 }, cam: cam(P.pyr, 90, 60, 250) },
+  { id: 'light-evening', group: 'Вода и свет', title: 'Вечер над проливом', note: 'Тёплый свет с запада и блик на воде.', p: { hour: 18.75 }, cam: cam(P.gib, 110, 62, -80) },
+  { id: 'light-night', group: 'Вода и свет', title: 'Ночь с огнями', note: 'После заката в домах горят окна.', p: { hour: 21.5, houses: 1.6, forest3d: 0 }, cam: cam(P.tou, 26, 55, 200) },
+  // ---- map modes
+  { id: 'mode-political', group: 'Режимы карты', title: 'Политика: светлая земля', note: 'Бумага, рельеф тенью, реки и дороги. Государств нет — карта пустая.', p: { look: 'paper', forest3d: 0 }, cam: cam([40.4, -3.0], 620, 15, 0) },
+  { id: 'mode-districts', group: 'Режимы карты', title: 'Деление: районы около 30 км', note: 'Границы условные (не по рекам): страница показывает размер, цвета и линии.', p: { look: 'paper', forest3d: 0, division: 1 }, cam: cam([41.4, -1.0], 330, 10, 0) },
+  { id: 'mode-provinces', group: 'Режимы карты', title: 'Деление: провинции около 100 км', note: 'Тонкие линии — районы внутри провинций.', p: { look: 'paper', forest3d: 0, division: 2 }, cam: cam([40.6, -3.0], 700, 10, 0) },
+  { id: 'mode-regions', group: 'Режимы карты', title: 'Деление: регионы 300–400 км', note: 'Самый крупный уровень. На полуостров выходит пять-шесть регионов.', p: { look: 'paper', forest3d: 0, division: 3 }, cam: cam([40.2, -3.4], 1500) },
+  { id: 'mode-territories', group: 'Режимы карты', title: 'Территории 10 × 10 км', note: 'Сетка квадратов, из которых состоят районы.', p: { grid: 1, division: 1 }, cam: cam(P.ebro, 150, 25, 0) },
+  { id: 'data-temp', group: 'Режимы карты', title: 'Данные: температура', note: 'Один показатель за раз, без эффектов. Здесь расчёт по широте и высоте.', p: { data: 1, forest3d: 0, towns: 0, roadsOn: 0 }, cam: cam([40.2, -3.4], 1300) },
+  { id: 'data-height', group: 'Режимы карты', title: 'Данные: высоты', note: 'Высота над морем ступенями цвета.', p: { data: 2, forest3d: 0, towns: 0, roadsOn: 0 }, cam: cam([40.2, -3.4], 1300) },
+  // ---- settlements and roads
+  { id: 'roads', group: 'Города и дороги', title: 'Дороги по рельефу', note: 'Главные дороги сплошные, остальные пунктиром. Путь выбран по настоящим высотам: долинами и через перевалы.', p: { roads: 1.5 }, cam: cam([41.6, -2.2], 380, 30, 10) },
+  { id: 'town-grid', group: 'Города и дороги', title: 'Город из квадратиков: правильная сетка', note: 'Так строят на юге и востоке. Ползунок «Рост городов» меняет размер.', p: { houses: 1.3 }, cam: cam([41.39, 2.16], 24, 55, 200) },
+  { id: 'town-ring', group: 'Города и дороги', title: 'Город из квадратиков: кольца', note: 'Так строят на атлантическом севере: дома по кругу, без улиц.', p: { houses: 1.3 }, cam: cam([43.26, -2.93], 24, 55, 160) },
+  // ---- disasters
+  { id: 'hazard-fire', group: 'Бедствия', title: 'Пожар идёт по территориям', note: 'Огонь неяркий, виден дым по ветру; за огнём остаётся гарь. Скорость — ползунок «Ход времени».', p: { hazard: 'fire', forest3d: 0 }, cam: cam([42.6, -7.6], 190, 45, 20) },
+  { id: 'hazard-quake', group: 'Бедствия', title: 'Землетрясение: что почувствовал каждый район', note: 'Цвет района — сила толчков в нём; тёмная линия — разрыв.', p: { hazard: 'quake', look: 'paper', forest3d: 0, division: 1 }, cam: cam([38.3, -8.4], 520, 10, 0) },
+];
+
+export function initPages(album, q) {
+  album.pages = PAGES;
+  album.openPage = (id, keepCam) => {
+    const page = PAGES.find(p => p.id === id) || PAGES[0];
+    album.page = page;
+    album.params.reset(); album.params.setMany(page.p || {});
+    if (!keepCam && page.cam) album.cam.set(page.cam, !album.ready);
+    album.restartHazard?.();
+    album.onPage?.(page);
+  };
+  album.openPage(q.get('page') || PAGES[0].id);
+}

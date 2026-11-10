@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('passionaris', {
   launch: s => ipcRenderer.send('game:launch', s),
   exitToLauncher: () => ipcRenderer.send('game:exit-to-launcher'),
   quit: () => ipcRenderer.send('app:quit'),
+  openAlbum: () => ipcRenderer.send('album:open'),
+  albumFeedback: text => ipcRenderer.invoke('album:feedback', text),
   minimize: () => ipcRenderer.send('win:minimize'),
   // game window: apply {windowMode, resolution} now (in-game settings); windowState() for checks
   applyWindow: s => ipcRenderer.invoke('win:apply', s),

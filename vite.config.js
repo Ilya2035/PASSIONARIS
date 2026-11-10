@@ -21,6 +21,7 @@ export default defineConfig({
       input: {
         launcher: resolve(import.meta.dirname, 'index.html'),
         game: resolve(import.meta.dirname, 'game.html'),
+        album: resolve(import.meta.dirname, 'album.html'),
       },
     },
   },

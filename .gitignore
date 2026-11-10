@@ -25,3 +25,7 @@ public/assets/climate/biome.bin.gz
 
 # git worktrees of parallel sessions (if created inside the project)
 .claude/worktrees/
+
+# Graphics album: third-party open data fetched by scripts/album/fetch-data.mjs (never committed)
+public/album-data/
+data/album/

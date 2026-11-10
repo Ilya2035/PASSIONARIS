@@ -104,7 +104,7 @@ function createLauncher() {
   launcher.loadURL(pageUrl('index.html'));
 }
 
-function createGame(settings) {
+function createGame(settings, page = 'game.html') {
   const mode = settings?.windowMode || 'fullscreen';
   // open on the launcher's screen; window mode gets its resolution as the content size right away
   const display = displayOf(launcher);
@@ -130,7 +130,7 @@ function createGame(settings) {
   game.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') { game.setFullScreen(!game.isFullScreen()); e.preventDefault(); }
   });
-  game.loadURL(pageUrl('game.html'));
+  game.loadURL(pageUrl(page));
 }
 
 app.whenReady().then(() => {
@@ -157,6 +157,9 @@ app.whenReady().then(() => {
     if (!launcher) createLauncher();
     game?.close();
   });
+  // the graphics album opens in the game window's place; its marks go to a text file next to the settings
+  ipcMain.on('album:open', () => { if (!game) createGame(readSettings(), 'album.html'); launcher?.close(); });
+  ipcMain.handle('album:feedback', (_e, text) => { const f = path.join(app.getPath('userData'), 'album-feedback.txt'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, String(text).slice(0, 200000)); return f; });
   ipcMain.on('app:quit', () => app.quit());
   // screens for the resolution list: logical size, scale factor (Windows display scaling), refresh rate
   ipcMain.handle('app:displays', () => screen.getAllDisplays().map(d => ({ id: d.id, width: d.size.width, height: d.size.height, scale: d.scaleFactor, hz: d.displayFrequency, primary: d.id === screen.getPrimaryDisplay().id })));
@@ -206,8 +209,11 @@ async function captureShot({ query, width = 2560, height = 1440, out, evaluate, 
   }
   // page: another page (e.g. 'index.html', the launcher) captured as it is, after a short settle
   await win.loadURL(page ? `${pageUrl(page)}${query ? '?' + query : ''}` : `${pageUrl('game.html')}?shot=1&${query}`);
-  for (let i = 0; i < 240 && !page; i++) {
-    if (await win.webContents.executeJavaScript('!!(window.__game && window.__game.ready)').catch(() => false)) break;
+  // the graphics album (album.html) raises its own ready flag once the data is on screen
+  const albumPage = !!page && page.startsWith('album');
+  if (albumPage) win.webContents.on('console-message', e => { if (String(e.message).startsWith('[album]')) console.log('[capture]', e.message); });
+  for (let i = 0; i < 480 && (!page || albumPage); i++) {
+    if (await win.webContents.executeJavaScript(albumPage ? '!!(window.__album && window.__album.ready)' : '!!(window.__game && window.__game.ready)').catch(() => false)) break;
     await wait(250);
   }
   await wait(2500); // let streaming/fades settle

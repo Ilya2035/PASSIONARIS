@@ -5,6 +5,7 @@
 #   scripts/harness.sh build <A>                                  build the pages into <A>/dist
 #   scripts/harness.sh cap   <A> <name> "<query>" [W H] [eval.js] one frame of game.html?shot=1&<query> → <A>/<name>.png + .jpg
 #   scripts/harness.sh capl  <A> <name> [W H] [eval.js]           the launcher page → <A>/<name>.png + .jpg
+#   scripts/harness.sh acap  <A> <name> "<query>" [W H] [eval.js] one frame of the graphics album, album.html?shot=1&<query>
 #   scripts/harness.sh smoke <A> [eval.js]                        launcher → Play → map, fps probes, optional script in the game
 #   scripts/harness.sh test  [pattern]                            node --test on tests/*<pattern>*.test.mjs, one file at a time
 # Useful query keys: lat lon alt tilt date=YYYY-MM-DD mode=<id> ui=0 clean=1 fxdemo=<s> fxkind= fxlevel= fxvei= fxair=1
@@ -41,6 +42,13 @@ case "$cmd" in
     EVJ=""; [ -n "$EV" ] && EVJ=",\"evaluate\":$(evjson "$EV")"
     PASSIONARIS_USERDATA="$(abs "$A/userdata")" PASSIONARIS_DIST="$(abs "$A/dist")" PASSIONARIS_CAPTURE="{\"page\":\"index.html\",\"query\":\"\",\"width\":$W,\"height\":$H,\"out\":\"$OUT\"$EVJ}" \
       timeout 120 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -8
+    jpg "$OUT" "$(abs "$A/$NAME.jpg")" ;;
+  acap)
+    A="$1"; NAME="$2"; Q="$3"; W="${4:-1600}"; H="${5:-900}"; EV="$6"
+    mkdir -p "$A/userdata"; OUT="$(abs "$A/$NAME.png")"
+    EVJ=""; [ -n "$EV" ] && EVJ=",\"evaluate\":$(evjson "$EV")"
+    PASSIONARIS_USERDATA="$(abs "$A/userdata")" PASSIONARIS_DIST="$(abs "$A/dist")" PASSIONARIS_CAPTURE="{\"page\":\"album.html\",\"query\":\"shot=1&$Q\",\"width\":$W,\"height\":$H,\"out\":\"$OUT\"$EVJ}" \
+      timeout 240 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -12
     jpg "$OUT" "$(abs "$A/$NAME.jpg")" ;;
   smoke)
     A="$1"; EV="$2"; mkdir -p "$A/userdata" "$A/smoke"

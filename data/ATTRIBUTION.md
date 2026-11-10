@@ -27,6 +27,16 @@
 
 Ассеты Europa Universalis V и других игр Paradox **не используются**.
 
+## Альбом графики (`album.html`)
+
+Данные альбома скачивает `scripts/album/fetch-data.mjs` в `public/album-data/`; в репозиторий они не входят.
+
+| Данные | Источник | Лицензия |
+|---|---|---|
+| Высоты Пиренейского полуострова и юга Франции (уровни 9 и 12) | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), формат terrarium; собраны Mapzen из SRTM, GMTED, ETOPO1 и других открытых наборов | Открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
+| Реки, озёра, поселения | Natural Earth 10m | Общественное достояние |
+| Текстуры земли, 16 штук (`aerial_*`, `forest_floor`, `snow_*` и другие) | [Poly Haven](https://polyhaven.com/textures) | CC0 1.0 |
+
 ## Код
 
 - Масштабирование картинки (`src/game/post.js`): перенос AMD FidelityFX Super Resolution 1.0 (EASU + RCAS),
