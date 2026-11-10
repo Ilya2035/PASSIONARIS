@@ -29,7 +29,7 @@ export async function createWorldSystems(ctx) {
   let mode = 'terrain';
   const sys = {
     features,
-    onModeChange(id) { mode = id; sys.regions?.setMode(id); },
+    onModeChange(id) { mode = id; sys.regions?.setMode(id); sys.winds?.setMode(id); },
     onHover(v) { sys.regions?.onHover(toGeo(v)); },
     onSelect(v) { const g = toGeo(v); sys.regions?.onSelect(g); sys.weather?.onSelect(g); },
     liveInfo: false,
@@ -175,6 +175,17 @@ export async function createWorldSystems(ctx) {
       prevSetting?.(k, v);
     };
   }
+  // prevailing winds (streaks), seasonal
+  const windMod = await load('../fx/wind.js');
+  if (windMod) {
+    try {
+      sys.winds = new windMod.Winds(ctx.scene, globe);
+      sys.winds.setVisible(ctx.settings.showWind !== false && !globe.clean);
+      features.add('wind');
+      const prevSetting = sys.onSetting;
+      sys.onSetting = (k, v) => { if (k === 'showWind') sys.winds.setVisible(v !== false); prevSetting?.(k, v); };
+    } catch (e) { console.warn('wind', e); sys.winds = null; }
+  }
   // fractional month for seasonal currents: m = middle of month m (1..12)
   const monthOf = t => { const d = cal.toDate(t); return d.month + (d.day - 15.5) / 30.4; };
 
@@ -199,7 +210,9 @@ export async function createWorldSystems(ctx) {
     sys.hazards?.update(dt, running());
     sys.weather?.update(dt, running());
     sys.fx?.update(ctx.gcam, t, { running: running(), heightPx: ctx.renderHeight?.(), fov: ctx.camera?.fov });
-    if (sys.currents) { if (sys.clock) sys.currents.setMonth(monthOf(sys.clock.t)); sys.currents.update(ctx.gcam, t); }
+    const mo = sys.clock ? monthOf(sys.clock.t) : 1;
+    if (sys.currents) { if (sys.clock) sys.currents.setMonth(mo); sys.currents.update(ctx.gcam, t); }
+    if (sys.winds) { sys.winds.setMonth(mo); sys.winds.update(ctx.gcam, t); }
     sys.labels?.update(ctx.gcam, t);
     for (const u of updaters) u(dt, t, p);
   };

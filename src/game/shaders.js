@@ -30,16 +30,21 @@ const float DTILE = 256.0;
 const float DWIN = 2048.0;
 // height in metres at uv; lodG = mip level in global-grid texels, lodD = mip level in detail texels
 float heightAt(vec2 uv, float lodG, float lodD) {
-  if (uDetailOn < 0.5) return textureLod(uHeight, uv, lodG).r;
-  vec2 gt = uv * DGRID;
-  vec2 rel = gt / DTILE - uDetailOrigin;
-  rel.x = mod(rel.x, DGRID.x / DTILE);
-  if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= 8.0 || rel.y >= 8.0) return textureLod(uHeight, uv, lodG).r;
-  float edge = min(min(rel.x, 8.0 - rel.x), min(rel.y, 8.0 - rel.y));
-  float hd = textureLod(uDetail, gt / DWIN, lodD).r;
-  float w = smoothstep(0.3, 1.2, edge) * uDetailOn;
-  if (w > 0.999) return hd;                     // deep inside the detail window: the global height is not needed
-  return mix(textureLod(uHeight, uv, lodG).r, hd, w);
+  // one return path (the D3D shader compiler warns about early returns here)
+  float w = 0.0, hd = 0.0;
+  if (uDetailOn >= 0.5) {
+    vec2 gt = uv * DGRID;
+    vec2 rel = gt / DTILE - uDetailOrigin;
+    rel.x = mod(rel.x, DGRID.x / DTILE);
+    if (rel.x >= 0.0 && rel.y >= 0.0 && rel.x < 8.0 && rel.y < 8.0) {
+      float edge = min(min(rel.x, 8.0 - rel.x), min(rel.y, 8.0 - rel.y));
+      hd = textureLod(uDetail, gt / DWIN, lodD).r;
+      w = smoothstep(0.3, 1.2, edge) * uDetailOn;
+    }
+  }
+  // deep inside the detail window the global height is not needed
+  float hg = w > 0.999 ? hd : textureLod(uHeight, uv, lodG).r;
+  return mix(hg, hd, w);
 }
 // land coverage from the detail window; returns -1 outside it (caller falls back to the coarse cells)
 float detailLand(vec2 uv, float lodD, float coarse) {
@@ -210,14 +215,23 @@ vec3 biomeBlend(vec2 uv) {
   float w0 = (1.0 - f.x) * (1.0 - f.y) * float(k0 != 0u), w1 = f.x * (1.0 - f.y) * float(k1 != 0u);
   float w2 = (1.0 - f.x) * f.y * float(k2 != 0u), w3 = f.x * f.y * float(k3 != 0u);
   float ws = w0 + w1 + w2 + w3;
+  vec3 res = uPaper;   // one return path (D3D compiler warning otherwise)
   if (ws < 1e-4) {
     // land by the fine coast mask but water in the coarse raster: borrow the nearest land class around
     const ivec2 R[12] = ivec2[12](ivec2(-1, 0), ivec2(2, 0), ivec2(0, -1), ivec2(0, 2), ivec2(1, -1), ivec2(-1, 1),
                                   ivec2(2, 1), ivec2(1, 2), ivec2(-1, -1), ivec2(2, 2), ivec2(-1, 2), ivec2(2, -1));
-    for (int i = 0; i < 12; i++) { uint k = biomeAt(b + R[i]); if (k != 0u) return uBiomeCol[min(k, 15u)]; }
-    return uPaper;
+    vec3 found = uPaper;
+    bool has = false;
+    for (int i = 0; i < 12; i++) {
+      if (has) break;
+      uint k = biomeAt(b + R[i]);
+      if (k != 0u) { found = uBiomeCol[min(k, 15u)]; has = true; }
+    }
+    res = found;
+  } else {
+    res = (uBiomeCol[min(k0, 15u)] * w0 + uBiomeCol[min(k1, 15u)] * w1 + uBiomeCol[min(k2, 15u)] * w2 + uBiomeCol[min(k3, 15u)] * w3) / ws;
   }
-  return (uBiomeCol[min(k0, 15u)] * w0 + uBiomeCol[min(k1, 15u)] * w1 + uBiomeCol[min(k2, 15u)] * w2 + uBiomeCol[min(k3, 15u)] * w3) / ws;
+  return res;
 }
 
 void main() {

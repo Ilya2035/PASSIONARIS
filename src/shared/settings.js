@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS = {
   showLabels: true,
   showRoads: true,
   showWeather: true,          // clouds, snow, drought tint
+  showWind: true,             // prevailing-wind streaks
   effects: true,              // eruptions, quakes, meteors, fires
   waterAnimation: true,
   autosaveMinutes: 10,        // 0 = off

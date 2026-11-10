@@ -22,6 +22,7 @@ const FIELDS = [
   { key: 'reliefScale', label: 'Высота рельефа (1 = как в жизни)', type: 'range', min: 1, max: 10, step: 0.5 },
   { key: 'unroll', label: 'Разворачивание глобуса', type: 'range', min: 0, max: 1, step: 0.01 },
   { key: 'showWeather', label: 'Погода: облака, снег, засуха', type: 'check' },
+  { key: 'showWind', label: 'Ветры', type: 'check' },
   { key: 'effects', label: 'Эффекты стихий', type: 'check' },
   { key: 'waterAnimation', label: 'Анимация воды', type: 'check' },
   { key: 'showCurrents', label: 'Морские течения', type: 'check' },
