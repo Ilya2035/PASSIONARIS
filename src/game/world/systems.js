@@ -85,6 +85,7 @@ export async function createWorldSystems(ctx) {
     const time = createTime({ cal, clk, save, hud, settings: ctx.settings });
     sys.time = time;
     sys.clock = time.clock;
+    sys.cal = cal;
     features.add('time');
     sys.renderClock = extra => time.render(extra);
     sys.setSpeed = n => time.setSpeed(n);

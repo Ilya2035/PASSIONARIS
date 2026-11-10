@@ -240,7 +240,12 @@ export class Globe {
   setWeather(rgba, w, h) {
     const u = this.terrainMat.uniforms;
     if (u.uHasWeather.value && u.uWeather.value.image.width === w) { u.uWeather.value.image.data.set(rgba); u.uWeather.value.needsUpdate = true; }
-    else { u.uWeather.value = makeLayerTexture(new Uint8Array(rgba), w, h); u.uHasWeather.value = 1; } // own copy: the caller may hand its buffer back to a worker
+    else {
+      // own copy (the caller may hand its buffer back to a worker); mipmaps give the clouds a cheap wide blur
+      const t = makeLayerTexture(new Uint8Array(rgba), w, h);
+      t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true;
+      u.uWeather.value = t; u.uHasWeather.value = 1;
+    }
   }
 
   // CPU height lookup (metres) at a unit vector
@@ -306,7 +311,7 @@ export class Globe {
     u.uLineSea.value = this.clean || !this.hasRegions || this.settings.showDistricts === false ? 0 : regions ? fade(0.1, 0.35) : fade(0.03, 0.09);
     // clouds belong to the landscape views; data maps (temperature, precipitation, hazards, regions) stay readable
     const cloudy = this.mode === 'terrain' || this.mode === 'relief';
-    u.uCloudAmt.value = this.settings.showWeather === false || !cloudy ? 0 : 0.35 + 0.65 * p.globe;
+    u.uCloudAmt.value = this.settings.showWeather === false || !cloudy ? 0 : 0.18 + 0.82 * p.globe;
     // political colours are strong from afar and give way to the terrain up close
     u.uOverlay.value = this.overlayBase * (0.3 + 0.7 * Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.015)) / (Math.log(0.6) - Math.log(0.015)))));
     // contour interval follows the zoom; lines fade out at globe distance

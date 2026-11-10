@@ -30,15 +30,16 @@ const float DTILE = 256.0;
 const float DWIN = 2048.0;
 // height in metres at uv; lodG = mip level in global-grid texels, lodD = mip level in detail texels
 float heightAt(vec2 uv, float lodG, float lodD) {
-  float hg = textureLod(uHeight, uv, lodG).r;
-  if (uDetailOn < 0.5) return hg;
+  if (uDetailOn < 0.5) return textureLod(uHeight, uv, lodG).r;
   vec2 gt = uv * DGRID;
   vec2 rel = gt / DTILE - uDetailOrigin;
   rel.x = mod(rel.x, DGRID.x / DTILE);
-  if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= 8.0 || rel.y >= 8.0) return hg;
+  if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= 8.0 || rel.y >= 8.0) return textureLod(uHeight, uv, lodG).r;
   float edge = min(min(rel.x, 8.0 - rel.x), min(rel.y, 8.0 - rel.y));
   float hd = textureLod(uDetail, gt / DWIN, lodD).r;
-  return mix(hg, hd, smoothstep(0.3, 1.2, edge) * uDetailOn);
+  float w = smoothstep(0.3, 1.2, edge) * uDetailOn;
+  if (w > 0.999) return hd;                     // deep inside the detail window: the global height is not needed
+  return mix(textureLod(uHeight, uv, lodG).r, hd, w);
 }
 // land coverage from the detail window; returns -1 outside it (caller falls back to the coarse cells)
 float detailLand(vec2 uv, float lodD, float coarse) {
@@ -383,17 +384,33 @@ void main() {
     else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.3);
     else if (uMode == 4) col = mix(col, hazardRamp(sim.b), 0.6 * step(0.02, sim.b));
   }
-  // clouds from the weather simulation (soft, broken edges), strongest at globe distance
+  // clouds from the weather simulation: broken multi-scale edges (octaves fade before they alias), white tops,
+  // grey rain clouds, and a faint shadow on the ground offset toward the south-east for volume
   if (uHasWeather > 0.5 && uCloudAmt > 0.0) {
+    vec2 tx = vec2(1.0 / 720.0, 1.0 / 360.0);
 #ifdef SIMPLE
     float cn = 0.5;
 #else
-    float cn = vnoise(uv * vec2(900.0, 450.0) + vec2(uTime * 0.02, 0.0)) * 0.55 + vnoise(uv * vec2(2600.0, 1300.0)) * 0.45;
+    vec2 q = uv * vec2(720.0, 360.0);
+    float f1 = 1.0 - smoothstep(3.0, 6.0, texPerPx), f2 = 1.0 - smoothstep(1.2, 2.5, texPerPx), f3 = 1.0 - smoothstep(0.5, 1.0, texPerPx);
+    float cn = 0.5 + (vnoise(q * 1.3 + vec2(uTime * 0.02, 0.0)) - 0.5) * 0.6 * f1
+                   + (vnoise(q * 3.1 - vec2(uTime * 0.035, uTime * 0.01)) - 0.5) * 0.34 * f2
+                   + (vnoise(q * 7.7 + vec2(0.0, uTime * 0.02)) - 0.5) * 0.18 * f3;
 #endif
-    float cloudF = wxS.g < 0.5 ? wxS.g * 2.0 : 1.0;
-    float rain = clamp(wxS.g * 2.0 - 1.0, 0.0, 1.0);
-    float cm = smoothstep(0.5, 0.9, cloudF + (cn - 0.5) * 0.55);
-    col = mix(col, vec3(0.96, 0.95, 0.93) * (1.0 - 0.22 * rain), cm * (0.45 + 0.2 * rain) * uCloudAmt);
+    // the simulator marks wet cells one by one (salt-and-pepper at 0.5 degrees): the share of wet cells around is the
+    // cloud cover, so the field is read from a mip level ~3 cells wide (mipmapped weather texture)
+    float gC = textureLod(uWeather, uv, 1.6).g;
+    float cloudF = gC < 0.5 ? gC * 2.0 : 1.0;
+    float rain = clamp(gC * 2.0 - 1.0, 0.0, 1.0);
+    float dens = cloudF + (cn - 0.5) * 0.5;
+    float cm = smoothstep(0.5, 0.95, dens);
+    vec4 wsh = textureLod(uWeather, uv + tx * vec2(0.9, 0.7), 1.6);
+    float shF = wsh.g < 0.5 ? wsh.g * 2.0 : 1.0;
+    float shadowM = smoothstep(0.5, 0.95, shF + (cn - 0.5) * 0.5) * (1.0 - cm);
+    col *= 1.0 - 0.1 * shadowM * uCloudAmt;
+    vec3 cc = mix(vec3(0.99, 0.985, 0.975), vec3(0.8, 0.81, 0.83), rain * 0.6);
+    cc = mix(cc, vec3(1.0), smoothstep(0.9, 1.15, dens) * 0.4 * (1.0 - rain));
+    col = mix(col, cc, cm * (0.5 + 0.18 * rain) * uCloudAmt);
   }
 
   // ---------------------------------------------------------------- borders

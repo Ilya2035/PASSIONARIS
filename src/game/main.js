@@ -90,6 +90,11 @@ loadText.textContent = 'Заводим часы мира…';
 const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
 fill.style.width = '100%';
 if ((!SHOT || params.has('packs')) && packs.enabled.length) runPackScripts(packs.enabled, { version: VERSION, hud, world, globe, scene, gcam });
+// ?date=Y-M-D (astronomical year, e.g. -4999-07-01 or 1650-01-15): start at that moment (captures, checks)
+if (params.has('date') && world.clock && world.cal) {
+  const m = /^(-?\d+)-(\d{1,2})-(\d{1,2})$/.exec(params.get('date'));
+  if (m) world.clock.setTime(world.cal.fromDate(+m[1], +m[2], +m[3]));
+}
 // "Continue" in the launcher: load the save it picked (one-shot)
 try {
   const cont = localStorage.getItem('passionaris.continue');
