@@ -37,6 +37,8 @@ const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const readSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; } };
 const writeSettings = s => { fs.mkdirSync(path.dirname(settingsFile()), { recursive: true }); fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2)); };
 
+const ICON = path.join(PUBLIC, "assets", "ui", "icon.png");
+if (process.platform === "win32") app.setAppUserModelId("Passionaris");
 const webPreferences = { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false };
 let launcher = null;
 let game = null;
@@ -44,7 +46,7 @@ let game = null;
 function createLauncher() {
   launcher = new BrowserWindow({
     width: 1240, height: 740, minWidth: 960, minHeight: 600,
-    frame: false, backgroundColor: '#121211', show: false, title: 'Passionaris', webPreferences,
+    frame: false, backgroundColor: '#121211', show: false, title: 'Passionaris', icon: ICON, webPreferences,
   });
   launcher.once('ready-to-show', () => launcher.show());
   launcher.on('closed', () => { launcher = null; });
@@ -56,7 +58,7 @@ function createGame(settings) {
   game = new BrowserWindow({
     width: 1600, height: 900, minWidth: 1024, minHeight: 640,
     fullscreen: mode === 'fullscreen', autoHideMenuBar: true,
-    backgroundColor: '#121211', show: false, title: 'Passionaris', webPreferences,
+    backgroundColor: '#121211', show: false, title: 'Passionaris', icon: ICON, webPreferences,
   });
   game.once('ready-to-show', () => { if (mode === 'maximized') game.maximize(); game.show(); game.focus(); });
   game.on('closed', () => { game = null; });

@@ -1,5 +1,6 @@
 @echo off
-rem Двойной клик — собрать и запустить Passionaris (лаунчер).
+rem Двойной клик — собрать игру, обновить установленную копию (ярлык «Passionaris» на рабочем столе и в меню «Пуск»)
+rem и запустить её. Дальше игру можно запускать прямо с ярлыка.
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
@@ -17,7 +18,9 @@ if not exist "public\assets\map\world.json" (
 )
 echo [Passionaris] Сборка...
 call npm run build || goto :fail
-start "" "node_modules\.bin\electron.cmd" .
+echo [Passionaris] Обновляю установленную копию и ярлыки...
+call node scripts\install-local.mjs || goto :fail
+start "" "%LOCALAPPDATA%\Programs\Passionaris\Passionaris.exe"
 goto :eof
 
 :fail
