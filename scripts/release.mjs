@@ -12,7 +12,7 @@
 // Releases are serialised through a lock file in the shared .git folder, so parallel sessions can each run this.
 // Safety: refuses to commit WorldClim-derived files; pushes only main and the new tag (never refs/backup/*).
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, openSync, closeSync, statSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, openSync, closeSync, statSync, rmSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 
 const REPO_URL = 'https://github.com/Ilya2035/PASSIONARIS.git';
@@ -97,7 +97,8 @@ try {
   node([join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--logLevel', 'error']);
   if (!flag('--no-test')) {
     step('tests');
-    const files = execFileSync('git', ['ls-files', 'tests/*.test.mjs'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+    // every test file on disk, including new ones not yet added to git
+    const files = readdirSync(join(ROOT, 'tests')).filter(f => f.endsWith('.test.mjs')).map(f => join('tests', f));
     node(['--test', '--test-concurrency=1', ...files]);
   }
 
