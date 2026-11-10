@@ -604,8 +604,11 @@ export class ZoneLabels {
       // a long label can still cross the screen while its centre is far outside
       const mx = Math.max(0.5 * vw, 0.55 * lpx * this.lenEm[i]), my = Math.max(0.5 * vh, 0.55 * lpx * this.lenEm[i]);
       if (cx < -mx || cx > vw + mx || cy < -my || cy > vh + my) continue;
-      const maxPx = this.opts.maxLetterPx ?? 125;   // letters bigger than this fade out (smaller zones take over)
-      const aSize = smoothstep(7, 10, lpx) * (1 - smoothstep(maxPx * 0.82, maxPx, lpx));
+      // letters bigger than maxPx fade out (smaller zones take over); both limits are for a 1080p-tall view and
+      // grow with taller ones (1440p, 4K at 100%), so every screen shows the same set of labels
+      const kPx = vh > 1080 ? vh / 1080 : 1;
+      const maxPx = (this.opts.maxLetterPx ?? 125) * kPx;
+      const aSize = smoothstep(7 * kPx, 10 * kPx, lpx) * (1 - smoothstep(maxPx * 0.82, maxPx, lpx));
       const t = aAlt * aSize * smoothstep(0.05, 0.2, face);
       if (!(t > 0.01)) continue;
       // screen samples along the text

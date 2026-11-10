@@ -8,6 +8,8 @@
 // 1/c that touches it at F. Arc lengths from F are preserved, so near the screen
 // centre shapes are undistorted; at c -> 0 it becomes the azimuthal equidistant
 // map. c = 1 is the true globe.
+import { KOPPEN_GLSL } from '../sim/climate/koppen.js';
+import { FERT_GLSL } from '../sim/climate/fertility.js';
 
 export const COMMON = /* glsl */ `
 precision highp float;
@@ -24,6 +26,9 @@ uniform vec2 uGrid;     // cell grid size (W, H)
 uniform sampler2D uDetail;     // streamed detail heights, toroidal 2048x2048 window (8x8 tiles of 256)
 uniform vec2 uDetailOrigin;    // window origin in detail tiles
 uniform float uDetailOn;
+#ifdef V_NODETAIL
+#define uDetailOn 0.0          // terrain shader variant for views without the detail window (globe.js)
+#endif
 uniform sampler2D uDetailMask; // land coverage 0..1 on the same toroidal window (NE 1:10m, anti-aliased)
 const vec2 DGRID = vec2(32768.0, 16384.0);
 const float DTILE = 256.0;
@@ -136,9 +141,43 @@ uniform sampler2D uSim;       // 720x360 RGBA per-mode data: R temperature, G pr
 uniform float uHasSim;
 uniform sampler2D uWeather;   // 720x360 RGBA: R snow/ice, G clouds/precip, B T anomaly, A drought
 uniform float uHasWeather;
-uniform float uCloudAmt;
+uniform float uCloudAmt;      // 0 = no clouds (setting, data map modes), 1 = on
+uniform float uCloudVis;      // opacity of cloud bodies vs zoom: 1 from orbit .. ~0.12 up close
+uniform float uCloudTone;     // the tone clouds leave up close (overcast dimming): 0 from orbit .. 1 close
+uniform float uCloudCrisp;    // edge sharpness: 1 crisp (orbit) .. 0 soft (close)
+uniform sampler2D uAero;      // 360x180 RGBA: R ash, G smoke, B dust, A sulphate, each 1 - exp(-k tau) (mipmapped)
+uniform sampler2D uAeroGround;// 360x180 RGBA: R ashfall deposit, G volcanic cooling
+uniform float uHasAero;       // 1 while any aerosol is visible
+uniform float uAeroAmt;       // 0 hidden (setting, data map modes) .. 1
+uniform float uAeroVis;       // opacity of aerosol bodies vs zoom: 1 from orbit .. ~0.2 up close
+uniform float uAeroLag;       // game days since the field was stepped (the lookup glides with the wind)
+uniform float uItcz;          // ITCZ shift, degrees north
 uniform float uLineSea;       // sea-zone borders (only up close)
 uniform float uNeedInfo;      // 1 only when district/province/country lines are drawn (saves ~10 fetches/pixel)
+uniform highp sampler2DArray uClim; // 720x360 x4 RGBA16F era statistics (src/sim/climate/era.js): Köppen, fertility
+uniform float uHasClim;
+uniform sampler2D uWater;     // 2048x1024 R8 fresh-water proximity: rivers, lakes, coasts (src/sim/climate/waters.js)
+uniform float uHasWater;
+
+// Compile-time variants (globe.js compiles one per map mode and layer state in the background and swaps it in when
+// ready; until then this generic, uniform-driven version draws the same picture). The uniform names become
+// constants, so the compiler drops the blocks that cannot run: fewer registers and no dead texture reads.
+#ifdef V_MODE
+#define uMode V_MODE
+#if V_MODE != 5 && V_MODE != 9
+#define uNeedInfo 0.0
+#endif
+#endif
+#ifdef V_WX
+#define uHasWeather V_WX
+#endif
+#ifdef V_CLOUD
+#define uCloudAmt V_CLOUD
+#define uAeroAmt V_CLOUD
+#endif
+#ifdef V_AERO
+#define uHasAero V_AERO
+#endif
 
 in vec3 vGeo;
 in vec3 vWorld;
@@ -147,26 +186,31 @@ layout(location = 0) out vec4 fragColor;
 
 int gw() { return int(uGrid.x); }
 const uint SEA_BIT = 0x40000000u;   // sea-zone ids (regions module); everything at or above is water
-uint rawAt(ivec2 p) {
-  int w = gw();
-  p.x = ((p.x % w) + w) % w;
+// a grid texel wrapped in longitude, clamped in latitude. Float floor instead of integer % : GPUs emulate integer
+// division (~two dozen instructions per %), and a pixel makes up to ~13 cell / biome lookups (exact below 2^24)
+ivec2 wrapCell(ivec2 p) {
+  p.x -= gw() * int(floor(float(p.x) / uGrid.x));
   p.y = clamp(p.y, 0, int(uGrid.y) - 1);
-  return texelFetch(uCells, p, 0).r;
+  return p;
 }
+uint rawAt(ivec2 p) { return texelFetch(uCells, wrapCell(p), 0).r; }
 uint cellAt(ivec2 p) { uint v = rawAt(p); return v >= SEA_BIT ? 0u : v; }
-uvec2 infoOf(uint id) { return texelFetch(uInfo, ivec2(int(id) % uInfoW, int(id) / uInfoW), 0).rg; }
-vec4 colorOf(uint id) { return texelFetch(uColor, ivec2(int(id) % uInfoW, int(id) / uInfoW), 0); }
+ivec2 infoXY(uint id) { int y = int(float(id) / float(uInfoW)); return ivec2(int(id) - y * uInfoW, y); }   // id < 2^24
+uvec2 infoOf(uint id) { return texelFetch(uInfo, infoXY(id), 0).rg; }
+vec4 colorOf(uint id) { return texelFetch(uColor, infoXY(id), 0); }
 
-float hash12(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-float vnoise(vec2 p) {
-  vec2 i = floor(p), f = fract(p);
+// Value noise (smoothstep-faded lattice of random values) read from a tiling texture of random bytes (uNoise,
+// globe.js): the cubic fade is folded into the sample position, so one bilinear fetch blends the four lattice
+// values — the same noise as four hashed corners, at a fraction of the cost on weak GPUs (~60 ALU ops per lookup
+// before). R and G are two independent noises at the same point (vnoise2: a warp vector in one fetch).
+uniform sampler2D uNoise;
+const float NOISE_N = 512.0;
+vec2 vnoise2(vec2 p) {
+  vec2 i = floor(p), f = p - i;
   vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
+  return textureLod(uNoise, (mod(i, NOISE_N) + u + 0.5) / NOISE_N, 0.0).rg;
 }
+float vnoise(vec2 p) { return vnoise2(p).r; }
 
 // distance (px) from the 0.5 iso-line of a bilinear indicator I0..I3 with fractions f
 float isoDistPx(float I0, float I1, float I2, float I3, vec2 f, vec2 jx, vec2 jy) {
@@ -200,12 +244,7 @@ vec3 hazardRamp(float h) { // 0..1 = level 0..5
   vec3 c = mix(vec3(0.98, 0.9, 0.62), vec3(0.93, 0.62, 0.3), smoothstep(0.1, 0.5, h));
   return mix(c, vec3(0.62, 0.16, 0.14), smoothstep(0.5, 1.0, h));
 }
-uint biomeAt(ivec2 p) {
-  int w = gw();
-  p.x = ((p.x % w) + w) % w;
-  p.y = clamp(p.y, 0, int(uGrid.y) - 1);
-  return texelFetch(uBiome, p, 0).r;
-}
+uint biomeAt(ivec2 p) { return texelFetch(uBiome, wrapCell(p), 0).r; }
 vec3 biomeBlend(vec2 uv) {
   vec2 st = uv * uGrid - 0.5;
   ivec2 b = ivec2(floor(st));
@@ -233,6 +272,37 @@ vec3 biomeBlend(vec2 uv) {
   }
   return res;
 }
+// prevailing wind (m/s, u east, v north) at latitude phi (deg): the circulation of src/game/fx/wind.js and
+// src/sim/aerosols/core.js (trades, westerlies, polar easterlies; bands shifted by the ITCZ)
+vec2 aeroWind(float phi) {
+  float p = phi - uItcz * (1.0 - smoothstep(10.0, 45.0, abs(phi)));
+  float ap = abs(p), s = sign(p);
+  vec2 w;
+  if (ap < 30.0) { float k = sin(PI * ap / 30.0); w = vec2(-6.5 * k, -s * 2.2 * k); }
+  else if (ap < 60.0) { float k = sin(PI * (ap - 30.0) / 30.0); w = vec2((p < 0.0 ? 13.0 : 9.0) * k, s * 1.2 * k); }
+  else { float k = sin(PI * (ap - 60.0) / 30.0); w = vec2(-3.5 * k, -s * 0.8 * k); }
+  return w;
+}
+
+// ---------------------------------------------------------------- map modes «Климат», «Плодородие», «Погода»,
+// «Воздух», «Ветры и течения». Köppen classes and fertility come from src/sim/climate (koppen.js, fertility.js
+// generate the GLSL and the palettes); the colours below have JS copies in src/game/ui/legend.js — keep in sync.
+${KOPPEN_GLSL}
+${FERT_GLSL}
+const vec3 WX_WARM = vec3(0.85, 0.42, 0.3), WX_COLD = vec3(0.32, 0.5, 0.78), WX_DROUGHT = vec3(0.6, 0.38, 0.19);
+const vec3 WX_CLOUD = vec3(0.94, 0.94, 0.93), WX_SNOW = vec3(0.975, 0.98, 0.995);
+vec3 rainWx(float r) {   // 0 drizzle .. 1 downpour (>= 60 mm/day): radar greens, a downpour turns violet
+  vec3 c = mix(vec3(0.6, 0.78, 0.6), vec3(0.2, 0.52, 0.38), smoothstep(0.0, 0.55, r));
+  return mix(c, vec3(0.38, 0.24, 0.5), smoothstep(0.6, 1.0, r));
+}
+vec3 snowfallWx(float r) { return mix(vec3(0.84, 0.84, 0.95), vec3(0.58, 0.54, 0.83), smoothstep(0.0, 1.0, r)); }
+const vec3 AIR_ASH = vec3(0.22, 0.21, 0.21), AIR_SMOKE = vec3(0.52, 0.38, 0.27), AIR_DUST = vec3(0.85, 0.62, 0.32);
+const vec3 AIR_SULF = vec3(0.6, 0.55, 0.76), AIR_FALL = vec3(0.35, 0.33, 0.32), AIR_COOL = vec3(0.42, 0.58, 0.82);
+const vec3 WIND_EAST = vec3(0.88, 0.72, 0.5), WIND_WEST = vec3(0.52, 0.66, 0.8);
+// a quiet base for the data maps whose content is drawn on top (weather, air, winds)
+vec3 quietBase(vec3 c, vec3 paper) { return mix(desat(c), paper, 0.32); }
+// diagonal screen-space hatching (drought, ashfall): crisp at any zoom
+float hatch(float period) { return step(0.58, fract((gl_FragCoord.x + gl_FragCoord.y) / period)); }
 
 void main() {
   vec3 g = normalize(vGeo);
@@ -345,8 +415,9 @@ void main() {
     // seasonal snow from the weather simulation, broken into crisp dense patches
     float snow = wxS.r;
     if (snow > 0.01) {
-      float nz = vnoise(uv * uGrid * 1.7) * 0.6 + vnoise(uv * uGrid * 5.3) * 0.4;
       float fadeN = 1.0 - smoothstep(0.8, 3.0, texPerPx);
+      float nz = 0.5;   // the fine octaves only where they show
+      if (fadeN > 0.0) nz = vnoise(uv * uGrid * 1.7) * 0.6 + vnoise(uv * uGrid * 5.3) * 0.4;
       float nm = vnoise(uv * vec2(2200.0, 1100.0)) * 0.65 + vnoise(uv * vec2(5100.0, 2550.0)) * 0.35;  // 0.1-0.2 deg blobs
       float m = smoothstep(0.3, 0.62, snow + (nm - 0.5) * 0.34 + (nz - 0.5) * 0.4 * fadeN);
       // more snow on heights and on the shaded side of slopes
@@ -374,6 +445,37 @@ void main() {
       vec3 tint = mix(ov.rgb, vec3(dot(ov.rgb, vec3(0.333))), 0.15);
       col = mix(col, tint * mix(1.0, shade, 0.5), ov.a * uOverlay);
     }
+    else if ((uMode == 6 || uMode == 7) && uHasClim > 0.5) {
+      // the era's statistics of the 0.5 degree cell (bilinear), moved to the local height by the lapse rate:
+      // class borders stay crisp at any zoom and follow the relief (snow-line tundra on the peaks)
+      if (uMode == 6) {
+        // four rotated-grid samples per pixel (the height follows its local gradient): anti-aliased class borders
+        // and a fine ink seam where the samples disagree (faded out when minified, where it would be noise)
+        vec2 gH = vec2((he - hw) / (SPAN * o.x), (hs - hn) / (SPAN * o.y));   // dh / duv
+        const vec2 RG[4] = vec2[4](vec2(0.125, 0.375), vec2(-0.375, 0.125), vec2(-0.125, -0.375), vec2(0.375, -0.125));
+        vec3 kcol = vec3(0.0);
+        int k0 = 0;
+        float seam = 0.0;
+        for (int i = 0; i < 4; i++) {
+          vec2 d = duvx * RG[i].x + duvy * RG[i].y;
+          vec3 us = vec3(uv + d, 0.0);
+          vec4 a = textureLod(uClim, us, 0.0), c = textureLod(uClim, us + vec3(0.0, 0.0, 2.0), 0.0);
+          int k = koppenClass(a, textureLod(uClim, us + vec3(0.0, 0.0, 1.0), 0.0), c, climLapse(hc + dot(gH, d), c.z, a.y, degrees(lat)));
+          kcol += KCOL[k];
+          if (i == 0) k0 = k; else if (k != k0) seam = 1.0;
+        }
+        col = mix(desat(col), kcol * 0.25 * mix(1.0, shade, 0.6), 0.86);
+        col = mix(col, col * 0.7, seam * 0.4 * (1.0 - smoothstep(0.6, 2.5, texPerPx)));
+      } else {
+        vec4 kA = textureLod(uClim, vec3(uv, 0.0), 0.0), kC = textureLod(uClim, vec3(uv, 2.0), 0.0);
+        float dTl = climLapse(hc, kC.z, kA.y, degrees(lat));
+        float slope = length(vec2((max(he, 0.0) - max(hw, 0.0)) / dxm, (max(hn, 0.0) - max(hs, 0.0)) / dym));
+        float irr = uHasWater > 0.5 ? textureLod(uWater, uv, 0.0).r : 0.0;
+        float fe = fertilityAt(kC, textureLod(uClim, vec3(uv, 3.0), 0.0), dTl, slope, hLand, irr);
+        col = mix(desat(col), fertRamp(fe) * mix(1.0, shade, 0.55), 0.86);
+      }
+    }
+    else if (uMode == 8 || uMode == 10 || uMode == 11) col = quietBase(col, uPaper);
   } else {
     float depth = max(-hc, 0.0);
     vec3 wc = mix(uShallow, uDeep, pow(smoothstep(0.0, 5000.0, depth), 0.55));
@@ -387,9 +489,12 @@ void main() {
     float shelf = (1.0 - smoothstep(0.3, 1.2, abs(sv - 1.0) / sw));
     float fadeIso = smoothstep(0.01, 0.05, 1.0 / bw);
     wc = mix(wc, uInk, (iso * 0.08 + shelf * 0.14) * fadeIso * (win == 1u ? 0.0 : 1.0));
-    vec2 q = uv * uGrid * 0.35;
-    float n = vnoise(q + vec2(uTime * 0.05, uTime * 0.035)) * 0.6 + vnoise(q * 2.7 - vec2(uTime * 0.08, 0.0)) * 0.4;
-    wc *= 1.0 + (n - 0.5) * 0.08 * (1.0 - smoothstep(0.6, 3.0, texPerPx));
+    float rip = 1.0 - smoothstep(0.6, 3.0, texPerPx);   // ripples only where they show
+    if (rip > 0.0) {
+      vec2 q = uv * uGrid * 0.35;
+      float n = vnoise(q + vec2(uTime * 0.05, uTime * 0.035)) * 0.6 + vnoise(q * 2.7 - vec2(uTime * 0.08, 0.0)) * 0.4;
+      wc *= 1.0 + (n - 0.5) * 0.08 * rip;
+    }
 #endif
     // sea ice: from the simulation when running, else from the imagery
     float ice = uHasWeather > 0.5 ? smoothstep(0.15, 0.55, wxS.r + (vnoise(uv * vec2(2200.0, 1100.0)) - 0.5) * 0.25) : smoothstep(0.55, 0.8, dot(alb, vec3(0.333)));
@@ -397,34 +502,201 @@ void main() {
     if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.45);
     else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.3);
     else if (uMode == 4) col = mix(col, hazardRamp(sim.b), 0.6 * smoothstep(0.03, 0.25, sim.b));
+    else if (uMode >= 6 && uMode != 9) {
+      // a pale, quiet sea under the new data maps: the land (or the weather drawn on top) carries the map
+      vec3 seaQ = mix(mix(uShallow, uDeep, pow(smoothstep(0.0, 5000.0, depth), 0.55) * 0.55), uPaper, 0.55);
+      seaQ = mix(seaQ, desat(seaQ), 0.4);
+      col = uMode == 8 ? mix(seaQ, uSnow, ice * 0.9) : seaQ;
+    }
   }
+
+  // ---------------------------------------------------------------- «Погода»: what is happening today
+  // temperature anomaly against the era's norm of the month (layer 3 .w = the paleo dT of the month: the weather's
+  // B channel is measured against today's normals), snow cover and sea ice, drought, clouds, rain and snowfall
+  if (uMode == 8 && uHasWeather > 0.5) {
+    float mdT = uHasClim > 0.5 ? textureLod(uClim, vec3(uv, 3.0), 0.0).w : 0.0;
+    // the anomaly field is coarse (synoptic boxes): read ~2 degrees wide through a gentle warp, so no box edges show
+    vec2 aq = uv * vec2(120.0, 60.0);
+    vec2 awp = (vnoise2(aq) - 0.5) * vec2(3.0 / 360.0, 3.0 / 180.0);
+    float an = (textureLod(uWeather, uv + awp, 2.3).b * 255.0 - 128.0) / 8.0 - mdT;
+    float ak = clamp(an / 8.0, -1.0, 1.0);
+    col = mix(col, ak > 0.0 ? WX_WARM : WX_COLD, pow(abs(ak), 0.85) * 0.6);
+    col = mix(col, WX_SNOW * mix(1.0, shade, land ? 0.5 : 0.0), smoothstep(0.12, 0.55, wxS.r) * 0.85);
+    if (land) col = mix(col, WX_DROUGHT, smoothstep(0.3, 0.85, wx.a) * hatch(7.0) * 0.7);
+    // cloud share and rain from a mip ~3 cells wide, like the cloud layer of the landscape views
+    float gC = textureLod(uWeather, uv, 1.6).g;
+    float cloudF = gC < 0.5 ? gC * 2.0 : 1.0, rain = clamp(gC * 2.0 - 1.0, 0.0, 1.0);
+    col = mix(col, WX_CLOUD, smoothstep(0.35, 1.0, cloudF) * 0.32);
+    // rain or snowfall by today's temperature (the month's norm of the era + the anomaly)
+    float tNow = sim.r * 80.0 - 40.0 + an;
+    vec3 pc = mix(rainWx(rain), snowfallWx(rain), 1.0 - smoothstep(-1.5, 1.5, tNow));
+    col = mix(col, pc, smoothstep(0.02, 0.22, rain) * (0.5 + 0.4 * rain));
+  }
+
+  // ---------------------------------------------------------------- «Воздух»: ash, smoke, dust, volcanic haze
+  if (uMode == 10 && uHasAero > 0.5) {
+    vec2 wnd = aeroWind(degrees(lat)) * (1.4 * uAeroLag * 86.4 / 111.2);   // glide with the wind between steps
+    vec2 auv = uv + vec2(-wnd.x / max(cos(lat), 0.15) / 360.0, wnd.y / 180.0);
+    vec4 ae = textureLod(uAero, auv, max(0.0, log2(max(texPerPx * 360.0 / uGrid.x, 1e-4))));
+    vec4 tau = -log(max(vec4(1.0) - ae, vec4(0.004))) / vec4(0.9, 1.2, 1.0, 3.0);   // aerosols.js ENC_K
+    vec4 a = vec4(1.0) - exp(-tau * vec4(2.2, 1.6, 1.3, 5.0));
+    vec4 gr = texture(uAeroGround, uv);
+    col = mix(col, AIR_COOL, smoothstep(0.05, 2.0, gr.g * 255.0 / 25.0) * 0.42);   // volcanic winter (per latitude)
+    if (land) col = mix(col, AIR_FALL, smoothstep(0.03, 0.4, gr.r) * hatch(6.0) * 0.75);
+    col = mix(col, AIR_SULF, a.a * 0.75);
+    col = mix(col, AIR_DUST, a.b * 0.85);
+    col = mix(col, AIR_SMOKE, a.g * 0.85);
+    col = mix(col, AIR_ASH, a.r * 0.9);
+  }
+
+  // ---------------------------------------------------------------- «Ветры и течения»: the belts under the streaks
+  // trades and polar easterlies warm, westerlies cool, the calms (doldrums, horse latitudes) left as paper
+  if (uMode == 11) {
+    vec2 wv = aeroWind(degrees(lat));
+    col = mix(col, wv.x < 0.0 ? WIND_EAST : WIND_WEST, smoothstep(0.8, 8.0, length(wv)) * 0.32);
+  }
+  // ---------------------------------------------------------------- ashfall, clouds, aerosols
+  // Zoom response (globe.js): from orbit the bodies of clouds and aerosol clouds are opaque with crisp edges; zooming
+  // in they turn strongly transparent (uCloudVis / uAeroVis) so the land reads, and leave a tone instead
+  // (uCloudTone): overcast dims the land and rain greys it, ash makes it dark and colourless, smoke brown, dust
+  // ochre, the volcanic haze milky — the province reads as "under ash" without hiding it.
+
+  // ashfall: the ground under a big eruption's cloud stays grey for a few months (landscape modes)
+  if (land && uHasAero > 0.5 && uMode <= 1) {
+    float dep = texture(uAeroGround, uv).r;
+    if (dep > 0.01) {
+      float nd = vnoise(uv * vec2(2200.0, 1100.0));
+      float m = smoothstep(0.05, 0.75, dep + (nd - 0.5) * 0.3 * smoothstep(0.03, 0.25, dep));
+      col = mix(col, desat(col) * 0.5 + vec3(0.035, 0.032, 0.03), m * 0.78);
+    }
+  }
+
   // clouds from the weather simulation: broken multi-scale edges (octaves fade before they alias), white tops,
   // grey rain clouds, and a faint shadow on the ground offset toward the south-east for volume
   if (uHasWeather > 0.5 && uCloudAmt > 0.0) {
     vec2 tx = vec2(1.0 / 720.0, 1.0 / 360.0);
 #ifdef SIMPLE
-    float cn = 0.5;
+    float cn = 0.5, cvar = 0.5, cfine = 0.0;
+    vec2 cuv = uv;
 #else
     vec2 q = uv * vec2(720.0, 360.0);
     float f1 = 1.0 - smoothstep(3.0, 6.0, texPerPx), f2 = 1.0 - smoothstep(1.2, 2.5, texPerPx), f3 = 1.0 - smoothstep(0.5, 1.0, texPerPx);
-    float cn = 0.5 + (vnoise(q * 1.3 + vec2(uTime * 0.02, 0.0)) - 0.5) * 0.6 * f1
-                   + (vnoise(q * 3.1 - vec2(uTime * 0.035, uTime * 0.01)) - 0.5) * 0.34 * f2
-                   + (vnoise(q * 7.7 + vec2(0.0, uTime * 0.02)) - 0.5) * 0.18 * f3;
+    // octaves are only evaluated where they show (faded ones cost nothing)
+    float cn = 0.5;
+    if (f1 > 0.0) cn += (vnoise(q * 1.3 + vec2(uTime * 0.02, 0.0)) - 0.5) * 0.6 * f1;
+    if (f2 > 0.0) cn += (vnoise(q * 3.1 - vec2(uTime * 0.035, uTime * 0.01)) - 0.5) * 0.34 * f2;
+    if (f3 > 0.0) cn += (vnoise(q * 7.7 + vec2(0.0, uTime * 0.02)) - 0.5) * 0.18 * f3;
+    // domain warp (two scales, up to ~2 degrees): crisp edges must not trace the straight lines of the coarse
+    // synoptic grid and its 5-degree boxes (not needed up close, where the bodies are faint and soft)
+    vec2 wq = q * 0.09;
+    vec2 cw = vnoise2(wq + vec2(3.1, uTime * 0.002));
+    float cvar = cw.x;                                     // also the large-scale thickness of the cloud body
+    vec2 cuv = uv;
+    if (uCloudCrisp > 0.3) {
+      cuv += ((cw - 0.5) * 7.0 + (vnoise2(wq * 3.3 + vec2(41.2, 0.0)) - 0.5) * 2.6) * tx * smoothstep(0.3, 0.6, uCloudCrisp);
+    }
+    float cfine = (cn - 0.5) * 0.4 * f2;                     // fine thickness only where it cannot alias
 #endif
     // the simulator marks wet cells one by one (salt-and-pepper at 0.5 degrees): the share of wet cells around is the
     // cloud cover, so the field is read from a mip level ~3 cells wide (mipmapped weather texture)
-    float gC = textureLod(uWeather, uv, 1.6).g;
+    float gC = textureLod(uWeather, cuv, 1.6).g;
     float cloudF = gC < 0.5 ? gC * 2.0 : 1.0;
     float rain = clamp(gC * 2.0 - 1.0, 0.0, 1.0);
     float dens = cloudF + (cn - 0.5) * 0.5;
-    float cm = smoothstep(0.5, 0.95, dens);
-    vec4 wsh = textureLod(uWeather, uv + tx * vec2(0.9, 0.7), 1.6);
+    // crisp edges from orbit, soft ones up close
+    float cm = smoothstep(mix(0.5, 0.63, uCloudCrisp), mix(0.95, 0.77, uCloudCrisp), dens);
+    vec4 wsh = textureLod(uWeather, cuv + tx * vec2(0.9, 0.7), 1.6);
     float shF = wsh.g < 0.5 ? wsh.g * 2.0 : 1.0;
     float shadowM = smoothstep(0.5, 0.95, shF + (cn - 0.5) * 0.5) * (1.0 - cm);
-    col *= 1.0 - 0.1 * shadowM * uCloudAmt;
+    col *= 1.0 - 0.12 * shadowM * uCloudAmt * uCloudVis;
+    // the tone kept up close: the wider cloud cover (coarse mip) dims the land and makes it cooler and greyer,
+    // more so under rain; the local density keeps soft structure in it
+    if (uCloudTone > 0.0) {
+      float gW = textureLod(uWeather, uv, 3.0).g;
+      float cov = smoothstep(0.18, 0.5, gW) * (0.55 + 0.45 * smoothstep(0.35, 0.95, dens));
+      float wet = clamp(gW * 2.0 - 1.0, 0.0, 1.0) * (0.6 + 0.4 * cm);
+      vec3 ov = col * (1.0 - 0.15 * cov - 0.14 * wet);
+      ov = mix(ov, vec3(dot(ov, vec3(0.3, 0.55, 0.15))) * vec3(0.97, 0.985, 1.02), 0.28 * cov + 0.3 * wet);
+      col = mix(col, ov, uCloudTone * uCloudAmt);
+    }
     vec3 cc = mix(vec3(0.99, 0.985, 0.975), vec3(0.8, 0.81, 0.83), rain * 0.6);
     cc = mix(cc, vec3(1.0), smoothstep(0.9, 1.15, dens) * 0.4 * (1.0 - rain));
-    col = mix(col, cc, cm * (0.5 + 0.18 * rain) * uCloudAmt);
+    // thin parts let the map through, thick cores and rain clouds are nearly opaque
+    float thick = smoothstep(0.62, 1.12, cloudF + (cvar - 0.5) * 0.55 + cfine);
+    col = mix(col, cc, cm * (mix(0.46, 0.76, thick) + 0.12 * rain) * uCloudAmt * uCloudVis);
+  }
+
+  // aerosols (src/game/world/aerosols.js): volcanic ash, wildfire smoke, dust, sulphate haze. From orbit they are
+  // masses of their own colour with crisp edges and some volume (lit north-west rims, darker south-east sides, a
+  // shadow on the ground); up close they become transparent and tint the provinces under them.
+  if (uHasAero > 0.5 && uAeroAmt > 0.0) {
+    // the field is stepped every few game hours: between steps the lookup glides with the prevailing wind
+    vec2 wnd = aeroWind(degrees(lat)) * (1.4 * uAeroLag * 86.4 / 111.2);   // degrees moved since the last step
+    vec2 auv = uv + vec2(-wnd.x / max(cos(lat), 0.15) / 360.0, wnd.y / 180.0);
+#ifndef SIMPLE
+    // from orbit, a large-scale warp (~1.5 degrees) gives the masses natural lobes instead of the straight
+    // edges that a wind depending on latitude alone would leave
+    if (uCloudCrisp > 0.3) {
+      vec2 wa = auv * vec2(60.0, 30.0);
+      auv += (vnoise2(wa + vec2(7.3, uTime * 0.003)) - 0.5) * vec2(3.2 / 360.0, 3.2 / 180.0) * smoothstep(0.3, 0.6, uCloudCrisp);
+    }
+#endif
+    float ap = texPerPx * 360.0 / uGrid.x;                                    // aerosol cells per pixel
+    float lodA = max(0.0, log2(max(ap, 1e-4)));
+    vec4 ae = textureLod(uAero, auv, lodA);
+    vec4 aw = textureLod(uAero, auv, max(lodA, 2.3));                         // ~5 cells wide: the tone
+    if (dot(ae + aw, vec4(1.0)) > 0.004) {
+      const vec4 EK = vec4(0.9, 1.2, 1.0, 3.0);
+      vec4 tau = -log(max(vec4(1.0) - ae, vec4(0.004))) / EK;
+      // billows: one broad octave reads from orbit, finer ones fade in as the view closes (never under ~3 px)
+      vec2 q = auv * vec2(360.0, 180.0);
+      float tt = uTime * 0.02;
+#ifdef SIMPLE
+      float n = 0.5 + (vnoise(q * 0.9 + vec2(tt, 0.0)) - 0.5) * 0.7;
+#else
+      float n = 0.5 + (vnoise(q * 0.9 + vec2(tt, 0.0)) - 0.5) * 0.6;
+      float o2 = 1.0 - smoothstep(0.12, 0.3, ap * 2.6), o3 = 1.0 - smoothstep(0.12, 0.3, ap * 7.3);
+      if (o2 > 0.0) n += (vnoise(q * 2.6 - vec2(tt * 1.6, tt)) - 0.5) * 0.38 * o2;
+      if (o3 > 0.0) n += (vnoise(q * 7.3 + vec2(0.0, tt * 2.0)) - 0.5) * 0.26 * o3;
+#endif
+      vec4 tn = tau * max(vec4(0.0), 1.0 + (n - 0.5) * vec4(1.3, 1.2, 1.0, 0.5));
+      vec4 a = vec4(1.0) - exp(-tn * vec4(2.4, 1.7, 1.1, 0.9));
+      // from orbit: a sharp rim where the cloud starts, dense inside
+      a = mix(a, smoothstep(vec4(0.2, 0.2, 0.16, 0.1), vec4(0.36, 0.38, 0.45, 0.5), a) * (0.64 + 0.36 * a), uCloudCrisp * vec4(1.0, 1.0, 0.85, 0.3));
+      a.a *= 0.45;                                                             // the haze never hides the map
+      float A = 1.0 - (1.0 - a.r) * (1.0 - a.g) * (1.0 - a.b) * (1.0 - a.a);
+      const vec3 C_ASH = vec3(0.17, 0.16, 0.155), C_SMOKE = vec3(0.47, 0.41, 0.35);
+      const vec3 C_DUST = vec3(0.77, 0.59, 0.37), C_SULF = vec3(0.93, 0.92, 0.88);   // dust: warm enough to read over deserts
+      float wsum = a.r + a.g + a.b + a.a + 1e-4;
+      vec3 body = (a.r * C_ASH + a.g * C_SMOKE + a.b * C_DUST + a.a * C_SULF) / wsum;
+#ifndef SIMPLE
+      // volume: the field one cell toward the sun (north-west) — lit rims, shaded far sides, a shadow on the ground
+      // (only while the bodies are dense enough to show it)
+      if (uAeroVis > 0.55) {
+      vec4 anw = textureLod(uAero, auv - vec2(1.4 / 360.0, 1.2 / 180.0), max(lodA, 0.5));
+      vec4 bn = vec4(1.0) - exp(-(-log(max(vec4(1.0) - anw, vec4(0.004))) / EK) * vec4(2.4, 1.7, 1.1, 0.0));
+      float Anw = 1.0 - (1.0 - bn.r) * (1.0 - bn.g) * (1.0 - bn.b);
+      float vk = smoothstep(0.55, 0.8, uAeroVis);
+      float rim = clamp((A - Anw) * 3.0, -1.0, 1.0) * vk;
+      body = mix(body, mix(body, vec3(0.78, 0.76, 0.72), 0.5), max(rim, 0.0) * 0.85);
+      body *= 1.0 - 0.3 * max(-rim, 0.0);
+      col *= 1.0 - 0.3 * clamp(Anw - A, 0.0, 1.0) * vk * uAeroAmt;
+      }
+#endif
+      // the tone up close (wide field, soft structure from the billows — not a flat fill)
+      if (uCloudTone > 0.0) {
+        vec4 b = vec4(1.0) - exp(-(-log(max(vec4(1.0) - aw, vec4(0.004))) / EK) * vec4(2.6, 1.9, 1.3, 2.5));
+        b = clamp(b * (0.7 + 0.6 * n), 0.0, 1.0);
+        vec3 c = col;
+        float g = dot(c, vec3(0.3, 0.55, 0.15));
+        c = mix(c, vec3(g) * vec3(0.46, 0.45, 0.44), b.r * 0.9);                   // ash: dark, colourless
+        c = mix(c, c * vec3(0.78, 0.68, 0.56) + vec3(0.03, 0.02, 0.0), b.g * 0.8);  // smoke: brown dimming
+        c = mix(c, mix(c, C_DUST, 0.5) * 0.96, b.b * 0.75);                         // dust: ochre haze
+        c = mix(c, mix(c, C_SULF, 0.35), b.a * 0.7);                                // sulphate: milky
+        col = mix(col, c, uCloudTone * uAeroAmt);
+      }
+      col = mix(col, body, A * uAeroVis * uAeroAmt);
+    }
   }
 
   // ---------------------------------------------------------------- borders

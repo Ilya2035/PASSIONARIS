@@ -57,6 +57,8 @@ test('client <-> worker: init, step, release, query, field, climateLog, serializ
   assert.equal(old.byteLength, 0, 'buffer transferred to the worker');
   const f11 = await wx.step(t0 + 11);
   assert.equal(f11.grid.length, N * 4);
+  assert.equal(f11.simDays, 1, 'frames report the days advanced (pacing)');
+  assert.ok(f11.ms >= 0 && Number.isFinite(f11.ms), 'frames report the worker compute time (pacing)');
   local.step(t0 + 11);
 
   const q = await wx.queryLatLon(55.75, 37.6);
@@ -69,6 +71,8 @@ test('client <-> worker: init, step, release, query, field, climateLog, serializ
   assert.equal((await wx.setOptions({ maxSimDays: 120 })).maxSimDays, 120);
   local.setOptions({ maxSimDays: 120 });
   await assert.rejects(wx.setOptions({ maxSimDays: -1 }), /maxSimDays/);
+  assert.equal((await wx.setOptions({ stride: 1 })).stride, 1);
+  await assert.rejects(wx.setOptions({ stride: 0 }), /stride/);
 
   // save / load through the worker
   const snap = await wx.serialize();

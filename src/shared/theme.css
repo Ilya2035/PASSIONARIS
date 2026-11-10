@@ -27,6 +27,8 @@
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --radius: 2px;
   --cut: 10px;
+  /* interface scale: the game sets it from settings.uiScale (src/game/ui/hud.js); zoomed blocks use it */
+  --ui: 1;
 }
 
 * { box-sizing: border-box; }
@@ -56,7 +58,8 @@ button { font: inherit; color: inherit; }
 }
 .paper > .paper-body {
   position: relative;
-  background: var(--tex-paper, var(--paper)) center / 320px;
+  /* the stipple stays at screen-pixel grain whatever the interface zoom (crisp dots at 1440p / 4K) */
+  background: var(--tex-paper, var(--paper)) center / calc(320px / var(--ui, 1));
   clip-path: polygon(var(--cut) 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, var(--cut) 100%, 0 calc(100% - var(--cut)), 0 var(--cut));
   padding: 16px 18px;
 }
@@ -125,7 +128,7 @@ kbd {
 
 .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: none; align-items: center; justify-content: center; z-index: 50; }
 .modal-back.open { display: flex; }
-.modal { width: min(460px, calc(100vw - 32px)); }
+.modal { width: min(460px, calc(100vw / var(--ui, 1) - 32px)); }
 .modal h2 { font-size: 28px; margin: 0 0 4px; }
 
 /* faint film grain over everything */

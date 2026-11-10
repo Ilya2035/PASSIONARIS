@@ -4,6 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Passionaris</title>
+  <script>
+    // interface scale before the first paint (the loading screen): the 'auto' rule of autoUiScale() in
+    // src/game/ui/hud.js — keep both in sync. main.js applies the player's own setting a moment later.
+    (function () {
+      var w = innerWidth, h = innerHeight, d = devicePixelRatio || 1, s = Math.min(h / 1080, w / 1600);
+      var k = s >= 1 ? 1 + (s - 1) * 0.7 : s >= 0.8333 ? 1 : 1 - (0.8333 - s) * 1.1;
+      k = Math.round(Math.min(2.2, Math.max(k, 0.7, 0.85 / d)) * 20) / 20;
+      k = Math.max(0.6, Math.min(k, Math.floor(Math.min(w / 760, h / 480) * 20) / 20));
+      document.documentElement.style.setProperty('--ui', String(k));
+    })();
+  </script>
 </head>
 <body class="grain">
   <canvas id="view"></canvas>
@@ -106,7 +117,6 @@
       <h2>Настройки</h2>
       <div class="rule"></div>
       <div id="settings-fields"></div>
-      <div class="dim note">DLSS работает только в нативных движках. Здесь вместо него — масштаб рендеринга с повышением резкости.</div>
     </div></div>
   </div>
 

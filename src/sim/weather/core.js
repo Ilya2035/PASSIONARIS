@@ -4,7 +4,7 @@
 //   T = normal (daily, mean-preserving interpolation of the monthly normals)
 //       + paleo dT (anomalyFn, cached per year)
 //       + sigma(cell, season) * synoptic anomaly (coarse AR(1) fields, see fields.js)
-//   precipitation: a latent unit Gaussian z (fast advected coarse field + cell noise) decides
+//   precipitation: a latent unit Gaussian z (fast advected coarse field + mesoscale noise) decides
 //       occurrence (wet when z > z*, P(wet) = p from the monthly mean) and intensity
 //       (mu/(p*M) * g(z - z*), g(d) = d + d^2/2 + d^3/6, M = E[g | wet]); persistent wet/dry
 //       spells come from an independent lognormal factor exp(k1*S + k2*V - (k1^2+k2^2)/2) of
@@ -19,10 +19,20 @@
 // Box diagnostics (5x5 deg) feed the extreme-event detectors (events.js) and the
 // per-year climateLog (climatelog.js).
 //
-// A day runs in three passes: (A) every cell: synoptic anomaly, precipitation, G/B
-// channels; (B) land cells: temperature, snow, drought, floods, fire, R/A channels;
-// (C) sea/lake cells that can freeze: ice, R channel. Land and ice state is stored
-// compactly (indexed by land / ice cell number), the rest per SIM cell.
+// The mesoscale noise is a static per-seed smooth Gaussian table read through a daily random window
+// (buildMesoNoise): rain areas and the cloud band below the rain threshold come in coherent patches
+// a few cells wide (fronts, cloud systems) instead of per-cell salt-and-pepper, while every cell keeps a
+// unit-variance latent, so the precipitation statistics per cell are those of white cell noise.
+//
+// A day is one pass over the SIM rows (#passRows): the coarse fields are interpolated once per row,
+// then small loops over the row run while it is cache-resident: every cell (synoptic anomaly, B;
+// precipitation, G), the row's land cells (temperature, snow, flood memory, dry spell, drought, fire,
+// R/A, box sums) and its freezing sea/lake cells (ice, R). Land and ice state is stored compactly
+// (indexed by land / ice cell number, in row order), the rest per SIM cell.
+//
+// Fast clock (setOptions({stride: k})): blocks of up to k days in one step (#simulateDay). The fields,
+// tropical cyclones and the field-based detectors still advance every day; the cell pass runs once for
+// the block's middle day, and snow / ice integrate day by day with each day's box-mean field change.
 //
 // Output grid: Uint8Array RGBA (720*360*4)
 //   R  land: snow cover 0-255; water: sea/lake ice cover 0-255 (>= 50 means ice)
@@ -31,7 +41,7 @@
 //   B  temperature anomaly vs. the (modern) normals incl. paleo dT: 128 = 0, 8 units per degC
 //   A  drought 0-255 (land only)
 
-import { W, H, N, CX, CY, CN, BX, BN, OCEAN, LAKE, LAND, cellLat, cellLon, nodeLat, boxLat, boxLon, interpTables, nodesToCells, cellOf } from './grid.js';
+import { W, H, N, CX, CY, CN, BX, BY, BN, OCEAN, LAKE, LAND, cellLat, cellLon, nodeLat, boxLat, boxLon, interpTables, nodesToCells, cellOf } from './grid.js';
 import { dayInfo, dayOf, daysInMonth, daysBeforeMonth, toDate } from './date.js';
 import { GAUSS, GAUSS_BITS, invNorm, normCdf, normPdf, phiLut, gexLut, dayBase, cellHash, u01 } from './rng.js';
 import { SynopticField } from './fields.js';
@@ -43,6 +53,7 @@ export const FORMAT_KIND = 'passionaris.weather';
 
 export const DEFAULT_OPTIONS = {
   maxSimDays: 730,      // a jump longer than this re-initialises from climatology instead of simulating every day
+  stride: 1,            // simulate blocks of up to this many days at once (run-time pacing for a fast clock, see setOptions)
   anomalyStride: 5,     // anomalyFn is evaluated every N cells (5 = 2.5 deg) once per year and interpolated
   logAnnualYears: 300,  // climateLog keeps this many recent years annually, older ones as decades
   events: true,
@@ -77,8 +88,8 @@ const T_FAST = 0.8, T_SLOW = 0.6;
 const TCLIP = 3.3;                      // synoptic temperature anomaly clipped at +-3.3 sigma
 const W_FIELD = 0.88, W_NOISE = Math.sqrt(1 - W_FIELD * W_FIELD);
 const SNOWSTORM_MM = 25;                // daily snowfall (SWE, mm) of a snowstorm cell
-const SNOWSTORM_CELLS = 16;
-const FLOOD_CELLS = 6;
+const SNOWSTORM_CELLS = 25;               // calibrated with the mesoscale noise (coherent heavy cells) to the earlier event rates
+const FLOOD_CELLS = 9;
 const IGNITION = 2.5e-3;                // ignition probability per cell-day at fire danger 1 (scaled by FD^3)
 const FIRE_MIN = 0.35;
 const HEAT_A = 2.1, COLD_A = 2.1;       // box-mean synoptic anomaly (sigma units) of heat/cold waves
@@ -86,6 +97,27 @@ const HEAT_C = 2.5, COLD_C = 3.0;       // ... and at least this many degC (no +
 const STORM_Z = 3.2;                    // coarse fast precipitation field value of an extratropical storm
 const GSHIFT = 32 - GAUSS_BITS;
 const DEG = Math.PI / 180;
+// mesoscale noise of the precipitation latent (see buildMesoNoise): blob scale in cells, daily window shifts
+const MESO_SX = 1.6, MESO_SY = 1.4;
+const MZ_RS = 16, MZ_ROWS = H + MZ_RS, MZ_PAD = 10, MZ_W = W + MZ_PAD;
+// n-day blocks (fast clock). The fast part of a block's precipitation total is shrunk towards its
+// conditional mean so that sums over many blocks (the 90 / 365-day drought sums) keep the variance of
+// daily sums: n * lambda^2 = (1 + rho) / (1 - rho) for a day-to-day correlation rho of daily amounts.
+// The wettest day of a block is estimated from the middle day's latent shifted by the expected maximum
+// of the block's days (k * E[max of n standard normals]): a block counts as wet (dry-spell reset) when
+// that day gives more than 1 mm (k = BLOCK_DRY_K + BLOCK_DRY_KN * n, calibrated on the fire danger of daily
+// steps for n = 3..12), and snowstorm / flood cells are detected on it (k = BLOCK_EXT_K), so these events keep
+// roughly their daily rates although only one day is simulated. Blocks are meant for n <= ~8.
+const BLOCK_MAX = 31, BLOCK_RHO = 0.3, BLOCK_DRY_K = 0.62, BLOCK_DRY_KN = 0.015, BLOCK_EXT_K = 0.57;
+const BLOCK_LAMBDA = new Float64Array(BLOCK_MAX + 1), BLOCK_DSHIFT = new Float64Array(BLOCK_MAX + 1), BLOCK_XSHIFT = new Float64Array(BLOCK_MAX + 1);
+for (let n = 1; n <= BLOCK_MAX; n++) {
+  BLOCK_LAMBDA[n] = Math.min(1, Math.sqrt((1 + BLOCK_RHO) / (1 - BLOCK_RHO) / n));
+  // E[max of n iid N(0,1)] = integral of (1 - Phi(x)^n - Phi(-x)^n) over x > 0
+  let e = 0;
+  for (let x = 0.0025; x < 8; x += 0.005) e += (1 - normCdf(x) ** n - normCdf(-x) ** n) * 0.005;
+  BLOCK_DSHIFT[n] = n === 1 ? 0 : (BLOCK_DRY_K + BLOCK_DRY_KN * n) * e;
+  BLOCK_XSHIFT[n] = n === 1 ? 0 : BLOCK_EXT_K * e;
+}
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
 // synthetic climateLog (fast-forward) rates per box-year, calibrated on the real normals:
@@ -243,12 +275,21 @@ export class WeatherSim {
       this.iceY[i] = y; this.iceTf[i] = lake ? 0 : -1.8; this.iceK[c] = i;
       this.iceQ[i] = lake ? 0 : this.rowLat[y] >= 0 ? ICE_QO_N : ICE_QO_S;
     }
+    // compact (row-ordered) copies for the rows pass: the cell lists are sorted, so the land / ice
+    // cells of row y are [landRow[y], landRow[y+1]) / [iceRow[y], iceRow[y+1])
+    this.landRow = rowRanges(this.landY); this.iceRow = rowRanges(this.iceY);
+    this.sigL = gather(sig, this.landIdx); this.sigI = gather(sig, this.iceIdx);
+    this.TvL = new Float32Array(12 * L); this.TvI = new Float32Array(12 * I);
+    for (let m = 0; m < 12; m++) {
+      const o = m * N;
+      for (let k = 0; k < L; k++) this.TvL[m * L + k] = this.Tv[o + this.landIdx[k]];
+      for (let i = 0; i < I; i++) this.TvI[m * I + i] = this.Tv[o + this.iceIdx[i]];
+    }
+    this.dTL = new Float32Array(L); this.dTI = new Float32Array(I);
 
     // ---- interpolation tables
     this.cTab = interpTables(5);
     this.aTab = interpTables(this.opts.anomalyStride);
-    this.xph = new Uint8Array(W);
-    for (let x = 0; x < W; x++) this.xph[x] = x % 5;
 
     // ---- box statics
     const bLW = new Float64Array(BN), bAllW = new Float64Array(BN), bT = new Float64Array(BN), bP = new Float64Array(BN);
@@ -321,6 +362,11 @@ export class WeatherSim {
     this.normP = this.#interpNorm([[F.fastP, 1]]);
     this.TC = new Float32Array(CN); this.PC = new Float32Array(CN); this.SF = new Float32Array(CN);
     this.rT = new Float32Array(CX); this.rP = new Float32Array(CX); this.rS = new Float32Array(CX);
+    // full-resolution row buffers of the interpolated fields, and the per-phase interpolation
+    // fractions / unit-variance factors (cell x = 5i + 2 + j lies at fraction j/5 between nodes i, i+1)
+    this.uX = new Float64Array(W); this.zX = new Float64Array(W); this.sX = new Float64Array(W); this.dzX = new Float64Array(W);
+    this.phF = new Float64Array(5); this.kT = new Float64Array(5); this.kP = new Float64Array(5); this.kOne = new Float64Array(5).fill(1);
+    for (let j = 0; j < 5; j++) this.phF[j] = this.cTab.fx[2 + j];
     this.sRow = new Float32Array(H);
     this.nodeSummer = new Float32Array(CY);
 
@@ -364,8 +410,28 @@ export class WeatherSim {
     };
     this.yDays = 0; this.mDays = 0;
     this.curYear = null; this.curMonth = null;
+    // n-day blocks: per-day box-mean temperature field and storm values, middle-day box values
+    this.blkTC = new Float32Array(BLOCK_MAX * BN); this.blkSV = new Float32Array(BLOCK_MAX * BN); this.blkSC = new Int32Array(BLOCK_MAX * BN);
+    this.blkH = new Float32Array(BN); this.blkC = new Float32Array(BN); this.blkDB = new Float32Array(BLOCK_MAX * BN); this.blkDBmin = new Float32Array(BN);
+    this.repTC = new Float32Array(CN); this.repPC = new Float32Array(CN); this.repSF = new Float32Array(CN);
+    this.iceBox = new Uint16Array(this.iceIdx.length);
+    for (let i = 0; i < this.iceIdx.length; i++) { const c = this.iceIdx[i]; this.iceBox[i] = ((((c / W) | 0) / 10) | 0) * BX + (((c % W) / 10) | 0); }
+    this.bAUr = new Float32Array(BN); this.bMTr = new Float32Array(BN);
+    // kappa: land-weighted mean unit-variance factor of the box (box-mean u ~ kappa * box-mean TC)
+    this.bKappa = new Float32Array(BN); this.bHeatable = new Uint8Array(BN);
+    {
+      const wsum = new Float64Array(BN), ksum = new Float64Array(BN);
+      for (let k = 0; k < L; k++) {
+        const c = this.landIdx[k], y = this.landY[k], b = this.landBox[k], w = this.rowW[y];
+        wsum[b] += w; ksum[b] += w * this.normT[y * 5 + (c % W) % 5];
+      }
+      for (let b = 0; b < BN; b++) {
+        this.bKappa[b] = wsum[b] > 0 ? ksum[b] / wsum[b] : 1;
+        this.bHeatable[b] = this.bLandW[b] > 0 && this.bLandFrac[b] >= 0.25 && this.bClimT[b] > -12 ? 1 : 0;
+      }
+    }
     this.candCell = new Int32Array(8192); this.candFD = new Float32Array(8192); this.nCand = 0;
-    this.info = {};
+    this.info = {}; this.infoR = {}; this.infoA = {};
     this.tw = { m0: 0, m1: 0, w1: 0 };
     this.winterNow = { n: false, s: false };
   }
@@ -382,6 +448,7 @@ export class WeatherSim {
     // and any table mean would be amplified by the blur normalisation and accumulated by AR(1)
     const mean = s / N, k = 1 / Math.sqrt(s2 / N - mean * mean);
     for (let i = 0; i < N; i++) this.NZ[i] = this.NZ[i + N] = (this.NZ[i] - mean) * k;
+    this.MZ = buildMesoNoise(this.seed, this.MZ);
   }
 
   #interpNorm(parts) {
@@ -411,8 +478,17 @@ export class WeatherSim {
     if (this.curYear === null) { this.#reinit(target); this.#simulateDay(target); }
     else if (target < this.day) this.#jump(target, true);
     else if (target - this.day > this.opts.maxSimDays) this.#jump(target, false);
-    else while (this.day < target) this.#simulateDay(this.day + 1);
+    else while (this.day < target) this.#advance(target);
     return this.current(t);
+  }
+
+  /** One daily step, or with stride k > 1 one block of up to k days (never across a month end). */
+  #advance(target) {
+    const k = this.opts.stride;
+    if (!(k > 1)) { this.#simulateDay(this.day + 1); return; }
+    const i = dayInfo(this.day + 1, this.infoA);
+    const end = Math.min(target, this.day + k, this.day + 1 + i.daysInMonth - i.day);
+    this.#simulateDay(end, end - this.day);
   }
 
   /** Last simulated frame without advancing; events emitted since the previous call. */
@@ -464,15 +540,20 @@ export class WeatherSim {
   }
 
   /**
-   * Change the run-time pacing: {maxSimDays} (a step further ahead than this re-initialises from
-   * climatology instead of simulating every day). A simulated day costs ~6 ms, so when the clock
-   * runs faster than ~150 days per real second (speed 5 of the ancient era: 365) a lower value
-   * (e.g. 90) keeps each worker request short at the price of more synthetic climateLog years.
+   * Change the run-time pacing (not part of the simulated climate, never taken from saves):
+   *   maxSimDays  a step further ahead than this re-initialises from climatology instead of simulating;
+   *   stride      1 = every day; k > 1 = blocks of up to k days per step (the weather shown is the
+   *               middle day of the block, snow / ice / drought / flood memory advance with the block
+   *               totals), so a clock running k times faster than the simulator still moves smoothly.
    */
-  setOptions({ maxSimDays } = {}) {
+  setOptions({ maxSimDays, stride } = {}) {
     if (maxSimDays !== undefined) {
       if (!(maxSimDays >= 1)) throw new Error(`weather: bad maxSimDays ${maxSimDays}`);
       this.opts.maxSimDays = maxSimDays;
+    }
+    if (stride !== undefined) {
+      if (!(stride >= 1 && stride <= BLOCK_MAX)) throw new Error(`weather: bad stride ${stride}`);
+      this.opts.stride = Math.floor(stride);
     }
     return { ...this.opts };
   }
@@ -610,10 +691,11 @@ export class WeatherSim {
   #loadYear(year) {
     if (this.anomYear === year) return;
     this.anomYear = year;
-    if (!this.anomalyFn) { this.dT.fill(0); this.pf.fill(1); return; }
+    if (!this.anomalyFn) { this.dT.fill(0); this.pf.fill(1); this.dTL.fill(0); this.dTI.fill(0); return; }
     const r = this.#evalAnomalyNodes(year);
     nodesToCells(r.dT, this.aTab, this.dT);
     nodesToCells(r.pf, this.aTab, this.pf);
+    gather(this.dT, this.landIdx, this.dTL); gather(this.dT, this.iceIdx, this.dTI);
   }
 
   /** Per-month precipitation parameters. */
@@ -674,12 +756,20 @@ export class WeatherSim {
     }
   }
 
-  // ===================================================================== one day
-  #simulateDay(d) {
+  // ===================================================================== one day (or one n-day block)
+  /**
+   * Simulate day d, or with n > 1 the block of days d-n+1 .. d (within one month) at once. A block
+   * steps the synoptic fields, tropical cyclones and the field-based detectors (storms, heat and cold
+   * waves from box-mean field values) every day, exactly as daily steps would, but runs the cell
+   * pass once, for the block's middle day: that day's weather is shown, and snow, ice, drought sums,
+   * flood memory, dry spells and the climate accumulators advance by n days with the block totals.
+   * Used when the clock runs faster than the simulator (setOptions({stride})).
+   */
+  #simulateDay(d, n = 1) {
     const info = dayInfo(d, this.info);
     if (info.month !== this.curMonth || info.year !== this.curYear) {
       this.#monthEnd();
-      this.#advanceRef(d - 1);
+      this.#advanceRef(d - n);
       if (info.year !== this.curYear) {
         this.#finalizeYear();
         this.curYear = info.year;
@@ -693,35 +783,105 @@ export class WeatherSim {
     }
     const m = info.month;
     this.winterNow.n = m === 12 || m <= 2; this.winterNow.s = m >= 6 && m <= 8;
-    const tw = this.#tWeights(info, this.tw);
-    this.#seasonRows(info);
-    const seed = this.seed, F = this.fields;
-    for (const k in F) F[k].step(seed, d);
+    const d0 = d - n + 1, rep = d - ((n - 1) >> 1);
+    const infoR = n > 1 ? dayInfo(rep, this.infoR) : info;
+    const tw = this.#tWeights(infoR, this.tw);
+    this.#seasonRows(infoR);
+    const seed = this.seed, F = this.fields, evOn = this.opts.events;
+    const ctx = evOn ? { month: info.month + (info.day - 0.5) / info.daysInMonth - 0.5, cls: this.cls, normalT: c => this.normalTemp(c) + this.dT[c] } : null;
+    const blk = n > 1, jr = rep - d0;
+    for (let dd = d0; dd <= d; dd++) {
+      for (const k in F) F[k].step(seed, dd);
+      const isRep = dd === rep;
+      this.#coarseFields(isRep);
+      if (evOn) {
+        this.events.cyclones(dd, ctx);
+        this.#stormValues(info);
+        if (isRep) this.events.cycloneRain(this.PC);
+      }
+      if (!blk) break;
+      this.#recordDay(dd - d0, evOn);
+      if (isRep) { this.repTC.set(this.TC); this.repPC.set(this.PC); this.repSF.set(this.SF); }
+    }
+    if (blk) {
+      // the middle day's coarse fields for the cell pass; per-day box-mean field changes since then
+      this.TC.set(this.repTC); this.PC.set(this.repPC); this.SF.set(this.repSF);
+      const dB = this.blkDB, dMin = this.blkDBmin, tc = this.blkTC, kap = this.bKappa, tR = jr * BN;
+      dMin.fill(0);
+      for (let j = 0, o = 0; j < n; j++) for (let b = 0; b < BN; b++, o++) { const v = kap[b] * (tc[o] - tc[tR + b]); dB[o] = v; if (v < dMin[b]) dMin[b] = v; }
+    }
+    this.#passRows(rep, tw, n, jr);
+    this.#boxes(tw, n);
+    if (blk) this.#blockDays(d0, n, jr, evOn);
+    if (evOn) {
+      if (!blk) this.events.boxes(d);
+      this.events.fires(d, this.candCell, this.candFD, this.nCand, this.bd.rain);
+    }
+    const bd = this.bd;
+    for (const k of ['Tl', 'Al', 'Pl', 'Dl', 'Aall', 'Pall', 'snowN', 'snowMax', 'floodN', 'floodMax']) bd[k].fill(0);
+    this.yDays += n; this.mDays += n;
+    this.day = d;
+  }
 
-    // ---- coarse combined fields
-    const TC = this.TC, PC = this.PC, SF = this.SF;
+  /** Coarse combined fields of today: temperature unit field TC; with `all` also precipitation PC and slow factor SF. */
+  #coarseFields(all) {
+    const F = this.fields, TC = this.TC, PC = this.PC, SF = this.SF;
     const fT = F.fastT.data, sT = F.slowT.data, fP = F.fastP.data, sP = F.slowP.data, vP = F.vslowP.data;
     for (let j = 0; j < CY; j++) {
       const th = 0.5 * this.nodeSummer[j], ct = Math.cos(th), st = Math.sin(th);
-      for (let i = 0, n = j * CX; i < CX; i++, n++) {
-        TC[n] = T_FAST * fT[n] + T_SLOW * (ct * sT[n] - st * sP[n]);
-        PC[n] = fP[n];
-        SF[n] = Math.exp(SF_K1 * sP[n] + SF_K2 * vP[n] + SF_C);
+      for (let i = 0, o = j * CX; i < CX; i++, o++) TC[o] = T_FAST * fT[o] + T_SLOW * (ct * sT[o] - st * sP[o]);
+      if (all) for (let i = 0, o = j * CX; i < CX; i++, o++) { PC[o] = fP[o]; SF[o] = Math.exp(SF_K1 * sP[o] + SF_K2 * vP[o] + SF_C); }
+    }
+  }
+
+  /** Block day j: box means of the coarse temperature field (2x2 nodes per box) and the day's storm values. */
+  #recordDay(j, evOn) {
+    const TC = this.TC, tc = this.blkTC, sv = this.blkSV, sc = this.blkSC, bd = this.bd, o = j * BN;
+    for (let by = 0; by < BY; by++) {
+      for (let bx = 0; bx < BX; bx++) {
+        const n0 = 2 * by * CX + 2 * bx;
+        tc[o + by * BX + bx] = 0.25 * (TC[n0] + TC[n0 + 1] + TC[n0 + CX] + TC[n0 + CX + 1]);
       }
     }
-    if (this.opts.events) {
-      this.events.cyclones(d, { month: info.month + (info.day - 0.5) / info.daysInMonth - 0.5, cls: this.cls, normalT: c => this.normalTemp(c) + this.dT[c] });
-      this.events.cycloneRain(PC);
-      this.#stormValues(info);
-    }
-
-    this.#passAll(d);
-    this.#passLand(d, tw);
-    this.#passIce(tw);
-    this.#boxes(d, tw);
-    this.yDays++; this.mDays++;
-    this.day = d;
+    if (evOn) { sv.set(bd.stormV, o); sc.set(bd.stormCell, o); }
   }
+
+  /**
+   * The days of an n-day block (jr = index of the simulated middle day): winter anomaly accumulators and
+   * box detectors day by day. Box-mean anomaly of a day = middle day's + its box-mean field change (dB),
+   * so heat and cold waves and severe winters keep the field's day-to-day persistence. Storms come from
+   * each day's field; snowstorms, floods and droughts keep the middle day's values for the whole block.
+   */
+  #blockDays(d0, n, jr, evOn) {
+    const ev = this.events, val = ev.val, vc = ev.valCell, acc = this.acc;
+    const HW = DET.heatwave * BN, CW = DET.coldwave * BN, ST = DET.storm * BN;
+    const { bAUr, bMTr, bSig, bHeatable, bHasLand, bNorth, sRow, blkDB, blkSV, blkSC } = this;
+    const nWin = this.winterNow.n, sWin = this.winterNow.s;
+    const repH = this.blkH, repC = this.blkC;
+    repH.set(val.subarray(HW, HW + BN)); repC.set(val.subarray(CW, CW + BN));
+    for (let j = 0; j < n; j++) {
+      const o = j * BN;
+      for (let b = 0; b < BN; b++) if (bHasLand[b] && (bNorth[b] ? nWin : sWin)) { acc.wA[b] += bAUr[b] + blkDB[o + b]; acc.wN[b]++; }
+      if (!evOn) continue;
+      if (j === jr) { val.set(repH, HW); val.set(repC, CW); }
+      else {
+        for (let b = 0; b < BN; b++) {
+          let vh = 0, vcw = 0;
+          if (bHeatable[b]) {
+            let aU = bAUr[b] + blkDB[o + b];
+            if (aU > TCLIP) aU = TCLIP; else if (aU < -TCLIP) aU = -TCLIP;
+            const kC = bSig[b] * sRow[((b / BX) | 0) * 10 + 5], aC = aU * kC, mT = bMTr[b] + (aU - bAUr[b]) * kC;
+            if (aU >= HEAT_A && aC >= HEAT_C && mT >= 18) vh = waveSeverity(aU);
+            if (aU <= -COLD_A && aC <= -COLD_C && mT <= 12) vcw = waveSeverity(-aU);
+          }
+          val[HW + b] = vh; val[CW + b] = vcw;
+        }
+      }
+      for (let b = 0; b < BN; b++) { val[ST + b] = blkSV[o + b]; vc[ST + b] = blkSC[o + b]; }
+      ev.boxes(d0 + j);
+    }
+  }
+
 
   #stormValues(info) {
     const bd = this.bd, fP = this.fields.fastP.data, coast = this.nodeCoast;
@@ -731,8 +891,8 @@ export class WeatherSim {
       const lat = nodeLat(j), a = Math.abs(lat);
       if (a < 35 || a > 72 || !(lat > 0 ? nCold : sCold)) continue;
       for (let i = 0; i < CX; i++) {
-        const n = j * CX + i, v = fP[n];
-        if (v < STORM_Z || !coast[n]) continue;
+        const o = j * CX + i, v = fP[o];
+        if (v < STORM_Z || !coast[o]) continue;
         const b = (j >> 1) * BX + (i >> 1), val = 1 + (v - STORM_Z) / 0.25;
         if (val > bd.stormV[b]) { bd.stormV[b] = val; bd.stormCell[b] = (j * 5 + 2) * W + i * 5 + 2; }
       }
@@ -740,141 +900,186 @@ export class WeatherSim {
   }
 
   /**
-   * Pass A, every cell: synoptic anomaly (B channel) and precipitation (G channel), as two
-   * loops (smaller loop bodies keep the JIT's registers from spilling).
+   * Rows pass. Per SIM row the coarse fields are interpolated once into full-resolution row buffers
+   * (expandRow), then small loops run over the row's cells while it is cache-resident:
+   * (1) every cell: synoptic temperature anomaly, B channel (clears R/G/A);
+   * (2) every cell: precipitation and cloud, G channel (latent = synoptic field + mesoscale noise);
+   * (3) the row's land cells: temperature, snow, flood memory, dry spell, drought sums, R channel;
+   * (4) the row's land cells: drought index, A channel, fire danger and ignitions, land box sums;
+   * (5) the row's freezing sea/lake cells: ice, R channel.
+   * Small loop bodies keep the JIT's registers from spilling; land / ice data are compact and in
+   * row order, and box sums are accumulated in registers over each run of cells of the same box.
    */
-  #passAll(d) {
-    const { sig, dT, zth, mwN, grid, grid32, precip, aU: aUc, rT, rP, rS, sRow, rowW, TC, PC, SF, normT, normP, xph, NZ } = this;
-    const { ix0, ix1, fx, iy0, iy1, fy } = this.cTab;
-    const bAall = this.bd.Aall, bPall = this.bd.Pall;
+  #passRows(d, tw, n, jr = 0) {
+    const { sig, dT, zth, mwN, grid, grid32, precip, aU, rT, rP, rS, uX, zX, sX, sRow, rowW, TC, PC, SF, normT, normP, MZ } = this;
+    const { iy0, iy1, fy } = this.cTab;
+    const bd = this.bd, bAall = bd.Aall, bPall = bd.Pall;
+    const PH = this.phF, kT = this.kT, kP = this.kP, kOne = this.kOne;
+    // mesoscale noise window of the day
+    const hN = dayBase(this.seed, d, 11), mzR = hN % (MZ_RS + 1), mzS = (hN >>> 5) % W;
+    // block constants (n = 1: the daily model exactly)
+    const nd = n, lam = BLOCK_LAMBDA[Math.min(n, BLOCK_MAX)], lam1 = 1 - lam, dSh = BLOCK_DSHIFT[Math.min(n, BLOCK_MAX)], xSh = BLOCK_XSHIFT[Math.min(n, BLOCK_MAX)];
+    const dzX = this.dzX, dB = this.blkDB, dBmin = this.blkDBmin;
+    const a3n = n === 1 ? A3 : Math.pow(A3, n), k3n = n === 1 ? 1 : (1 - a3n) / (1 - A3) / n;
+    const a90n = n === 1 ? A90 : Math.pow(A90, n), k90n = n === 1 ? 1 : (1 - a90n) / (1 - A90) / n;
+    const a365n = n === 1 ? A365 : Math.pow(A365, n), k365n = n === 1 ? 1 : (1 - a365n) / (1 - A365) / n;
+    // land
+    const { landIdx, landRow, landBox, TvL, dTL, sigL, swe, w3, dry, floodThr, TL, muL, p90, n90, p365, n365, muRef, droughtOn, drought, fire, fuel } = this;
+    const L = landIdx.length;
+    const snowN = bd.snowN, snowMax = bd.snowMax, snowCell = bd.snowCell, floodN = bd.floodN, floodMax = bd.floodMax, floodCell = bd.floodCell;
+    const bTl = bd.Tl, bAl = bd.Al, bPl = bd.Pl, bDl = bd.Dl;
+    const w1 = tw.w1, w0 = 1 - w1, o0L = tw.m0 * L, o1L = tw.m1 * L;
+    // drought: expected sums advanced to today; each cell recomputes the slowly changing index every
+    // 4th day (staggered), or every block
+    const jd = d - this.refDay, ph4 = n === 1 ? d & 3 : -1;
+    const a90 = Math.pow(A90, jd), k90 = (1 - a90) / (1 - A90), a365 = Math.pow(A365, jd), k365 = (1 - a365) / (1 - A365);
+    // fires
+    const candCell = this.candCell, candFD = this.candFD, candCap = candCell.length;
+    const baseF = dayBase(this.seed, d, 12) | 0, evOn = this.opts.events, ign = IGNITION * nd;
+    let nCand = 0;
+    // ice
+    const { iceIdx, iceRow, iceBox, TvI, dTI, sigI, iceTf, iceQ, ice } = this;
+    const I = iceIdx.length, o0I = tw.m0 * I, o1I = tw.m1 * I;
 
-    // A1: temperature anomaly (sigma units, clipped), B channel; clears R/G/A
     for (let y = 0; y < H; y++) {
       const r0 = iy0[y] * CX, r1 = iy1[y] * CX, wy = fy[y];
-      for (let i = 0; i < CX; i++) { const a = TC[r0 + i]; rT[i] = a + (TC[r1 + i] - a) * wy; }
-      const sR = sRow[y], wr = rowW[y], nr = y * 5, boxRow = ((y / 10) | 0) * BX;
-      let c = y * W;
-      for (let bx = 0; bx < BX; bx++) {
+      for (let i = 0; i < CX; i++) {
+        const a = TC[r0 + i], b = PC[r0 + i], q = SF[r0 + i];
+        rT[i] = a + (TC[r1 + i] - a) * wy;
+        rP[i] = b + (PC[r1 + i] - b) * wy;
+        rS[i] = q + (SF[r1 + i] - q) * wy;
+      }
+      const nr = y * 5;
+      for (let j = 0; j < 5; j++) { const ph = (j + 2) % 5; kT[j] = normT[nr + ph]; kP[j] = normP[nr + ph]; }
+      expandRow(rT, uX, PH, kT, 1);
+      expandRow(rP, zX, PH, kP, W_FIELD);
+      expandRow(rS, sX, PH, kOne, 1);
+      const sR = sRow[y], wr = rowW[y], boxRow = ((y / 10) | 0) * BX, c0 = y * W;
+
+      // (1) temperature anomaly (sigma units, clipped), B channel; clears R/G/A
+      for (let bx = 0, x = 0, c = c0; bx < BX; bx++) {
         let sa = 0;
-        const xe = bx * 10 + 10;
-        for (let x = bx * 10; x < xe; x++, c++) {
-          let u = (rT[ix0[x]] + (rT[ix1[x]] - rT[ix0[x]]) * fx[x]) * normT[nr + xph[x]];
+        for (const xe = x + 10; x < xe; x++, c++) {
+          let u = uX[x];
           if (u > TCLIP) u = TCLIP; else if (u < -TCLIP) u = -TCLIP;
-          aUc[c] = u;
+          aU[c] = u;
           const da = dT[c] + sig[c] * sR * u;
           sa += da;
-          let Bc = 128 + da * 8;
-          Bc = Bc < 0 ? 0 : Bc > 255 ? 255 : (Bc + 0.5) | 0;
+          let Bc = 128.5 + da * 8;
+          Bc = Bc < 0 ? 0 : Bc > 255 ? 255 : Bc | 0;
           grid32[c] = LITTLE_ENDIAN ? Bc << 16 : Bc << 8;
         }
         bAall[boxRow + bx] += sa * wr;
       }
-    }
 
-    // A2: precipitation and cloud, G channel
-    const off = dayBase(this.seed, d, 11) % N;
-    for (let y = 0; y < H; y++) {
-      const r0 = iy0[y] * CX, r1 = iy1[y] * CX, wy = fy[y];
-      for (let i = 0; i < CX; i++) {
-        const b = PC[r0 + i], q = SF[r0 + i];
-        rP[i] = b + (PC[r1 + i] - b) * wy;
-        rS[i] = q + (SF[r1 + i] - q) * wy;
-      }
-      const wr = rowW[y], nr = y * 5, boxRow = ((y / 10) | 0) * BX;
-      let c = y * W;
-      for (let bx = 0; bx < BX; bx++) {
+      // (2) precipitation and cloud, G channel. Latent = W_FIELD * synoptic + W_NOISE * mesoscale noise;
+      // cells without rain within 0.7 of the threshold carry the cloud band (0..127)
+      const mzRow = (y + mzR) * MZ_W;
+      for (let bx = 0, x = 0, c = c0; bx < BX; bx++) {
         let sp = 0;
-        const xe = bx * 10 + 10;
-        for (let x = bx * 10; x < xe; x++, c++) {
+        const xs = bx * 10 + mzS, mo = mzRow + (xs >= W ? xs - W : xs) - x;
+        for (const xe = x + 10; x < xe; x++, c++) {
+          const dz = zX[x] + W_NOISE * MZ[mo + x] - zth[c];
           let pr = 0, G = 0;
-          const zt = zth[c];
-          if (zt < NO_RAIN) {
-            const i0 = ix0[x], i1 = ix1[x], f = fx[x];
-            const dz = W_FIELD * (rP[i0] + (rP[i1] - rP[i0]) * f) * normP[nr + xph[x]] + W_NOISE * NZ[c + off] - zt;
-            if (dz > 0) {
-              pr = mwN[c] * dz * (1 + dz * (0.5 + dz * (1 / 6))) * (rS[i0] + (rS[i1] - rS[i0]) * f);
-              const gi = (pr * 4) | 0;
-              G = GLUT[gi > 255 ? 255 : gi];
-            } else if (dz > -0.7) G = (127 + dz * 181.4) | 0; // cloud band just below the rain threshold
-          }
+          if (dz > 0) {
+            pr = mwN[c] * dz * (1 + dz * (0.5 + dz * (1 / 6))) * sX[x];
+            const gi = (pr * 4) | 0;
+            G = GLUT[gi > 255 ? 255 : gi];
+          } else if (dz > -0.7) G = (127 + dz * 181.4) | 0;
           precip[c] = pr;
           sp += pr;
           grid[(c << 2) + 1] = G;
+          dzX[x] = dz;
         }
         bPall[boxRow + bx] += sp * wr;
       }
-    }
-  }
 
-  /**
-   * Pass B, land cells: temperature, snow, drought, flood memory, fire danger, R and A channels.
-   * Split into small loops over the compact (cache-resident) land arrays: one big loop body
-   * makes the JIT spill registers and runs about twice as slow.
-   */
-  #passLand(d, tw) {
-    const { Tv, dT, sig, aU: aUc, precip, grid, drought, fire, sRow, rowW, landIdx, landY, landBox, fuel, swe, p90, n90, p365, n365, w3, dry, muRef, floodThr, TL, droughtOn } = this;
-    const bd = this.bd;
-    const L = landIdx.length;
-
-    // B1: temperature, snow, flood memory, dry spell
-    {
-      const snowN = bd.snowN, snowMax = bd.snowMax, snowCell = bd.snowCell, floodN = bd.floodN, floodMax = bd.floodMax, floodCell = bd.floodCell;
-      const o0 = tw.m0 * N, o1 = tw.m1 * N, w1 = tw.w1, w0 = 1 - w1;
-      for (let k = 0; k < L; k++) {
-        const c = landIdx[k];
-        const T = Tv[o0 + c] * w0 + Tv[o1 + c] * w1 + dT[c] + sig[c] * sRow[landY[k]] * aUc[c];
-        TL[k] = T;
-        const pr = precip[c];
-        let sw = swe[k], rain = pr, melt = 0;
-        if (pr > 0 && T < SNOW_T1) {
-          const sn = T <= SNOW_T0 ? pr : pr * (SNOW_T1 - T) * 0.5;
-          sw += sn; rain = pr - sn;
-          if (sn >= SNOWSTORM_MM) { const b = landBox[k]; snowN[b]++; if (sn > snowMax[b]) { snowMax[b] = sn; snowCell[b] = c; } }
+      const k0 = landRow[y], ke = landRow[y + 1];
+      // (3) land: temperature, snow, flood memory, dry spell, drought sums
+      if (nd === 1) {
+        for (let k = k0; k < ke; k++) {
+          const c = landIdx[k];
+          const T = TvL[o0L + k] * w0 + TvL[o1L + k] * w1 + dTL[k] + sigL[k] * sR * aU[c];
+          TL[k] = T;
+          const pr = precip[c];
+          let sw = swe[k], rain = pr, melt = 0;
+          if (pr > 0 && T < SNOW_T1) {
+            const sn = T <= SNOW_T0 ? pr : pr * (SNOW_T1 - T) * 0.5;
+            sw += sn; rain = pr - sn;
+            if (sn >= SNOWSTORM_MM) { const b = landBox[k]; snowN[b]++; if (sn > snowMax[b]) { snowMax[b] = sn; snowCell[b] = c; } }
+          }
+          if (T > 0 && sw > 0) { melt = DDF * T; if (melt > sw) melt = sw; sw -= melt; }
+          if (sw > SWE_MAX) sw = SWE_MAX;
+          swe[k] = sw;
+          let R = 0;
+          if (sw > 0) { const si = (sw * 4) | 0; R = si >= SNOW_LUT_N ? 255 : SNOW_LUT[si]; }
+          grid[c << 2] = R;
+          const ww = w3[k] * A3 + rain + 0.5 * melt;
+          w3[k] = ww;
+          const ft = floodThr[k];
+          if (ww > ft) { const b = landBox[k]; floodN[b]++; const r = ww / ft; if (r > floodMax[b]) { floodMax[b] = r; floodCell[b] = c; } }
+          const dd = dry[k];
+          dry[k] = pr > 1 ? 0 : dd < 255 ? dd + 1 : 255;
+          p90[k] = p90[k] * A90 + pr;
+          p365[k] = p365[k] * A365 + pr;
         }
-        if (T > 0 && sw > 0) { melt = DDF * T; if (melt > sw) melt = sw; sw -= melt; }
-        if (sw > SWE_MAX) sw = SWE_MAX;
-        swe[k] = sw;
-        let R = 0;
-        if (sw > 0) { const si = (sw * 4) | 0; R = si >= SNOW_LUT_N ? 255 : SNOW_LUT[si]; }
-        grid[c << 2] = R;
-        const ww = w3[k] * A3 + rain + 0.5 * melt;
-        w3[k] = ww;
-        const ft = floodThr[k];
-        if (ww > ft) { const b = landBox[k]; floodN[b]++; const r = ww / ft; if (r > floodMax[b]) { floodMax[b] = r; floodCell[b] = c; } }
-        const dd = dry[k];
-        dry[k] = pr > 1 ? 0 : dd < 255 ? dd + 1 : 255;
+      } else {
+        // n-day block. Precipitation: the block total, its fast part shrunk towards the conditional mean
+        // (muL * slow factor), spread evenly over the days. Snow and melt day by day with the day's
+        // temperature T + kc * dB (the change of the box-mean field since the middle day). Snowstorms and
+        // floods are detected on the middle day's own (daily) values.
+        for (let k = k0; k < ke; k++) {
+          const c = landIdx[k], b = landBox[k], x = c - c0, kc = sigL[k] * sR;
+          const T = TvL[o0L + k] * w0 + TvL[o1L + k] * w1 + dTL[k] + kc * aU[c];
+          TL[k] = T;
+          const pr = precip[c];
+          const P = nd * (lam * pr + lam1 * muL[k] * sX[x]), Pd = P / nd;
+          let sw = swe[k], rain = 0, melt = 0, meltR = 0;
+          if (sw === 0 && T + kc * dBmin[b] >= SNOW_T1) rain = P; // no snow on any day of the block
+          else for (let j = 0, o = b; j < nd; j++, o += BN) {
+            const Tj = T + kc * dB[o];
+            if (Tj < SNOW_T1) { const fr = Tj <= SNOW_T0 ? 1 : (SNOW_T1 - Tj) * 0.5; sw += Pd * fr; rain += Pd * (1 - fr); } else rain += Pd;
+            if (Tj > 0 && sw > 0) { let mj = DDF * Tj; if (mj > sw) mj = sw; sw -= mj; melt += mj; if (j === jr) meltR = mj; }
+            if (sw > SWE_MAX) sw = SWE_MAX;
+          }
+          // the block's wettest day (expected maximum): snowstorm and flood cells
+          const zx = dzX[x] + xSh, px = zx > 0 ? mwN[c] * zx * (1 + zx * (0.5 + zx * (1 / 6))) * sX[x] : 0;
+          const sd = T < SNOW_T1 ? (T <= SNOW_T0 ? px : px * (SNOW_T1 - T) * 0.5) : 0;
+          if (sd >= SNOWSTORM_MM) { snowN[b]++; if (sd > snowMax[b]) { snowMax[b] = sd; snowCell[b] = c; } }
+          swe[k] = sw;
+          let R = 0;
+          if (sw > 0) { const si = (sw * 4) | 0; R = si >= SNOW_LUT_N ? 255 : SNOW_LUT[si]; }
+          grid[c << 2] = R;
+          const w3o = w3[k];
+          w3[k] = w3o * a3n + (rain + 0.5 * melt) * k3n;
+          const ft = floodThr[k], wd = w3o * A3 + px - sd + 0.5 * meltR;
+          if (wd > ft) { floodN[b]++; const r = wd / ft; if (r > floodMax[b]) { floodMax[b] = r; floodCell[b] = c; } }
+          // dry-spell reset: any wet day in the block (the middle day's latent shifted by the expected maximum)
+          let wet = pr > 1;
+          if (!wet) { const z = dzX[x] + dSh; wet = z > 0 && mwN[c] * z * (1 + z * (0.5 + z * (1 / 6))) * sX[x] > 1; }
+          const dd = dry[k] + nd;
+          dry[k] = wet ? 0 : dd < 255 ? dd : 255;
+          p90[k] = p90[k] * a90n + P * k90n;
+          p365[k] = p365[k] * a365n + P * k365n;
+        }
       }
-    }
 
-    // B2: drought: exponentially weighted 90 / 365-day sums vs. the reference; the index itself
-    // changes slowly, so each cell recomputes it every 4th day (staggered)
-    {
-      const jr = d - this.refDay, ph4 = d & 3;
-      const a90 = Math.pow(A90, jr), k90 = (1 - a90) / (1 - A90), a365 = Math.pow(A365, jr), k365 = (1 - a365) / (1 - A365);
-      for (let k = 0; k < L; k++) {
-        const pr = precip[landIdx[k]];
-        const q90 = p90[k] * A90 + pr, q365 = p365[k] * A365 + pr;
-        p90[k] = q90; p365[k] = q365;
-        if ((k & 3) === ph4 && droughtOn[k]) {
+
+      // (4) land: drought index, A channel, fire danger and ignitions, land box sums (register runs per box)
+      let bCur = -1, sT = 0, sA = 0, sP = 0, sD = 0;
+      for (let k = k0; k < ke; k++) {
+        const c = landIdx[k], b = landBox[k];
+        if (((k & 3) === ph4 || ph4 < 0) && droughtOn[k]) {
           const mr = muRef[k];
-          let d1 = (DROUGHT_R0 - (q90 + C90) / (n90[k] * a90 + mr * k90 + C90)) * DROUGHT_K;
-          let d2 = (DROUGHT_R0 - (q365 + C365) / (n365[k] * a365 + mr * k365 + C365)) * DROUGHT_K;
+          let d1 = (DROUGHT_R0 - (p90[k] + C90) / (n90[k] * a90 + mr * k90 + C90)) * DROUGHT_K;
+          let d2 = (DROUGHT_R0 - (p365[k] + C365) / (n365[k] * a365 + mr * k365 + C365)) * DROUGHT_K;
           d1 = d1 < 0 ? 0 : d1 > 1 ? 1 : d1;
           d2 = d2 < 0 ? 0 : d2 > 1 ? 1 : d2;
-          drought[landIdx[k]] = (127.5 * (d1 + d2) + 0.5) | 0;
+          drought[c] = (127.5 * (d1 + d2) + 0.5) | 0;
         }
-        const c = landIdx[k];
-        grid[(c << 2) + 3] = drought[c]; // pass A cleared the A channel
-      }
-    }
-
-    // B3: fire danger and ignitions
-    {
-      const candCell = this.candCell, candFD = this.candFD, candCap = candCell.length;
-      const baseF = dayBase(this.seed, d, 12) | 0, evOn = this.opts.events;
-      let nCand = 0;
-      for (let k = 0; k < L; k++) {
-        const c = landIdx[k], T = TL[k], vg = fuel[k];
+        const D = drought[c];
+        grid[(c << 2) + 3] = D;
+        const T = TL[k], vg = fuel[k];
         let FD = 0;
         if (vg > 0 && T > 5 && swe[k] < 1) {
           let ht = (T - 5) * (1 / 15); if (ht > 1) ht = 1;
@@ -883,48 +1088,52 @@ export class WeatherSim {
           // a normal Mediterranean summer or savanna dry season counts as dry) or the drought anomaly
           let sd = 1 - p90[k] / (90 * (0.5 + 0.2 * T));
           if (sd < 0) sd = 0;
-          FD = vg * ht * dr * (0.25 + 0.45 * sd + 0.3 * INV255 * drought[c]);
+          FD = vg * ht * dr * (0.25 + 0.45 * sd + 0.3 * INV255 * D);
           if (evOn && FD > FIRE_MIN && nCand < candCap) {
             let g = Math.imul(baseF ^ c, 0x2c1b3c6d);
             g ^= g >>> 12; g = Math.imul(g, 0x297a2d39);
             g ^= g >>> 15; g = Math.imul(g, 0x4b1d6f2b);
             g ^= g >>> 13;
-            if ((g >>> 0) / 4294967296 < IGNITION * FD * FD * FD) { candCell[nCand] = c; candFD[nCand] = FD; nCand++; }
+            if ((g >>> 0) / 4294967296 < ign * FD * FD * FD) { candCell[nCand] = c; candFD[nCand] = FD; nCand++; }
           }
         }
         fire[c] = (FD * 255 + 0.5) | 0;
+        if (b !== bCur) {
+          if (bCur >= 0) { bTl[bCur] += sT * wr; bAl[bCur] += sA * wr; bPl[bCur] += sP * wr; bDl[bCur] += sD * wr; }
+          bCur = b; sT = 0; sA = 0; sP = 0; sD = 0;
+        }
+        sT += T; sA += aU[c]; sP += precip[c]; sD += D;
       }
-      this.nCand = nCand;
+      if (bCur >= 0) { bTl[bCur] += sT * wr; bAl[bCur] += sA * wr; bPl[bCur] += sP * wr; bDl[bCur] += sD * wr; }
+
+      // (5) sea/lake cells that can freeze: ice proxy, R channel (blocks: day by day as for snow)
+      for (let i = iceRow[y], ie = iceRow[y + 1]; i < ie; i++) {
+        const c = iceIdx[i], kc = sigI[i] * sR;
+        const T = TvI[o0I + i] * w0 + TvI[o1I + i] * w1 + dTI[i] + kc * aU[c];
+        const tf = iceTf[i], q = iceQ[i];
+        let v = ice[i];
+        if (nd === 1) {
+          v = v - q + (T < tf ? (ICE_KF * ICE_H0 * (tf - T)) / (ICE_H0 + v) : -ICE_KM * (T - tf));
+          v = v < 0 ? 0 : v > ICE_MAX ? ICE_MAX : v;
+        } else if (v > 0 || T + kc * dBmin[iceBox[i]] <= tf) {
+          for (let j = 0, o = iceBox[i]; j < nd; j++, o += BN) {
+            const Tj = T + kc * dB[o];
+            v = v - q + (Tj < tf ? (ICE_KF * ICE_H0 * (tf - Tj)) / (ICE_H0 + v) : -ICE_KM * (Tj - tf));
+            v = v < 0 ? 0 : v > ICE_MAX ? ICE_MAX : v;
+          }
+        }
+        ice[i] = v;
+        grid[c << 2] = v >= 25.5 ? 255 : (v * 10) | 0;
+      }
     }
 
-    // B4: land box sums
-    {
-      const bTl = bd.Tl, bAl = bd.Al, bPl = bd.Pl, bDl = bd.Dl;
-      for (let k = 0; k < L; k++) {
-        const c = landIdx[k], b = landBox[k], wr = rowW[landY[k]];
-        bTl[b] += TL[k] * wr; bAl[b] += aUc[c] * wr; bPl[b] += precip[c] * wr; bDl[b] += drought[c] * wr;
-      }
-      for (let b = 0; b < BN; b++) bDl[b] *= INV255;
-    }
+    for (let b = 0; b < BN; b++) bDl[b] *= INV255;
+    this.nCand = nCand;
   }
 
-  /** Pass C, sea/lake cells that can freeze: ice proxy, R channel. */
-  #passIce(tw) {
-    const { Tv, dT, sig, aU: aUc, grid, sRow, iceIdx, iceY, iceTf, iceQ, ice } = this;
-    const o0 = tw.m0 * N, o1 = tw.m1 * N, w1 = tw.w1, w0 = 1 - w1;
-    const I = iceIdx.length;
-    for (let i = 0; i < I; i++) {
-      const c = iceIdx[i];
-      const T = Tv[o0 + c] * w0 + Tv[o1 + c] * w1 + dT[c] + sig[c] * sRow[iceY[i]] * aUc[c];
-      const tf = iceTf[i], h = ice[i];
-      let v = h - iceQ[i] + (T < tf ? (ICE_KF * ICE_H0 * (tf - T)) / (ICE_H0 + h) : -ICE_KM * (T - tf));
-      v = v < 0 ? 0 : v > ICE_MAX ? ICE_MAX : v;
-      ice[i] = v;
-      grid[c << 2] = v >= 25.5 ? 255 : (v * 10) | 0;
-    }
-  }
 
-  #boxes(d, tw) {
+  /** Box diagnostics of the simulated day: climate accumulators (x n days), detector values, rep values for blocks. */
+  #boxes(tw, n) {
     const bd = this.bd, acc = this.acc, ev = this.events, val = ev.val, vc = ev.valCell;
     const { bLandFrac, bClimP, bClimT, bRep, bNorth, bLandW, bAllW, bTvAll } = this;
     const nWin = this.winterNow.n, sWin = this.winterNow.s;
@@ -938,8 +1147,9 @@ export class WeatherSim {
         mT = bd.Tl[b] / wl; mP = bd.Pl[b] / wl;
         // aC: the box-mean anomaly in degC (box-mean sigma at the box's centre row)
         const aU = bd.Al[b] / wl, aC = aU * this.bSig[b] * this.sRow[((b / BX) | 0) * 10 + 5], D = bd.Dl[b] / wl;
-        acc.mD[b] += D;
-        if (bNorth[b] ? nWin : sWin) { acc.wA[b] += aU; acc.wN[b]++; }
+        this.bAUr[b] = aU; this.bMTr[b] = mT;
+        acc.mD[b] += D * n;
+        if (n === 1 && (bNorth[b] ? nWin : sWin)) { acc.wA[b] += aU; acc.wN[b]++; } // blocks: day by day in #blockDays
         if (bLandFrac[b] >= 0.25 && bClimT[b] > -12) { // no heat/cold waves over the ice sheets
           if (aU >= HEAT_A && aC >= HEAT_C && mT >= 18) vh = waveSeverity(aU);
           if (aU <= -COLD_A && aC <= -COLD_C && mT <= 12) vcw = waveSeverity(-aU);
@@ -950,7 +1160,7 @@ export class WeatherSim {
         mT = bTvAll[o0 + b] * w0 + bTvAll[o1 + b] * w1 + bd.Aall[b] / w;
         mP = bd.Pall[b] / w;
       }
-      acc.yT[b] += mT; acc.yP[b] += mP; bd.rain[b] = mP;
+      acc.yT[b] += mT * n; acc.yP[b] += mP * n; bd.rain[b] = mP;
       const sn = bd.snowN[b], fl = bd.floodN[b];
       val[S + b] = sn >= SNOWSTORM_CELLS && bClimT[b] > -12 ? 1 + 4 * Math.min(1, (sn - SNOWSTORM_CELLS) / 60) : 0; vc[S + b] = bd.snowCell[b];
       val[HW + b] = vh; vc[HW + b] = bRep[b];
@@ -959,11 +1169,6 @@ export class WeatherSim {
       val[FL + b] = fl >= FLOOD_CELLS ? 1 + Math.log2(fl / FLOOD_CELLS) : 0; vc[FL + b] = bd.floodCell[b];
       val[ST + b] = bd.stormV[b]; vc[ST + b] = bd.stormCell[b];
     }
-    if (this.opts.events) {
-      ev.boxes(d);
-      ev.fires(d, this.candCell, this.candFD, this.nCand, bd.rain);
-    }
-    for (const k of ['Tl', 'Al', 'Pl', 'Dl', 'Aall', 'Pall', 'snowN', 'snowMax', 'floodN', 'floodMax']) bd[k].fill(0);
   }
 
   #onAttach(k, b, ev) {
@@ -1100,8 +1305,8 @@ export class WeatherSim {
     for (const k in this.fields) this.fields[k].noise = this.NZ;
     // model options come from the snapshot (exact continuation); maxSimDays is the caller's
     // run-time pacing policy (setOptions) and stays as it is
-    const stride = this.opts.anomalyStride, maxSimDays = this.opts.maxSimDays;
-    this.opts = { ...this.opts, ...m.options, maxSimDays };
+    const stride = this.opts.anomalyStride, maxSimDays = this.opts.maxSimDays, pace = this.opts.stride;
+    this.opts = { ...this.opts, ...m.options, maxSimDays, stride: pace };
     if (this.opts.anomalyStride !== stride) this.aTab = interpTables(this.opts.anomalyStride);
     for (const k of ['swe', 'p90', 'n90', 'p365', 'n365', 'w3', 'dry', 'ice', 'pfLong', 'aU', 'precip', 'drought', 'fire', 'grid']) {
       this[k].set(new this[k].constructor(B[`cell.${k}`]));
@@ -1165,6 +1370,101 @@ function indexWhere(arr, pred) {
   const out = new Int32Array(n);
   for (let i = 0, k = 0; i < arr.length; i++) if (pred(arr[i])) out[k++] = i;
   return out;
+}
+
+/**
+ * Static per-seed mesoscale noise for the precipitation latent: white Gaussian noise blurred with a
+ * Gaussian of MESO_SY cells in y and MESO_SX / cos(lat) cells in x (so blobs keep roughly their size in
+ * km), renormalised to exactly unit variance per row and zero mean / unit variance overall. Rows are
+ * x-periodic with the first MZ_PAD columns repeated at the end, so a day reads the window
+ * MZ[(y + r) * MZ_W + ((x + s) mod W)] for a daily random row shift r <= MZ_RS and column shift s, box by
+ * box (10 cells) without a modulo per cell. Precipitation cells and the cloud band below the rain threshold
+ * then come in coherent patches a few cells wide instead of salt-and-pepper, while every cell keeps a
+ * unit-variance latent (so the precipitation statistics per cell are unchanged).
+ */
+function buildMesoNoise(seed, out) {
+  const rows = MZ_ROWS, pad = Math.ceil(3 * MESO_SY);
+  const src = new Float32Array((rows + 2 * pad) * W), tmp = new Float64Array(W), row = new Float64Array(W);
+  const base = dayBase(seed, 0x7ffffffe, 17);
+  for (let i = 0; i < src.length; i++) src[i] = GAUSS[cellHash(base, i) >>> GSHIFT];
+  // x blur, row by row (latitude of a table row = that of the cell row it serves at the middle shift)
+  for (let t = 0; t < rows + 2 * pad; t++) {
+    const y = Math.min(H - 1, Math.max(0, t - pad - (MZ_RS >> 1)));
+    const sx = MESO_SX / Math.max(Math.cos(cellLat(y) * DEG), 0.22), R = Math.ceil(3 * sx);
+    const wts = new Float64Array(2 * R + 1);
+    let e = 0;
+    for (let j = -R; j <= R; j++) { const w = Math.exp(-0.5 * (j / sx) ** 2); wts[j + R] = w; e += w * w; }
+    const k = 1 / Math.sqrt(e), o = t * W;
+    for (let x = 0; x < W; x++) tmp[x] = src[o + x];
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let j = -R; j <= R; j++) { let xx = x + j; xx = xx < 0 ? xx + W : xx >= W ? xx - W : xx; s += wts[j + R] * tmp[xx]; }
+      row[x] = s * k;
+    }
+    for (let x = 0; x < W; x++) src[o + x] = row[x];
+  }
+  // y blur (rows are independent unit-variance after the x pass)
+  const Ry = pad, wy = new Float64Array(2 * Ry + 1);
+  let ey = 0;
+  for (let j = -Ry; j <= Ry; j++) { const w = Math.exp(-0.5 * (j / MESO_SY) ** 2); wy[j + Ry] = w; ey += w * w; }
+  const ky = 1 / Math.sqrt(ey);
+  const mz = out && out.length === rows * MZ_W ? out : new Float32Array(rows * MZ_W);
+  let s1 = 0, s2 = 0;
+  for (let t = 0; t < rows; t++) {
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let j = -Ry; j <= Ry; j++) s += wy[j + Ry] * src[(t + pad + j) * W + x];
+      const v = s * ky;
+      mz[t * MZ_W + x] = v; s1 += v; s2 += v * v;
+    }
+  }
+  const cnt = rows * W, mean = s1 / cnt, kk = 1 / Math.sqrt(s2 / cnt - mean * mean);
+  for (let t = 0; t < rows; t++) {
+    const o = t * MZ_W;
+    for (let x = 0; x < W; x++) mz[o + x] = (mz[o + x] - mean) * kk;
+    for (let x = 0; x < MZ_PAD; x++) mz[o + W + x] = mz[o + x];
+  }
+  return mz;
+}
+
+/** a[idx[k]] for every k (into out). */
+function gather(a, idx, out = new Float32Array(idx.length)) {
+  for (let k = 0; k < idx.length; k++) out[k] = a[idx[k]];
+  return out;
+}
+
+/** Start offsets per row of a sorted per-cell row list: cells of row y are [r[y], r[y+1]). */
+function rowRanges(rowOf) {
+  const r = new Int32Array(H + 1);
+  for (let k = 0; k < rowOf.length; k++) r[rowOf[k] + 1]++;
+  for (let y = 0; y < H; y++) r[y + 1] += r[y];
+  return r;
+}
+
+/**
+ * Linear interpolation of a coarse row (CX nodes, node i at cell 5i + 2, periodic) to W cells:
+ * out[5i + 2 + j] = (pre * (r[i] + (r[i+1] - r[i]) * F[j])) * K[j] (same arithmetic as the
+ * per-cell bilinear tables, so results are bit-identical).
+ */
+function expandRow(r, out, F, K, pre) {
+  const f1 = F[1], f2 = F[2], f3 = F[3], f4 = F[4];
+  const k0 = K[0], k1 = K[1], k2 = K[2], k3 = K[3], k4 = K[4];
+  let a = r[0];
+  for (let i = 0, x = 2; i < CX - 1; i++, x += 5) {
+    const b = r[i + 1], dl = b - a;
+    out[x] = (pre * (a + dl * F[0])) * k0;
+    out[x + 1] = (pre * (a + dl * f1)) * k1;
+    out[x + 2] = (pre * (a + dl * f2)) * k2;
+    out[x + 3] = (pre * (a + dl * f3)) * k3;
+    out[x + 4] = (pre * (a + dl * f4)) * k4;
+    a = b;
+  }
+  const dl = r[0] - a; // last segment wraps: cells 717, 718, 719, 0, 1
+  out[W - 3] = (pre * (a + dl * F[0])) * k0;
+  out[W - 2] = (pre * (a + dl * f1)) * k1;
+  out[W - 1] = (pre * (a + dl * f2)) * k2;
+  out[0] = (pre * (a + dl * f3)) * k3;
+  out[1] = (pre * (a + dl * f4)) * k4;
 }
 
 function expand(compact, idx, C) {

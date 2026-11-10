@@ -1,25 +1,64 @@
-import { ICONS, MODE_DEFS } from './icons.js';
+import { buildModeButtons, markModeButtons } from './icons.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Bottom-right hexagon map-mode buttons. available: Set of feature keys ('climate', 'hazards', 'regions').
-export function buildModes(onSelect, available) {
-  const el = $('modes');
-  el.innerHTML = '';
-  for (const m of MODE_DEFS) {
-    if (m.needs && !available.has(m.needs)) continue;
-    const b = document.createElement('button');
-    b.className = 'hex'; b.dataset.mode = m.id; b.title = `${m.name} — ${m.hint}`;
-    b.setAttribute('aria-label', m.name);
-    b.innerHTML = ICONS[m.id] || '';
-    b.onclick = () => onSelect(m.id);
-    el.appendChild(b);
+// ---------------------------------------------------------------- interface scale (settings.uiScale)
+// Every HUD element (clock, modes, legend, info, tooltip, toasts, compass, modals, loading screen) carries
+// `zoom: var(--ui)` in game.css: the browser lays text out at the final size, so it stays crisp at any scale
+// (no bitmap stretching). Inside a zoomed element every length — px, vw, vh — is multiplied by --ui, which is why
+// game.css writes viewport-sized limits as calc(100vh / var(--ui)).
+// 'auto': the window size in CSS pixels already includes the OS display scaling (devicePixelRatio), so a 4K screen at
+// 200% reads as 1920×1080 and keeps scale 1. A plain 1080p-class layout (1600×900 … 1920×1080) is 1; bigger windows
+// (1440p, 4K at 100%) grow the interface by 70% of the extra size, smaller ones (1366×768, 1280×720) shrink it.
+// devicePixelRatio sets the floor: text never drops below ~85% of its design size in physical pixels.
+// Mirrored in game.html (inline script, sets --ui before the first paint) — keep both in sync.
+export function autoUiScale(w = window.innerWidth, h = window.innerHeight, dpr = window.devicePixelRatio || 1) {
+  const s = Math.min(h / 1080, w / 1600);
+  let k = s >= 1 ? 1 + (s - 1) * 0.7 : s >= 0.8333 ? 1 : 1 - (0.8333 - s) * 1.1;
+  k = Math.min(2.2, Math.max(k, 0.7, 0.85 / dpr));
+  return Math.round(k * 20) / 20;
+}
+// Seamless paper for the HUD windows. The shared stipple tile (src/shared/stipple.js) bakes its light→dark gradient
+// into 320 px, which shows as light bands across windows taller than one tile (the info window, settings; more of
+// them at 1440p / 4K). Here the dots come from a flat tile and game.css lays the gradient over the whole window.
+export function applySeamlessPaper() {
+  const n = 320, cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const c = cv.getContext('2d');
+  let s = 3;
+  const R = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 0; i < n * n * 0.35; i++) {
+    c.fillStyle = R() < 0.5 ? 'rgba(110,85,55,.16)' : 'rgba(255,255,255,.5)';
+    c.fillRect(R() * n, R() * n, 1, 1);
   }
+  document.documentElement.style.setProperty('--tex-paper-dots', `url("${cv.toDataURL('image/png')}")`);
 }
-export function markMode(id) {
-  for (const b of $('modes').children) b.classList.toggle('active', b.dataset.mode === id);
+
+let ui = 1;
+export const uiScale = () => ui;
+// setting: 'auto' | number. Returns { ui, auto, wanted }: auto = what 'auto' would pick for this window,
+// wanted = the asked-for scale. Any scale is capped so the HUD keeps a room of at least 760×480 of its own pixels
+// (200% on a 1280×720 window becomes 150%): the corners never run into each other.
+export function applyUiScale(setting) {
+  const auto = autoUiScale();
+  const n = Number(setting);
+  const wanted = setting === 'auto' || setting == null || !(n > 0) ? auto : Math.min(2.5, Math.max(0.5, n));
+  const fit = Math.floor(Math.min(window.innerWidth / 760, window.innerHeight / 480) * 20) / 20;
+  ui = Math.max(0.6, Math.min(wanted, fit));
+  document.documentElement.style.setProperty('--ui', String(ui));
+  // room left for the HUD, in HUD pixels: narrow / short windows switch to a tighter layout (game.css)
+  const rw = window.innerWidth / ui, rh = window.innerHeight / ui;
+  document.body.classList.toggle('hud-narrow', rw < 700);
+  document.body.classList.toggle('hud-tight', rw < 560);
+  document.body.classList.toggle('hud-short', rh < 600);
+  return { ui, auto, wanted };
 }
+
+// Bottom-right hexagon map-mode buttons. available: Set of feature keys ('climate', 'hazards', 'regions').
+// (grouped modes open a column above their group's hexagon: src/game/ui/icons.js)
+export function buildModes(onSelect, available) { buildModeButtons($('modes'), onSelect, available); }
+export function markMode(id) { markModeButtons($('modes'), id); }
 
 // Top-right date & time. text: { date, time }, speed: 0..5
 export function renderClock(text, speed) {
@@ -46,13 +85,15 @@ export function showInfo({ kicker, title, rows }) {
 }
 export function hideInfo() { $('info').classList.add('hidden'); infoHtml = ''; }
 
+let tipHtml = '';
 export function showTooltip(html, x, y) {
   const t = $('tooltip');
-  t.innerHTML = html;
+  if (html !== tipHtml) { tipHtml = html; t.innerHTML = html; }
   t.classList.remove('hidden');
-  const tw = t.offsetWidth, th = t.offsetHeight;
-  t.style.left = `${Math.min(window.innerWidth - tw - 8, x + 16)}px`;
-  t.style.top = `${Math.min(window.innerHeight - th - 8, y + 18)}px`;
+  // the tooltip is zoomed by --ui: offset sizes are unzoomed, and left/top are multiplied by the zoom
+  const tw = t.offsetWidth * ui, th = t.offsetHeight * ui;
+  t.style.left = `${(Math.max(4, Math.min(window.innerWidth - tw - 8, x + 16)) / ui).toFixed(1)}px`;
+  t.style.top = `${(Math.max(4, Math.min(window.innerHeight - th - 8, y + 18)) / ui).toFixed(1)}px`;
 }
 export function hideTooltip() { $('tooltip').classList.add('hidden'); }
 
@@ -64,18 +105,25 @@ export function toast(html, ms = 5000, onClick = null) {
   el.innerHTML = html;
   if (onClick) el.onclick = onClick;
   box.prepend(el);
-  while (box.children.length > 5) box.lastChild.remove();
+  // short windows keep fewer slips so the column never reaches the legend and the mode buttons
+  const max = document.body.classList.contains('hud-short') ? 3 : 5;
+  while (box.children.length > max) box.lastChild.remove();
   setTimeout(() => { el.style.transition = 'opacity .5s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 500); }, ms);
   return el;
 }
 
+// kmPerPixel: per CSS pixel of the map; the bar lives in the zoomed HUD (a HUD pixel = --ui CSS pixels)
+let compassText = '', scaleW = '', scaleText = '';
 export function updateCompassAndScale(heading, kmPerPixel) {
-  $('compass-needle').setAttribute('transform', `rotate(${(-heading * 180 / Math.PI).toFixed(2)} 24 24)`);
-  const target = kmPerPixel * 110;
+  const rot = `rotate(${(-heading * 180 / Math.PI).toFixed(1)} 24 24)`;
+  if (rot !== compassText) { compassText = rot; $('compass-needle').setAttribute('transform', rot); }
+  const target = kmPerPixel * 110 * ui;
   const pow = 10 ** Math.floor(Math.log10(target));
   const nice = [1, 2, 5, 10].map(m => m * pow).reverse().find(v => v <= target) || pow;
-  $('scale-bar').style.width = `${(nice / kmPerPixel).toFixed(0)}px`;
-  $('scale-text').textContent = nice >= 1 ? `${nice.toLocaleString('ru-RU')} км` : `${Math.round(nice * 1000)} м`;
+  const w = `${(nice / kmPerPixel / ui).toFixed(0)}px`;
+  const txt = nice >= 1 ? `${nice.toLocaleString('ru-RU')} км` : `${Math.round(nice * 1000)} м`;
+  if (w !== scaleW) { scaleW = w; $('scale-bar').style.width = w; }
+  if (txt !== scaleText) { scaleText = txt; $('scale-text').textContent = txt; }
 }
 
 export { esc };

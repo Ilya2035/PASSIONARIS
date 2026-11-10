@@ -3,11 +3,19 @@ html, body { overflow: hidden; }
 #view.dragging { cursor: grabbing; }
 .hidden { display: none !important; }
 
+/* interface scale (settings.uiScale, see applyUiScale() in src/game/ui/hud.js): every HUD block is zoomed by --ui.
+   Inside a zoomed block all lengths — px, vw and vh alike — grow with the zoom, so viewport-sized limits below are
+   written as calc(100vh / var(--ui)). Positions (top/right/bottom/left) scale too: margins stay in proportion. */
+.load-inner, #clock, #legend, #modes, #hud-left, #info, #tooltip, #toasts, .modal-back > .modal { zoom: var(--ui, 1); }
+/* HUD windows: flat stipple dots (screen-pixel grain at any zoom) over a light→dark gradient spanning the whole
+   window — the same paper as the shared tile, without light bands on tall windows (applySeamlessPaper in hud.js) */
+.paper > .paper-body { background: var(--tex-paper-dots, var(--tex-paper, none)) center / calc(320px / var(--ui, 1)), linear-gradient(180deg, #f1ebdf, #e2d8c5); }
+
 /* loading */
 #loading { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
   background: var(--tex-ink, var(--ink)) center / 256px; transition: opacity .6s; color: var(--text); }
 #loading.done { opacity: 0; pointer-events: none; }
-.load-inner { width: min(460px, 80vw); text-align: center; }
+.load-inner { width: min(460px, calc(80vw / var(--ui, 1))); text-align: center; }
 .load-title { font-size: 46px; letter-spacing: 0.16em; padding-left: 0.16em; color: #ead7ae; }
 .load-sub { margin: 6px 0 26px; color: var(--text-dim); letter-spacing: 0.08em; font-size: 12px; }
 .load-bar { height: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-bottom: 12px; }
@@ -53,8 +61,10 @@ body.shot #legend { display: none !important; }
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
 #tooltip b { font-family: var(--font-display); font-size: 15px; }
 
-/* info window */
-#info { position: fixed; top: 14px; left: 14px; width: 330px; z-index: 9; }
+/* info window: top left; never wider than the room left of the clock, never taller than the room above the compass */
+#info { position: fixed; top: 14px; left: 14px; width: min(330px, calc(100vw / var(--ui, 1) - 300px)); z-index: 9; }
+#info .paper-body { max-height: calc(100vh / var(--ui, 1) - 96px); overflow-y: auto; overscroll-behavior: contain; }
+#info .paper-body, .modal .paper-body, #chronicle-list { scrollbar-width: thin; scrollbar-color: rgba(74, 54, 34, 0.45) transparent; }
 #info h1 { font-size: 26px; line-height: 1.1; margin-top: 2px; }
 .info-kicker { text-transform: uppercase; letter-spacing: 0.16em; font-size: 10px; color: var(--paper-ink-dim); }
 #info dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin: 0; font-size: 13px; }
@@ -85,8 +95,8 @@ body.shot #legend { display: none !important; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 
 /* menu, saves, settings */
-.modal.wide { width: min(560px, calc(100vw - 32px)); }
-.modal .paper-body { padding: 22px 24px; max-height: calc(100vh - 60px); overflow: auto; }
+.modal.wide { width: min(560px, calc(100vw / var(--ui, 1) - 32px)); }
+.modal .paper-body { padding: 22px 24px; max-height: calc(100vh / var(--ui, 1) - 60px); overflow: auto; }
 .menu-actions { display: grid; gap: 8px; }
 .menu-actions .btn { width: 100%; }
 .keys { margin-top: 14px; font-size: 11px; line-height: 2.1; }
@@ -96,7 +106,7 @@ body.shot #legend { display: none !important; }
 #save-list { display: grid; gap: 6px; }
 #chronicle-btn { width: 34px; height: 34px; padding: 0; color: var(--paper-ink); }
 #chronicle-btn svg { width: 18px; height: 18px; }
-#chronicle-list { display: grid; gap: 5px; max-height: 60vh; overflow: auto; padding-right: 4px; }
+#chronicle-list { display: grid; gap: 5px; max-height: calc(60vh / var(--ui, 1)); overflow: auto; padding-right: 4px; }
 .chr-row { display: grid; grid-template-columns: 112px 1fr; gap: 10px; align-items: baseline; padding: 6px 10px; cursor: pointer;
   background: rgba(255, 255, 255, 0.35); border: 1px solid rgba(74, 54, 34, 0.16); }
 .chr-row:hover { background: rgba(255, 255, 255, 0.7); }
@@ -115,10 +125,27 @@ body.shot #legend { display: none !important; }
 body.shot #clock, body.shot #hud-left, body.shot #modes, body.shot #tooltip, body.shot #info, body.shot #loading, body.shot #toasts { display: none !important; }
 body.shot::after { display: none; }
 
-@media (max-width: 720px) {
-  #info { width: calc(100vw - 28px); top: auto; bottom: 80px; }
-  #clock { min-width: 0; }
-}
+/* settings: sections as tabs («Экран», «Графика», «Карта», «Игра») */
+.set-tabs { display: flex; gap: 3px; margin: 2px 0 6px; border-bottom: 1px solid rgba(74, 54, 34, 0.3); }
+.set-tab { flex: 1; border: 0; padding: 7px 8px 6px; cursor: pointer; font-family: var(--font-display); font-weight: 700; font-size: 15px;
+  letter-spacing: 0.06em; color: var(--paper-ink-dim); background: rgba(255, 255, 255, 0.3);
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%); transition: background .15s, color .15s; }
+.set-tab:hover { background: rgba(255, 255, 255, 0.6); color: var(--paper-ink); }
+.set-tab.on { background: var(--tex-bronze, #c9a26a) center / cover; color: var(--paper-ink); }
+.set-page { display: none; min-height: 384px; }
+.set-page.on { display: block; }
+.field .hint { grid-column: 1 / -1; margin-top: -6px; font-size: 12px; line-height: 1.4; color: var(--paper-ink-dim); opacity: 0.85; }
+.field .hint:empty { display: none; }
+.field select { max-width: 330px; }
+
+/* narrow windows (little room once the interface is scaled): the compass row moves above the mode buttons;
+   tight ones put the info window under the clock and the legend above the compass row */
+body.hud-narrow #hud-left { bottom: 78px; }
+body.hud-narrow #info .paper-body { max-height: calc(100vh / var(--ui, 1) - 158px); }
+body.hud-tight #clock { min-width: 0; }
+body.hud-tight #info { left: auto; right: 14px; top: 124px; width: calc(100vw / var(--ui, 1) - 28px); }
+body.hud-tight #info .paper-body { max-height: calc(100vh / var(--ui, 1) - 268px); }
+body.hud-tight #legend { bottom: 128px; width: min(270px, calc(100vw / var(--ui, 1) - 28px)); }
 
 /* ---- the interface follows the epoch: older = calmer and whiter, the Middle Ages darker, the New Time brighter,
    the industrial age sooty sepia, the 20th-21st centuries a cooler grey (a light filter over the paper windows) */

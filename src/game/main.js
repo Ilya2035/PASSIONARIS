@@ -16,7 +16,7 @@ import { GlobeCamera, vecToGeo } from './camera.js';
 import { Upscaler } from './post.js';
 import { DetailTerrain } from './terrain/detail.js';
 import * as hud from './ui/hud.js';
-import { buildSettings, openModal, closeModal, anyModalOpen } from './ui/menus.js';
+import { buildSettings, refreshSettingsView, openModal, closeModal, anyModalOpen } from './ui/menus.js';
 import { createWorldSystems } from './world/systems.js';
 import { openChronicle } from './ui/chronicle.js';
 import { showLegend } from './ui/legend.js';
@@ -25,6 +25,11 @@ import { BIOME_COLORS } from './world/biomes.js';
 import { VERSION } from '../shared/version.js';
 
 const $ = id => document.getElementById(id);
+// loading-time marks (performance.getEntriesByType('mark')): p:start, p:data, p:globe, p:systems, p:frame1, p:ready
+performance.mark('p:start');
+// the map data starts loading at once: its fetches and decompression overlap the settings, packs and WebGL start-up
+const worldP = loadWorld(p => { $('load-fill').style.width = `${(p * 70).toFixed(1)}%`; });
+worldP.catch(() => {});   // a failure surfaces where it is awaited
 const settings = await loadSettings();
 const params = new URLSearchParams(location.search);
 if (params.has('palette')) settings.palette = params.get('palette');
@@ -34,6 +39,10 @@ if (params.has('packs')) settings.packs = Object.fromEntries(params.get('packs')
 const packs = await applyPackData(settings, { biomeColors: BIOME_COLORS }).catch(e => { console.warn('packs', e); return { enabled: [] }; });
 applyUiPalette(settings.palette);
 applyStippleTheme();
+if (params.has('uiscale')) settings.uiScale = params.get('uiscale'); // captures: ?uiscale=auto|1.25
+if (params.has('fps')) settings.fpsLimit = +params.get('fps');        // checks: ?fps=30
+hud.applyUiScale(settings.uiScale);
+hud.applySeamlessPaper();
 const PAL = getPalette(settings.palette).map;
 
 document.title = `${APP_NAME} ${VERSION_LABEL}`;
@@ -43,14 +52,33 @@ $('menu-version').textContent = `${APP_NAME} ${VERSION_LABEL} · ${EPOCH_LABEL}`
 // ------------------------------------------------------------------ renderer
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', reverseDepthBuffer: true });
-renderer.setPixelRatio(Math.min(2, (window.devicePixelRatio || 1) * (settings.pixelRatio || 1)));
+const pixelRatio = () => Math.min(2, (window.devicePixelRatio || 1) * (settings.pixelRatio || 1));
+renderer.setPixelRatio(pixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
 const upscaler = new Upscaler(renderer);
 // GPU class: integrated GPUs get lighter defaults; "auto" settings adapt at runtime
 const gpuName = (() => { const gl = renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; })();
 const integratedGpu = /Intel|UHD|Iris|Radeon\(TM\) Graphics|Radeon Graphics|Vega \d+ Graphics|Microsoft Basic|SwiftShader/i.test(gpuName) && !/RTX|GTX|Radeon RX|Arc A/i.test(gpuName);
 settings.qualityResolved = settings.quality === 'auto' ? (integratedGpu ? 'medium' : 'high') : settings.quality;
-let dynScale = integratedGpu ? 0.75 : 1, frameEma = 16, dynT = 0;
+// MSAA of the upscaler's target: 4x on the 'high' class, 2x below (see post.js); ?msaa=N for checks
+upscaler.samples = params.has('msaa') ? +params.get('msaa') : settings.qualityResolved === 'high' ? 4 : 2;
+let dynScale = integratedGpu ? 0.75 : 1, frameEma = 16, dynT = 0, dynHold = 0;
+
+// Internal render resolution — what the GPU draws before the sharpening upscale (post.js):
+//  * settings.resolution 'WxH' is in physical pixels. In fullscreen / maximized mode it caps the drawing:
+//    base = min(1, W / bufferW, H / bufferH) — the screen's aspect is kept, nothing is supersampled.
+//    In window mode it is the window's size instead (electron/main.cjs), so the base stays 1. 'native' = 1.
+//  * settings.renderScale multiplies the base: a fixed 0.5..1, or 'auto' = dynamic resolution, which moves between
+//    50% and 100% OF THAT BASE to hold the frame rate (so "1920×1080" on a 4K screen draws 1080p at best and drops
+//    towards 960×540 only when the GPU cannot keep up). The product never goes below 25% of the screen.
+let resBase = 1;
+function updateResolutionBase() {
+  const m = /^(\d+)x(\d+)$/.exec(String(settings.resolution || ''));
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  resBase = m && settings.windowMode !== 'window' ? Math.min(1, +m[1] / Math.max(1, size.x), +m[2] / Math.max(1, size.y)) : 1;
+}
+updateResolutionBase();
+const currentRenderScale = () => Math.max(0.25, resBase * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1));
 const scene = new THREE.Scene();
 const SPACE = new THREE.Color(...PAL.space);
 const SKY = new THREE.Color(...PAL.haze);
@@ -69,14 +97,23 @@ const stars = (() => {
 
 // ------------------------------------------------------------------ data
 const fill = $('load-fill'), loadText = $('load-text');
-const data = await loadWorld(p => { fill.style.width = `${(p * 70).toFixed(1)}%`; });
+const data = await worldP;
+performance.mark('p:data');
 loadText.textContent = 'Поднимаем горы и наполняем океаны…';
 await new Promise(r => setTimeout(r, 20));
 const globe = new Globe(scene, renderer, data, settings);
 globe.setShaders(settings.shaders);
+// the terrain shaders compile in the GPU process while the world systems load (instead of stalling the first frame)
+// (compiled for the target the frame is drawn into: the upscaler's, or the canvas — see post.js prepare)
+globe.compileTarget = () => upscaler.prepare(currentRenderScale(), settings.brightness);
+if (!params.has('novariants')) globe.precompile(camera); else globe.noVariants = true;
+// the heights and the imagery (~220 MB with mips) go to the GPU now: the GPU process digests them while the world
+// systems load (the cell raster waits: the regions module re-encodes it)
+for (const t of [globe.heightTex, data.albedo, globe.terrainMat.uniforms.uNoise.value]) { try { renderer.initTexture(t); } catch { /* uploaded at first use */ } }
 const gcam = new GlobeCamera(camera, settings);
 const detail = new DetailTerrain(globe, data);
 if (params.has('lat')) gcam.lookAt(+params.get('lat'), +params.get('lon'), +(params.get('alt') || 0.3));
+performance.mark('p:globe');
 
 // "shot" mode: no UI, camera placed instantly — used to render menu art (scripts/render-menu-art.mjs)
 const SHOT = params.get('shot') === '1';
@@ -89,8 +126,45 @@ if (SHOT) {
 
 // ------------------------------------------------------------------ world systems (time, climate, weather, hazards, fx…)
 loadText.textContent = 'Заводим часы мира…';
-const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; } });
+// onIdle (called by the world systems at a few points while they load): compile the shaders made so far in the GPU
+// process (KHR_parallel_shader_compile) and upload the map textures, so the GPU process works on them in parallel
+// with the loading instead of all at once at the first frames (compiles and uploads already done are skipped)
+function warmUp() {
+  const done = [];
+  try {
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(globe.compileTarget());
+    done.push(renderer.compileAsync(scene, camera).catch(() => {}));
+    renderer.setRenderTarget(prev);
+    done.push(renderer.compileAsync(upscaler.quadScene, upscaler.quadCam).catch(() => {}));
+    const seen = new Set();
+    for (const u of [globe.terrainMat.uniforms, globe.shared]) {
+      for (const k in u) {
+        const t = u[k].value;
+        if (t?.isTexture && !seen.has(t)) { seen.add(t); renderer.initTexture(t); }
+      }
+    }
+  } catch (e) { console.warn('warm-up', e); }
+  return Promise.all(done);
+}
+const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, settings, hud, renderHeight: () => window.innerHeight * renderer.getPixelRatio() * currentRenderScale(), onProgress: p => { fill.style.width = `${(70 + p * 30).toFixed(1)}%`; }, onIdle: warmUp });
+// Before the first frame, let the GPU process finish what the loading queued (shader compiles, ~0.4 GB of map
+// texture uploads): otherwise the first frames stall behind it — ~0.5 s of a frozen map and a stuck loading-screen fade
+// on a weak PC. Waited for here, behind the loading screen: the zone labels (built asynchronously), the remaining
+// compiles, then a fence after everything queued so far (at most ~3 s in all).
+{
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  await Promise.race([world.labels?.ready$, wait(800)]);
+  await Promise.race([warmUp(), wait(1000)]);
+  try {
+    const gl = renderer.getContext(), fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    for (const t0 = performance.now(); performance.now() - t0 < 1500 && gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED;) await wait(8);
+    gl.deleteSync(fence);
+  } catch { /* no fences: start at once */ }
+}
 fill.style.width = '100%';
+performance.mark('p:systems');
 if ((!SHOT || params.has('packs')) && packs.enabled.length) runPackScripts(packs.enabled, { version: VERSION, hud, world, globe, scene, gcam });
 // ?date=Y-M-D (astronomical year, e.g. -4999-07-01 or 1650-01-15): start at that moment (captures, checks)
 if (params.has('date') && world.clock && world.cal) {
@@ -116,20 +190,34 @@ function rebuildModes() { hud.buildModes(setMode, world.features); hud.markMode(
 rebuildModes();
 setMode(params.get('mode') || 'terrain');
 
-// ?fxdemo=<seconds>: a sample of every event effect around the view centre, pre-aged (captures, style checks)
+// ?fxdemo=<seconds>: a sample of every event effect around the view centre, pre-aged (captures, style checks);
+// &fxkind=<type> shows just that event at the centre instead (&fxlevel=1..5, &fxvei=0..8, &fxair=1: an airburst)
 if (params.has('fxdemo') && world.fx) {
+  const fx = world.fx, age = +params.get('fxdemo') || 2, t0 = fx.now;
   const la = +params.get('lat') || 0, lo = +params.get('lon') || 0, d = Math.max(0.6, gcam.altTarget * 9);
-  const at = (dy, dx, ev) => world.fx.spawn({ lat: la + dy * d, lon: lo + dx * d / Math.max(0.2, Math.cos(la * Math.PI / 180)), ...ev });
-  at(0.15, 0.1, { type: 'eruption', vei: 4 });
-  at(-0.6, -1.2, { type: 'earthquake', level: 4 });
-  at(-0.9, 1.0, { type: 'tsunami', level: 3 });
-  at(0.8, -0.9, { type: 'wildfire', level: 3 });
-  at(1.0, 1.1, { type: 'flood', level: 3 });
-  at(-0.2, 2.2, { type: 'storm', level: 3 });
-  at(0.3, -2.2, { type: 'heatwave', level: 3 });
-  world.fx.now += +params.get('fxdemo') || 2;
-  at(-1.3, 0.1, { type: 'meteorite', level: 3 });
-  world.fx.now += 0.3;
+  const at = (dy, dx, ev) => fx.spawn({ lat: la + dy * d, lon: lo + dx * d / Math.max(0.2, Math.cos(la * Math.PI / 180)), ...ev });
+  if (params.has('fxkind')) {
+    at(0, 0, {
+      type: params.get('fxkind'), level: +params.get('fxlevel') || 3,
+      vei: params.has('fxvei') ? +params.get('fxvei') : undefined, kind: params.get('fxair') === '1' ? 'airburst' : undefined,
+    });
+  } else {
+    at(0.15, 0.1, { type: 'eruption', vei: 4 });
+    at(-0.6, -1.2, { type: 'earthquake', level: 4 });
+    at(-0.9, 1.0, { type: 'tsunami', level: 3 });
+    at(0.8, -0.9, { type: 'wildfire', level: 3 });
+    at(1.0, 1.1, { type: 'flood', level: 3 });
+    at(-0.2, 2.2, { type: 'storm', level: 3 });
+    at(0.3, -2.2, { type: 'heatwave', level: 3 });
+    at(-1.5, -2.2, { type: 'snowstorm', level: 3 });
+    at(1.5, 2.3, { type: 'drought', level: 3 });
+    at(0.7, 0.45, { type: 'landslide', level: 4 });
+    fx.now = t0 + age - 2.6;
+    at(-0.5, 0.8, { type: 'meteorite', level: 5 });     // its fireball and mushroom at capture time
+    fx.now = t0 + age - 0.3;
+    at(-1.3, 0.1, { type: 'meteorite', level: 3 });     // still falling
+  }
+  fx.now = t0 + age;
 }
 
 // ------------------------------------------------------------------ helpers
@@ -247,23 +335,46 @@ $('menu-save').disabled = $('menu-load').disabled = !world.openSaves;
 $('menu-launcher').onclick = () => { if (isElectron) window.passionaris.exitToLauncher(); else location.href = './index.html'; };
 $('menu-quit').onclick = () => { if (isElectron) window.passionaris.quit(); else location.href = './index.html'; };
 buildSettings(settings, (key, value) => {
-  if (key === 'brightness' || key === 'renderScale' || key === 'sharpen') return; // read every frame
+  if (key === 'brightness' || key === 'renderScale' || key === 'sharpen' || key === 'fpsLimit' || key === 'showFps') return; // read every frame
+  if (key === 'uiScale') { applyDisplay(); return; }
+  if (key === 'windowMode' || key === 'resolution') {
+    // the window follows at once (Electron); the internal resolution is re-read here and again on the resize
+    window.passionaris?.applyWindow?.({ windowMode: settings.windowMode, resolution: settings.resolution });
+    applyDisplay();
+    return;
+  }
   if (key === 'shaders') globe.setShaders(value);
   world.onSetting?.(key, value);
 });
 
 // ------------------------------------------------------------------ loop
-window.addEventListener('resize', () => {
+// window size, display scaling (moving to another monitor changes devicePixelRatio), interface scale, resolution
+function applyDisplay() {
+  renderer.setPixelRatio(pixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-});
+  updateResolutionBase();
+  const { auto, ui, wanted } = hud.applyUiScale(settings.uiScale);
+  refreshSettingsView({ autoUi: auto, ui, wanted });
+}
+window.addEventListener('resize', applyDisplay);
+applyDisplay();
 
 const timer = new THREE.Timer();
-let fpsAcc = 0, fpsN = 0, hudT = 0, fpsText = '';
+let fpsAcc = 0, fpsN = 0, hudT = 0, fpsText = '', lastDraw = -1e9, drawnFrames = 0;
 function frame(ts) {
+  // frame limiter (settings.fpsLimit): skip display refreshes until the next frame is due. The cadence is kept by
+  // stepping lastDraw by whole intervals (a 60 cap on a 144 Hz screen averages 60), and resynced after a hitch.
+  const cap = Number(settings.fpsLimit) || 0;
+  if (cap > 0 && !SHOT) {
+    const iv = 1000 / cap, since = ts - lastDraw;
+    if (since < iv - Math.min(2, iv * 0.2)) { requestAnimationFrame(frame); return; }
+    lastDraw = since > iv * 2 ? ts : lastDraw + iv;
+  }
   timer.update(ts);
-  const dt = Math.min(0.05, timer.getDelta());
+  const rawDt = timer.getDelta();
+  const dt = Math.min(0.05, rawDt);
   const t = timer.getElapsed();
 
   if (!menuOpen) {
@@ -283,16 +394,21 @@ function frame(ts) {
   scene.background.copy(SPACE).lerp(SKY, (1 - p.globe) * Math.min(1, p.tilt / 0.6) * 0.9);
   stars.material.opacity = 0.7 * p.globe;
 
-  // dynamic resolution: keep ~50 FPS by moving the internal render scale between 50% and 100%
+  // dynamic resolution: keep ~50 FPS by moving the internal render scale between 50% and 100% (of the base above).
+  // Frame times are measured between drawn frames. Under a cap the controller aims at the cap: a 30 FPS cap
+  // means 33 ms frames are on target (not "slow"), and frames that meet a 30/60 cap may raise the scale again.
+  // After a step down it waits 4 s before stepping up, so it does not see-saw around the limit.
   frameEma = frameEma * 0.92 + dt * 1000 * 0.08;
-  dynT += dt;
+  dynT += dt; dynHold = Math.max(0, dynHold - dt);
   if (settings.renderScale === 'auto' && dynT > 0.5) {
     dynT = 0;
-    if (frameEma > 21) dynScale = Math.max(0.5, dynScale - 0.05);
-    else if (frameEma < 14.5) dynScale = Math.min(1, dynScale + 0.025);
+    const capMs = cap > 0 ? 1000 / cap : 0;
+    const slowMs = Math.max(21, capMs * 1.12), fastMs = Math.max(14.5, capMs * 1.04);
+    if (frameEma > slowMs) { dynScale = Math.max(0.5, dynScale - 0.05); dynHold = 4; }
+    else if (frameEma < fastMs && dynHold <= 0) dynScale = Math.min(1, dynScale + 0.025);
   }
-  const renderScale = settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1;
-  upscaler.render(scene, camera, { renderScale, sharpen: settings.sharpen, brightness: settings.brightness });
+  upscaler.render(scene, camera, { renderScale: currentRenderScale(), sharpen: settings.sharpen, brightness: settings.brightness });
+  if (!drawnFrames) performance.mark('p:frame1');
 
   hudT += dt;
   if (hudT > 0.05) {
@@ -301,7 +417,7 @@ function frame(ts) {
     hud.updateCompassAndScale(gcam.heading, gcam.kmPerPixel(window.innerHeight));
     if (infoPoint && world.liveInfo) hud.showInfo(describePoint(infoPoint));
   }
-  fpsAcc += dt; fpsN++;
+  fpsAcc += rawDt; fpsN++; drawnFrames++;
   if (fpsAcc > 0.5) { fpsText = `${Math.round(fpsN / fpsAcc)} FPS`; fpsAcc = 0; fpsN = 0; }
   world.renderClock?.(settings.showFps ? fpsText : '');
   requestAnimationFrame(frame);
@@ -311,6 +427,8 @@ setTimeout(() => $('loading')?.classList.add('done'), SHOT ? 0 : 150);
 if (SHOT) $('loading')?.remove();
 
 // debug hooks for automated checks
-window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, gpuName, integratedGpu, get dynScale() { return dynScale; }, ready: false, rebuildModes };
+window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, gpuName, integratedGpu, get dynScale() { return dynScale; }, ready: false, rebuildModes,
+  hud, applyDisplay, upscaler, get renderScale() { return currentRenderScale(); }, get fpsText() { return fpsText; }, get drawnFrames() { return drawnFrames; },
+  openInfo: (lat, lon) => { const r = Math.PI / 180; openInfo(new THREE.Vector3(Math.cos(lat * r) * Math.sin(lon * r), Math.sin(lat * r), Math.cos(lat * r) * Math.cos(lon * r))); } };
 let framesDrawn = 0;
-(function markReady() { if (++framesDrawn > 20) window.__game.ready = true; else requestAnimationFrame(markReady); })();
+(function markReady() { if (++framesDrawn > 20) { window.__game.ready = true; performance.mark('p:ready'); } else requestAnimationFrame(markReady); })();

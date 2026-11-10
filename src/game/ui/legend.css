@@ -1,0 +1,37 @@
+/* Legend extras (Köppen chips, hatched swatches) and the grouped map-mode hexagons (src/game/ui/icons.js). */
+#legend .lg-kg { display: flex; align-items: baseline; gap: 6px; margin: 5px 0 2px; color: var(--paper-ink-dim); }
+#legend .lg-kg:first-child { margin-top: 0; }
+#legend .lg-kg b { font-family: var(--font-display); font-size: 12px; color: var(--paper-ink); }
+#legend .lg-chips { display: flex; flex-wrap: wrap; gap: 2px; }
+#legend .lg-chip { min-width: 22px; padding: 0 3px; font-size: 9.5px; line-height: 14px; text-align: center; color: var(--paper-ink);
+  border: 1px solid rgba(60, 46, 30, 0.3); cursor: help; }
+#legend .lg-chip.dark { color: #f3eee4; }
+#legend i.hatch { background: repeating-linear-gradient(45deg, var(--c) 0 2px, transparent 2px 5px) !important; }
+
+/* a group of map modes: its hexagon in the row, the members in a column above it (hover or click) */
+#modes .hex-group { position: relative; display: inline-flex; }
+#modes .hex-fly {
+  position: absolute; right: 0; bottom: 100%; padding-bottom: 8px; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  visibility: hidden; opacity: 0; transform: translateY(4px);
+  transition: opacity .14s, transform .14s, visibility 0s .14s;
+}
+#modes .hex-group:hover .hex-fly, #modes .hex-group.open .hex-fly { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+#modes .hex-item { display: flex; align-items: center; gap: 6px; }
+#modes .hex-label {
+  font-family: var(--font-display); font-size: 13px; letter-spacing: 0.02em; white-space: nowrap; cursor: pointer;
+  padding: 3px 10px 2px 12px; color: var(--paper-ink); background: rgba(239, 232, 218, 0.96);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); clip-path: polygon(7px 0, 100% 0, 100% 100%, 7px 100%, 0 50%);
+}
+#modes .hex-item:hover .hex-label { background: #f7f2e8; }
+#modes .hex-item .hex.active ~ .hex-label, #modes .hex-item:has(.hex.active) .hex-label { background: var(--tex-bronze, #c9a26a) center / cover; }
+#modes .hex-caret {
+  position: absolute; top: 6px; left: 50%; width: 7px; height: 4px; margin-left: -3.5px;
+  background: currentColor; opacity: 0.6; clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+/* short windows: the column becomes two columns of bare hexagons (the names stay in the tooltips) */
+body.hud-short #modes .hex-fly { display: grid; grid-template-columns: repeat(2, auto); gap: 4px 6px; }
+body.hud-short #modes .hex-label { display: none; }
+/* while a group's column is open it stands where the legend is: the legend steps aside */
+#legend { transition: opacity .12s; }
+body:has(#modes .hex-group.open) #legend, body:has(#modes .hex-group:hover) #legend { opacity: 0; pointer-events: none; }

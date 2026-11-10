@@ -68,15 +68,17 @@ export class WeatherClient {
     return this.#call('init', { normals, normalsHeader, seed, t, mask, veg, options, anomalyModule, anomalyExports, snapshot }, tl);
   }
 
-  /** Advance to game time t. Resolves to {t, day, date, grid, events}. */
+  /** Advance to game time t. Resolves to {t, day, date, grid, events, ms (worker compute time), simDays}. */
   step(t) { return this.#call('step', { t }); }
 
   /** Last frame without advancing. */
   current() { return this.#call('current'); }
 
   /**
-   * Run-time pacing: {maxSimDays} — a step further ahead than this re-initialises from climatology
-   * instead of simulating every day (~6 ms per day). E.g. 90 while the clock runs a year per second.
+   * Run-time pacing (see core.js setOptions): {maxSimDays} — a step further ahead than this
+   * re-initialises from climatology; {stride} — simulate blocks of up to this many days per step
+   * (1 = every day, ~4 ms; a block of k days costs about (1 + (k - 1) / 4) days), so a fast clock is
+   * followed smoothly instead of by jumps.
    */
   setOptions(o) { return this.#call('options', o); }
 

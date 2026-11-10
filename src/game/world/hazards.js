@@ -8,7 +8,9 @@ export const QUAKE_LEVEL_TEXT = ['—', '2–4 балла', '4–6 баллов'
 const RISK = ['нет', 'низкая', 'умеренная', 'заметная', 'высокая', 'очень высокая'];
 const D2R = Math.PI / 180;
 
-export async function createHazards({ mod, clock, cal, climate, fx, hud, gcam }) {
+// onEvent(ev): every event that happens (not only the shown ones) — the aerosol layer takes eruption ash, SO2
+// and impact dust from here
+export async function createHazards({ mod, clock, cal, climate, fx, hud, gcam, onEvent }) {
   const data = await mod.loadHazards();
   const sched = mod.createScheduler({ data, seed: 1 });
   const L = data.levels.layers;
@@ -92,6 +94,7 @@ export async function createHazards({ mod, clock, cal, climate, fx, hud, gcam })
     if (!evs.length) return;
     const cand = [];
     for (const ev of evs) {
+      if (onEvent) { try { onEvent(ev); } catch (e) { console.warn('hazard onEvent', e); } }
       const w = weight(ev);
       if (isGreat(ev)) {
         log.push(ev);
@@ -108,7 +111,7 @@ export async function createHazards({ mod, clock, cal, climate, fx, hud, gcam })
       const always = s >= 9;
       if (!always && (tokens < 1 || s < 2)) break;
       if (!always) tokens -= 1;
-      fx.spawn({ type: ev.type, lat: ev.lat, lon: ev.lon, level: ev.level, vei: ev.vei });
+      fx.spawn({ type: ev.type, lat: ev.lat, lon: ev.lon, level: ev.level, vei: ev.vei, kind: ev.kind });
       spawned++;
     }
   }

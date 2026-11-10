@@ -47,9 +47,56 @@ const webPreferences = { preload: path.join(__dirname, 'preload.cjs'), contextIs
 let launcher = null;
 let game = null;
 
+// ---------------------------------------------------------------- window geometry
+// settings.resolution: 'native' | 'WxH' in PHYSICAL pixels (what a game calls a resolution; a 150% display turns
+// 1920×1080 into a 1280×720-DIP window). Window mode: the window's picture (content) is that size, scaled down to fit
+// the display's work area with the same aspect, and centred. Fullscreen / maximized: the window covers the screen and
+// the renderer draws at that resolution and upscales (src/game/main.js). 'native' in window mode = 1600×900 DIP.
+const parseRes = r => { const m = /^(\d{3,5})x(\d{3,5})$/.exec(String(r || '')); return m ? { w: +m[1], h: +m[2] } : null; };
+const MIN_GAME = { w: 640, h: 400 };
+const FRAME_GUESS = { w: 16, h: 39 }; // Windows 11: 8-DIP side borders, 31-DIP title bar
+// frame = outer size minus content size (title bar, borders) in DIP; measured on a live window when it has one
+function contentBoundsFor(s, display, frame = FRAME_GUESS) {
+  const wa = display.workArea, sf = display.scaleFactor || 1, r = parseRes(s?.resolution);
+  let w = r ? r.w / sf : 1600, h = r ? r.h / sf : 900;
+  const k = Math.min(1, (wa.width - frame.w) / w, (wa.height - frame.h) / h);
+  w = Math.max(Math.min(MIN_GAME.w, wa.width - frame.w), Math.round(w * k));
+  h = Math.max(Math.min(MIN_GAME.h, wa.height - frame.h), Math.round(h * k));
+  // centre the whole window (content + frame) in the work area; the title bar sits above the content
+  const x = Math.round(wa.x + (wa.width - w - frame.w) / 2 + frame.w / 2);
+  const y = Math.round(wa.y + (wa.height - h - frame.h) / 2 + (frame.h - frame.w / 2));
+  return { x, y, width: w, height: h };
+}
+const displayOf = win => (win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
+const nextEvent = (win, ev, ms = 1500) => new Promise(res => {
+  const done = () => { clearTimeout(t); win.removeListener(ev, done); res(); };
+  const t = setTimeout(done, ms);
+  win.once(ev, done);
+});
+// Live switch from the in-game settings (and the same rules as at launch): 'fullscreen' | 'maximized' | 'window'.
+let applying = Promise.resolve();
+function applyWindow(win, s) {
+  applying = applying.then(async () => {
+    if (!win || win.isDestroyed()) return;
+    const mode = s?.windowMode || 'fullscreen';
+    if (mode === 'fullscreen') { if (!win.isFullScreen()) win.setFullScreen(true); return; }
+    if (win.isFullScreen()) { const p = nextEvent(win, 'leave-full-screen'); win.setFullScreen(false); await p; await new Promise(r => setTimeout(r, 60)); }
+    if (mode === 'maximized') { if (!win.isMaximized()) win.maximize(); return; }
+    if (win.isMaximized()) { const p = nextEvent(win, 'unmaximize'); win.unmaximize(); await p; }
+    const [ow, oh] = win.getSize(), [cw, ch] = win.getContentSize();
+    const frame = ow > cw || oh > ch ? { w: ow - cw, h: oh - ch } : undefined;
+    win.setContentBounds(contentBoundsFor(s, displayOf(win), frame));
+  }).catch(e => console.warn('[window]', e.message));
+  return applying.then(() => true);
+}
+
 function createLauncher() {
+  // fits small screens: at most 92% of the work area of the screen under the cursor
+  const wa = displayOf(null).workArea;
+  const width = Math.min(1240, Math.round(wa.width * 0.92)), height = Math.min(740, Math.round(wa.height * 0.92));
   launcher = new BrowserWindow({
-    width: 1240, height: 740, minWidth: 960, minHeight: 600,
+    width, height, minWidth: Math.min(960, width), minHeight: Math.min(600, height),
+    x: Math.round(wa.x + (wa.width - width) / 2), y: Math.round(wa.y + (wa.height - height) / 2),
     frame: false, backgroundColor: '#121211', show: false, title: 'Passionaris', icon: ICON, webPreferences,
   });
   launcher.once('ready-to-show', () => launcher.show());
@@ -59,8 +106,21 @@ function createLauncher() {
 
 function createGame(settings) {
   const mode = settings?.windowMode || 'fullscreen';
+  // open on the launcher's screen; window mode gets its resolution as the content size right away
+  const display = displayOf(launcher);
+  const wa = display.workArea;
+  let geo;
+  if (mode === 'window') {
+    // width/height are the content (useContentSize); x/y place the outer window
+    const c = contentBoundsFor(settings, display);
+    geo = { width: c.width, height: c.height, x: c.x - FRAME_GUESS.w / 2, y: c.y - (FRAME_GUESS.h - FRAME_GUESS.w / 2) };
+  } else {
+    const w = Math.min(1600, wa.width), h = Math.min(900, wa.height);
+    geo = { width: w, height: h, x: Math.round(wa.x + (wa.width - w) / 2), y: Math.round(wa.y + (wa.height - h) / 2) };
+  }
   game = new BrowserWindow({
-    width: 1600, height: 900, minWidth: 1024, minHeight: 640,
+    ...geo, useContentSize: mode === 'window',
+    minWidth: Math.min(MIN_GAME.w, wa.width), minHeight: Math.min(MIN_GAME.h, wa.height),
     fullscreen: mode === 'fullscreen', autoHideMenuBar: true,
     backgroundColor: '#121211', show: false, title: 'Passionaris', icon: ICON, webPreferences,
   });
@@ -103,6 +163,18 @@ app.whenReady().then(() => {
   ipcMain.handle('app:open-saves-folder', async () => { const dir = path.join(app.getPath('userData'), 'saves'); fs.mkdirSync(dir, { recursive: true }); return shell.openPath(dir); });
   ipcMain.handle('app:info', () => ({ userData: app.getPath('userData'), version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome }));
   ipcMain.on('win:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());
+  // in-game settings: window mode and resolution applied live (only the game window, only these two keys)
+  ipcMain.handle('win:apply', (e, s) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win !== game) return false;
+    return applyWindow(win, { windowMode: String(s?.windowMode || 'fullscreen'), resolution: String(s?.resolution || 'native') });
+  });
+  ipcMain.handle('win:state', e => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return null;
+    const d = displayOf(win);
+    return { fullscreen: win.isFullScreen(), maximized: win.isMaximized(), bounds: win.getBounds(), content: win.getContentBounds(), workArea: d.workArea, scale: d.scaleFactor };
+  });
 
   if (CAPTURE) { captureShot(JSON.parse(CAPTURE)); return; }
   createLauncher();
@@ -112,18 +184,42 @@ app.whenReady().then(() => {
 // PASSIONARIS_CAPTURE={"query":"lat=..&lon=..","width":2560,"height":1440,"out":"file.png"}
 // renders game.html?shot=1&<query> in an offscreen-sized window and saves one frame (menu art, docs)
 const CAPTURE = process.env.PASSIONARIS_CAPTURE;
-async function captureShot({ query, width = 2560, height = 1440, out, evaluate }) {
+async function captureShot({ query, width = 2560, height = 1440, out, evaluate, page }) {
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const win = new BrowserWindow({ width, height, useContentSize: true, show: false, frame: false, paintWhenInitiallyHidden: true, backgroundColor: '#121211', webPreferences });
   win.webContents.on('console-message', e => { if (e.level === 'error' || e.level === 'warning') console.log('[capture] console:', e.level, e.message); });
-  await win.loadURL(`${pageUrl('game.html')}?shot=1&${query}`);
-  for (let i = 0; i < 240; i++) {
+  // Sizes the screen cannot hold (Windows clamps even hidden windows to the desktop), or dpr=N in the query:
+  // emulate the viewport (CSS size width×height at devicePixelRatio N) through the DevTools protocol and take the
+  // shot from it — e.g. "…&dpr=1" 3840 2160 = a 4K monitor at 100% display scaling.
+  const disp = screen.getPrimaryDisplay();
+  const dprQ = Number(new URLSearchParams(query || '').get('dpr')) || 0;
+  let dbg = null;
+  if (dprQ || width > disp.workAreaSize.width || height > disp.workAreaSize.height) {
+    const limit = (p, ms, what) => Promise.race([p, wait(ms).then(() => { throw new Error(what + ' timed out'); })]);
+    try {
+      await limit(win.loadURL('about:blank'), 10000, 'blank page');
+      dbg = win.webContents.debugger;
+      dbg.attach('1.3');
+      await limit(dbg.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dprQ || disp.scaleFactor, mobile: false, screenWidth: width, screenHeight: height }), 10000, 'metrics override');
+      console.log('[capture] emulated viewport', width, 'x', height, '@', dprQ || disp.scaleFactor);
+    } catch (e) { console.log('[capture] emulation failed:', e.message); try { dbg?.detach(); } catch { /* not attached */ } dbg = null; }
+  }
+  // page: another page (e.g. 'index.html', the launcher) captured as it is, after a short settle
+  await win.loadURL(page ? `${pageUrl(page)}${query ? '?' + query : ''}` : `${pageUrl('game.html')}?shot=1&${query}`);
+  for (let i = 0; i < 240 && !page; i++) {
     if (await win.webContents.executeJavaScript('!!(window.__game && window.__game.ready)').catch(() => false)) break;
     await wait(250);
   }
   await wait(2500); // let streaming/fades settle
-  if (evaluate) console.log('[capture] eval:', await win.webContents.executeJavaScript(evaluate).catch(e => 'ERR ' + e.message));
-  fs.writeFileSync(out, (await win.webContents.capturePage()).toPNG());
+  if (evaluate) {
+    console.log('[capture] eval:', await win.webContents.executeJavaScript(evaluate).catch(e => 'ERR ' + e.message));
+    // let what the script changed reach the screen (a slow GPU may draw only a few frames per second)
+    await win.webContents.executeJavaScript('Promise.race([new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))), new Promise(r => setTimeout(r, 4000))])').catch(() => {});
+    await wait(300);
+  }
+  let png = null;
+  if (dbg) png = await Promise.race([dbg.sendCommand('Page.captureScreenshot', { format: 'png' }).then(r => Buffer.from(r.data, 'base64')), wait(20000).then(() => null)]).catch(e => { console.log('[capture] cdp shot failed:', e.message); return null; });
+  fs.writeFileSync(out, png || (await win.webContents.capturePage()).toPNG());
   console.log('[capture] saved', out);
   app.quit();
 }

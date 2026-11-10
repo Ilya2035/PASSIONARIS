@@ -31,9 +31,16 @@ export async function loadWorld(onProgress) {
   let got = 0;
   const tick = b => { got += b; onProgress?.(Math.min(0.97, got / expected)); };
 
-  const albedoP = new Promise((resolve, reject) => {
+  // the 8192x4096 imagery is decoded off the main thread (createImageBitmap) while the other files load; an <img>
+  // would be decoded synchronously at its first upload (~0.2 s of a frozen first frame). No colour conversion and
+  // no flip, like the plain image upload before (the globe keeps flipY = false: row 0 = north)
+  const albedoP = (typeof createImageBitmap === 'function'
+    ? new THREE.ImageBitmapLoader().setOptions({ premultiplyAlpha: 'none', colorSpaceConversion: 'none', imageOrientation: 'from-image' })
+      .loadAsync(BASE + 'albedo.jpg').then(bmp => new THREE.Texture(bmp))
+    : Promise.reject(new Error('no createImageBitmap'))
+  ).catch(() => new Promise((resolve, reject) => {
     new THREE.TextureLoader().load(BASE + 'albedo.jpg', resolve, undefined, reject);
-  }).then(t => { tick(2.9e6); return t; });
+  })).then(t => { tick(2.9e6); return t; });
 
   const [worldBytes, hBytes, cBytes, rBytes, rkBytes, albedo] = await Promise.all([
     fetchBytes(BASE + 'world.json', tick),

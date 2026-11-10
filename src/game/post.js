@@ -4,9 +4,14 @@ import * as THREE from 'three';
 // renders the scene into a smaller multisampled target, then upsamples it to the screen with a
 // contrast-adaptive sharpening filter (RCAS-like) and applies brightness. At scale 1 it renders directly.
 export class Upscaler {
-  constructor(renderer) {
+  // samples: MSAA of the internal target. 4 costs a weak integrated GPU ~4 ms more per frame than 2 (every pass
+  // writes and blends 4 samples per pixel) for a hardly visible difference: the map's lines and coasts are
+  // anti-aliased in the shaders, MSAA only smooths mesh silhouettes, rivers and roads.
+  constructor(renderer, { samples = 4 } = {}) {
     this.renderer = renderer;
+    this.samples = samples;
     this.target = null;
+    this.size = new THREE.Vector2();
     this.quadScene = new THREE.Scene();
     this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.mat = new THREE.ShaderMaterial({
@@ -37,22 +42,35 @@ export class Upscaler {
     this.quadScene.add(quad);
   }
 
-  render(scene, camera, { renderScale = 1, sharpen = 0.35, brightness = 1 } = {}) {
-    const r = this.renderer;
-    const scale = Math.max(0.5, Math.min(1, renderScale));
-    if (scale >= 0.999 && Math.abs(brightness - 1) < 0.01) { r.setRenderTarget(null); r.render(scene, camera); return; }
-    const size = r.getDrawingBufferSize(new THREE.Vector2());
+  // renderScale: share of the drawing buffer actually rendered, 0.25..1 (a chosen resolution below the screen's
+  // times the dynamic / fixed render scale — see main.js); never above 1 (no supersampling).
+  // The target the scene is drawn into for these settings (made or resized here), or null when it goes straight to
+  // the canvas. Shaders compiled ahead of time (compileAsync) must be compiled with it bound: three keys a program by
+  // its output colour space, which differs between the canvas and a render target — a program compiled for the
+  // other one is compiled again, synchronously, at its first draw.
+  prepare(renderScale = 1, brightness = 1) {
+    const scale = Math.max(0.25, Math.min(1, renderScale));
+    if (scale >= 0.999 && Math.abs(brightness - 1) < 0.01) return null;
+    const size = this.renderer.getDrawingBufferSize(this.size);
     const w = Math.max(1, Math.round(size.x * scale)), h = Math.max(1, Math.round(size.y * scale));
-    if (!this.target || this.target.width !== w || this.target.height !== h) {
+    if (!this.target || this.target.width !== w || this.target.height !== h || this.target.samples !== this.samples) {
       this.target?.dispose();
-      this.target = new THREE.WebGLRenderTarget(w, h, { samples: 4, type: THREE.UnsignedByteType, depthBuffer: true });
+      this.target = new THREE.WebGLRenderTarget(w, h, { samples: this.samples, type: THREE.UnsignedByteType, depthBuffer: true });
       this.target.texture.minFilter = THREE.LinearFilter; this.target.texture.magFilter = THREE.LinearFilter;
     }
-    r.setRenderTarget(this.target);
+    return this.target;
+  }
+
+  render(scene, camera, { renderScale = 1, sharpen = 0.35, brightness = 1 } = {}) {
+    const r = this.renderer;
+    const target = this.prepare(renderScale, brightness);
+    if (!target) { r.setRenderTarget(null); r.render(scene, camera); return; }
+    const scale = Math.max(0.25, Math.min(1, renderScale)), w = target.width, h = target.height;
+    r.setRenderTarget(target);
     r.render(scene, camera);
     r.setRenderTarget(null);
     const u = this.mat.uniforms;
-    u.uTex.value = this.target.texture;
+    u.uTex.value = target.texture;
     u.uTexel.value.set(1 / w, 1 / h);
     u.uSharpen.value = scale < 0.999 ? sharpen : sharpen * 0.4;
     u.uBright.value = brightness;

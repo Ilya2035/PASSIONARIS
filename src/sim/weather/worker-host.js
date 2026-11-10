@@ -13,11 +13,12 @@
 //                anomalyModule?: url (exports makeAnomalyFn(normals) | anomaly | regionalDT + precipFactor),
 //                anomalyExports?: {dT: name | name[], precipFactor: name}, snapshot?}
 //               -> frame
-//   step        {t} -> frame {t, day, date, grid: Uint8Array (transferred), events}
+//   step        {t} -> frame {t, day, date, grid: Uint8Array (transferred), events, ms, simDays}
+//               (ms: the worker's compute time for the request, simDays: days advanced; for pacing)
 //   current     {} -> frame without advancing
 //   serialize   {} -> snapshot {version, kind, meta, buffers} (buffers transferred)
 //   deserialize {snapshot} -> frame
-//   options     {maxSimDays} -> current options (run-time pacing, see core.js setOptions)
+//   options     {maxSimDays?, stride?} -> current options (run-time pacing, see core.js setOptions)
 //   query       {cell} | {lat, lon} -> point info
 //   field       {name} -> typed array (transferred)
 //   climateLog  {} -> climateLog arrays (transferred)
@@ -56,11 +57,12 @@ export function installWeatherWorker(scope, { anomalyFn = null, makeAnomalyFn = 
   const pool = [];
   let queue = Promise.resolve();
 
-  const frame = r => {
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const frame = (r, ms = 0, simDays = 0) => {
     const buf = pool.pop() || new ArrayBuffer(N * 4);
     const grid = new Uint8Array(buf);
     grid.set(r.grid);
-    return { result: { t: r.t, day: r.day, date: r.date, grid, events: r.events }, transfer: [buf] };
+    return { result: { t: r.t, day: r.day, date: r.date, grid, events: r.events, ms, simDays }, transfer: [buf] };
   };
 
   const handlers = {
@@ -76,7 +78,10 @@ export function installWeatherWorker(scope, { anomalyFn = null, makeAnomalyFn = 
       if (a.snapshot) sim.deserialize(a.snapshot);
       return frame(sim.current(a.snapshot ? sim.day : a.t ?? 0));
     },
-    step: a => frame(sim.step(a.t)),
+    step(a) {
+      const t0 = now(), d0 = sim.day, r = sim.step(a.t);
+      return frame(r, now() - t0, r.day - d0);
+    },
     current: () => frame(sim.current()),
     serialize() {
       const s = sim.serialize();

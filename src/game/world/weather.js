@@ -1,24 +1,57 @@
 // Weather integration: the daily simulator in a worker → snow, sea ice, clouds, rain, drought on the map,
 // weather spells as light effects and notifications, a live readout for the selected point, saves.
 //
-// Pace: one simulated day costs ~8 ms in the worker, so speeds 1–4 keep up; at speed 5 (a year per second) the
-// worker simply covers more days per request and the map refreshes every second or two. A request is never sent
-// while the previous one is in flight.
+// Pace: a daily step costs ~4 ms in the worker (measured from every answer). When the clock runs faster than the
+// worker can follow with about half of its time, the worker simulates blocks of k days per step (a block costs
+// about (1 + (k-1)/4) daily steps: fields, cyclones and detectors still run every day, the cells once per block),
+// so the weather keeps up with the clock at every speed and the map changes smoothly instead of catching up by
+// jumps. A request is never sent while the previous one is in flight.
+// Display: the map does not switch from frame to frame but chases the newest frame with a short cross-fade in real
+// time (FADE_TAU): at slow speeds each new day blends in, at fast speeds clouds and snow glide (the fade averages
+// over the last days); the first frame, loads, rewinds and jumps while paused are shown at once.
 const D2R = Math.PI / 180;
+const WX_W = 720, WX_H = 360;
+const FADE_TAU = 0.25, FADE_STEP = 1 / 20; // s: cross-fade time constant (0 = off), at most 20 texture updates per second
+const BUDGET = 0.45;                         // share of the worker's time the simulation may use
+const STRIDE_MAX = 8;                        // longer blocks drift from the daily statistics (fire danger, droughts)
+const blockCost = k => (1 + 0.25 * (k - 1)) / k; // cost per game day of a k-day block, in daily steps
 
 export async function createWeather({ clientMod, mask, normals, clock, globe, fx, hud, gcam, registry, placeName }) {
   const worker = new Worker(new URL('./weather.worker.js', import.meta.url), { type: 'module' });
   const client = new clientMod.WeatherClient({ worker });
   // the worker keeps its own copy of the normals (structured clone), the climate layer keeps ours
   let frame = await client.init({ normals: { tavg: normals.tavg, prec: normals.prec, elev: normals.elev }, mask, seed: 1, t: clock.t });
-  let lastT = frame.t, enabled = true, snapshot = null, snapAt = -1e9, tokens = 2, toastCooldown = 0;
+  let lastT = frame.t, lastDay = frame.day, enabled = true, snapshot = null, snapAt = -1e9, tokens = 2, toastCooldown = 0;
   const recent = [];
 
-  function show(f) {
-    if (enabled) globe.setWeather(f.grid, 720, 360);
+  // ---- display: `disp` is on the map, `target` the newest frame; the fade moves disp towards target
+  const disp = new Uint8Array(WX_W * WX_H * 4), target = new Uint8Array(disp.length);
+  const disp32 = new Uint32Array(disp.buffer), target32 = new Uint32Array(target.buffer);
+  let fading = false, fadeAt = 0, snapNext = true, fadeTau = FADE_TAU;
+  const upload = () => { if (enabled) globe.setWeather(disp, WX_W, WX_H); };
+  function show(f, snap = false) {
+    target.set(f.grid);
     client.release(f.grid);
+    if (snap || snapNext || !(fadeTau > 0)) { disp.set(target); snapNext = false; fading = false; upload(); }
+    else if (!fading) { fading = true; fadeAt = performance.now(); }
   }
-  show(frame);
+  // one fade step: disp += (target - disp) * w / 256 on all four channels at once (two 8-bit lanes per 32-bit op,
+  // rounded); a byte that rounding would keep in place takes the target value, so the fade always ends
+  function fadeStep(a) {
+    const w = Math.max(8, Math.min(256, Math.round(a * 256))), iw = 256 - w;
+    let moving = 0;
+    for (let i = 0; i < disp32.length; i++) {
+      const p = disp32[i], q = target32[i];
+      if (p === q) continue;
+      const rb = (((p & 0x00ff00ff) * iw + (q & 0x00ff00ff) * w + 0x00800080) >>> 8) & 0x00ff00ff;
+      const ga = (((p >>> 8) & 0x00ff00ff) * iw + ((q >>> 8) & 0x00ff00ff) * w + 0x00800080) & 0xff00ff00;
+      const v = (rb | ga) >>> 0;
+      disp32[i] = v === p ? q : v;
+      moving++;
+    }
+    return moving;
+  }
+  show(frame, true);
 
   function viewScore(ev) {
     const cl = Math.cos(ev.lat * D2R);
@@ -51,11 +84,43 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
     }
   }
 
-  async function stepTo(t) {
+  // ---- pacing: msDay = learned cost of one daily step in the worker (ms)
+  let msDay = 5, stride = 0, maxSim = 0, requests = 0, maxLag = 0;
+  function learn(f) {
+    if (!(f.ms > 0) || !(f.simDays >= 1) || f.simDays > maxSim) return; // jumps (re-initialisation) do not count
+    const k = Math.min(stride, f.simDays), per = f.ms / f.simDays / blockCost(k);
+    const w = Math.min(1, f.simDays / 20) * 0.25;
+    msDay = Math.min(200, Math.max(0.3, msDay + (per - msDay) * w));
+  }
+  function pace() {
+    const rate = clock.daysPerSecond; // game days per real second (0 when paused)
+    let k = 1;
+    while (k < STRIDE_MAX && rate * msDay * blockCost(k) > BUDGET * 1000) k++;
+    // hysteresis: a smaller stride only when it is clearly within the budget
+    if (k < stride && stride > 1 && rate * msDay * blockCost(stride - 1) > 0.8 * BUDGET * 1000) k = stride;
+    // a gap the worker can simulate within ~0.5 s is simulated, a longer one re-initialises from climatology
+    const ms = Math.round(Math.min(730, Math.max(60, 500 / (msDay * blockCost(k)))));
+    if (k !== stride || Math.abs(ms - maxSim) > 0.25 * maxSim) {
+      stride = k; maxSim = ms;
+      client.setOptions?.({ stride: k, maxSimDays: ms }).catch(() => {});
+    }
+  }
+  clock.on?.('state', pace);
+  pace();
+  let paceAt = performance.now();
+
+  let rtt = 60; // ms, request round trip (EMA): while the clock runs, the request aims that far ahead
+  async function stepTo(t, running) {
     try {
+      requests++;
+      const t0 = performance.now();
       const f = await client.step(t);
-      lastT = f.t;
-      show(f);
+      rtt += (performance.now() - t0 - rtt) * 0.2;
+      learn(f);
+      // shown at once: rewinds, and jumps while the clock stands (loads, date changes); otherwise faded in
+      const jump = f.day < lastDay || (!running && f.day - lastDay > 1);
+      lastT = f.t; lastDay = f.day;
+      show(f, jump);
       if (f.events?.length) onEvents(f.events);
       // keep a recent snapshot for saves (SaveRegistry.collect() is synchronous)
       if (performance.now() - snapAt > 20000) {
@@ -65,23 +130,13 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
     } catch (e) { console.warn('weather step', e); }
   }
 
-  // pacing: the worker simulates ~170 days per real second; when time runs faster, catch up by short jumps
-  // (re-initialise from climatology after 90 days) instead of multi-second waits
-  let paceMax = 0;
-  const pace = () => {
-    const want = clock.daysPerSecond > 120 ? 90 : 730;
-    if (want !== paceMax && client.setOptions) { paceMax = want; client.setOptions({ maxSimDays: want }).catch(() => {}); }
-  };
-  clock.on?.('state', pace);
-  pace();
-
   registry?.register('weather', {
     optional: true,
     save: () => snapshot,
     load: async s => {
       if (!s?.buffers) return;
       const f = await client.deserialize(s);
-      lastT = f.t; snapshot = s; show(f);
+      lastT = f.t; lastDay = f.day; snapshot = s; show(f, true);
     },
   });
 
@@ -131,14 +186,36 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
     update(dt, running) {
       if (running) tokens = Math.min(3, tokens + dt * 1.2);
       toastCooldown -= dt;
-      const t = clock.t;
-      if (!client.busy && Math.abs(t - lastT) >= 1) stepTo(t);
-      if (sel && performance.now() - selAt > 1000 && !client.busy) { selAt = performance.now(); querySel(); refreshLog(); }
+      const t = clock.t, now = performance.now();
+      if (running && t - lastT > maxLag) maxLag = t - lastT;
+      if (now - paceAt > 1000) { paceAt = now; pace(); }
+      // aim where the clock will be when the answer arrives (fast speeds), at most a month ahead; a weather
+      // slightly ahead of a stopped or slowed clock waits for it instead of rewinding (which re-initialises)
+      const want = running ? t + Math.min(30, clock.daysPerSecond * rtt / 1000) : t;
+      const ahead = lastT - want;
+      if (!client.busy && (want - lastT >= 1 || ahead > 45)) stepTo(want, running);
+      if (fading && !enabled) { disp.set(target); fading = false; }
+      if (fading && now - fadeAt >= FADE_STEP * 1000) {
+        const a = 1 - Math.exp(-(now - fadeAt) / 1000 / fadeTau);
+        fadeAt = now;
+        if (!fadeStep(a)) fading = false;
+        upload();
+      }
+      if (sel && now - selAt > 1000 && !client.busy) { selAt = now; querySel(); refreshLog(); }
     },
     setEnabled(v) {
+      const was = enabled;
       enabled = v !== false;
       globe.terrainMat.uniforms.uHasWeather.value = enabled ? 1 : 0;
+      if (enabled && !was) upload();
     },
+    /** Pacing and display state (diagnostics, smoke tests): lag of the shown weather behind the clock, in days. */
+    stats() {
+      return { clockT: clock.t, weatherT: lastT, lagDays: clock.t - lastT, maxLagDays: maxLag, stride, maxSimDays: maxSim, msDay, requests, fading, daysPerSecond: clock.daysPerSecond };
+    },
+    resetStats() { maxLag = 0; requests = 0; },
+    /** Cross-fade time constant in seconds (0 switches the fade off: every frame is shown at once). */
+    setFade(seconds) { fadeTau = Math.max(0, +seconds || 0); },
     onSelect(geo) { sel = geo; selInfo = null; selAt = 0; if (geo) { logAt = -1e9; refreshLog(); } },
     describe(lat, lon) {
       if (!sel || !selInfo || Math.abs(sel.lat - lat) > 0.3 || Math.abs(sel.lon - lon) > 0.3) return [];
@@ -152,6 +229,6 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
       return rows.concat(chronicle(lat, lon));
     },
     climateLog: () => client.climateLog(),
-    reset() { lastT = -1e9; },
+    reset() { lastT = -1e9; snapNext = true; },
   };
 }

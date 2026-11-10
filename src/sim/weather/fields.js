@@ -54,6 +54,25 @@ function boxColClamped(src, dst, r) {
   }
 }
 
+const yA = new Float64Array(CN), yB = new Float64Array(CN), ySum = new Float64Array(CX);
+/** boxColClamped applied to every column of a CY x CX field at once (row-wise running sums). */
+function boxRowsClamped(src, dst, r) {
+  const n = CY, inv = 1 / (2 * r + 1), last = n - 1, s = ySum;
+  s.fill(0);
+  for (let k = -r; k <= r; k++) {
+    const o = (k < 0 ? 0 : k > last ? last : k) * CX;
+    for (let i = 0; i < CX; i++) s[i] += src[o + i];
+  }
+  for (let j = 0; j < n; j++) {
+    const o = j * CX, a = j + r + 1, b = j - r;
+    const oa = (a > last ? last : a) * CX, ob = (b < 0 ? 0 : b) * CX;
+    for (let i = 0; i < CX; i++) {
+      dst[o + i] = s[i] * inv;
+      s[i] += src[oa + i] - src[ob + i];
+    }
+  }
+}
+
 // x kernel of radius r (two periodic box passes): unit-variance factor and lag-1 autocorrelation
 const xKernelCache = new Map();
 function xKernel(r) {
@@ -127,7 +146,7 @@ export class SynopticField {
     const tab = this.noise;
     if (tab && tab.length > 2 * CN) {
       const off = base % (tab.length - CN);
-      for (let n = 0; n < CN; n++) tmpA[n] = tab[off + n];
+      tmpA.set(tab.subarray(off, off + CN));
     } else {
       for (let n = 0; n < CN; n++) {
         let h = Math.imul(base ^ n, 0x2c1b3c6d);
@@ -143,11 +162,14 @@ export class SynopticField {
       boxRowPeriodic(tmpB, o, tmpA, o, r);
       for (let i = 0; i < CX; i++) tmpA[o + i] *= k;
     }
-    for (let i = 0; i < CX; i++) {
-      for (let j = 0; j < CY; j++) colA[j] = tmpA[j * CX + i];
-      boxColClamped(colA, colB, this.ry);
-      boxColClamped(colB, colA, this.ry);
-      for (let j = 0; j < CY; j++) out[j * CX + i] = colA[j] * this.yNorm[j];
+    // y: the same two clamped box passes as boxColClamped, run on whole rows (all columns at once,
+    // same arithmetic per column, so bit-identical but cache-friendly)
+    boxRowsClamped(tmpA, yA, this.ry);
+    boxRowsClamped(yA, yB, this.ry);
+    const yN = this.yNorm;
+    for (let j = 0; j < CY; j++) {
+      const o = j * CX, k = yN[j];
+      for (let i = 0; i < CX; i++) out[o + i] = yB[o + i] * k;
     }
     return out;
   }
@@ -162,12 +184,12 @@ export class SynopticField {
     this.phase.fill(0);
   }
 
-  /** Advance one day. */
-  step(seed, day) {
+  /** Advance one day, or n days at once (exact for the AR(1) process: phi^n, n days of drift). */
+  step(seed, day, n = 1) {
     const d = this.data;
     if (this.advect) {
       for (let j = 0; j < CY; j++) {
-        let p = this.phase[j] + this.speed[j];
+        let p = this.phase[j] + (n === 1 ? this.speed[j] : this.speed[j] * n);
         const k = Math.trunc(p);
         p -= k;
         this.phase[j] = p;
@@ -180,7 +202,7 @@ export class SynopticField {
       }
     }
     const inn = this.innovation(seed, day, tmpB);
-    const a = this.phi, b = Math.sqrt(1 - a * a);
-    for (let n = 0; n < CN; n++) d[n] = a * d[n] + b * inn[n];
+    const a = n === 1 ? this.phi : Math.pow(this.phi, n), b = Math.sqrt(1 - a * a);
+    for (let i = 0; i < CN; i++) d[i] = a * d[i] + b * inn[i];
   }
 }
