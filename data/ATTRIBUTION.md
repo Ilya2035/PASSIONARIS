@@ -26,3 +26,8 @@
 (подробности — `data/sources/climate.md`).
 
 Ассеты Europa Universalis V и других игр Paradox **не используются**.
+
+## Код
+
+- Масштабирование картинки (`src/game/post.js`): перенос AMD FidelityFX Super Resolution 1.0 (EASU + RCAS),
+  © 2021 Advanced Micro Devices, Inc., лицензия MIT — текст лицензии в начале файла.

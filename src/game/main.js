@@ -14,6 +14,7 @@ import { loadWorld } from './data.js';
 import { Globe } from './globe.js';
 import { GlobeCamera, vecToGeo } from './camera.js';
 import { Upscaler } from './post.js';
+import { DynamicResolution } from './dynres.js';
 import { installMapSnapshot } from './snapshot.js';
 import { DetailTerrain } from './terrain/detail.js';
 import * as hud from './ui/hud.js';
@@ -43,6 +44,10 @@ applyUiPalette(settings.palette);
 applyStippleTheme();
 if (params.has('uiscale')) settings.uiScale = params.get('uiscale'); // captures: ?uiscale=auto|1.25
 if (params.has('fps')) settings.fpsLimit = +params.get('fps');        // checks: ?fps=30
+// checks: ?scale=0.5|0.75|1|auto — the render scale; ?upscale=0 — the old upscale filter (before/after), =fsr|lite —
+// that filter of the new ones (post.js; by default by the GPU class);
+// ?gputimer=0 — dynamic resolution without GPU timer queries (judged by frame times alone)
+if (params.has('scale')) settings.renderScale = params.get('scale') === 'auto' ? 'auto' : +params.get('scale');
 hud.applyUiScale(settings.uiScale);
 hud.applySeamlessPaper();
 const PAL = getPalette(settings.palette).map;
@@ -54,10 +59,16 @@ $('menu-version').textContent = `${APP_NAME} ${VERSION_LABEL} · ${EPOCH_LABEL}`
 // ------------------------------------------------------------------ renderer
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', reverseDepthBuffer: true });
+// The map's shaders write display colours. With three's default (sRGB output on the canvas, linear in a render target)
+// the canvas path and the upscaler's path used different shader programs — a synchronous recompile of every shader the
+// first time the dynamic resolution crossed 100% — and the space around the globe came out grey on one, black on the
+// other. Linear output everywhere: one set of programs, one look (the one captures and the menu art were made with).
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 const pixelRatio = () => Math.min(2, (window.devicePixelRatio || 1) * (settings.pixelRatio || 1));
 renderer.setPixelRatio(pixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
-const upscaler = new Upscaler(renderer);
+const upscaleParam = { 0: 'legacy', fsr: 'fsr', lite: 'lite' }[params.get('upscale')] || 'auto';
+const upscaler = new Upscaler(renderer, { mode: upscaleParam, gpuTimer: params.get('gputimer') !== '0' });
 installMapSnapshot(renderer); // save thumbnails: a copy of the canvas right after a drawn frame (src/game/snapshot.js)
 // GPU class: integrated GPUs get lighter defaults; "auto" settings adapt at runtime
 const gpuName = (() => { const gl = renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; })();
@@ -65,7 +76,10 @@ const integratedGpu = /Intel|UHD|Iris|Radeon\(TM\) Graphics|Radeon Graphics|Vega
 settings.qualityResolved = settings.quality === 'auto' ? (integratedGpu ? 'medium' : 'high') : settings.quality;
 // MSAA of the upscaler's target: 4x on the 'high' class, 2x below (see post.js); ?msaa=N for checks
 upscaler.samples = params.has('msaa') ? +params.get('msaa') : settings.qualityResolved === 'high' ? 4 : 2;
-let dynScale = integratedGpu ? 0.75 : 1, frameEma = 16, dynT = 0, dynHold = 0;
+// upscale filter: FSR 1 (EASU + RCAS) on discrete GPUs, the one-pass light filter on integrated ones (post.js)
+upscaler.autoTier = integratedGpu ? 'lite' : 'fsr';
+// dynamic resolution (dynres.js): 50-100% of the base below, aiming at 60 FPS or the frame cap
+const dyn = new DynamicResolution({ min: 0.5, max: 1, start: integratedGpu ? 0.75 : 1 });
 
 // Internal render resolution — what the GPU draws before the sharpening upscale (post.js):
 //  * settings.resolution 'WxH' is in physical pixels. In fullscreen / maximized mode it caps the drawing:
@@ -81,7 +95,7 @@ function updateResolutionBase() {
   resBase = m && settings.windowMode !== 'window' ? Math.min(1, +m[1] / Math.max(1, size.x), +m[2] / Math.max(1, size.y)) : 1;
 }
 updateResolutionBase();
-const currentRenderScale = () => Math.max(0.25, resBase * (settings.renderScale === 'auto' ? dynScale : Number(settings.renderScale) || 1));
+const currentRenderScale = () => Math.max(0.25, resBase * (settings.renderScale === 'auto' ? dyn.scale : Number(settings.renderScale) || 1));
 const scene = new THREE.Scene();
 const SPACE = new THREE.Color(...PAL.space);
 const SKY = new THREE.Color(...PAL.haze);
@@ -139,7 +153,7 @@ function warmUp() {
     renderer.setRenderTarget(globe.compileTarget());
     done.push(renderer.compileAsync(scene, camera).catch(() => {}));
     renderer.setRenderTarget(prev);
-    done.push(renderer.compileAsync(upscaler.quadScene, upscaler.quadCam).catch(() => {}));
+    done.push(renderer.compileAsync(upscaler.compileScene, upscaler.quadCam).catch(() => {}));
     const seen = new Set();
     for (const u of [globe.terrainMat.uniforms, globe.shared]) {
       for (const k in u) {
@@ -159,6 +173,7 @@ const world = await createWorldSystems({ scene, globe, gcam, camera, renderer, s
   const wait = ms => new Promise(r => setTimeout(r, ms));
   await Promise.race([world.labels?.ready$, wait(800)]);
   await Promise.race([warmUp(), wait(1000)]);
+  upscaler.warm(currentRenderScale());   // the upscaler's targets and passes, drawn once (post.js)
   try {
     const gl = renderer.getContext(), fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
@@ -382,6 +397,7 @@ function frame(ts) {
     if (since < iv - Math.min(2, iv * 0.2)) { requestAnimationFrame(frame); return; }
     lastDraw = since > iv * 2 ? ts : lastDraw + iv;
   }
+  upscaler.beginFrame();   // GPU time of this frame (post.js GpuTimer), for the dynamic resolution
   timer.update(ts);
   const rawDt = timer.getDelta();
   const dt = Math.min(0.05, rawDt);
@@ -404,18 +420,13 @@ function frame(ts) {
   scene.background.copy(SPACE).lerp(SKY, (1 - p.globe) * Math.min(1, p.tilt / 0.6) * 0.9);
   stars.material.opacity = 0.7 * p.globe;
 
-  // dynamic resolution: keep ~50 FPS by moving the internal render scale between 50% and 100% (of the base above).
-  // Frame times are measured between drawn frames. Under a cap the controller aims at the cap: a 30 FPS cap
-  // means 33 ms frames are on target (not "slow"), and frames that meet a 30/60 cap may raise the scale again.
-  // After a step down it waits 4 s before stepping up, so it does not see-saw around the limit.
-  frameEma = frameEma * 0.92 + dt * 1000 * 0.08;
-  dynT += dt; dynHold = Math.max(0, dynHold - dt);
-  if (settings.renderScale === 'auto' && dynT > 0.5) {
-    dynT = 0;
-    const capMs = cap > 0 ? 1000 / cap : 0;
-    const slowMs = Math.max(21, capMs * 1.12), fastMs = Math.max(14.5, capMs * 1.04);
-    if (frameEma > slowMs) { dynScale = Math.max(0.5, dynScale - 0.05); dynHold = 4; }
-    else if (frameEma < fastMs && dynHold <= 0) dynScale = Math.min(1, dynScale + 0.025);
+  // dynamic resolution (dynres.js): GPU time of the frames when timer queries work, else the frame intervals.
+  // Intervals are between drawn frames; under a cap the goal is the cap (30 FPS: 33 ms frames are on target).
+  if (settings.renderScale === 'auto' && !SHOT) {
+    const now = performance.now() / 1000;
+    dyn.freeAtMax = resBase >= 0.999 && Math.abs(settings.brightness - 1) < 0.01;   // 100% = straight to the canvas
+    if (upscaler.timer.fresh) dyn.gpuSample(upscaler.timer.scene, upscaler.timer.post, now);
+    dyn.update(rawDt * 1000, cap > 0 ? 1000 / cap : 0, now);
   }
   upscaler.render(scene, camera, { renderScale: currentRenderScale(), sharpen: settings.sharpen, brightness: settings.brightness });
   if (!drawnFrames) performance.mark('p:frame1');
@@ -437,7 +448,7 @@ setTimeout(() => $('loading')?.classList.add('done'), SHOT ? 0 : 150);
 if (SHOT) $('loading')?.remove();
 
 // debug hooks for automated checks
-window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, gpuName, integratedGpu, get dynScale() { return dynScale; }, ready: false, rebuildModes,
+window.__game = { gcam, globe, camera, renderer, setMode, world, settings, detail, gpuName, integratedGpu, dyn, get dynScale() { return dyn.scale; }, ready: false, rebuildModes,
   hud, applyDisplay, upscaler, get renderScale() { return currentRenderScale(); }, get fpsText() { return fpsText; }, get drawnFrames() { return drawnFrames; },
   openInfo: (lat, lon) => { const r = Math.PI / 180; openInfo(new THREE.Vector3(Math.cos(lat * r) * Math.sin(lon * r), Math.sin(lat * r), Math.cos(lat * r) * Math.cos(lon * r))); } };
 let framesDrawn = 0;
