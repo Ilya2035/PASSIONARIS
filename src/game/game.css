@@ -92,3 +92,14 @@ body.shot::after { display: none; }
   #info { width: calc(100vw - 28px); top: auto; bottom: 80px; }
   #clock { min-width: 0; }
 }
+
+/* ---- the interface follows the epoch: older = calmer and whiter, the Middle Ages darker, the New Time brighter,
+   the industrial age sooty sepia, the 20th-21st centuries a cooler grey (a light filter over the paper windows) */
+/* (on the card body: .paper itself carries the drop shadows) */
+.paper > .paper-body, .toast { transition: filter 2.5s ease; }
+body[data-era="ancient"] .paper > .paper-body, body[data-era="ancient"] .toast { filter: brightness(1.05) saturate(0.8); }
+body[data-era="antiquity"] .paper > .paper-body, body[data-era="antiquity"] .toast { filter: brightness(1.04) saturate(0.95) hue-rotate(-5deg); }
+body[data-era="medieval"] .paper > .paper-body, body[data-era="medieval"] .toast { filter: brightness(0.9) sepia(0.22) saturate(1.1); }
+body[data-era="early-modern"] .paper > .paper-body, body[data-era="early-modern"] .toast { filter: brightness(1.03) saturate(1.12); }
+body[data-era="industrial"] .paper > .paper-body, body[data-era="industrial"] .toast { filter: sepia(0.35) brightness(0.92) saturate(0.85); }
+body[data-era="contemporary"] .paper > .paper-body, body[data-era="contemporary"] .toast { filter: grayscale(0.45) brightness(0.96) contrast(1.04); }

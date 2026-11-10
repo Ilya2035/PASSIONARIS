@@ -6,8 +6,11 @@ export function createTime({ cal, clk, save, hud, settings }) {
   let menuPaused = false;
 
   // ---- HUD: date always; hours only when time runs slower than ~a day per second
-  let lastLabel = '';
+  let lastLabel = '', lastEra = '';
   function render(extra) {
+    // the interface follows the epoch (paper tone, ink, contrast): see game.css body[data-era]
+    const era = clock.era.id;
+    if (era !== lastEra) { lastEra = era; document.body.dataset.era = era; }
     const rate = clock.rateOf(clock.speed);
     const date = cal.formatRu(clock.t, rate > 20 ? 'month' : 'day');
     const time = rate < 1.5 ? cal.formatRu(clock.t, 'hour') : `${clock.era.nameRu}`;
