@@ -1,7 +1,7 @@
 {
   "name": "passionaris",
   "productName": "Passionaris",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Passionaris — grand strategy of the rise and fall of peoples on a living globe",
   "private": true,
   "type": "module",
