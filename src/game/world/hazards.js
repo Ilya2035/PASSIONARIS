@@ -16,7 +16,14 @@ export async function createHazards({ mod, clock, cal, climate, fx, hud, gcam })
 
   // hazard map layer (sim channel B): the strongest of the four hazards, 0..5 → 0..255
   const combined = new Uint8Array(N);
-  for (let i = 0; i < N; i++) combined[i] = Math.round(Math.max(L.quake[i], L.volcano[i], L.tsunami[i], L.landslide[i]) / 5 * 255);
+  // land: the strongest of the four hazards; sea: only the tsunami exposure of coastal water (open-ocean quake
+  // zones would paint meaningless bands with hard edges where the catalogue ends)
+  const landFrac = L.land;
+  for (let i = 0; i < N; i++) {
+    const onLand = !landFrac || landFrac[i] >= 96;
+    const lv = onLand ? Math.max(L.quake[i], L.volcano[i], L.tsunami[i], L.landslide[i]) : L.tsunami[i];
+    combined[i] = Math.round(lv / 5 * 255);
+  }
   climate?.setHazardChannel(combined);
 
   let lastT = clock.t, tokens = 3, toastCooldown = 0;

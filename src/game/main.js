@@ -19,6 +19,7 @@ import * as hud from './ui/hud.js';
 import { buildSettings, openModal, closeModal, anyModalOpen } from './ui/menus.js';
 import { createWorldSystems } from './world/systems.js';
 import { openChronicle } from './ui/chronicle.js';
+import { showLegend } from './ui/legend.js';
 import { applyPackData, runPackScripts } from '../engine/packs.js';
 import { BIOME_COLORS } from './world/biomes.js';
 import { VERSION } from '../shared/version.js';
@@ -109,6 +110,7 @@ function setMode(id) {
   globe.setMode(id);
   world.onModeChange?.(id);
   hud.markMode(id);
+  showLegend(id);
 }
 function rebuildModes() { hud.buildModes(setMode, world.features); hud.markMode(mode); }
 rebuildModes();
@@ -235,6 +237,7 @@ function showChronicle() {
   openChronicle({ items: world.chronicle(), onPick: it => gcam.flyTo(it.lat, it.lon, Math.min(gcam.alt, it.kind === 'weather' ? 0.8 : 0.35)) });
 }
 $('chronicle-btn').onclick = () => showChronicle();
+$('legend').onclick = () => $('legend').classList.toggle('mini');
 $('chronicle-btn').hidden = !world.chronicle;
 $('menu-resume').onclick = () => toggleMenu(false);
 $('menu-settings').onclick = () => openModal('settings');

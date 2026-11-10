@@ -396,7 +396,7 @@ void main() {
     col = mix(wc, uSnow * mix(1.0, shade, 0.5), ice * 0.9);
     if (uMode == 2) col = mix(desat(col), tempRamp(sim.r), 0.45);
     else if (uMode == 3) col = mix(desat(col), precRamp(sim.g), 0.3);
-    else if (uMode == 4) col = mix(col, hazardRamp(sim.b), 0.6 * step(0.02, sim.b));
+    else if (uMode == 4) col = mix(col, hazardRamp(sim.b), 0.6 * smoothstep(0.03, 0.25, sim.b));
   }
   // clouds from the weather simulation: broken multi-scale edges (octaves fade before they alias), white tops,
   // grey rain clouds, and a faint shadow on the ground offset toward the south-east for volume
