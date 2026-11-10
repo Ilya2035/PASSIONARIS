@@ -3,18 +3,21 @@
 //
 //   // my-weather.worker.js
 //   import { installWeatherWorker } from './weather/worker-host.js';
-//   import { regionalDT, precipFactor } from './climate/paleo.js';
-//   installWeatherWorker(self, { anomalyFn: (y, lat, lon) => ({ dT: regionalDT(y, lat, lon), precipFactor: precipFactor(y, lat, lon) }) });
+//   import { makeAnomalyFn } from './climate/anomaly.js';
+//   installWeatherWorker(self, { makeAnomalyFn });   // called with the normals on init
+// (or a ready function: installWeatherWorker(self, { anomalyFn: (year, lat, lon) => ({ dT, precipFactor }) }))
 //
 // Requests:  {id, cmd, args}            Responses: {id, ok: true, result} | {id, ok: false, error}
 // Commands:
 //   init        {normals | normals: ArrayBuffer (+normalsHeader), seed, t, mask?, veg?, options?,
-//                anomalyModule?: url, anomalyExports?: {dT: name | name[], precipFactor: name}, snapshot?}
+//                anomalyModule?: url (exports makeAnomalyFn(normals) | anomaly | regionalDT + precipFactor),
+//                anomalyExports?: {dT: name | name[], precipFactor: name}, snapshot?}
 //               -> frame
 //   step        {t} -> frame {t, day, date, grid: Uint8Array (transferred), events}
 //   current     {} -> frame without advancing
 //   serialize   {} -> snapshot {version, kind, meta, buffers} (buffers transferred)
 //   deserialize {snapshot} -> frame
+//   options     {maxSimDays} -> current options (run-time pacing, see core.js setOptions)
 //   query       {cell} | {lat, lon} -> point info
 //   field       {name} -> typed array (transferred)
 //   climateLog  {} -> climateLog arrays (transferred)
@@ -24,9 +27,16 @@
 import { createWeather } from './core.js';
 import { N, parseNormals } from './grid.js';
 
-/** Build an anomalyFn(year, lat, lon) from a module namespace (e.g. src/sim/climate/paleo.js). */
-export function anomalyFromModule(mod, names = {}) {
-  if (typeof mod.anomaly === 'function' && !names.dT && !names.precipFactor) return mod.anomaly;
+/**
+ * Build an anomalyFn(year, lat, lon) from a module namespace. Without explicit names it prefers
+ * makeAnomalyFn(normals) (src/sim/climate/anomaly.js), then anomaly(), then regionalDT +
+ * precipFactor (src/sim/climate/paleo.js).
+ */
+export function anomalyFromModule(mod, names = {}, normals = null) {
+  const explicit = names && (names.dT || names.precipFactor);
+  if (!explicit && typeof mod.makeAnomalyFn === 'function' && normals) return mod.makeAnomalyFn(normals);
+  if (!explicit && typeof mod.anomaly === 'function') return mod.anomaly;
+  names = names || {};
   const dTNames = [].concat(names.dT ?? 'regionalDT').filter(n => typeof mod[n] === 'function');
   const pfName = names.precipFactor ?? 'precipFactor';
   const pf = typeof mod[pfName] === 'function' ? mod[pfName] : null;
@@ -41,7 +51,7 @@ export function anomalyFromModule(mod, names = {}) {
  * Install the protocol on a worker scope (`self` in a module worker, or any object with
  * onmessage/postMessage semantics).
  */
-export function installWeatherWorker(scope, { anomalyFn = null } = {}) {
+export function installWeatherWorker(scope, { anomalyFn = null, makeAnomalyFn = null } = {}) {
   let sim = null;
   const pool = [];
   let queue = Promise.resolve();
@@ -55,9 +65,10 @@ export function installWeatherWorker(scope, { anomalyFn = null } = {}) {
 
   const handlers = {
     async init(a) {
-      let fn = anomalyFn;
-      if (a.anomalyModule) fn = anomalyFromModule(await import(/* @vite-ignore */ a.anomalyModule), a.anomalyExports);
       const normals = a.normals instanceof ArrayBuffer || ArrayBuffer.isView(a.normals) ? parseNormals(a.normals, a.normalsHeader) : a.normals;
+      let fn = anomalyFn;
+      if (makeAnomalyFn) fn = makeAnomalyFn(normals);
+      if (a.anomalyModule) fn = anomalyFromModule(await import(/* @vite-ignore */ a.anomalyModule), a.anomalyExports, normals);
       sim = createWeather({
         normals, seed: a.seed ?? 1, t: a.t ?? 0, mask: a.mask ?? null, veg: a.veg ?? null,
         anomalyFn: fn, options: a.options ?? {}, deferInit: !!a.snapshot,
@@ -75,6 +86,7 @@ export function installWeatherWorker(scope, { anomalyFn = null } = {}) {
       sim.deserialize(a.snapshot);
       return frame(sim.current());
     },
+    options: a => ({ result: sim.setOptions(a) }),
     query: a => ({ result: a.cell != null ? sim.query(a.cell) : sim.queryLatLon(a.lat, a.lon) }),
     field(a) {
       const f = sim.getField(a.name);

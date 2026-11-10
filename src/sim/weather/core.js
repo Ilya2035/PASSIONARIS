@@ -12,9 +12,10 @@
 //       equals the monthly normal exactly, amounts are heavy-tailed and spatially coherent, and
 //       the interannual variability is the same in wet and dry climates.
 //   snow water equivalent: snowfall below ~0.5 degC, degree-day melt.
-//   sea/lake ice: freezing/thawing degree-day thickness proxy.
+//   sea/lake ice: thickness proxy, Stefan-like growth from frost, degree-day melt + ocean heat flux.
 //   drought: rolling (exponential) 90- and 365-day precipitation vs. normal.
-//   fire danger: hot + dry spell + drought + vegetation fuel, with rare ignitions.
+//   fire danger: warm + dry spell + seasonal dryness (90-day rain vs. evaporative demand) + drought
+//       anomaly + vegetation fuel, with rare ignitions.
 // Box diagnostics (5x5 deg) feed the extreme-event detectors (events.js) and the
 // per-year climateLog (climatelog.js).
 //
@@ -32,7 +33,7 @@
 
 import { W, H, N, CX, CY, CN, BX, BN, OCEAN, LAKE, LAND, cellLat, cellLon, nodeLat, boxLat, boxLon, interpTables, nodesToCells, cellOf } from './grid.js';
 import { dayInfo, dayOf, daysInMonth, daysBeforeMonth, toDate } from './date.js';
-import { GAUSS, GAUSS_BITS, invNorm, normPdf, phiLut, gexLut, dayBase, cellHash } from './rng.js';
+import { GAUSS, GAUSS_BITS, invNorm, normCdf, normPdf, phiLut, gexLut, dayBase, cellHash, u01 } from './rng.js';
 import { SynopticField } from './fields.js';
 import { EventEngine, DET } from './events.js';
 import { ClimateLog, LOG_SYNTHETIC, LOG_PARTIAL } from './climatelog.js';
@@ -53,13 +54,22 @@ export const DEFAULT_OPTIONS = {
 const SNOW_T0 = -0.5, SNOW_T1 = 1.5;   // all snow below, all rain above (50 % at 0.5 degC)
 const DDF = 3.0;                        // degree-day melt factor, mm SWE / degC / day
 const SWE_MAX = 3000;                   // mm, perennial snow / ice sheets saturate here
-const ICE_KF = 0.25, ICE_KM = 1.0, ICE_MAX = 400; // ice proxy growth/melt, cm per degC-day
+// Sea/lake ice thickness proxy (cm). Growth is Stefan-like (slows as the ice thickens:
+// KF * frost * H0 / (H0 + h), ~2 m after a 4000 degC-day Arctic winter), melt is degree-day
+// plus a constant ocean heat flux (strong around Antarctica, weak in the Arctic). Without the
+// thickness limit and the ocean heat, Southern Ocean ice never melted (summer extent 14 Mkm2
+// instead of ~3).
+const ICE_KF = 0.15, ICE_H0 = 50, ICE_KM = 1.0, ICE_MAX = 400;
+const ICE_QO_N = 0.03, ICE_QO_S = 0.7;   // ocean heat flux melt, cm/day (lakes: 0)
 const ICE_FLAG_CM = 5;
 const WET_K = 4.0;                      // p(wet) = 1 - exp(-mu / WET_K), mu in mm/day
 const A3 = 1 - 1 / 3, A90 = 1 - 1 / 90, A365 = 1 - 1 / 365;
 const C90 = 90 * 0.25, C365 = 365 * 0.25; // ratio regularisation (mm) so deserts never look like droughts
 const DROUGHT_R0 = 0.9, DROUGHT_K = 2.0; // d = clamp((0.9 - ratio) * 2)
 const PF_TAU = 30;                      // years: the drought reference adapts to slow paleo precipitation change
+// precipFactor clamp: the climate module's effective factor (anomaly.js, maxFactor 25) folds the
+// green-Sahara monsoon rain into the factor of a near-zero desert normal, so it must pass through
+const PF_MAX = 50;
 // log-amplitudes of the persistent precipitation factor (slow 25 d / very slow 150 d fields)
 const SF_K1 = 0.35, SF_K2 = 0.25, SF_C = -(SF_K1 * SF_K1 + SF_K2 * SF_K2) / 2;
 // weights of the temperature unit field
@@ -69,15 +79,23 @@ const W_FIELD = 0.88, W_NOISE = Math.sqrt(1 - W_FIELD * W_FIELD);
 const SNOWSTORM_MM = 25;                // daily snowfall (SWE, mm) of a snowstorm cell
 const SNOWSTORM_CELLS = 16;
 const FLOOD_CELLS = 6;
-const IGNITION = 2e-2;                  // ignition probability per cell-day at fire danger 1 (scaled by FD^3)
-const FIRE_MIN = 0.3;
+const IGNITION = 2.5e-3;                // ignition probability per cell-day at fire danger 1 (scaled by FD^3)
+const FIRE_MIN = 0.35;
 const HEAT_A = 2.1, COLD_A = 2.1;       // box-mean synoptic anomaly (sigma units) of heat/cold waves
+const HEAT_C = 2.5, COLD_C = 3.0;       // ... and at least this many degC (no +1 degC "heat waves" in the rainforest)
 const STORM_Z = 3.2;                    // coarse fast precipitation field value of an extratropical storm
 const GSHIFT = 32 - GAUSS_BITS;
 const DEG = Math.PI / 180;
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
+// synthetic climateLog (fast-forward) rates per box-year, calibrated on the real normals:
+// drought months (SYN_DM * E[max(0, -Z - 0.5)] = 0.42), severe-winter probability, heat waves
+// (SYN_HW * E[max(0, 1 + 0.8 Z)] = 0.18)
+const SYN_DM = 0.42 / 0.1978, SYN_SW = 0.134, SYN_HW = 0.18 / 1.04;
+
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+/** E[max(0, X)] for X ~ N(mu, s^2). */
+const posPart = (mu, s) => (s > 1e-9 ? mu * normCdf(mu / s) + s * normPdf(mu / s) : mu > 0 ? mu : 0);
 const clamp01 = x => (x < 0 ? 0 : x > 1 ? 1 : x);
 const INV255 = 1 / 255;
 /**
@@ -188,7 +206,10 @@ export class WeatherSim {
       tAnn[c] = st / 12; pAnn[c] = sp;
       if (cls[c] === LAND) {
         sig[c] = Math.min(7, Math.max(0.5, 0.5 + 0.08 * range + 3.5 * smooth(25, 60, alat) * Math.min(1, 0.4 + range / 30)));
-        fuelN[c] = mx <= 0 ? 0 : smooth(150, 600, sp) * smooth(-8, 8, st / 12) * (1 - 0.65 * smooth(1800, 3500, sp));
+        // fuel: moisture index (annual P vs. a crude evaporative demand) keeps cold forests such as
+        // the taiga fully vegetated at 400 mm, deserts bare; tundra and ice have little to burn
+        const moist = sp / (300 + 40 * Math.max(0, st / 12));
+        fuelN[c] = mx <= 0 ? 0 : smooth(0.15, 0.6, moist) * smooth(-14, -2, st / 12) * (1 - 0.65 * smooth(1800, 3500, sp));
       } else {
         sig[c] = Math.min(5, 0.4 + 0.06 * range + 1.2 * smooth(20, 60, alat));
         iceable[c] = mn < 4 ? 1 : 0;
@@ -215,11 +236,12 @@ export class WeatherSim {
     }
     this.iceIdx = indexWhere(iceable, v => v === 1);
     const I = this.iceIdx.length;
-    this.iceY = new Uint16Array(I); this.iceTf = new Float32Array(I);
+    this.iceY = new Uint16Array(I); this.iceTf = new Float32Array(I); this.iceQ = new Float32Array(I);
     this.iceK = new Int32Array(N).fill(-1);
     for (let i = 0; i < I; i++) {
-      const c = this.iceIdx[i];
-      this.iceY[i] = (c / W) | 0; this.iceTf[i] = cls[c] === LAKE ? 0 : -1.8; this.iceK[c] = i;
+      const c = this.iceIdx[i], y = (c / W) | 0, lake = cls[c] === LAKE;
+      this.iceY[i] = y; this.iceTf[i] = lake ? 0 : -1.8; this.iceK[c] = i;
+      this.iceQ[i] = lake ? 0 : this.rowLat[y] >= 0 ? ICE_QO_N : ICE_QO_S;
     }
 
     // ---- interpolation tables
@@ -252,7 +274,7 @@ export class WeatherSim {
     this.bLandW = bLW; this.bAllW = bAllW;
     this.bLandFrac = new Float32Array(BN); this.bClimT = new Float32Array(BN); this.bClimP = new Float32Array(BN);
     this.bWinterT = new Float32Array(BN); this.bSummerT = new Float32Array(BN); this.bSig = new Float32Array(BN);
-    this.bRep = bRep; this.bNorth = new Uint8Array(BN); this.bHasLand = new Uint8Array(BN);
+    this.bRep = bRep; this.bNorth = new Uint8Array(BN); this.bHasLand = new Uint8Array(BN); this.bHeat = new Uint8Array(BN);
     for (let b = 0; b < BN; b++) {
       const by = (b / BX) | 0, bx = b % BX;
       this.bNorth[b] = boxLat(by) >= 0 ? 1 : 0;
@@ -265,6 +287,8 @@ export class WeatherSim {
       this.bSummerT[b] = land ? bSumL[b] / bLW[b] : bSum[b] / bAllW[b];
       this.bSig[b] = land ? bSig[b] / bLW[b] : 1;
       if (bRep[b] < 0) bRep[b] = (by * 10 + 5) * W + bx * 10 + 5;
+      // boxes where heat waves can be detected (see #boxes) and have a warm enough summer
+      this.bHeat[b] = land && this.bLandFrac[b] >= 0.25 && this.bClimT[b] > -12 && this.bSummerT[b] >= 18 ? 1 : 0;
     }
 
     // ---- coarse-node land fraction (3x3 node neighbourhood) for storm relevance
@@ -383,7 +407,9 @@ export class WeatherSim {
   step(t) {
     const target = dayOf(t);
     if (!(target >= -1e7 && target <= 1e8)) throw new Error(`weather: bad time ${t}`);
-    if (target < this.day) this.#jump(target, true);
+    // built with deferInit and never deserialized: start here (no synthetic history from year 1)
+    if (this.curYear === null) { this.#reinit(target); this.#simulateDay(target); }
+    else if (target < this.day) this.#jump(target, true);
     else if (target - this.day > this.opts.maxSimDays) this.#jump(target, false);
     else while (this.day < target) this.#simulateDay(this.day + 1);
     return this.current(t);
@@ -437,6 +463,20 @@ export class WeatherSim {
     }
   }
 
+  /**
+   * Change the run-time pacing: {maxSimDays} (a step further ahead than this re-initialises from
+   * climatology instead of simulating every day). A simulated day costs ~6 ms, so when the clock
+   * runs faster than ~150 days per real second (speed 5 of the ancient era: 365) a lower value
+   * (e.g. 90) keeps each worker request short at the price of more synthetic climateLog years.
+   */
+  setOptions({ maxSimDays } = {}) {
+    if (maxSimDays !== undefined) {
+      if (!(maxSimDays >= 1)) throw new Error(`weather: bad maxSimDays ${maxSimDays}`);
+      this.opts.maxSimDays = maxSimDays;
+    }
+    return { ...this.opts };
+  }
+
   /** climateLog arrays (copies), see climatelog.js. */
   getClimateLog() { return this.log.export(); }
   climateAt(year, box) { return this.log.get(year, box); }
@@ -488,7 +528,7 @@ export class WeatherSim {
   /** Deterministic expected-value run of snow, ice and drought references over the last spinupDays. */
   #spinup(day) {
     const S = this.opts.spinupDays, st = this.opts.spinupStep;
-    const { Tv, prec, sig, dT, pf, pfLong, swe, ice, n90, n365, landIdx, landY, iceIdx, iceY, iceTf, sRow } = this;
+    const { Tv, prec, sig, dT, pf, pfLong, swe, ice, n90, n365, landIdx, landY, iceIdx, iceY, iceTf, iceQ, sRow } = this;
     swe.fill(0); ice.fill(0);
     const L = landIdx.length, I = iceIdx.length;
     // drought references start at equilibrium with the start month / annual mean
@@ -526,7 +566,8 @@ export class WeatherSim {
         const tn = Tv[o0 + c] * w0 + Tv[o1 + c] * w1 + dT[c];
         const s = sig[c] * sRow[iceY[i]];
         const tf = iceTf[i];
-        const v = ice[i] + n * ICE_KF * s * gexLut((tf - tn) / s) - n * ICE_KM * s * gexLut((tn - tf) / s);
+        const h = ice[i];
+        const v = h + n * (ICE_KF * s * gexLut((tf - tn) / s) * ICE_H0 / (ICE_H0 + h) - ICE_KM * s * gexLut((tn - tf) / s) - iceQ[i]);
         ice[i] = v < 0 ? 0 : v > ICE_MAX ? ICE_MAX : v;
       }
     }
@@ -559,7 +600,7 @@ export class WeatherSim {
         const r = fn(year, lat, -180 + (i + 0.5) * s) || {};
         const t = +r.dT, p = +r.precipFactor;
         dT[j * nx + i] = Number.isFinite(t) ? t : 0;
-        pf[j * nx + i] = Number.isFinite(p) ? Math.min(10, Math.max(0, p)) : 1;
+        pf[j * nx + i] = Number.isFinite(p) ? Math.min(PF_MAX, Math.max(0, p)) : 1;
       }
     }
     return { dT, pf };
@@ -835,10 +876,14 @@ export class WeatherSim {
       for (let k = 0; k < L; k++) {
         const c = landIdx[k], T = TL[k], vg = fuel[k];
         let FD = 0;
-        if (vg > 0 && T > 8 && swe[k] < 1) {
-          let ht = (T - 8) * (1 / 22); if (ht > 1) ht = 1;
+        if (vg > 0 && T > 5 && swe[k] < 1) {
+          let ht = (T - 5) * (1 / 15); if (ht > 1) ht = 1;
           let dr = dry[k] * (1 / 25); if (dr > 1) dr = 1;
-          FD = vg * ht * dr * (0.35 + 0.65 * INV255 * drought[c]);
+          // dryness: the seasonal one (90-day precipitation vs. a crude evaporative demand, so
+          // a normal Mediterranean summer or savanna dry season counts as dry) or the drought anomaly
+          let sd = 1 - p90[k] / (90 * (0.5 + 0.2 * T));
+          if (sd < 0) sd = 0;
+          FD = vg * ht * dr * (0.25 + 0.45 * sd + 0.3 * INV255 * drought[c]);
           if (evOn && FD > FIRE_MIN && nCand < candCap) {
             let g = Math.imul(baseF ^ c, 0x2c1b3c6d);
             g ^= g >>> 12; g = Math.imul(g, 0x297a2d39);
@@ -865,14 +910,14 @@ export class WeatherSim {
 
   /** Pass C, sea/lake cells that can freeze: ice proxy, R channel. */
   #passIce(tw) {
-    const { Tv, dT, sig, aU: aUc, grid, sRow, iceIdx, iceY, iceTf, ice } = this;
+    const { Tv, dT, sig, aU: aUc, grid, sRow, iceIdx, iceY, iceTf, iceQ, ice } = this;
     const o0 = tw.m0 * N, o1 = tw.m1 * N, w1 = tw.w1, w0 = 1 - w1;
     const I = iceIdx.length;
     for (let i = 0; i < I; i++) {
       const c = iceIdx[i];
       const T = Tv[o0 + c] * w0 + Tv[o1 + c] * w1 + dT[c] + sig[c] * sRow[iceY[i]] * aUc[c];
-      const tf = iceTf[i];
-      let v = ice[i] + (T < tf ? ICE_KF * (tf - T) : -ICE_KM * (T - tf));
+      const tf = iceTf[i], h = ice[i];
+      let v = h - iceQ[i] + (T < tf ? (ICE_KF * ICE_H0 * (tf - T)) / (ICE_H0 + h) : -ICE_KM * (T - tf));
       v = v < 0 ? 0 : v > ICE_MAX ? ICE_MAX : v;
       ice[i] = v;
       grid[c << 2] = v >= 25.5 ? 255 : (v * 10) | 0;
@@ -891,12 +936,13 @@ export class WeatherSim {
       let vh = 0, vcw = 0, vdr = 0;
       if (hasL) {
         mT = bd.Tl[b] / wl; mP = bd.Pl[b] / wl;
-        const aU = bd.Al[b] / wl, D = bd.Dl[b] / wl;
+        // aC: the box-mean anomaly in degC (box-mean sigma at the box's centre row)
+        const aU = bd.Al[b] / wl, aC = aU * this.bSig[b] * this.sRow[((b / BX) | 0) * 10 + 5], D = bd.Dl[b] / wl;
         acc.mD[b] += D;
         if (bNorth[b] ? nWin : sWin) { acc.wA[b] += aU; acc.wN[b]++; }
         if (bLandFrac[b] >= 0.25 && bClimT[b] > -12) { // no heat/cold waves over the ice sheets
-          if (aU >= HEAT_A && mT >= 18) vh = waveSeverity(aU);
-          if (aU <= -COLD_A && mT <= 12) vcw = waveSeverity(-aU);
+          if (aU >= HEAT_A && aC >= HEAT_C && mT >= 18) vh = waveSeverity(aU);
+          if (aU <= -COLD_A && aC <= -COLD_C && mT <= 12) vcw = waveSeverity(-aU);
           if (bLandFrac[b] >= 0.25 && bClimP[b] >= 150 && D >= 0.33) vdr = 1 + (D - 0.33) / 0.12;
         }
       } else {
@@ -965,21 +1011,29 @@ export class WeatherSim {
     const log = this.log;
     const annualFrom = Math.max(y0, y1 - this.opts.logAnnualYears);
     const T = new Int16Array(BN), P = new Uint16Array(BN), DM = new Uint8Array(BN), SW = new Uint8Array(BN), HWa = new Uint8Array(BN);
+    // A record of n years: g1 (temperature) and g2 (precipitation) are the n-year means of unit
+    // annual indices (sd 1/sqrt(n)); the year-to-year spread around them is sw. Counts are n times
+    // the expected annual count given that mean (exact for the piecewise-linear count models),
+    // stochastically rounded, so annual and decade records have the same long-run rates as the
+    // simulated years (SYN_* calibrated on the real normals).
+    const sround = (x, h) => Math.min(255, Math.floor(x + u01(h)));
     const fill = (year, n) => {
-      const ns = 1 / Math.sqrt(n), base = dayBase(this.seed, year, 90);
+      const ns = 1 / Math.sqrt(n), sw = Math.sqrt(1 - 1 / n), base = dayBase(this.seed, year, 90);
       for (let b = 0; b < BN; b++) {
         let dT = 0, pf = 1;
         if (this.anomalyFn) {
           const r = this.anomalyFn(year, boxLat((b / BX) | 0), boxLon(b % BX)) || {};
           if (Number.isFinite(+r.dT)) dT = +r.dT;
-          if (Number.isFinite(+r.precipFactor)) pf = Math.max(0, +r.precipFactor);
+          if (Number.isFinite(+r.precipFactor)) pf = Math.min(PF_MAX, Math.max(0, +r.precipFactor));
         }
-        const g1 = GAUSS[cellHash(base, 2 * b) >>> GSHIFT] * ns, g2 = GAUSS[cellHash(base, 2 * b + 1) >>> GSHIFT] * ns;
+        const h = cellHash(base, 5 * b);
+        const g1 = GAUSS[h >>> GSHIFT] * ns, g2 = GAUSS[cellHash(h, 1) >>> GSHIFT] * ns;
         T[b] = Math.round((this.bClimT[b] + dT + g1 * (0.25 + 0.06 * this.bSig[b])) * 10);
         P[b] = Math.min(65535, Math.max(0, Math.round(this.bClimP[b] * pf * (1 + 0.12 * g2))));
-        DM[b] = this.bHasLand[b] ? Math.min(255, Math.round(Math.max(0, -g2 - 0.5) * 4 * n)) : 0;
-        SW[b] = this.bWinterT[b] <= 8 ? Math.min(255, Math.round(n * Math.min(1, Math.max(0, 0.13 - 0.12 * g1)))) : 0;
-        HWa[b] = this.bHasLand[b] && this.bSummerT[b] >= 18 ? Math.min(255, Math.round(n * Math.max(0, 0.6 + 0.5 * g1))) : 0;
+        const land = this.bHasLand[b] === 1;
+        DM[b] = land ? sround(n * SYN_DM * posPart(-g2 - 0.5, sw), cellHash(h, 2)) : 0;
+        SW[b] = land && this.bWinterT[b] <= 8 ? sround(n * clamp01(SYN_SW - 0.12 * g1), cellHash(h, 3)) : 0;
+        HWa[b] = this.bHeat[b] ? sround(n * SYN_HW * posPart(1 + 0.8 * g1, 0.8 * sw), cellHash(h, 4)) : 0;
       }
     };
     let y = y0;
@@ -1021,17 +1075,36 @@ export class WeatherSim {
   deserialize(snap) {
     if (!snap || snap.kind !== FORMAT_KIND) throw new Error('weather: not a weather snapshot');
     if (snap.version !== FORMAT_VERSION) throw new Error(`weather: unsupported snapshot version ${snap.version}`);
-    const m = snap.meta, B = snap.buffers;
+    const m = snap.meta;
+    if (!m || !snap.buffers || typeof snap.buffers !== 'object') throw new Error('weather: not a weather snapshot');
     if (m.maskHash !== this.maskHash) throw new Error('weather: snapshot was made with a different land mask / normals');
+    // buffers as ArrayBuffers (also accepts typed-array views and buffers from another realm, as a save loader may return)
+    const B = {};
+    for (const [k, v] of Object.entries(snap.buffers)) {
+      if (Object.prototype.toString.call(v) === '[object ArrayBuffer]') B[k] = v;
+      else if (ArrayBuffer.isView(v)) B[k] = v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength);
+    }
+    // validate everything before touching the state: a bad save must not leave a half-loaded simulator
+    const need = (key, bytes) => {
+      if (!B[key] || B[key].byteLength !== bytes) throw new Error(`weather: snapshot buffer ${key} is missing or has the wrong size`);
+    };
+    for (const k of ['swe', 'p90', 'n90', 'p365', 'n365', 'w3', 'dry', 'ice', 'pfLong', 'aU', 'precip', 'drought', 'fire', 'grid']) need(`cell.${k}`, this[k].byteLength);
+    for (const k in this.fields) { need(`field.${k}`, this.fields[k].data.byteLength); need(`field.${k}.phase`, this.fields[k].phase.byteLength); }
+    for (const k in this.acc) need(`acc.${k}`, this.acc[k].byteLength);
+    need('events.box', (this.events.run.length * 5 + BN) * 4);
+    if (!m.events || !Array.isArray(m.events.active) || !m.log || m.log.B !== BN || !(m.day >= -1e7 && m.day <= 1e8)) throw new Error('weather: snapshot meta is incomplete');
+    const log = ClimateLog.deserialize(m.log, B); // pure, throws on bad buffers
     this.seed = m.seed >>> 0;
     this.events.seed = this.seed;
     this.#buildNoise();
     for (const k in this.fields) this.fields[k].noise = this.NZ;
-    this.opts = { ...this.opts, ...m.options };
+    // model options come from the snapshot (exact continuation); maxSimDays is the caller's
+    // run-time pacing policy (setOptions) and stays as it is
+    const stride = this.opts.anomalyStride, maxSimDays = this.opts.maxSimDays;
+    this.opts = { ...this.opts, ...m.options, maxSimDays };
+    if (this.opts.anomalyStride !== stride) this.aTab = interpTables(this.opts.anomalyStride);
     for (const k of ['swe', 'p90', 'n90', 'p365', 'n365', 'w3', 'dry', 'ice', 'pfLong', 'aU', 'precip', 'drought', 'fire', 'grid']) {
-      const a = this[k], src = new a.constructor(B[`cell.${k}`]);
-      if (src.length !== a.length) throw new Error(`weather: snapshot field ${k} has wrong size`);
-      a.set(src);
+      this[k].set(new this[k].constructor(B[`cell.${k}`]));
     }
     for (const k in this.fields) {
       this.fields[k].data.set(new Float32Array(B[`field.${k}`]));
@@ -1039,7 +1112,7 @@ export class WeatherSim {
     }
     for (const k in this.acc) this.acc[k].set(new this.acc[k].constructor(B[`acc.${k}`]));
     this.events.deserialize(m.events, B);
-    this.log = ClimateLog.deserialize(m.log, B);
+    this.log = log;
     this.day = m.day; this.curYear = m.curYear; this.curMonth = m.curMonth; this.yDays = m.yDays; this.mDays = m.mDays; this.refDay = m.refDay;
     this.anomYear = null;
     const info = dayInfo(this.day);

@@ -66,6 +66,9 @@ test('client <-> worker: init, step, release, query, field, climateLog, serializ
   assert.ok(temp instanceof Float32Array && temp.length === N);
   const log = await wx.climateLog();
   assert.equal(log.count, 2592);
+  assert.equal((await wx.setOptions({ maxSimDays: 120 })).maxSimDays, 120);
+  local.setOptions({ maxSimDays: 120 });
+  await assert.rejects(wx.setOptions({ maxSimDays: -1 }), /maxSimDays/);
 
   // save / load through the worker
   const snap = await wx.serialize();

@@ -99,6 +99,27 @@ export function mountainMask(grid, land, height, opts = {}) {
   const open2 = slidingMaxMin(grid, open1, openKm, { wantMin: false }).max;
   m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = land[i] && open2[i] ? 1 : 0;
+  // the square windows above leave axis-aligned corners and notches (blocky massif edges, then blocky district
+  // borders): round them off — blur the mask (4 separable 3-tap box passes ~ a Gaussian of ~1.4 texels) and
+  // re-threshold at one half
+  {
+    let a0 = new Float32Array(N), a1 = new Float32Array(N);
+    for (let i = 0; i < N; i++) a0[i] = m[i];
+    for (let pass = 0; pass < 4; pass++) {
+      for (let y = 0; y < H; y++) {
+        const row = y * W;
+        for (let x = 0; x < W; x++) {
+          const xl = x === 0 ? W - 1 : x - 1, xr = x === W - 1 ? 0 : x + 1;
+          a1[row + x] = (a0[row + xl] + a0[row + x] + a0[row + xr]) / 3;
+        }
+      }
+      for (let y = 0; y < H; y++) {
+        const yu = y === 0 ? 0 : y - 1, yd = y === H - 1 ? H - 1 : y + 1;
+        for (let x = 0; x < W; x++) a0[y * W + x] = (a1[yu * W + x] + a1[y * W + x] + a1[yd * W + x]) / 3;
+      }
+    }
+    for (let i = 0; i < N; i++) m[i] = land[i] && a0[i] >= 0.5 ? 1 : 0;
+  }
   // keep significant massifs only
   const cls = new Int8Array(N).fill(-1);
   for (let i = 0; i < N; i++) if (land[i]) cls[i] = m[i];

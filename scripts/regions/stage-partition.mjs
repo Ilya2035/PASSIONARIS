@@ -119,8 +119,33 @@ export function partitionWorld(grid, inputs, opts = {}, log = () => {}) {
   // Float64 distances: a Float32 store would round below the heap key and make
   // the "stale entry" test skip valid expansions.
   const label = new Int32Array(N), dist = new Float64Array(N);
+  // Natural-looking borders where no river or ridge decides: growth on the 8-connected grid makes the border
+  // between two seeds a straight line at 0/45/90 degrees (blocky region outlines). A smooth deterministic noise
+  // on the travel cost (+-28 %, blobs ~45 km and ~110 km) bends those lines into gentle curves.
+  const landSpeed = new Float32Array(N);
+  {
+    const hash = (ix, iy) => {
+      let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) | 0;
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    };
+    const vn = (u, v) => {
+      const ix = Math.floor(u), iy = Math.floor(v), fx = u - ix, fy = v - iy;
+      const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+      const p = hash(ix, iy), q = hash(ix + 1, iy), r = hash(ix, iy + 1), t = hash(ix + 1, iy + 1);
+      return p + (q - p) * sx + (r - p) * sy + (p - q - r + t) * sx * sy;
+    };
+    for (let y = 0; y < H; y++) {
+      const lat = grid.rowLat[y], cl = Math.max(0.2, Math.cos(lat * Math.PI / 180));
+      for (let x = 0; x < W; x++) {
+        const u = grid.colLon[x] * cl * 111 / 45, v = lat * 111 / 45;
+        const n = 0.62 * vn(u, v) + 0.38 * vn(u * 0.4 + 17.3, v * 0.4 - 9.1);
+        landSpeed[y * W + x] = 0.72 + 0.56 * n;
+      }
+    }
+  }
   const landRun = lloyd(grid, label, dist, {
-    comp: lc.comp, seeds: landSeeds, height, slopeK: o.slopeK, cross: minor, crossKm: o.crossKm,
+    comp: lc.comp, seeds: landSeeds, height, slopeK: o.slopeK, cross: minor, crossKm: o.crossKm, speed: landSpeed,
     targetOf: (t, c) => compTarget[c], iterations: o.landIterations, splitK: 1.8, dropK: 0.3, log,
   });
   const S_land = landRun.seeds.length;

@@ -15,3 +15,8 @@ public/assets/map/world.json
 
 art/drafts/
 public/assets/terrain/
+
+# WorldClim 2.1 normals and data derived from them: the licence forbids redistribution without permission
+# (the repository is public). The bake recreates them locally: scripts/climate/bake-normals.mjs, bake-biomes.mjs.
+public/assets/climate/normals.bin.gz
+public/assets/climate/biome.bin.gz

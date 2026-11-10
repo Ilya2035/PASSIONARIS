@@ -14,6 +14,9 @@
 //
 // Each event is emitted twice: phase 'start' (t1 = earliest expected end, ongoing = true)
 // and phase 'end' (final t1 and peak severity, ongoing = false). Same `id` in both.
+// Box events and fires start with today's severity (the end severity is never lower);
+// tropical cyclones start with their forecast category and planned life, and end with the
+// peak they actually reached.
 
 import { BX, BY, BN, CX, CY, W, cellLat, cellLon, cellOf, boxOfCell, OCEAN } from './grid.js';
 import { dayBase, cellHash, u01 } from './rng.js';
@@ -195,7 +198,7 @@ export class EventEngine {
       const c = candCell[i], b = boxOfCell(c);
       if (day < this.fireCool[b]) continue;
       const fd = candFD[i];
-      const v = 1 + 4 * Math.min(1, Math.max(0, (fd - 0.3) / 0.45));
+      const v = 1 + 4 * Math.min(1, Math.max(0, (fd - 0.35) / 0.5)); // routine dry-season fire ~2-3, heat + drought 4-5
       const sev = sevOf(v);
       const h = cellHash(dayBase(this.seed, day, 77), c);
       const minDur = 4 + 2 * sev + (h % 4);
@@ -253,7 +256,10 @@ export class EventEngine {
       let cat = 1;
       while (cat < 5 && r > CAT_CDF[cat - 1]) cat++;
       const cy = { lat, lon, age: 0, cat, I: 0.6, life: 6 + (cellHash(h, 5) % 8), recurve: 22 + 8 * u01(cellHash(h, 6)) };
-      const ev = this.#newEvent('storm', -1, day, day, c, 1, 4, { subtype: 'tropical', cy, track: [Math.round(lat * 100) / 100, Math.round(lon * 100) / 100], peakCell: c });
+      // 'start' carries the forecast: severity = the category the storm is set to reach,
+      // t1 = its planned life (a fresh depression would otherwise always read severity 1).
+      // 'end' reports the peak actually reached (lower if it hit land or cool water early).
+      const ev = this.#newEvent('storm', -1, day, day, c, cat, cy.life, { subtype: 'tropical', cy, track: [Math.round(lat * 100) / 100, Math.round(lon * 100) / 100], peakCell: c });
       if (ev) { ev.peak = cy.I; n++; }
     }
   }
@@ -286,7 +292,10 @@ export class EventEngine {
       const ev = this.active[i];
       this.#end(ev, Math.max(ev.t0, Math.min(t1, ev.last + 1)));
     }
-    this.run.fill(0); this.slot.fill(0);
+    // Detector memory is reset too: after a rewind the cooldowns set by #end (and by recent
+    // fires) would lie in the future and silence those boxes until the old date came round again.
+    this.run.fill(0); this.slot.fill(0); this.lastOn.fill(0); this.lastEvt.fill(-1);
+    this.cool.fill(-2147483648); this.fireCool.fill(-2147483648);
   }
 
   takeOutput() {

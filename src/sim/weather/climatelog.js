@@ -118,10 +118,14 @@ export class ClimateLog {
     this.nA -= k;
   }
 
-  /** Drop every record for `year` and later (used on rewind / reload). */
+  /**
+   * Drop every record for `year` and later (used on rewind / reload). A decade record that
+   * contains `year` is dropped whole: it already averages years >= `year`, and keeping it would
+   * count those years twice once the re-simulated years are merged into it again.
+   */
   truncateFrom(year) {
     while (this.nA && this.a.year[this.nA - 1] >= year) this.nA--;
-    if (!this.nA) while (this.nD && this.d.year[this.nD - 1] >= year) this.nD--;
+    if (!this.nA) while (this.nD && this.d.year[this.nD - 1] + 10 > year) this.nD--;
   }
 
   /** Record for a year: {kind:'year'|'decade', year, nYears, flags, offset} or null. */
@@ -173,12 +177,20 @@ export class ClimateLog {
   }
 
   static deserialize(meta, buffers) {
+    if (!meta || !(meta.B > 0) || !(meta.annualCap > 0) || !(meta.nA >= 0) || !(meta.nD >= 0) || meta.nA > meta.annualCap + 12) {
+      throw new Error('weather: bad climateLog snapshot meta');
+    }
     const log = new ClimateLog(meta.B, meta.annualCap);
+    const arr = (key, C, n) => {
+      const b = buffers[key];
+      if (!b || b.byteLength !== n * C.BYTES_PER_ELEMENT) throw new Error(`weather: snapshot buffer ${key} is missing or has the wrong size`);
+      return new C(b);
+    };
     const fill = (set, part, n) => {
-      set.year.set(new Int32Array(buffers[`log.${part}.year`]));
-      set.flags.set(new Uint8Array(buffers[`log.${part}.flags`]));
-      set.nYears.set(new Uint8Array(buffers[`log.${part}.nYears`]));
-      for (const [k, C] of FIELDS) set[k].set(new C(buffers[`log.${part}.${k}`]));
+      set.year.set(arr(`log.${part}.year`, Int32Array, n));
+      set.flags.set(arr(`log.${part}.flags`, Uint8Array, n));
+      set.nYears.set(arr(`log.${part}.nYears`, Uint8Array, n));
+      for (const [k, C] of FIELDS) set[k].set(arr(`log.${part}.${k}`, C, n * meta.B));
       return n;
     };
     if (meta.nD > log.dCap) { log.dCap = 1 << Math.ceil(Math.log2(meta.nD)); log.d = makeSet(log.dCap, log.B); }

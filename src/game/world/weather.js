@@ -65,6 +65,16 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
     } catch (e) { console.warn('weather step', e); }
   }
 
+  // pacing: the worker simulates ~170 days per real second; when time runs faster, catch up by short jumps
+  // (re-initialise from climatology after 90 days) instead of multi-second waits
+  let paceMax = 0;
+  const pace = () => {
+    const want = clock.daysPerSecond > 120 ? 90 : 730;
+    if (want !== paceMax && client.setOptions) { paceMax = want; client.setOptions({ maxSimDays: want }).catch(() => {}); }
+  };
+  clock.on?.('state', pace);
+  pace();
+
   registry?.register('weather', {
     optional: true,
     save: () => snapshot,

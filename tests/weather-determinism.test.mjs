@@ -97,6 +97,38 @@ test('deserialize rejects snapshots from another land mask or format', () => {
   assert.throws(() => b.deserialize(snap), /mask/);
   assert.throws(() => a.deserialize({ ...snap, version: 99 }), /version/);
   assert.throws(() => a.deserialize({}), /snapshot/);
+  // a damaged save is rejected before anything is overwritten: the running simulator is untouched
+  a.step(start + 3);
+  const before = md5(a.grid), q = a.query(cellOf(60, 90));
+  for (const bad of ['cell.swe', 'log.years.meanT', 'events.box']) {
+    const broken = { ...snap, buffers: { ...snap.buffers, [bad]: new ArrayBuffer(6) } };
+    assert.throws(() => a.deserialize(broken), /wrong size/, bad);
+  }
+  const noLog = { ...snap, buffers: { ...snap.buffers } };
+  delete noLog.buffers['log.years.year'];
+  assert.throws(() => a.deserialize(noLog), /missing/);
+  assert.equal(md5(a.grid), before);
+  assert.deepEqual(a.query(cellOf(60, 90)), q);
+  assert.equal(a.day, start + 3);
+  // typed-array views instead of ArrayBuffers (as a save loader may hand them back) are accepted
+  const views = { ...snap, buffers: Object.fromEntries(Object.entries(snap.buffers).map(([k, v]) => [k, new Uint8Array(v)])) };
+  const c = createWeather({ ...base, seed: 3, deferInit: true, options: { events: false } }).deserialize(views);
+  assert.equal(md5(c.grid), md5(snap.buffers['cell.grid']));
+});
+
+test('setOptions changes the pacing; a never-initialised simulator starts where it is first stepped', () => {
+  const sim = createWeather({ ...base, seed: 4, t: fromDate(1900, 1, 1), options: { events: false } });
+  assert.equal(sim.setOptions({ maxSimDays: 40 }).maxSimDays, 40);
+  const evBefore = sim.events.nextId;
+  sim.step(fromDate(1900, 3, 1)); // 59 days > 40: a jump (re-initialised from climatology), not 59 simulated days
+  assert.equal(sim.day, fromDate(1900, 3, 1));
+  assert.equal(sim.mDays, 1, 'only the target day was simulated');
+  assert.equal(sim.events.nextId, evBefore);
+  assert.throws(() => sim.setOptions({ maxSimDays: 0 }), /maxSimDays/);
+  const fresh = createWeather({ ...base, seed: 4, deferInit: true, options: { events: false } });
+  const f = fresh.step(fromDate(1500, 7, 1));
+  assert.deepEqual([f.date.year, f.date.month, f.date.day], [1500, 7, 1]);
+  assert.equal(fresh.getClimateLog().years.year.length + fresh.getClimateLog().decades.year.length, 0, 'no synthetic history');
 });
 
 test('fast-forward: long jumps re-initialise from climatology and fill the climateLog', () => {
@@ -195,4 +227,60 @@ test('ClimateLog: decades beyond 300 years, lookup, truncate, serialize', () => 
   r.truncateFrom(550);
   assert.equal(r.export().years.year.at(-1), 549);
   assert.equal(r.get(560, 0), null);
+  // rewinding into the decade section drops the decade that contains the year (it already
+  // averages later years), so re-simulated years are never counted twice
+  r.truncateFrom(105);
+  const ex = r.export();
+  assert.equal(ex.years.year.length, 0);
+  assert.equal(ex.decades.year.at(-1), 90);
+  assert.equal(r.get(95, 0).year, 90);
+  assert.equal(r.get(100, 0), null);
+  for (let y = 105; y < 125; y++) { T.fill(y); r.pushYear(y, 0, T, P, DM, SW, HW); }
+  r.flushAnnual();
+  const d100 = r.get(100, 0);
+  assert.equal(d100.nYears, 5); // 105..109 only
+  assert.equal(d100.meanT, 10.7);
+  assert.equal(r.get(115, 0).nYears, 10);
+});
+
+test('a rewind clears event cooldowns (boxes can start events again right away)', async () => {
+  const { EventEngine, DET } = await import('../src/sim/weather/events.js');
+  const ev = new EventEngine(1);
+  const b = 1000, i = DET.heatwave * 2592 + b;
+  const run = (d0, days) => {
+    const out = [];
+    for (let d = d0; d < d0 + days; d++) { ev.val.fill(0); ev.val[i] = 2.5; ev.valCell[i] = 12345; ev.boxes(d); out.push(...ev.takeOutput()); }
+    return out;
+  };
+  const late = run(5000, 10);
+  assert.ok(late.some(e => e.phase === 'start' && e.type === 'heatwave'));
+  ev.endAll(5010);
+  assert.ok(ev.takeOutput().some(e => e.phase === 'end'));
+  const early = run(4000, 10); // rewind: an earlier date than every cooldown set above
+  assert.ok(early.some(e => e.phase === 'start' && e.type === 'heatwave'), 'heat wave detected again after the rewind');
+});
+
+test('synthetic climateLog: annual and decade records share the long-run rates', () => {
+  const sim = createWeather({ ...base, seed: 21, t: fromDate(-4999, 1, 1), options: { events: false } });
+  sim.step(fromDate(2100, 6, 1));
+  const l = sim.getClimateLog(), B = 2592;
+  const rate = (set, field, pick) => {
+    let s = 0, n = 0;
+    for (let r = 0; r < set.year.length; r++) {
+      if (!(set.flags[r] & LOG_SYNTHETIC)) continue;
+      for (let b = 0; b < B; b++) if (pick(b)) { s += set[field][r * B + b]; n += set.nYears[r]; }
+    }
+    return s / n;
+  };
+  const land = b => sim.bHasLand[b] === 1, cold = b => land(b) && sim.bWinterT[b] <= 8, hot = b => sim.bHeat[b] === 1;
+  const checks = [['droughtMonths', land, 0.42], ['severeWinter', cold, 0.134], ['heatwaves', hot, 0.18]];
+  const lines = [];
+  for (const [f, pick, want] of checks) {
+    const a = rate(l.years, f, pick), d = rate(l.decades, f, pick);
+    lines.push(`${f}: annual ${a.toFixed(3)} decades ${d.toFixed(3)}`);
+    assert.ok(Math.abs(a / want - 1) < 0.2, `${f} annual rate ${a.toFixed(3)} vs ${want}`);
+    assert.ok(Math.abs(d / want - 1) < 0.1, `${f} decade rate ${d.toFixed(3)} vs ${want}`);
+  }
+  for (let b = 0; b < B; b++) if (!land(b)) assert.equal(l.decades.severeWinter[b], 0, 'no severe winters over open ocean');
+  console.log('# synthetic log rates per box-year:', lines.join('; '));
 });

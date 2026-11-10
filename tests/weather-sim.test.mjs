@@ -135,7 +135,8 @@ test('extreme events: all types occur, well-formed, start/end pairs, visible dur
   for (const [id, e] of ends) {
     const s = starts.get(id);
     assert.equal(e.t0, s.t0); assert.equal(e.type, s.type); assert.equal(e.cell, s.cell);
-    assert.ok(e.severity >= s.severity, 'severity is the peak');
+    // box events and fires: the end severity is the peak; tropical cyclones start with their forecast
+    if (e.subtype !== 'tropical') assert.ok(e.severity >= s.severity, 'severity is the peak');
     assert.ok(e.t1 - e.t0 >= 3, `${e.type} lasts ${e.t1 - e.t0} days`);
     const det = DETECTORS.find(d => d.type === e.type && e.subtype !== 'tropical');
     if (det && e.type !== 'wildfire') assert.ok(e.t1 - e.t0 >= det.minDur, `${e.type} stretched to >= ${det.minDur} days`);
@@ -146,6 +147,12 @@ test('extreme events: all types occur, well-formed, start/end pairs, visible dur
   for (const ty of EVENT_TYPES) assert.ok(perType[ty] / YEARS < 400, `${ty} not spammy`);
   const tropical = [...ends.values()].filter(e => e.subtype === 'tropical');
   assert.ok(tropical.length > 10 && tropical.every(e => Array.isArray(e.track) && e.track.length >= 4));
+  // the start message carries the forecast category, so strong cyclones are visible from day one
+  const tStarts = [...starts.values()].filter(e => e.subtype === 'tropical');
+  const tSev = new Set(tStarts.map(e => e.severity));
+  assert.ok(tSev.size >= 3 && Math.max(...tSev) >= 4, `tropical start severities ${[...tSev].sort()}`);
+  assert.ok(tStarts.every(e => e.t1 - e.t0 >= 6), 'start t1 = planned life (6..13 days)');
+  assert.ok(tropical.some(e => e.severity >= 3), 'some cyclones reach category 3+');
 });
 
 test('climateLog: annual records per 5-degree box with plausible values', () => {

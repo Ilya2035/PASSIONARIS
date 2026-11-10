@@ -74,6 +74,12 @@ export class WeatherClient {
   /** Last frame without advancing. */
   current() { return this.#call('current'); }
 
+  /**
+   * Run-time pacing: {maxSimDays} — a step further ahead than this re-initialises from climatology
+   * instead of simulating every day (~6 ms per day). E.g. 90 while the clock runs a year per second.
+   */
+  setOptions(o) { return this.#call('options', o); }
+
   /** Give a grid buffer from a previous frame back to the worker's pool (do not use it afterwards). */
   release(grid) {
     const buffer = grid?.buffer ?? grid;
