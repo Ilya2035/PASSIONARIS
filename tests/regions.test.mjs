@@ -126,8 +126,12 @@ test('browser client helpers decode the baked files', () => {
 });
 
 // Rivers act as borders: texels on either side of the centre line belong to different districts.
+// The source is a raw Natural Earth download (gitignored): scripts/download-data.mjs fetches it into the main
+// checkout, scripts/worktree-setup.mjs copies it into a worktree. Without it these checks are skipped.
+const RIVERS = path.join(ROOT, 'data', 'raw', 'ne_10m_rivers_lake_centerlines.geojson');
+const noRivers = !fs.existsSync(RIVERS) && 'raw Natural Earth rivers missing (scripts/download-data.mjs, scripts/worktree-setup.mjs)';
 function riverLines(names) {
-  const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'raw', 'ne_10m_rivers_lake_centerlines.geojson'), 'utf8'));
+  const j = JSON.parse(fs.readFileSync(RIVERS, 'utf8'));
   const out = [];
   for (const f of j.features) {
     if (f.properties.featurecla !== 'River' || !names.includes(f.properties.name)) continue;
@@ -157,7 +161,7 @@ function sideSplit(lines, offKm = 9) {
   return { share: diff / total, total };
 }
 for (const [label, names] of [['Rhine', ['Rhine', 'Rhein', 'Rhin']], ['Loire', ['Loire']], ['Volga', ['Volga']]]) {
-  test(`${label} is a district border`, () => {
+  test(`${label} is a district border`, { skip: noRivers }, () => {
     const { share, total } = sideSplit(riverLines(names));
     assert.ok(total > 20, `${label}: too few samples (${total})`);
     assert.ok(share >= 0.8, `${label}: only ${(share * 100).toFixed(1)}% of ${total} samples are split`);

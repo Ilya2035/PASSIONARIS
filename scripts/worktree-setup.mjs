@@ -30,6 +30,13 @@ function copy(src, dst) {
   files++; bytes += s.size;
 }
 for (const p of ignored) copy(join(MAIN, p), join(HERE, p));
+// the few raw downloads the tests read (the rest of data/raw/ stays in the main checkout); release.mjs runs every
+// test inside the worktree, so without these the river-border checks of tests/regions.test.mjs would be skipped
+const RAW_FOR_TESTS = ['data/raw/ne_10m_rivers_lake_centerlines.geojson'];
+for (const p of RAW_FOR_TESTS) {
+  if (existsSync(join(MAIN, p))) copy(join(MAIN, p), join(HERE, p));
+  else console.log(`data: ${p} is not in the main checkout (scripts/download-data.mjs) — its checks will be skipped`);
+}
 console.log(`data: ${files} files copied (${(bytes / 1e6).toFixed(0)} MB)`);
 
 // 2. node_modules from the npm cache (same lockfile as main; electron and sharp binaries come from their caches)
