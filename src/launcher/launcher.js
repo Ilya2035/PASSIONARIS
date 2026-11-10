@@ -27,6 +27,8 @@ function mdToHtml(md) {
   let html = '', inList = false;
   for (const line of md.split(/\r?\n/)) {
     if (/^- /.test(line)) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(line.slice(2))}</li>`; continue; }
+    // an indented line continues the previous list item
+    if (inList && /^\s{2,}\S/.test(line)) { html = html.replace(/<\/li>$/, ` ${inline(line.trim())}</li>`); continue; }
     if (inList) { html += '</ul>'; inList = false; }
     if (/^## /.test(line)) html += `<h3>${inline(line.slice(3))}</h3>`;
     else if (/^### /.test(line)) html += `<h4>${inline(line.slice(4))}</h4>`;
@@ -52,16 +54,17 @@ showVersion(VERSION);
 const ROADMAP = [
   ['Обёртка (Electron) и лаунчер', 'done'],
   ['Глобус и 3D-карта высот', 'done'],
-  ['Чёткая потоковая карта', 'wip'],
-  ['Территории 10×10 км и районы', 'wip'],
-  ['Провинции и регионы', ''],
-  ['Границы всех эпох', ''],
-  ['Погода и климат', ''],
+  ['Чёткая потоковая карта', 'done'],
+  ['Районы, провинции, регионы, моря', 'done'],
+  ['Погода, климат, времена года', 'done'],
+  ['Стихии и хроника мира', 'done'],
+  ['Ход времени', 'done'],
+  ['Сохранение и загрузка', 'done'],
+  ['Моды и дополнения', 'wip'],
   ['Визуализация и стиль', 'wip'],
-  ['Ход времени', ''],
-  ['Сохранение и загрузка', ''],
-  ['Старые и новые версии', ''],
-  ['Оптимизация', ''],
+  ['Оптимизация', 'wip'],
+  ['Народы, города, государства', ''],
+  ['Границы всех эпох', ''],
 ];
 $('roadmap').innerHTML = ROADMAP.map(([t, s]) => `<li class="${s}">${t}</li>`).join('');
 
