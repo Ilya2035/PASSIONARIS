@@ -3,8 +3,8 @@
 //   decals  — an instanced grid per effect, draped over the relief; the pattern is drawn in the fragment shader
 //             as layers composited "over" each other plus an additive glow (premultiplied output, so one draw call
 //             can both cover the map with ash and make lava shine);
-//   sprites — instanced quads: soft puffs, glows, streaks stretched along their motion (sparks, meteor, flakes),
-//             lightning bolts and flat lava tongues lying on the ground. Every sprite computes its own position
+//   sprites — instanced quads: soft puffs and dust billows, glows, streaks stretched along their motion (sparks,
+//             meteor, flakes), lightning strikes and flat lava tongues lying on the ground. Every sprite computes its own position
 //             from its birth time and a few numbers, so nothing is simulated on the CPU.
 //
 // Lengths are radians of arc. Each effect keeps its physical size, but never gets smaller than a fraction of the
@@ -120,6 +120,25 @@ vec2 voro(vec2 p) {
 float spiral(vec2 q, float r, float arms, float tight, float spin, float speed) {
   float ang = atan(q.y, q.x);
   return 0.5 + 0.5 * sin(arms * (spin * ang - uNow * speed + tight * log(max(r, 0.015))) + vSeed * 6.0);
+}
+
+// The cloud top of a storm at q (decal units; n = its turbulence there). A tropical cyclone: two tight bands
+// winding into a dense disc, a clear eye inside a raised wall. A mid-latitude storm is a comma (a cloud head and
+// one long tail), a snowstorm swirls in three loose arms.
+float stormTop(vec2 q, float n, float spin, bool cyc, bool snow) {
+  float r = length(q), H;
+  if (cyc) {
+    float arms = spiral(q, r, 2.0, 2.4, spin, 0.3);
+    float bands = smoothstep(0.25, 0.8, arms + (n - 0.5) * 0.5) * (1.0 - smoothstep(0.42, 0.98, r)) * (0.5 + 0.3 * n);
+    float cdo = (1.0 - smoothstep(0.16, 0.4, r + (n - 0.5) * 0.12)) * 0.85;
+    H = (max(bands, cdo) + ring(r, 0.1, 0.035) * 0.3) * smoothstep(0.045, 0.085, r);
+  } else {
+    float arms = spiral(q, r, snow ? 3.0 : 1.0, snow ? 1.2 : 1.1, spin, 0.2);
+    float body = snow ? 0.0 : exp(-r * r * 10.0) * (0.5 + 0.35 * n);
+    H = max(smoothstep(snow ? 0.15 : 0.2, snow ? 0.85 : 0.7, arms + (n - 0.5) * 0.35) * (1.0 - smoothstep(0.3, 1.0, r)) * (0.5 + 0.42 * n), body)
+      + exp(-r * r * 30.0) * 0.15;
+  }
+  return H;
 }
 
 void main() {
@@ -277,16 +296,35 @@ void main() {
     over(acc, vec3(0.52, 0.4, 0.28), body * (0.4 + 0.45 * streak));
     over(acc, vec3(0.3, 0.21, 0.14), scarp * 0.75 * smoothstep(0.0, 0.1, age));
     over(acc, vec3(0.78, 0.7, 0.6), dust * 0.35);
-  } else if (kind == 5) {                // wildfire: flickering front that runs faster downwind, charred land, smouldering
-    float n = fbm(sp * 1.6 + vec2(0.0, uNow * 0.4));
+  } else if (kind == 5) {                // wildfire: flickering front that runs faster downwind, charred land, smouldering, smoke
+    // the decal is wider than the fire (vExt.y times its radius): the smoke lies downwind of it
+    float rm = r * vExt.y;                                          // in units of the fire's radius
+    vec2 qm = qr * vExt.y;                                          // along the wind, across it
+    vec2 spm = vQ * vExt.y * 3.0 + vSeed * 17.0;
+    float n = fbm(spm * 1.6 + vec2(0.0, uNow * 0.4));
     float fwd = dot(vQ / max(r, 1e-5), dir);
     float front = (0.22 + 0.68 * smoothstep(0.0, 0.85, age)) * (0.85 + 0.3 * fwd) * 0.9 + (n - 0.5) * 0.22;
-    float band = smoothstep(front - 0.15, front - 0.02, r) * (1.0 - smoothstep(front - 0.02, front + 0.03, r));
-    float burnt = 1.0 - smoothstep(front - 0.1, front, r);
+    float band = smoothstep(front - 0.15, front - 0.02, rm) * (1.0 - smoothstep(front - 0.02, front + 0.03, rm));
+    float burnt = 1.0 - smoothstep(front - 0.1, front, rm);
     float alive = 1.0 - smoothstep(0.72, 0.92, age);
-    vec3 scarC = mix(vec3(0.15, 0.13, 0.11), vec3(0.44, 0.42, 0.4), smoothstep(0.55, 0.8, fbm(sp * 4.0)));
+    vec3 scarC = mix(vec3(0.15, 0.13, 0.11), vec3(0.44, 0.42, 0.4), smoothstep(0.55, 0.8, fbm(spm * 4.0)));
     over(acc, scarC, burnt * (0.5 + 0.25 * n));
-    float smoulder = burnt * smoothstep(0.6, 0.78, fbm(sp * 9.0 + vec2(uNow * 0.2, 0.0))) * smoothstep(front - 0.4, front - 0.05, r);
+    // smoke: a widening streak from the fire downwind, torn by turbulence that drifts along it; thick and brown
+    // at the fire, pale where it thins. From mid distance it is the sign of the fire; up close it steps back.
+    float reach = 0.6 + (vExt.y - 0.9) * smoothstep(0.0, 0.45, age);
+    float sway = qm.y + 0.14 * sin(qm.x * 2.6 + vSeed * 20.0) * qm.x;
+    float turb = fbm(vec2(qm.x * 2.2 - uNow * 0.3, qm.y * 3.2) + vSeed * 31.0);
+    float plume = smoothstep(0.0, 0.4, qm.x) * (1.0 - smoothstep(reach - 0.7, reach, qm.x))
+                * (1.0 - smoothstep(0.3, 1.0, abs(sway) / (0.16 + 0.27 * max(qm.x, 0.0)) + (turb - 0.5) * 1.1));
+    plume *= (0.55 + 0.45 * turb) * (0.6 + 0.4 * vStr) * alive * mix(0.5, 0.9, far);
+    vec3 smokeC = mix(vec3(0.29, 0.25, 0.215), vec3(0.63, 0.6, 0.56), smoothstep(0.2, reach, qm.x) * (0.6 + 0.4 * turb));
+    // its shadow on the land to the south-east, then the smoke itself
+    vec2 qsh = vQ * vExt.y + vec2(-0.07, 0.08);
+    vec2 qrs = vec2(dot(qsh, dir), dot(qsh, vec2(dir.y, -dir.x)));
+    float shd = smoothstep(0.0, 0.4, qrs.x) * (1.0 - smoothstep(reach - 0.7, reach, qrs.x)) * (1.0 - smoothstep(0.3, 0.9, abs(qrs.y) / (0.16 + 0.27 * max(qrs.x, 0.0))));
+    over(acc, vec3(0.16, 0.15, 0.14), shd * 0.22 * alive * far * (1.0 - plume));
+    over(acc, smokeC, plume);
+    float smoulder = burnt * smoothstep(0.6, 0.78, fbm(spm * 9.0 + vec2(uNow * 0.2, 0.0))) * smoothstep(front - 0.4, front - 0.05, rm);
     glow += vec3(1.0, 0.33, 0.07) * smoulder * 0.55 * (0.3 + 0.7 * alive);
     vec3 fire = mix(vec3(0.85, 0.16, 0.05), vec3(1.0, 0.78, 0.3), n * flick);
     over(acc, fire, band * 0.8 * alive * flick);
@@ -344,28 +382,21 @@ void main() {
   } else {                               // storm (10) / snowstorm (11): rotating spiral bands; a cyclone has an eye
     float spin = vExt.z < 0.0 ? -1.0 : 1.0;
     float n = fbm(sp * 1.5 + uNow * 0.2);
-    float dens;
-    if (kind == 10 && vExt.w > 0.5) {
-      float arms = spiral(vQ, r, 2.0, 2.4, spin, 0.3);
-      float bands = smoothstep(0.3, 0.85, arms + (n - 0.5) * 0.5) * (1.0 - smoothstep(0.45, 1.0, r)) * (0.55 + 0.35 * n);
-      float cdo = exp(-r * r * 14.0) * 0.95;
-      float eye = smoothstep(0.035, 0.06, r);
-      float wall = ring(r, 0.075, 0.025);
-      dens = max(max(bands, cdo), wall * 0.95) * eye;
-      // thick tops are bright, the thin edges and the gaps between the bands grey; the eye wall casts a ring of shade
-      over(acc, vec3(0.3, 0.33, 0.37), ring(r, 0.05, 0.02) * 0.35);
-      over(acc, mix(vec3(0.58, 0.61, 0.66), vec3(0.98, 0.98, 0.96), clamp(dens * 1.2, 0.0, 1.0)), dens * 0.88);
-    } else {
-      bool snow = kind == 11;
-      // a snowstorm swirls in three loose arms; a mid-latitude storm is a comma: a cloud head and one long tail
-      float arms = spiral(vQ, r, snow ? 3.0 : 1.0, snow ? 1.2 : 1.1, spin, 0.2);
-      float body = snow ? 0.0 : exp(-r * r * 10.0) * (0.45 + 0.3 * n);
-      dens = max(smoothstep(snow ? 0.15 : 0.2, snow ? 0.85 : 0.7, arms + (n - 0.5) * 0.35) * (1.0 - smoothstep(0.3, 1.0, r)) * (0.48 + 0.4 * n), body)
-           + exp(-r * r * 30.0) * 0.15;
-      vec3 lo = snow ? vec3(0.6, 0.68, 0.8) : vec3(0.5, 0.53, 0.58), hi = snow ? vec3(0.96, 0.97, 1.0) : vec3(0.96, 0.96, 0.94);
-      if (!snow) over(acc, vec3(0.34, 0.37, 0.42), smoothstep(0.35, 0.8, dens) * 0.3);   // rain under the thick cloud
-      over(acc, mix(lo, hi, clamp(dens * 1.6 - 0.2, 0.0, 1.0)), min(dens, 0.9));
-    }
+    bool snow = kind == 11, cyc = kind == 10 && vExt.w > 0.5;
+    // the cloud top here and one step toward the sun (north-west, the light of the map): slopes facing it are lit,
+    // the far sides fall into shade, and the whole system casts a shadow on what lies under it — so a storm reads
+    // as a body of its own even over the white of the cloud layer
+    float H = stormTop(vQ, n, spin, cyc, snow), HS = stormTop(vQ + vec2(-0.025, 0.031), n, spin, cyc, snow);
+    float relief = clamp((H - HS) * 6.5, -1.0, 1.0);
+    float cover = smoothstep(0.07, 0.3, H);
+    vec3 lo = snow ? vec3(0.6, 0.69, 0.83) : vec3(0.53, 0.57, 0.66), mid = snow ? vec3(0.9, 0.93, 0.98) : vec3(0.89, 0.9, 0.915);
+    vec3 cc = relief > 0.0 ? mix(mid, vec3(1.0, 0.996, 0.985), relief) : mix(mid, lo, -relief);
+    cc = mix(cc, vec3(1.0, 0.996, 0.985), smoothstep(0.7, 1.0, H) * 0.5 * (1.0 - max(-relief, 0.0)));
+    over(acc, vec3(0.18, 0.21, 0.29), smoothstep(0.1, 0.4, HS) * (1.0 - cover) * 0.42);
+    // rain: slate under the thick cloud, and over the whole disc of a cyclone (its bands stand on an overcast)
+    if (!snow) over(acc, vec3(0.37, 0.41, 0.49), max(smoothstep(0.3, 0.75, H) * 0.3, cyc ? (1.0 - smoothstep(0.45, 0.9, r)) * 0.34 * smoothstep(0.03, 0.07, r) : 0.0));
+    // thin parts of the cloud let the map through (a snowstorm is a veil all over), thick ones are nearly opaque
+    over(acc, cc, cover * mix(snow ? 0.5 : 0.6, snow ? 0.82 : 0.94, smoothstep(0.3, 0.75, H)));
   }
 
   float m = env * edge * smoothstep(0.0, 0.06, vFace);
@@ -388,10 +419,10 @@ in vec4 aB;     // kind-specific
 uniform float uPx, uH;   // pixels per unit of tan(view angle); render height in pixels
 out vec2 vUV;
 out vec4 vCol;
-out float vAdd, vShape, vK, vSeed, vFlick;
+out float vAdd, vShape, vK, vSeed;
 
 void main() {
-  vUV = position.xy; vCol = vec4(0.0); vAdd = 0.0; vShape = 0.0; vK = 1.0; vSeed = aGeo.w; vFlick = 0.0;
+  vUV = position.xy; vCol = vec4(0.0); vAdd = 0.0; vShape = 0.0; vK = 1.0; vSeed = aGeo.w;
   float life = max(aTime.y, 1e-3);
   float age = (uNow - aTime.x) / life;
   if (age < 0.0 || age > 1.0) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
@@ -425,9 +456,9 @@ void main() {
 
   vec2 off = vec2(0.0), offT = vec2(0.0);   // position (east, north) and the streak's tail, already scaled
   float h = 0.0, hT = 0.0, size = 0.0, a = 1.0, add = 0.0;
-  float maxPx = 0.06 * uH, minPx = 1.5;
+  float maxPx = 0.06 * uH, minPx = 1.5, minLen = 0.0;   // minLen: shortest streak on screen, in half widths
   vec3 col = vec3(1.0);
-  int shape = 0;            // 0 puff, 1 glow, 2 streak (hot head), 3 lightning, 6 even streak, 7 meteor head, 8 snowflake
+  int shape = 0;            // 0 puff, 1 glow, 2 streak (hot head), 3 lightning, 5 dust billow, 6 even streak, 7 meteor head, 8 snowflake
   bool streak = false;
 
   if (kind == 0) {                       // ash puff: rises, then drifts downwind in a widening plume
@@ -440,15 +471,16 @@ void main() {
     a = smoothstep(0.0, 0.1, age) * (1.0 - smoothstep(0.45, 1.0, age)) * 0.7 * (0.85 + 0.35 * aA.z) * ashK;
     col = mix(vec3(0.27, 0.245, 0.225) * (1.0 - 0.3 * aA.z), vec3(0.58, 0.545, 0.5) * (1.0 - 0.2 * aA.z), age);
   } else if (kind == 1) {                // wildfire smoke: columns from points on the fire front streaming downwind
-    float L = aA.y, k = max(zs, 0.018 * uAlt / L);
+    float L = aA.y, k = max(zs, 0.028 * uAlt / L);   // from mid distance the plume keeps a readable size
     float rise = 0.5 * L * sqrt(age);
-    float ang = aA.x + (fract(sd * 13.7) - 0.5) * 0.6;
-    float drift = (0.05 + 3.5 * age) * L * (0.7 + 0.6 * fract(sd * 71.3));   // streams far downwind of the fire
+    float ang = aA.x + (fract(sd * 13.7) - 0.5) * 0.5;
+    float drift = (0.05 + 4.2 * age) * L * (0.7 + 0.6 * fract(sd * 71.3));   // streams far downwind of the fire
     off = aB.xy * zs + dirOf(ang) * drift * k; h = rise * k;
-    size = 0.55 * L * (0.35 + 1.4 * age) * k;
-    a = smoothstep(0.0, 0.12, age) * (1.0 - smoothstep(0.4, 1.0, age)) * 0.8 * ashK;
-    col = mix(vec3(0.4, 0.36, 0.31), vec3(0.7, 0.68, 0.64), smoothstep(0.0, 0.7, age));   // warm grey: reads over forest and snow
-    maxPx = 0.05 * uH;
+    size = 0.55 * L * (0.4 + 1.7 * age) * k;
+    a = smoothstep(0.0, 0.1, age) * (1.0 - smoothstep(0.35, 1.0, age)) * 0.85 * ashK;
+    // dark and brown over the fire, paling as it thins: reads over forest, snow and cloud alike
+    col = mix(vec3(0.3, 0.26, 0.225), vec3(0.72, 0.7, 0.67), smoothstep(0.0, 0.75, age));
+    maxPx = 0.075 * uH;
   } else if (kind == 2 || kind == 3) {   // meteor: aA = heading, path length, entry height, end height
     vec2 hd = dirOf(aA.x);
     if (kind == 2) {                     // the incandescent head; aB.x = size
@@ -505,27 +537,34 @@ void main() {
     off = (aB.zw + dirOf(aA.x) * aA.y * e1) * zs; h = aA.z * sqrt(age) * zs;
     size = mix(aA.w, aB.x, sqrt(age)) * zs;
     int tone = int(aB.y + 0.5);
-    col = tone == 0 ? vec3(0.5, 0.43, 0.36) : tone == 1 ? vec3(0.3, 0.28, 0.27) : tone == 2 ? vec3(0.72, 0.64, 0.52) : vec3(0.58, 0.47, 0.35);
-    col = mix(col, col * 0.55 + vec3(0.3), age * 0.6);
-    a = smoothstep(0.0, 0.1, age) * (1.0 - smoothstep(0.45, 1.0, age)) * (tone == 1 ? 0.7 : 0.45) * ashK;
+    // earthquake (2) and landslide (3) dust: a light warm cloud, paler than the ground it rose from, so it reads
+    // as dust in the air and not as more earth
+    col = tone == 0 ? vec3(0.5, 0.43, 0.36) : tone == 1 ? vec3(0.3, 0.28, 0.27) : tone == 2 ? vec3(0.8, 0.71, 0.55) : vec3(0.79, 0.68, 0.5);
+    col = mix(col, col * 0.55 + vec3(0.3), age * (tone >= 2 ? 0.35 : 0.6));
+    a = smoothstep(0.0, 0.1, age) * (1.0 - smoothstep(0.45, 1.0, age)) * (tone == 1 ? 0.7 : tone == 0 ? 0.45 : 0.78) * ashK;
     if (tone == 1) { float hot = exp(-Ts * 1.2); col = mix(col, vec3(0.95, 0.45, 0.15), hot * 0.45); add = hot * 0.35; }
+    if (tone >= 2) shape = 5;            // a billow with a clear edge
     maxPx = 0.075 * uH;
-  } else if (kind == 7) {                // glow / flash: aA = x0, y0, h0, size0; aB = size1, tone, decay power
-    off = aA.xy * zs; h = aA.z * zs;
-    size = mix(aA.w, aB.x, sqrt(age)) * zs;
+  } else if (kind == 7) {                // glow / flash: aA = x0, y0, h0, size0; aB = size1, tone, decay power, plume scale
+    float k = aB.w > 0.0 ? max(zs, 0.03 * uAlt / aB.w) : zs;   // a flash inside a plume keeps the plume's zoom floor
+    off = aA.xy * k; h = aA.z * k;
+    size = mix(aA.w, aB.x, sqrt(age)) * k;
     int tone = int(aB.y + 0.5);
     float f = tone == 1 ? 0.75 + 0.25 * sin(uNow * 17.0 + sd * 40.0) * sin(uNow * 5.3 + sd * 9.0) : 1.0;
     col = tone == 0 ? vec3(1.0, 0.93, 0.8) : tone == 1 ? vec3(1.0, 0.52, 0.18) : vec3(0.82, 0.86, 1.0);
     a = smoothstep(0.0, 0.03, age) * pow(1.0 - age, aB.z) * f;
     add = 1.0; shape = 1; maxPx = 0.45 * uH; minPx = 3.0;
-  } else if (kind == 8) {                // lightning: aA = x0, y0, h0, length; aB = flashes per second, width, plume scale
+  } else if (kind == 8) {                // lightning strike: aA = x0, y0, h0, azimuth; aB = length, width, plume scale, style
+    // The sprite lives for one strike: the first stroke, two return strokes along the same channel, an afterglow.
+    // The channel runs across the map (a vertical one would vanish seen from above) and is never shorter than a
+    // few of its widths on screen, so a strike reads from any distance.
     float k = aB.z > 0.0 ? max(zs, 0.03 * uAlt / aB.z) : zs;
-    off = aA.xy * k; h = aA.z * k; offT = off; hT = (aA.z + aA.w) * k;
-    float slot = floor(uNow * aB.x + sd * 31.0);
-    float on = step(0.7, hash12(vec2(slot, sd * 91.0)));
-    vFlick = fract(slot * 0.137) * 50.0;
-    size = aB.y * k; col = vec3(0.86, 0.88, 1.0);
-    a = on * (1.0 - smoothstep(0.85, 1.0, age)); add = 1.0; streak = true; shape = 3; minPx = 3.0; maxPx = 0.03 * uH;
+    vec2 hd = dirOf(aA.w) * aB.x * 0.5 * k;
+    off = aA.xy * k + hd; h = aA.z * k * 0.5; offT = aA.xy * k - hd; hT = aA.z * k;
+    float t2 = 0.15 + 0.1 * fract(sd * 7.31), t3 = t2 + 0.13 + 0.1 * fract(sd * 3.77);
+    float I = exp(-Ts * 10.0) + (Ts > t2 ? 0.85 * exp(-(Ts - t2) * 12.0) : 0.0) + (Ts > t3 ? 0.6 * exp(-(Ts - t3) * 8.0) : 0.0);
+    size = aB.y * k; col = aB.w > 0.5 ? vec3(0.9, 0.84, 1.0) : vec3(1.0, 0.9, 0.5);   // violet in ash, yellow in rain
+    a = min(I, 1.0); add = 1.0; streak = true; shape = 3; minPx = 10.0; maxPx = 0.036 * uH; minLen = 7.0;
   } else if (kind == 9) {                // snowflake circling the storm: aA = angle0, radius, height, size; aB.x = angular speed
     float ang = aA.x + aB.x * Ts, ang2 = ang - aB.x * 0.08;
     float br = 1.0 + 0.06 * sin(Ts * 1.3 + sd * 20.0);
@@ -545,7 +584,7 @@ void main() {
 
   // when the zoom floor blows an event up, heights grow much less than distances: from orbit a meteor's path
   // stays a ground track instead of climbing off the planet's limb (the plume kinds keep their own floor)
-  if (kind != 0 && kind != 1 && kind != 8) { float zh = (1.0 + 0.25 * (zs - 1.0)) / zs; h *= zh; hT *= zh; }
+  if (kind != 0 && kind != 1 && kind != 8 && !(kind == 7 && aB.w > 0.0)) { float zh = (1.0 + 0.25 * (zs - 1.0)) / zs; h *= zh; hT *= zh; }
   vec3 up;
   vec3 P = placeOff(g0, e, n, off, h, up);
   vec4 mv = viewMatrix * vec4(P, 1.0);
@@ -562,7 +601,7 @@ void main() {
     float L = length(dv);
     vec2 dx = L > 1e-7 ? dv / L : vec2(1.0, 0.0);
     vec2 dy = vec2(-dx.y, dx.x);
-    float hl = 0.5 * L + hw;
+    float hl = 0.5 * max(L, minLen * hw) + hw;
     vs = (s + st) * 0.5 + dx * c.x * hl + dy * c.y * hw;
     vK = hl / hw;
   } else {
@@ -579,12 +618,51 @@ precision highp float;
 uniform float uDot;
 in vec2 vUV;
 in vec4 vCol;
-in float vAdd, vShape, vK, vSeed, vFlick;
+in float vAdd, vShape, vK, vSeed;
 layout(location = 0) out vec4 fragColor;
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 ${NOISE}
+// the path of a lightning channel across its quad (t along it, 0..1): a zigzag of straight pieces (the noise row
+// is read between texel centres, so it is piecewise linear), pinned to the axis at both ends
+float boltPath(float t, float row) {
+  float pin = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.82, 1.0, t));
+  return ((vnoise(vec2(t * 7.0, row)) - 0.5) * 1.5 + (vnoise(vec2(t * 23.0, row + 37.0)) - 0.5) * 0.45) * pin * 0.8;
+}
 void main() {
   int shape = int(vShape + 0.5);
+  if (shape == 3) {
+    // lightning: a jagged channel with two thinner branches. The core is laid over the map in its own colour
+    // (white-hot along the axis) inside a dark outline, so it reads over white cloud as well as over dark ash;
+    // the glow around it is added light
+    float t = vUV.x * 0.5 + 0.5, y = vUV.y, row = floor(vSeed * 199.0);
+    float d = abs(y - boltPath(t, row));
+    float core = 1.0 - smoothstep(0.05, 0.14, d), hot = 1.0 - smoothstep(0.0, 0.07, d);
+    float halo = exp(-d * d * 9.0);
+    float ink = 1.0 - smoothstep(0.16, 0.36, d);
+    for (int i = 0; i < 2; i++) {
+      float fi = float(i);
+      float tb = 0.2 + 0.32 * fi + 0.16 * fract(vSeed * (13.3 + 16.4 * fi)), len = 0.13 + 0.09 * fract(vSeed * (5.7 + 9.1 * fi));
+      float u = (t - tb) / len;
+      if (u > 0.0 && u < 1.0) {
+        // a short fork that leaves the channel at a clear angle, toward the emptier side of the quad
+        float y0 = boltPath(tb, row), side = y0 > 0.0 ? -1.0 : 1.0;
+        float yb = y0 + side * u * (0.6 + 0.3 * fract(vSeed * 77.0 + fi * 0.37)) + (vnoise(vec2(t * 31.0, row + 71.0 + 13.0 * fi)) - 0.5) * 0.4 * u;
+        float db = abs(y - yb), fade = 1.0 - u;
+        core = max(core, (1.0 - smoothstep(0.03, 0.1, db)) * (0.4 + 0.6 * fade));
+        halo = max(halo, exp(-db * db * 16.0) * fade);
+        ink = max(ink, (1.0 - smoothstep(0.11, 0.28, db)) * fade);
+      }
+    }
+    float ends = 1.0 - smoothstep(0.86, 1.0, abs(vUV.x));
+    float I = vCol.a, on = smoothstep(0.02, 0.22, I) * ends;
+    float coreA = core * min(I * 1.6, 1.0) * ends, inkA = ink * 0.75 * on;
+    float cover = max(coreA, inkA);
+    vec3 over = mix(vec3(0.1, 0.09, 0.22), mix(vCol.rgb, vec3(1.0, 0.99, 0.95), hot), coreA / max(cover, 1e-4));
+    vec3 light = vCol.rgb * halo * 0.4 * min(I * 1.25, 1.0) * ends;
+    if (cover + dot(light, vec3(0.33)) < 0.006) discard;
+    fragColor = vec4(over * cover + light, cover);
+    return;
+  }
   vec2 c = vUV;
   float a, core = 0.0;
   vec3 col = vCol.rgb;
@@ -615,12 +693,16 @@ void main() {
     if (shape == 2) { a *= mix(0.2, 1.0, along * along); core = (1.0 - smoothstep(0.0, 0.5, d)) * along; }
     else core = 1.0 - smoothstep(0.0, 0.5, d);
     if (shape == 8) { a = 1.0 - smoothstep(0.6, 1.0, d); col *= mix(vec3(0.62, 0.7, 0.82), vec3(1.0), 1.0 - smoothstep(0.25, 0.7, d)); }
-  } else if (shape == 3) {               // lightning: a jagged line along x with a soft halo
-    float t = c.x * 0.5 + 0.5;
-    float j = (vnoise(vec2(t * 6.0, vSeed * 53.0 + vFlick)) - 0.5) * 0.9 + (vnoise(vec2(t * 21.0, vSeed * 7.0 + vFlick)) - 0.5) * 0.35;
-    float d = abs(c.y - j * (1.0 - abs(c.x) * 0.5));
-    core = exp(-d * d * 700.0);
-    a = core + exp(-d * d * 6.0) * 0.3 * (1.0 - abs(c.x));
+  } else if (shape == 5) {               // dust billow: a rounded lump with a clear edge, light on top, shaded below
+    // (a soft puff of pale dust would melt into pale ground: the shaded rim is what makes it read)
+    float r = length(c);
+    if (r > 1.0) discard;
+    float lump = vnoise(c * 2.6 + vSeed * 41.0);
+    float rr = r + (lump - 0.5) * 0.36;
+    a = 1.0 - smoothstep(0.48, 0.9, rr);
+    float lit = clamp(dot(c, vec2(-0.55, 0.65)) * 0.9 + (lump - 0.5) * 0.7, -1.0, 1.0);
+    col *= 0.94 + 0.16 * lit;
+    col = mix(col, col * vec3(0.6, 0.57, 0.54), smoothstep(0.38, 0.8, rr) * (0.55 - 0.45 * lit));
   } else if (shape == 4) {               // lava tongue: an elongated lens with a ragged edge
     float d = length(vec2(max(abs(c.x) * vK - (vK - 1.0), 0.0), c.y));
     float rag = vnoise(c * vec2(vK * 2.0, 2.0) + vSeed * 13.0);

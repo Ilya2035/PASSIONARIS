@@ -1,10 +1,11 @@
 // Map legend: a small paper slip above the mode buttons that says what the colours mean in the current mode.
-// The ramps are JS copies of the shader ramps in src/game/shaders.js (hypso, tempRamp, precRamp, hazardRamp and the
-// WX_* / AIR_* / WIND_* colours of the weather, air and winds modes); the Köppen palette and the fertility ramp come
-// straight from src/sim/climate (the shader's copies are generated from the same tables).
+// The ramps of the older modes are JS copies of the shader ramps in src/game/shaders.js (hypso, tempRamp, precRamp,
+// hazardRamp); the climate belts, weather, air and winds read the same table as the shader (./mapcolors.js), and
+// the fertility ramp comes straight from src/sim/climate/fertility.js — so those cannot drift from the map.
 import { BIOME_COLORS } from '../world/biomes.js';
 import { KOPPEN, KOPPEN_GROUPS } from '../../sim/climate/koppen.js';
-import { fertRamp } from '../../sim/climate/fertility.js';
+import { fertRamp, FERT_TIERS } from '../../sim/climate/fertility.js';
+import { koppenColor, WX, WX_STEPS, AIR, WIND } from './mapcolors.js';
 import './legend.css';
 
 const $ = id => document.getElementById(id);
@@ -12,14 +13,7 @@ const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
 const mix = (c, d, t) => c.map((v, i) => v + (d[i] - v) * t);
 const css = c => `rgb(${c.map(v => Math.round(v * 255)).join(',')})`;
 
-const PAPER = [0.93, 0.9, 0.84];   // ≈ the quiet base of the weather / air / winds maps
-const WX = {
-  warm: [0.85, 0.42, 0.3], cold: [0.32, 0.5, 0.78], drought: [0.6, 0.38, 0.19], cloud: [0.94, 0.94, 0.93], snow: [0.975, 0.98, 0.995],
-  rain: r => mix(mix([0.6, 0.78, 0.6], [0.2, 0.52, 0.38], ss(0, 0.55, r)), [0.38, 0.24, 0.5], ss(0.6, 1, r)),
-  snowfall: r => mix([0.84, 0.84, 0.95], [0.58, 0.54, 0.83], ss(0, 1, r)),
-};
-const AIR = { ash: [0.22, 0.21, 0.21], smoke: [0.52, 0.38, 0.27], dust: [0.85, 0.62, 0.32], sulf: [0.6, 0.55, 0.76], fall: [0.35, 0.33, 0.32], cool: [0.42, 0.58, 0.82] };
-const WIND = { east: [0.88, 0.72, 0.5], west: [0.52, 0.66, 0.8] };
+const PAPER = [0.83, 0.82, 0.75];   // ≈ the light paper land of the weather / air / winds maps
 const CURRENT = { warm: [0.86, 0.55, 0.32], cold: [0.6, 0.76, 0.9] };   // src/game/fx/currents.js defaults
 
 const RAMPS = {
@@ -42,8 +36,6 @@ const RAMPS = {
     return mix(c, [0.16, 0.32, 0.55], ss(0.65, 1, p));
   },
   hazard: h => mix(mix([0.98, 0.9, 0.62], [0.93, 0.62, 0.3], ss(0.1, 0.5, h)), [0.62, 0.16, 0.14], ss(0.5, 1, h)),
-  // weather anomaly: −8 … +8 °C (the shader mixes 60 % of the tint at |8 °C|)
-  anomaly: x => { const a = x * 2 - 1; return mix(PAPER, a > 0 ? WX.warm : WX.cold, Math.pow(Math.abs(a), 0.85) * 0.6); },
   fert: f => mix(fertRamp(f), PAPER, 0.08),
 };
 
@@ -52,9 +44,19 @@ function gradient(fn, from, to, n = 24) {
   for (let i = 0; i <= n; i++) { const x = from + (to - from) * i / n; stops.push(`${css(fn(x))} ${(i / n * 100).toFixed(1)}%`); }
   return `linear-gradient(90deg, ${stops.join(', ')})`;
 }
+// a bar of equal flat steps (banded maps)
+function steps(colors) {
+  const n = colors.length;
+  return `linear-gradient(90deg, ${colors.map((c, i) => `${css(c)} ${(i / n * 100).toFixed(2)}% ${((i + 1) / n * 100).toFixed(2)}%`).join(', ')})`;
+}
 const bar = (bg, ticks) => `<div class="lg-bar" style="background:${bg}"></div><div class="lg-ticks">${ticks.map(([p, t]) => `<span style="left:${p}%">${t}</span>`).join('')}</div>`;
-const sw = (c, name, cls = '') => `<span><i class="${cls}" style="--c:${css(c)};background:${cls ? 'transparent' : css(c)}"></i>${name}</span>`;
-const grid = items => `<div class="lg-grid">${items.join('')}</div>`;
+// a swatch with a name; cls: 'hatch' (diagonal strokes) or 'dots' (stipple) drawn in the colour over paper
+const sw = (c, name, cls = '') => `<span><i class="${cls}" style="--c:${css(c)};background:${cls ? css(PAPER) : css(c)}"></i>${name}</span>`;
+// a swatch of several flat steps (thin → thick)
+const swSteps = (colors, name) => `<span><i class="wide" style="background:${steps(colors)}"></i>${name}</span>`;
+const grid = (items, cls = '') => `<div class="lg-grid ${cls}">${items.join('')}</div>`;
+const sub = text => `<div class="lg-sub">${text}</div>`;
+const note = text => `<div class="lg-note">${text}</div>`;
 
 const BIOMES = [
   ['ice', 'Льды'], ['tundra', 'Тундра'], ['taiga', 'Тайга'], ['temperate_forest', 'Умеренный лес'], ['steppe', 'Степь'],
@@ -65,11 +67,49 @@ const BIOMES = [
 // Köppen: the five groups with their classes as small labelled chips (the code on the class colour)
 function koppenLegend() {
   const chip = k => {
-    const L = 0.3 * k.color[0] + 0.55 * k.color[1] + 0.15 * k.color[2];
-    return `<span class="lg-chip${L < 0.5 ? ' dark' : ''}" style="background:${css(k.color)}" title="${k.code} — ${k.nameRu}">${k.code}</span>`;
+    const c = koppenColor(k.code), L = 0.3 * c[0] + 0.55 * c[1] + 0.15 * c[2];
+    return `<span class="lg-chip${L < 0.52 ? ' dark' : ''}" style="background:${css(c)}" title="${k.code} — ${k.nameRu}">${k.code}</span>`;
   };
   const rows = KOPPEN_GROUPS.map(g => `<div class="lg-kg"><b>${g.key}</b>${g.nameRu}</div><div class="lg-chips">${KOPPEN.filter(k => k.group === g.key).map(chip).join('')}</div>`);
-  return `${rows.join('')}<div class="lg-note">f — без сухого сезона · s — сухое лето · w — сухая зима; a, b, c — жаркое, тёплое, прохладное лето, d — лютая зима; h / k — жарко / холодно. Пояса этой эпохи: сдвигаются с климатом</div>`;
+  return `${rows.join('')}${note('вторая буква — сухой сезон: f — нет, s — летом, w — зимой; третья — лето: a жаркое, b тёплое, c прохладное, d — лютая зима; в сухих поясах h — жарко, k — холодно. Наведите на значок — название. Пояса этой эпохи: они сдвигаются вместе с климатом')}`;
+}
+
+// «Плодородие»: the ramp with its six named tiers
+function fertilityLegend() {
+  const tiers = FERT_TIERS.map((t, i) => {
+    const lo = i ? FERT_TIERS[i - 1].max : 0, hi = Number.isFinite(t.max) ? t.max : 1;
+    return sw(RAMPS.fert((lo + hi) / 2), t.nameRu[0].toUpperCase() + t.nameRu.slice(1));
+  });
+  return bar(gradient(RAMPS.fert, 0, 1), [[0, '0'], [20, '20'], [40, '40'], [60, '60'], [80, '80'], [100, '100 %']])
+    + grid(tiers, 'three')
+    + note('тепло для роста × влага × почвы × рельеф; реки, озёра и побережья дают воду засушливым землям, крутые склоны и высокогорья отнимают');
+}
+
+// «Погода сегодня»: the anomaly in the map's own bands (four on either side of the norm), then the signs
+function weatherLegend() {
+  const n = WX_STEPS.anomaly.length, bands = [];
+  for (let i = -n; i <= n; i++) bands.push(mix(PAPER, i > 0 ? WX.warm : WX.cold, Math.abs(i) / n * 0.64));
+  return sub('Температура против нормы месяца')
+    + bar(steps(bands), [[0, '−8'], [27.8, '−4'], [50, 'норма'], [72.2, '+4'], [100, '+8 °C']])
+    + sub('Осадки за день')
+    + grid([swSteps(WX.rain, 'Морось · дождь · ливень'), swSteps(WX.snowfall, 'Снегопад: слабый · сильный')], 'one')
+    + grid([sw(WX.cloud, 'Облачность', 'dots'), sw(WX.snow, 'Снег и лёд'), sw(WX.drought, 'Засуха', 'hatch')], 'three')
+    + note('норма — средняя температура этого месяца в нынешнюю эпоху');
+}
+
+function airLegend() {
+  const thin = (c, k) => mix(PAPER, c, k);
+  const three = (c, top) => [thin(c, 0.5 * top), thin(c, 0.78 * top), thin(c, top)];
+  return grid([swSteps(three(AIR.ash, 0.93), 'Вулканический пепел'), swSteps(three(AIR.smoke, 0.9), 'Дым пожаров'), swSteps(three(AIR.dust, 0.9), 'Пыль')], 'one')
+    + grid([sw(thin(AIR.sulf, 0.7), 'Вулканическая дымка'), sw(thin(AIR.cool, 0.42), 'Вулканическая зима'), sw(AIR.fall, 'Пепел на земле', 'hatch')])
+    + note('три ступени: редкое, густое, плотное облако. Облака несёт ветер; чистая карта — чистый воздух');
+}
+
+function windsLegend() {
+  const belt = c => mix(PAPER, c, 0.36);
+  return grid([sw(belt(WIND.east), 'Пассаты и полярные восточные'), sw(belt(WIND.west), 'Западные ветры'), sw(PAPER, 'Штили')], 'one')
+    + grid([sw(CURRENT.warm, 'Тёплые течения'), sw(CURRENT.cold, 'Холодные течения')])
+    + note('штрихи — куда дует ветер в этом сезоне; линии в море — течения');
 }
 
 const CONTENT = {
@@ -80,18 +120,10 @@ const CONTENT = {
   hazards: () => ['Наибольшая природная опасность', `<div class="lg-steps">${[1, 2, 3, 4, 5].map(l => `<span><i style="background:${css(RAMPS.hazard(l / 5))}"></i>${l}</span>`).join('')}</div><div class="lg-note">землетрясения: 1 = 2–4 балла · 2 = 4–6 · 3 = 6–8 · 4 = 8–10 · 5 = более 10</div>`],
   regions: () => ['Районы, провинции, регионы', '<div class="lg-note">толстая линия — регион, средняя — провинция, тонкая — район; у каждого региона своё семейство оттенков</div>'],
   koppen: () => ['Климатические пояса (по Кёппену)', koppenLegend()],
-  fertility: () => ['Плодородие земель', bar(gradient(RAMPS.fert, 0, 1), [[0, 'бесплодные'], [50, 'средние'], [100, 'богатейшие']])
-    + '<div class="lg-note">тепло для роста × влага × почвы × рельеф; реки, озёра и побережья дают воду засушливым землям, крутые склоны и высокогорья отнимают</div>'],
-  weather: () => ['Погода сегодня', bar(gradient(RAMPS.anomaly, 0, 1), [[0, '−8'], [50, 'норма'], [100, '+8 °C']])
-    + grid([sw(WX.rain(0.35), 'Дождь'), sw(WX.rain(1), 'Ливень'), sw(WX.snowfall(0.6), 'Снегопад'), sw(WX.cloud, 'Облачность'),
-      sw(WX.snow, 'Снег и лёд'), sw(WX.drought, 'Засуха', 'hatch')])
-    + '<div class="lg-note">отклонение от нормы этого месяца в нынешнюю эпоху</div>'],
-  air: () => ['Воздух', grid([sw(AIR.ash, 'Вулканический пепел'), sw(AIR.smoke, 'Дым пожаров'), sw(AIR.dust, 'Пыль'), sw(AIR.sulf, 'Вулканическая дымка'),
-    sw(AIR.fall, 'Пепел на земле', 'hatch'), sw(AIR.cool, 'Вулканическая зима')])
-    + '<div class="lg-note">облака уносит ветрами; пустая карта — чистый воздух</div>'],
-  winds: () => ['Ветры и течения', grid([sw(WIND.east, 'Пассаты, восточные'), sw(WIND.west, 'Западные ветры'), sw(PAPER, 'Штили'),
-    sw(CURRENT.warm, 'Тёплые течения'), sw(CURRENT.cold, 'Холодные течения')])
-    + '<div class="lg-note">штрихи — направление ветров этого сезона</div>'],
+  fertility: () => ['Плодородие земель', fertilityLegend()],
+  weather: () => ['Погода сегодня', weatherLegend()],
+  air: () => ['Воздух', airLegend()],
+  winds: () => ['Ветры и течения', windsLegend()],
 };
 
 export function showLegend(mode) {

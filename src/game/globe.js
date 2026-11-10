@@ -3,6 +3,7 @@ import { TERRAIN_VERT, TERRAIN_FRAG, RIVER_VERT, RIVER_FRAG, ATMO_VERT, ATMO_FRA
 import { makeHeightTexture, makeCellTexture, makeInfoTexture, makeColorTexture, INFO_W } from './data.js';
 export { INFO_W };
 import { getPalette } from '../shared/palettes.js';
+import { bakeCloudNoise } from './fx/cloudnoise.js';
 
 const QUALITY = {
   low: { az: 512, rings: 300 },
@@ -41,16 +42,19 @@ function dummyClimate(layers = 4) {
   t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; t.needsUpdate = true;
   return t;
 }
-// value-noise lattice for the terrain shader (shaders.js vnoise): n x n RG8 random bytes, bilinear, tiling.
-// Deterministic (xorshift32), so captures and the look do not change between runs.
+// noise for the terrain shader, n x n RGBA8, bilinear, tiling. R and G: random bytes, the value-noise lattice
+// (shaders.js vnoise, read at mip 0). B and A: baked cloud noise (src/game/fx/cloudnoise.js: billows and a smooth
+// fractal, read through the mip chain by shaders.js cloudNoise). Deterministic (xorshift32, mulberry32), so
+// captures and the look do not change between runs.
 function makeNoiseTexture(n = 512) {
-  const d = new Uint8Array(n * n * 2);
+  const d = new Uint8Array(n * n * 4);
   let s = 0x2545f491;
-  for (let i = 0; i < d.length; i++) { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; d[i] = s >>> 24; }
-  const t = new THREE.DataTexture(d, n, n, THREE.RGFormat, THREE.UnsignedByteType);
-  t.minFilter = t.magFilter = THREE.LinearFilter;
+  for (let i = 0; i < n * n * 2; i++) { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; d[(i >> 1) * 4 + (i & 1)] = s >>> 24; }
+  bakeCloudNoise(d, n);
+  const t = new THREE.DataTexture(d, n, n, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.generateMipmaps = false; t.needsUpdate = true;
+  t.generateMipmaps = true; t.needsUpdate = true;
   return t;
 }
 function dummyR8() {
@@ -178,6 +182,7 @@ export class Globe {
         uCloudAmt: { value: 1 },
         // zoom response of clouds and aerosols (set in update): bodies crisp from orbit, a tone up close
         uCloudVis: { value: 1 }, uCloudTone: { value: 0 }, uCloudCrisp: { value: 1 },
+        uCloudK: { value: new THREE.Vector4(0.6, 7.1, 1.02, 10) }, uCloudK2: { value: new THREE.Vector4(1, 0.16, 0.7, 1) },
         // aerosol layer (src/game/world/aerosols.js): 360x180 RGBA ash/smoke/dust/sulphate + ground deposit
         uAero: { value: dummyRGBA(0) }, uAeroGround: { value: dummyRGBA(0) }, uHasAero: { value: 0 },
         uAeroAmt: { value: 0 }, uAeroVis: { value: 1 }, uAeroLag: { value: 0 }, uItcz: { value: 1 },
@@ -186,6 +191,7 @@ export class Globe {
         uWater: { value: dummyR8() }, uHasWater: { value: 0 },
         uNeedInfo: { value: 0 },
         uNoise: { value: makeNoiseTexture() },
+        uDot: { value: 2 },   // stipple dot of cloud and aerosol edges, render pixels (fx/events.js keeps it in step)
       },
     });
     this.terrainNear = new THREE.Mesh(polarGrid(q.az, q.rings), this.terrainMat);
@@ -491,11 +497,18 @@ export class Globe {
     {
       const k = Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.035)) / (Math.log(1.1) - Math.log(0.035))));
       const zk = k * k * (3 - 2 * k);   // 0 close-up … 1 orbit
-      u.uCloudVis.value = 0.12 + 0.88 * Math.pow(zk, 1.3);
+      u.uCloudVis.value = 0.1 + 0.9 * zk * zk;   // the bodies are denser than they were, so they thin out sooner
       u.uCloudTone.value = 1 - zk;
       u.uCloudCrisp.value = zk;
       u.uAeroAmt.value = u.uCloudAmt.value;
       u.uAeroVis.value = 0.2 + 0.8 * Math.pow(zk, 1.1);
+      // what the cloud and aerosol shader blocks need of the zoom, ready-made (per-pixel arithmetic is what a weak
+      // GPU pays for): the edges of cloud bodies and tops — clear from orbit, soft up close — and how much of the
+      // volume (lit slopes, shadows, stipple) still shows
+      const e0 = 0.5 + 0.1 * zk, e1 = 0.95 - 0.21 * zk, t0 = 0.95 + 0.07 * zk, t1 = 1.4 - 0.28 * zk;
+      const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+      u.uCloudK.value.set(e0, 1 / (e1 - e0), t0, 1 / (t1 - t0));
+      u.uCloudK2.value.set(sm(0.2, 0.5, zk), 0.34 - 0.18 * zk, 0.7 * zk, sm(0.4, 0.8, u.uAeroVis.value));
     }
     // political colours are strong from afar and give way to the terrain up close
     u.uOverlay.value = this.overlayBase * (0.3 + 0.7 * Math.min(1, Math.max(0, (Math.log(alt) - Math.log(0.015)) / (Math.log(0.6) - Math.log(0.015)))));

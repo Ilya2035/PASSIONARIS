@@ -74,6 +74,7 @@ export class EventFx {
     this.heightPx = 900;
     this.fov = 34;
     this.noise = makeNoise();
+    this.strikes = [];   // effect times of the latest lightning strikes (captures and checks: fx.now = a strike)
 
     // ---- decals
     const grid = new THREE.PlaneGeometry(2, 2, GRID, GRID);
@@ -144,7 +145,8 @@ export class EventFx {
 
   get active() { return this.decals.visible || this.parts.visible; }
 
-  // ev: {type, lat, lon, level 1..5, vei 0..8, severity 1..5, magnitude, kind ('airburst' for meteorites), tropical}
+  // ev: {type, lat, lon, level 1..5, vei 0..8, severity 1..5, magnitude, kind ('airburst' for meteorites, 'tropical'
+  // for storms: a cyclone with an eye — also subtype: 'tropical' or tropical: true)}
   spawn(ev) {
     const kind = FX_KINDS[ev.type];
     if (kind === undefined || !Number.isFinite(ev.lat) || !Number.isFinite(ev.lon)) return false;
@@ -159,7 +161,7 @@ export class EventFx {
       case 'landslide': this.#landslide(e); break;
       case 'wildfire': this.#wildfire(e); break;
       case 'flood': this.#simple(e, DK.flood, 50 + lvl * 45, 8 + lvl); break;
-      case 'storm': case 'snowstorm': this.#storm(e, ev.type === 'snowstorm', !!ev.tropical || ev.subtype === 'tropical'); break;
+      case 'storm': case 'snowstorm': this.#storm(e, ev.type === 'snowstorm', ev.kind === 'tropical' || ev.subtype === 'tropical' || ev.tropical === true); break;
       default: this.#simple(e, kind, 380 + lvl * 90, 9 + lvl); break; // heat / cold / drought
     }
     this.#flush();
@@ -210,15 +212,28 @@ export class EventFx {
         S(SK.spark, tk + 0.25 * r(), 0.7 + 0.5 * r(), 0, 0, h0, r() * TAU, R * 0.07 * r(), V, V + h0, R * 0.005);
       }
     }
-    // lightning flickers inside the ash column
+    // lightning in the ash column: a few strikes over the eruption, each a bright bolt and the flash it throws on
+    // the plume (rare enough to be an event, not a flicker)
     if (vei >= 4) {
       const sx = Math.sin(wind), sy = Math.cos(wind);
-      for (let i = 0, m = 3 + 3 * (vei - 4); i < m; i++) {
-        const d = L * (0.25 + 0.9 * r()), j = (r() - 0.5) * L * 0.3;
-        // bolt: aA = x, y, height, length; aB = flashes per second, width, plume scale (same zoom floor as the ash)
-        S(SK.bolt, t0 + r() * life * 0.6, 1.2 + 1.5 * r(), sx * d + sy * j, sy * d - sx * j, L * (0.12 + 0.2 * r()), L * (0.12 + 0.1 * r()), 7 + 5 * r(), L * 0.03, L, 0);
+      for (let i = 0, m = 3 + 2 * (vei - 4); i < m; i++) {
+        const d = L * (0.2 + 0.8 * r()), j = (r() - 0.5) * L * 0.3;
+        this.#strike(S, t0 + 0.8 + ((i + 0.9 * r()) / m) * life * 0.72, sx * d + sy * j, sy * d - sx * j, L * (0.14 + 0.2 * r()), wind + (r() - 0.5) * 2.4, L * (0.45 + 0.3 * r()), L * 0.05, L, 1);
       }
     }
+  }
+
+  // one lightning strike: the flash on the cloud around it, then the bolt on top (sprites draw in spawn order).
+  // x, y, h: where (east, north, height); az: the direction the channel runs; len, wid: its size; plume: the plume
+  // scale whose zoom floor it shares (0 = the event's own); style 1 = violet (ash), 0 = warm (rain)
+  #strike(S, t, x, y, h, az, len, wid, plume, style) {
+    const life = 0.6 + 0.15 * this.rand();
+    this.strikes.push(t);
+    if (this.strikes.length > 64) this.strikes.shift();
+    // glow: aA = x, y, height, size0; aB = size1, tone (2 = cold flash), decay, plume scale
+    S(SK.glow, t, 0.45, x, y, h, len * 0.4, len * 1.25, 2, 2.0, plume);
+    // bolt: aA = x, y, height, azimuth; aB = length, width, plume scale, style
+    S(SK.bolt, t, life, x, y, h, az, len, wid, plume, style);
   }
 
   // lava tongues that follow the slope down from the vent (traced on the height grid), advancing over the
@@ -365,11 +380,29 @@ export class EventFx {
   #earthquake(e) {
     const { lat, lon, lvl, seed, t0 } = e, r = this.rand;
     const R = [0, 25, 60, 140, 320, 650][lvl] * KM, life = 3.5 + lvl * 0.9, str = lvl / 5;
-    this.#decal(lat, lon, DK.earthquake, R, 1, t0, life, seed, str, r() * Math.PI);
-    for (let i = 0, m = 3 + 3 * lvl; i < m; i++) {
-      const rr = R * 0.7 * Math.sqrt(r()), a = r() * TAU;
-      const birth = t0 + (rr / R / 0.95 / 1.35) * life;      // when the first ripple gets there
-      this.#sprite(lat, lon, SK.dust, birth, 2 + r(), R, str, r() * TAU, R * 0.06, R * 0.015, R * 0.02, R * (0.05 + 0.03 * r()), 2, Math.sin(a) * rr, Math.cos(a) * rr);
+    const fa = r() * Math.PI;                                // the rupture's bearing (the decal draws it)
+    this.#decal(lat, lon, DK.earthquake, R, 1, t0, life, seed, str, fa);
+    // dust: aA = azimuth, reach, height, size0; aB = size1, tone (2 = quake), origin x, y
+    const dust = (birth, x, y, big) => this.#sprite(lat, lon, SK.dust, birth, 3.6 + 1.6 * r(), R, str, r() * TAU, R * 0.05 * big, R * 0.03 * big, R * 0.03 * big,
+      R * (0.075 + 0.045 * r()) * big, 2, x, y);
+    // thrown up along the rupture as it opens
+    const flen = R * (0.14 + 0.3 * str) * 0.8, fx = Math.sin(fa), fy = Math.cos(fa);
+    for (let i = 0, m = 2 + lvl; i < m; i++) {
+      const u = (2 * (i + r()) / m - 1) * flen, w = (r() - 0.5) * R * 0.08;
+      dust(t0 + 0.1 + 0.5 * r(), fx * u + fy * w, fy * u - fx * w, 1.1);
+    }
+    // and where the shaking reaches steep ground: of a few spots tried, the steepest gives way
+    const steep = (x, y) => { const d = R * 0.03; return Math.abs(this.#heightLocal(lat, lon, x + d, y) - this.#heightLocal(lat, lon, x - d, y)) + Math.abs(this.#heightLocal(lat, lon, x, y + d) - this.#heightLocal(lat, lon, x, y - d)); };
+    for (let i = 0, m = 4 + 4 * lvl; i < m; i++) {
+      let bx = 0, by = 0, bs = -1, brr = 0;
+      for (let k = 0; k < 4; k++) {
+        const rr = R * (0.12 + 0.6 * Math.sqrt(r())), a = r() * TAU, x = Math.sin(a) * rr, y = Math.cos(a) * rr;
+        if (this.#heightLocal(lat, lon, x, y) <= 0) continue;   // not on the sea
+        const sl = steep(x, y);
+        if (sl > bs) { bs = sl; bx = x; by = y; brr = rr; }
+      }
+      if (bs < 0) continue;
+      dust(t0 + (brr / R / 0.95 / 1.35) * life, bx, by, 1.2 + 0.5 * r());   // when the first ripple gets there
     }
   }
 
@@ -385,10 +418,16 @@ export class EventFx {
     az += (r() - 0.5) * 0.4;
     this.#decal(lat, lon, DK.landslide, R, 1, t0, life, seed, str, az);
     const sx = Math.sin(az), sy = Math.cos(az);
-    for (let i = 0, m = 4 + 2 * lvl; i < m; i++) {
-      const j = (r() - 0.5) * R * 0.3;
-      this.#sprite(lat, lon, SK.dust, t0 + 0.1 + r() * life * 0.4, 2 + r(), R, str, az + (r() - 0.5) * 0.5, R * (0.4 + 0.4 * r()), R * 0.04, R * 0.05,
-        R * 0.14, 3, -sx * R * 0.3 + sy * j, -sy * R * 0.3 - sx * j);
+    // dust sliding along the tongue…
+    for (let i = 0, m = 7 + 3 * lvl; i < m; i++) {
+      const j = (r() - 0.5) * R * 0.36;
+      this.#sprite(lat, lon, SK.dust, t0 + 0.1 + r() * life * 0.42, 3.4 + 1.4 * r(), R, str, az + (r() - 0.5) * 1.1, R * (0.5 + 0.7 * r()), R * 0.12, R * 0.1,
+        R * (0.3 + 0.16 * r()), 3, -sx * R * 0.3 + sy * j, -sy * R * 0.3 - sx * j);
+    }
+    // …and the cloud that billows up where the slide comes to rest
+    for (let i = 0, m = 3 + lvl; i < m; i++) {
+      this.#sprite(lat, lon, SK.dust, t0 + life * (0.22 + 0.2 * r()), 3.6 + 1.4 * r(), R, str, r() * TAU, R * (0.25 + 0.5 * r()), R * 0.22, R * 0.14,
+        R * (0.42 + 0.2 * r()), 3, sx * R * 0.42, sy * R * 0.42);
     }
   }
 
@@ -397,16 +436,16 @@ export class EventFx {
     const { lat, lon, lvl, seed, t0 } = e, r = this.rand;
     const R = (18 + lvl * 26) * KM, life = 8 + lvl * 1.6, str = lvl / 5;
     const wind = windAzimuth(lat) + (r() - 0.5) * 1.2, wx = Math.sin(wind), wy = Math.cos(wind);
-    this.#decal(lat, lon, DK.wildfire, R, 1, t0, life, seed, str, wind);
+    this.#decal(lat, lon, DK.wildfire, R, 3, t0, life, seed, str, wind);   // 3x the fire: the smoke lies downwind of it
     // where the front is at a given age and bearing (the decal's formula without its noise)
     const front = (age, a) => R * (0.22 + 0.68 * smooth(0, 0.85, age)) * (0.85 + 0.3 * Math.cos(a - wind)) * 0.85;
-    const L = (8 + lvl * 5) * KM, cols = 2 + lvl, per = Math.round((40 + lvl * 16) / cols);
+    const L = (8 + lvl * 5) * KM, cols = 2 + lvl, per = Math.round((48 + lvl * 18) / cols);
     for (let c = 0; c < cols; c++) {
       const a = r() * TAU;
       for (let i = 0; i < per; i++) {
         const birth = t0 + ((i + 0.5 * r()) / per) * life * 0.8, f = front((birth - t0) / life, a);
         // smoke: aA = wind azimuth, plume scale; aB = origin x, y
-        this.#sprite(lat, lon, SK.smoke, birth, 3.4 * (0.8 + 0.4 * r()), R, str, wind, L, 0, 0, Math.sin(a) * f, Math.cos(a) * f, 0, 0);
+        this.#sprite(lat, lon, SK.smoke, birth, 4.4 * (0.8 + 0.4 * r()), R, str, wind, L, 0, 0, Math.sin(a) * f, Math.cos(a) * f, 0, 0);
       }
     }
     for (let i = 0, m = 10 + 6 * lvl; i < m; i++) {
@@ -423,10 +462,12 @@ export class EventFx {
     const spin = lat >= 0 ? 1 : -1;                          // counter-clockwise in the north
     const cyc = !snow && (tropical || (Math.abs(lat) < 30 && lvl >= 3)) ? 1 : 0;
     this.#decal(lat, lon, snow ? DK.snowstorm : DK.storm, R, 1, t0, life, seed, str, r() * TAU, spin, cyc);
+    // lightning: a few strikes over the life of a strong storm (in a cyclone, in the bands around the eye)
     if (!snow && lvl >= 3) {
-      for (let i = 0; i < lvl; i++) {
-        const rr = R * (0.12 + 0.5 * r()), a = r() * TAU;
-        this.#sprite(lat, lon, SK.bolt, t0 + r() * life * 0.75, 1 + r(), R, str, Math.sin(a) * rr, Math.cos(a) * rr, R * 0.015, R * 0.04, 5 + 4 * r(), R * 0.006, 0, 0);
+      const S = (kind, birth, lf, ...p) => this.#sprite(lat, lon, kind, birth, lf, R, str, ...p);
+      for (let i = 0, m = lvl; i < m; i++) {
+        const rr = R * (0.16 + 0.42 * r()), a = r() * TAU;
+        this.#strike(S, t0 + 0.7 + ((i + 0.9 * r()) / m) * life * 0.8, Math.sin(a) * rr, Math.cos(a) * rr, R * 0.012, r() * TAU, R * (0.13 + 0.07 * r()), R * 0.014, 0, 0);
       }
     }
     if (snow) {
@@ -513,6 +554,9 @@ export class EventFx {
       u.uLift.value = lift;
       u.uDot.value = Math.max(1.5, this.heightPx / 640);
     }
+    // the stipple of cloud and aerosol edges in the terrain shader uses the same dot
+    const td = this.globe?.terrainMat?.uniforms?.uDot;
+    if (td) td.value = this.decalMat.uniforms.uDot.value;
     if (opts.fov) this.fov = opts.fov;
     const pu = this.partMat.uniforms;
     pu.uPx.value = this.heightPx / (2 * Math.tan(THREE.MathUtils.degToRad(this.fov / 2)));
@@ -538,6 +582,7 @@ export class EventFx {
     this.partEnd = 0; this.partUsed = 0; this.partNext = 0;
     this.partGeo.instanceCount = 0;
     this.parts.visible = false;
+    this.strikes.length = 0;
   }
 
   setVisible(v) {
