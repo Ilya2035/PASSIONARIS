@@ -238,7 +238,7 @@ export class Upscaler {
     this.renderer = renderer;
     this.samples = samples;
     // 'auto' (autoTier: set by main.js from the GPU class) | 'fsr' (EASU + RCAS) | 'lite' (one pass, see LITE_FRAG) |
-    // 'legacy' (?upscale=0: the filter before v0.2.2)
+    // 'legacy' (?upscale=0: the filter before v0.2.6)
     this.mode = mode;
     this.autoTier = 'fsr';
     this.target = null;          // the scene's MSAA target; the scene draws into its lower-left view (w x h)
