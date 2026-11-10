@@ -692,6 +692,8 @@ void main() {
   // provinces under them. The sulphate haze of a big eruption is a smooth milky veil over whole latitude belts.
   // Cost: one fetch where the air is clean; under the haze alone nothing more (it is read from that same wide
   // sample); the noise, the second sample toward the sun and the per-kind maths only where a body is near.
+  // "Clean" is anything too thin to show (BODY_MIN, HAZE_MIN: about two steps of the byte encoding for ash, smoke
+  // and dust, and the haze below ~1 % opacity): a big eruption leaves such traces over half the planet for months.
   if (uHasAero > 0.5 && uAeroAmt > 0.0) {
     // the field is stepped every few game hours: between steps the lookup glides with the prevailing wind
     vec2 wnd = aeroWind(degrees(lat)) * (1.4 * uAeroLag * 86.4 / 111.2);   // degrees moved since the last step
@@ -699,7 +701,9 @@ void main() {
     float dpp = texPerPx * 360.0 / uGrid.x;                                   // degrees per pixel = cells per pixel
     float lodA = max(0.0, log2(max(dpp, 1e-4)));
     vec4 aw = textureLod(uAero, auv, max(lodA, 2.6));                         // ~6 cells wide: the tone, and "any here?"
-    if (dot(aw, vec4(1.0)) > 0.003) {
+    const float BODY_MIN = 0.0065, HAZE_MIN = 0.02;
+    float awB = aw.r + aw.g + aw.b;
+    if (awB > BODY_MIN || aw.a > HAZE_MIN) {
       const vec3 EK = vec3(0.9, 1.2, 1.0);                                    // aerosols.js ENC_K (sulphate: 3.0)
       const vec3 C_SMOKE = vec3(0.47, 0.41, 0.35), C_DUST = vec3(0.77, 0.59, 0.37), C_SULF = vec3(0.93, 0.92, 0.88);
       // the haze: tau = -ln(1 - v) / 3, so 1 - exp(-k tau) = 1 - (1 - v)^(k / 3)
@@ -709,7 +713,7 @@ void main() {
       vec3 a = vec3(0.0), body = C_SULF;
       float A = 0.0, bil = 0.5, dots = 0.0;
       vec3 cFr = vec3(0.0);
-      if (aw.r + aw.g + aw.b > 0.003) {
+      if (awB > BODY_MIN) {
         vec2 dg = vec2(auv.x * 360.0, mercDeg(g.y));                         // as the clouds
         float nl = log2(dpp * 2.4 * NOISE_N);
         float tt = uTime * 0.012;
