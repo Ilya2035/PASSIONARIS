@@ -115,5 +115,5 @@ export async function createHazards({ mod, clock, cal, climate, fx, hud, gcam })
     return rows;
   }
 
-  return { sched, data, log, update, describe, reset() { lastT = clock.t; } };
+  return { sched, data, log, detail, update, describe, reset() { lastT = clock.t; } };
 }

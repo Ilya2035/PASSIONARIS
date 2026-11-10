@@ -40,6 +40,7 @@
   <div id="hud-left">
     <svg id="compass" viewBox="0 0 48 48" aria-label="Компас"><circle cx="24" cy="24" r="21" fill="rgba(239,232,218,.85)" stroke="#4a3622"/><g id="compass-needle"><path d="M24 6 L29 24 L24 21 L19 24 Z" fill="#7a5730"/><path d="M24 42 L29 24 L24 27 L19 24 Z" fill="#b8ab93"/></g></svg>
     <div class="scale"><div id="scale-bar"></div><span id="scale-text"></span></div>
+    <button id="chronicle-btn" class="hex small" title="Хроника мира (J)" aria-label="Хроника мира"><svg viewBox="0 0 24 24"><path d="M6 4h10a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2H8a2 2 0 0 1-2-2V4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 4a2 2 0 0 0-2 2v2h2M9 8h6M9 11h6M9 14h4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
   </div>
 
   <!-- info window: opens on click -->
@@ -82,6 +83,16 @@
       <div class="rule"></div>
       <div class="save-new"><input id="save-name" maxlength="60" placeholder="Название сохранения" /><button class="btn primary" id="save-do">Сохранить</button></div>
       <div id="save-list"></div>
+    </div></div>
+  </div>
+
+  <!-- chronicle: the great events of the world so far -->
+  <div class="modal-back" id="chronicle">
+    <div class="modal paper wide"><div class="paper-body">
+      <button class="close" data-close="chronicle">×</button>
+      <h2>Хроника мира</h2>
+      <div class="rule"></div>
+      <div id="chronicle-list"></div>
     </div></div>
   </div>
 

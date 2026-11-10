@@ -78,6 +78,17 @@ html, body { overflow: hidden; }
 .save-new { display: flex; gap: 8px; margin-bottom: 12px; }
 .save-new input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid rgba(74, 54, 34, 0.45); background: rgba(255, 255, 255, 0.55); color: var(--paper-ink); }
 #save-list { display: grid; gap: 6px; }
+#chronicle-btn { width: 34px; height: 34px; padding: 0; color: var(--paper-ink); }
+#chronicle-btn svg { width: 18px; height: 18px; }
+#chronicle-list { display: grid; gap: 5px; max-height: 60vh; overflow: auto; padding-right: 4px; }
+.chr-row { display: grid; grid-template-columns: 112px 1fr; gap: 10px; align-items: baseline; padding: 6px 10px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.35); border: 1px solid rgba(74, 54, 34, 0.16); }
+.chr-row:hover { background: rgba(255, 255, 255, 0.7); }
+.chr-row .when { font-size: 11px; color: var(--paper-ink-dim); }
+.chr-row .what { font-family: var(--font-display); font-size: 14px; }
+.chr-row .sub { display: block; font-family: inherit; font-size: 11px; color: var(--paper-ink-dim); }
+.chr-row.k-weather { border-left: 3px solid #6f8fa6; }
+.chr-row.k-hazard { border-left: 3px solid #a4553a; }
 .save-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 7px 10px; background: rgba(255, 255, 255, 0.4); border: 1px solid rgba(74, 54, 34, 0.2); }
 .save-row .nm { font-family: var(--font-display); font-size: 15px; }
 .save-row .meta { font-size: 11px; color: var(--paper-ink-dim); }

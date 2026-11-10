@@ -18,6 +18,7 @@ import { DetailTerrain } from './terrain/detail.js';
 import * as hud from './ui/hud.js';
 import { buildSettings, openModal, closeModal, anyModalOpen } from './ui/menus.js';
 import { createWorldSystems } from './world/systems.js';
+import { openChronicle } from './ui/chronicle.js';
 import { applyPackData, runPackScripts } from '../engine/packs.js';
 import { BIOME_COLORS } from './world/biomes.js';
 import { VERSION } from '../shared/version.js';
@@ -197,6 +198,7 @@ window.addEventListener('keydown', e => {
   keys.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); world.togglePause?.(); }
   if (/^Digit[1-5]$/.test(e.code)) world.setSpeed?.(Number(e.code.slice(5)));
+  if (e.code === 'KeyJ' && world.chronicle) showChronicle();
   if (e.code === 'F5') { e.preventDefault(); world.quickSave?.(); }
   if (e.code === 'F9') { e.preventDefault(); world.quickLoad?.(); }
   if (e.code === 'Home') gcam.altTarget = 2.15;
@@ -229,6 +231,11 @@ function toggleMenu(force) {
   menuOpen = force ?? !menuOpen;
   if (menuOpen) { openModal('menu'); world.pauseForMenu?.(true); } else { closeModal('menu'); world.pauseForMenu?.(false); }
 }
+function showChronicle() {
+  openChronicle({ items: world.chronicle(), onPick: it => gcam.flyTo(it.lat, it.lon, Math.min(gcam.alt, it.kind === 'weather' ? 0.8 : 0.35)) });
+}
+$('chronicle-btn').onclick = () => showChronicle();
+$('chronicle-btn').hidden = !world.chronicle;
 $('menu-resume').onclick = () => toggleMenu(false);
 $('menu-settings').onclick = () => openModal('settings');
 $('menu-save').onclick = () => world.openSaves?.('save');

@@ -178,6 +178,21 @@ export async function createWorldSystems(ctx) {
   // fractional month for seasonal currents: m = middle of month m (1..12)
   const monthOf = t => { const d = cal.toDate(t); return d.month + (d.day - 15.5) / 30.4; };
 
+  // chronicle items: great hazards + strong weather spells, newest first
+  sys.chronicle = () => {
+    const out = [];
+    for (const ev of sys.hazards?.log || []) {
+      out.push({ kind: 'hazard', t: ev.t, lat: ev.lat, lon: ev.lon, title: sys.hazards.sched.label(ev), sub: sys.hazards.detail?.(ev) || '' });
+    }
+    for (const e of sys.weather?.recent || []) {
+      if (e.severity < 4) continue;
+      const where = sys.regions?.describe(e.lat, e.lon)?.title;
+      out.push({ kind: 'weather', t: e.t0, lat: e.lat, lon: e.lon, title: e.name || e.type, sub: `${where ? where + ' · ' : ''}сила ${e.severity} из 5` });
+    }
+    out.sort((a, b) => b.t - a.t);
+    return out.slice(0, 80).map(it => ({ ...it, when: cal ? cal.formatRu(it.t, 'day') : '' }));
+  };
+
   const running = () => !!sys.time?.running;
   sys.update = (dt, t, p) => {
     sys.time?.update(dt);
