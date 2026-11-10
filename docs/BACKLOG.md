@@ -120,9 +120,9 @@
 Любую задачу можно отдать новой сессии в проекте Passionaris словами «Сделай задачу N из docs/BACKLOG.md».
 Правила работы — в `CLAUDE.md`: свой worktree, только свои файлы, выпуск версии через `scripts/release.mjs`.
 
-1. **Погода и воздух связаны** (код).
-   - Вулканическая зима охлаждает саму погоду: снег, лёд, «Погода сегодня». Связка: `setAnomalyFn` в
-     `src/sim/weather/core.js` ← `world.aerosols.sim.coolingAt(lat)`.
+1. ✅ **Погода и воздух связаны** (код, сделано).
+   - Вулканическая зима охлаждает саму погоду: снег, лёд, «Погода сегодня». Связка: сообщение `cooling` в погодный
+     поток (`setCooling` в `src/sim/weather/core.js`) ← `world.aerosols.sim.cooling`.
    - В эффекты передаётся подтип бури «тропический» из `src/game/world/weather.js`. Сейчас циклон выбирается по
      широте.
    - Файлы: `src/sim/weather/*`, `src/game/world/weather.js`, `src/game/world/systems.js`.

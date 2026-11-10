@@ -82,6 +82,12 @@ export class WeatherClient {
    */
   setOptions(o) { return this.#call('options', o); }
 
+  /**
+   * Volcanic winter: cooling in degC per latitude row (row 0 = north, e.g. the aerosol layer's Float32Array(180)),
+   * null = none (see core.js setCooling). Copied; served in order, so a following step() already sees it.
+   */
+  setCooling(rows) { return this.#call('cooling', { rows: rows ? Float32Array.from(rows) : null }); }
+
   /** Give a grid buffer from a previous frame back to the worker's pool (do not use it afterwards). */
   release(grid) {
     const buffer = grid?.buffer ?? grid;

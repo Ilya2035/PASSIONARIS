@@ -15,8 +15,14 @@ const FADE_TAU = 0.25, FADE_STEP = 1 / 20; // s: cross-fade time constant (0 = o
 const BUDGET = 0.45;                         // share of the worker's time the simulation may use
 const STRIDE_MAX = 8;                        // longer blocks drift from the daily statistics (fire danger, droughts)
 const blockCost = k => (1 + 0.25 * (k - 1)) / k; // cost per game day of a k-day block, in daily steps
+const COOL_STEP = 0.05;                      // degC: a change of the volcanic cooling this large is sent to the worker
 
-export async function createWeather({ clientMod, mask, normals, clock, globe, fx, hud, gcam, registry, placeName }) {
+/**
+ * @param {() => (Float32Array|null)} [o.cooling] volcanic winter of the aerosol layer: degC (<= 0) per latitude row,
+ *   row 0 = north (world.aerosols.sim.cooling). Read before every step and sent to the worker when it changed, so the
+ *   snow, the sea ice, «Погода сегодня» and the weather spells feel it at every pace and after loads.
+ */
+export async function createWeather({ clientMod, mask, normals, clock, globe, fx, hud, gcam, registry, placeName, cooling = null }) {
   const worker = new Worker(new URL('./weather.worker.js', import.meta.url), { type: 'module' });
   const client = new clientMod.WeatherClient({ worker });
   // the worker keeps its own copy of the normals (structured clone), the climate layer keeps ours
@@ -71,7 +77,8 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
       for (const { e, s } of cand) {
         if (tokens < 1 || s < 3) break;
         tokens -= 1;
-        fxs.spawn({ type: e.type, lat: e.lat, lon: e.lon, severity: e.severity });
+        // tropical cyclones of the simulator carry their kind: the effect does not have to guess it from the latitude
+        fxs.spawn({ type: e.type, lat: e.lat, lon: e.lon, severity: e.severity, ...(e.subtype === 'tropical' ? { kind: 'tropical' } : null) });
       }
     }
     // only the extreme spells get a notification
@@ -109,10 +116,29 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
   pace();
   let paceAt = performance.now();
 
+  // ---- volcanic winter → the worker (a message, served before the next step). `coolSent` mirrors the worker's rows:
+  // the worker keeps them across loads (they are not part of the weather save), so a load only has to send the
+  // loaded aerosol state when it differs, like any other change. A cooling that has died out is cleared exactly.
+  let coolSent = null, coolForce = false, coolAt = 0;
+  function syncCooling() {
+    if (!client.setCooling) return;
+    const src = typeof cooling === 'function' ? cooling() : cooling;
+    const on = !!src && src.some(v => v !== 0);
+    let send = coolForce;
+    if (!on) send ||= coolSent !== null;
+    else if (!coolSent || coolSent.length !== src.length) send = true;
+    else for (let i = 0; i < src.length && !send; i++) if (Math.abs(src[i] - coolSent[i]) > COOL_STEP) send = true;
+    if (!send) return;
+    coolForce = false;
+    coolSent = on ? Float32Array.from(src) : null;
+    client.setCooling(coolSent).catch(e => console.warn('weather cooling', e));
+  }
+
   let rtt = 60; // ms, request round trip (EMA): while the clock runs, the request aims that far ahead
   async function stepTo(t, running) {
     try {
       requests++;
+      syncCooling();
       const t0 = performance.now();
       const f = await client.step(t);
       rtt += (performance.now() - t0 - rtt) * 0.2;
@@ -137,6 +163,7 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
       if (!s?.buffers) return;
       const f = await client.deserialize(s);
       lastT = f.t; lastDay = f.day; snapshot = s; show(f, true);
+      coolForce = true;   // the next step (or the paused check in update) sends the cooling of the loaded aerosols
     },
   });
 
@@ -194,6 +221,8 @@ export async function createWeather({ clientMod, mask, normals, clock, globe, fx
       const want = running ? t + Math.min(30, clock.daysPerSecond * rtt / 1000) : t;
       const ahead = lastT - want;
       if (!client.busy && (want - lastT >= 1 || ahead > 45)) stepTo(want, running);
+      // while no step goes out (a paused clock), the point readout still learns a changed cooling within a second
+      else if (!client.busy && now - coolAt > 1000) { coolAt = now; syncCooling(); }
       if (fading && !enabled) { disp.set(target); fading = false; }
       if (fading && now - fadeAt >= FADE_STEP * 1000) {
         const a = 1 - Math.exp(-(now - fadeAt) / 1000 / fadeTau);

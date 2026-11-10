@@ -2,7 +2,7 @@
 //
 // Grid: SIM 720x360 (docs/ENGINE.md). One step = one day. Per cell and day:
 //   T = normal (daily, mean-preserving interpolation of the monthly normals)
-//       + paleo dT (anomalyFn, cached per year)
+//       + paleo dT (anomalyFn, cached per year) + volcanic cooling of the latitude row (setCooling)
 //       + sigma(cell, season) * synoptic anomaly (coarse AR(1) fields, see fields.js)
 //   precipitation: a latent unit Gaussian z (fast advected coarse field + mesoscale noise) decides
 //       occurrence (wet when z > z*, P(wet) = p from the monthly mean) and intensity
@@ -38,7 +38,7 @@
 //   R  land: snow cover 0-255; water: sea/lake ice cover 0-255 (>= 50 means ice)
 //   G  0-127 cloud fraction without precipitation, 128-255 precipitation intensity
 //      (128 = trace, 255 >= 60 mm/day; log scale)
-//   B  temperature anomaly vs. the (modern) normals incl. paleo dT: 128 = 0, 8 units per degC
+//   B  temperature anomaly vs. the (modern) normals incl. paleo dT and volcanic cooling: 128 = 0, 8 units per degC
 //   A  drought 0-255 (land only)
 
 import { W, H, N, CX, CY, CN, BX, BY, BN, OCEAN, LAKE, LAND, cellLat, cellLon, nodeLat, boxLat, boxLon, interpTables, nodesToCells, cellOf } from './grid.js';
@@ -370,9 +370,10 @@ export class WeatherSim {
     this.sRow = new Float32Array(H);
     this.nodeSummer = new Float32Array(CY);
 
-    // per-year / per-month caches
+    // per-year / per-month caches. dT = paleo dTp (per year, anomalyFn) + volcanic cooling of the row (setCooling)
     const L = this.landIdx.length, I = this.iceIdx.length;
-    this.dT = new Float32Array(N); this.pf = new Float32Array(N).fill(1);
+    this.dT = new Float32Array(N); this.dTp = new Float32Array(N); this.pf = new Float32Array(N).fill(1);
+    this.cool = new Float32Array(H); this.coolOn = false;
     this.zth = new Float32Array(N).fill(NO_RAIN); this.mwN = new Float32Array(N);
     this.muL = new Float32Array(L); this.muRef = new Float32Array(L); this.floodThr = new Float32Array(L);
     this.anomYear = null;
@@ -512,7 +513,7 @@ export class WeatherSim {
     const c = cell | 0, y = (c / W) | 0, x = c % W, k = this.landK[c], i = this.iceK[c];
     return {
       cell: c, lat: cellLat(y), lon: cellLon(x), kind: ['ocean', 'lake', 'land'][this.cls[c]],
-      temp: this.tempAt(c), normalTemp: this.normalTemp(c), paleoDT: this.dT[c], precipFactor: this.pf[c],
+      temp: this.tempAt(c), normalTemp: this.normalTemp(c), paleoDT: this.dTp[c], cooling: this.cool[y], precipFactor: this.pf[c],
       precip: this.precip[c], cloud: this.grid[c * 4 + 1],
       swe: k >= 0 ? this.swe[k] : 0, snowCover: k >= 0 ? this.grid[c * 4] / 255 : 0,
       iceCm: i >= 0 ? this.ice[i] : 0, ice: i >= 0 && this.ice[i] >= ICE_FLAG_CM,
@@ -567,6 +568,38 @@ export class WeatherSim {
     this.anomYear = null;
     if (this.curYear !== null) { this.#loadYear(this.curYear); this.#loadMonth(dayInfo(this.day)); }
   }
+
+  /**
+   * Volcanic winter (src/sim/aerosols `cooling`): a temperature offset in degC per latitude row, row 0 = the north
+   * pole edge, any number of rows >= 2 (e.g. the aerosol layer's Float32Array(180) of 1 degree rows), resampled
+   * linearly to the 360 SIM rows; null / all zero = none. It is added to the paleo dT of every cell, so it reaches
+   * everything the daily temperature drives: snow and melt, sea and lake ice, the B channel (anomaly), heat and
+   * cold waves, tropical cyclone genesis, the climate log and the spin-up after a jump. A run-time input like the
+   * anomaly function: not part of snapshots, it stays as set across deserialize() and the caller keeps it up to
+   * date (the game sends the loaded aerosol layer's cooling after a load). Applies from the next simulated day on;
+   * costs ~0.3 ms when it changes, nothing per day.
+   */
+  setCooling(rows) {
+    const cool = this.cool, n = rows ? rows.length | 0 : 0;
+    if (n >= 2) {
+      for (let y = 0; y < H; y++) {
+        let sy = (90 - this.rowLat[y]) * n / 180 - 0.5;
+        sy = sy < 0 ? 0 : sy > n - 1 ? n - 1 : sy;
+        const y0 = Math.min(n - 2, Math.floor(sy)), fy = sy - y0;
+        let v = +rows[y0] * (1 - fy) + +rows[y0 + 1] * fy;
+        if (!Number.isFinite(v)) v = 0;
+        cool[y] = v < -40 ? -40 : v > 40 ? 40 : v;
+      }
+    } else cool.fill(0);
+    let on = false;
+    for (let y = 0; y < H; y++) if (cool[y] !== 0) { on = true; break; }
+    if (!on && !this.coolOn) return;
+    this.coolOn = on;
+    this.#applyCooling();
+  }
+
+  /** The volcanic cooling (degC) of a SIM row as set by setCooling. */
+  coolingRow(y) { return this.cool[Math.min(H - 1, Math.max(0, y | 0))]; }
 
   // ===================================================================== time control
   #jump(target, rewind) {
@@ -687,15 +720,34 @@ export class WeatherSim {
     return { dT, pf };
   }
 
-  /** Per-year paleo anomaly cache (dT, precipFactor per cell). */
+  /** Per-year paleo anomaly cache (dTp, precipFactor per cell), then dT = dTp + cooling. */
   #loadYear(year) {
     if (this.anomYear === year) return;
     this.anomYear = year;
-    if (!this.anomalyFn) { this.dT.fill(0); this.pf.fill(1); this.dTL.fill(0); this.dTI.fill(0); return; }
-    const r = this.#evalAnomalyNodes(year);
-    nodesToCells(r.dT, this.aTab, this.dT);
-    nodesToCells(r.pf, this.aTab, this.pf);
-    gather(this.dT, this.landIdx, this.dTL); gather(this.dT, this.iceIdx, this.dTI);
+    if (!this.anomalyFn) { this.dTp.fill(0); this.pf.fill(1); }
+    else {
+      const r = this.#evalAnomalyNodes(year);
+      nodesToCells(r.dT, this.aTab, this.dTp);
+      nodesToCells(r.pf, this.aTab, this.pf);
+    }
+    this.#applyCooling();
+  }
+
+  /**
+   * dT = dTp + cooling of the cell's row, and its compact land / ice copies. Without cooling dT is a plain copy
+   * of dTp, so the weather is bit-identical to a simulator that never heard of cooling.
+   */
+  #applyCooling() {
+    const { dT, dTp, cool } = this;
+    if (!this.coolOn) dT.set(dTp);
+    else {
+      for (let y = 0; y < H; y++) {
+        const cr = cool[y], e = (y + 1) * W;
+        if (cr === 0) for (let c = y * W; c < e; c++) dT[c] = dTp[c];
+        else for (let c = y * W; c < e; c++) dT[c] = dTp[c] + cr;
+      }
+    }
+    gather(dT, this.landIdx, this.dTL); gather(dT, this.iceIdx, this.dTI);
   }
 
   /** Per-month precipitation parameters. */

@@ -142,6 +142,8 @@ export async function createWorldSystems(ctx) {
       sys.weather = await createWeather({
         clientMod, mask: wxMask, normals, clock: sys.clock, globe, fx: () => sys.fx, hud, gcam: ctx.gcam,
         registry: sys.time?.registry, placeName: (la, lo) => sys.regions?.describe(la, lo)?.title,
+        // volcanic winter of the aerosol layer (created later while loading): degC per 1-degree row, sent on change
+        cooling: () => sys.aerosols?.sim?.cooling ?? null,
       }).catch(e => { console.warn('weather', e); return null; });
       if (sys.weather) {
         features.add('weather');

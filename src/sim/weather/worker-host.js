@@ -19,6 +19,8 @@
 //   serialize   {} -> snapshot {version, kind, meta, buffers} (buffers transferred)
 //   deserialize {snapshot} -> frame
 //   options     {maxSimDays?, stride?} -> current options (run-time pacing, see core.js setOptions)
+//   cooling     {rows: Float32Array | null} -> true (volcanic winter, degC per latitude row, row 0 = north; see
+//               core.js setCooling; not saved: kept across deserialize, the main thread sends it on change)
 //   query       {cell} | {lat, lon} -> point info
 //   field       {name} -> typed array (transferred)
 //   climateLog  {} -> climateLog arrays (transferred)
@@ -92,6 +94,7 @@ export function installWeatherWorker(scope, { anomalyFn = null, makeAnomalyFn = 
       return frame(sim.current());
     },
     options: a => ({ result: sim.setOptions(a) }),
+    cooling(a) { sim.setCooling(a.rows ?? null); return { result: true }; },
     query: a => ({ result: a.cell != null ? sim.query(a.cell) : sim.queryLatLon(a.lat, a.lon) }),
     field(a) {
       const f = sim.getField(a.name);
