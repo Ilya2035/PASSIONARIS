@@ -182,7 +182,7 @@ export class Globe {
         uCloudAmt: { value: 1 },
         // zoom response of clouds and aerosols (set in update): bodies crisp from orbit, a tone up close
         uCloudVis: { value: 1 }, uCloudTone: { value: 0 }, uCloudCrisp: { value: 1 },
-        uCloudK: { value: new THREE.Vector4(0.6, 7.1, 1.02, 10) }, uCloudK2: { value: new THREE.Vector4(1, 0.16, 0.7, 1) },
+        uCloudK: { value: new THREE.Vector4(0.67, 7.1, 1.06, 10) }, uCloudK2: { value: new THREE.Vector4(1, 0.16, 0.7, 1) },
         // aerosol layer (src/game/world/aerosols.js): 360x180 RGBA ash/smoke/dust/sulphate + ground deposit
         uAero: { value: dummyRGBA(0) }, uAeroGround: { value: dummyRGBA(0) }, uHasAero: { value: 0 },
         uAeroAmt: { value: 0 }, uAeroVis: { value: 1 }, uAeroLag: { value: 0 }, uItcz: { value: 1 },
@@ -505,7 +505,7 @@ export class Globe {
       // what the cloud and aerosol shader blocks need of the zoom, ready-made (per-pixel arithmetic is what a weak
       // GPU pays for): the edges of cloud bodies and tops — clear from orbit, soft up close — and how much of the
       // volume (lit slopes, shadows, stipple) still shows
-      const e0 = 0.5 + 0.1 * zk, e1 = 0.95 - 0.21 * zk, t0 = 0.95 + 0.07 * zk, t1 = 1.4 - 0.28 * zk;
+      const e0 = 0.5 + 0.17 * zk, e1 = 0.95 - 0.14 * zk, t0 = 0.95 + 0.11 * zk, t1 = 1.4 - 0.24 * zk;
       const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
       u.uCloudK.value.set(e0, 1 / (e1 - e0), t0, 1 / (t1 - t0));
       u.uCloudK2.value.set(sm(0.2, 0.5, zk), 0.34 - 0.18 * zk, 0.7 * zk, sm(0.4, 0.8, u.uAeroVis.value));

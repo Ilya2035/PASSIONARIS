@@ -617,11 +617,12 @@ void main() {
   // plus baked noise; the same density one step toward the sun (north-west, the light of the land relief) gives the
   // volume — slopes facing the sun are lit, the far sides fall into a cool shade — and the shadow of the bodies on
   // the ground.
-  // Cost on a weak GPU (measured: a texture fetch from orbit costs about as much as 25 arithmetic operations, a
-  // sine or a logarithm about 6): one fetch where the sky is clear or the cover too thin to show; in a cloud three
-  // more from orbit (the billows here, the cover and the billows toward the sun), one or two closer in — no second
-  // sample once the volume no longer shows (uCloudK2.x), fine billows only while they are wider than a few pixels.
-  // What depends on the zoom alone arrives ready in uCloudK / uCloudK2 (globe.js).
+  // Cost on a weak GPU. Measured on an integrated Radeon at 2560x1600: a texture fetch from orbit is worth roughly
+  // two dozen arithmetic operations and a sine or a logarithm a handful, so both are counted here. One fetch where
+  // the sky is clear or the cover too thin to show; in a cloud three more from orbit (the billows here, the cover
+  // and the billows toward the sun), one or two closer in — no second sample once the volume no longer shows
+  // (uCloudK2.x), fine billows only while they are wider than a few pixels. What depends on the zoom alone arrives
+  // ready in uCloudK / uCloudK2 (globe.js).
   if (uHasWeather > 0.5 && uCloudAmt > 0.0) {
     // the simulator marks wet cells one by one (salt-and-pepper at 0.5 degrees): the share of wet cells around is
     // the cloud cover, so the field is read from a mip level ~4 cells wide (mipmapped weather texture)
@@ -638,7 +639,7 @@ void main() {
       // billows (lobes of ~4 degrees at the equator with their finer detail) and a smooth fractal beside them: a
       // broad swell that bends the edges of the cover, so they do not trace the straight lines of the coarse
       // synoptic grid and its 5-degree boxes
-      const vec2 BK = vec2(0.7, 0.4);
+      const vec2 BK = vec2(0.7, 0.3);
       vec2 nb = cloudNoise(dg + vec2(tt, 0.0), 30.0, nl);
       float amp = min(cloudF * 3.3, 1.0);
       float bil = dot(nb - 0.5, BK);
@@ -665,7 +666,8 @@ void main() {
         col *= 1.0 - shadow * vis * vec3(0.31, 0.27, 0.2);
         float relief = clamp((dens - densS) * 5.0, -1.0, 1.0) * uCloudK2.x;
         vec3 cShade = vec3(0.64, 0.68, 0.77) - rain * vec3(0.126, 0.126, 0.133);
-        cb += max(relief, 0.0) * (vec3(1.0, 0.997, 0.985) - cMid) + min(relief, 0.0) * (cMid - cShade);
+        // (gentle far slopes stay white: the shade is for the steep ones, or the whole layer would look grey)
+        cb += max(relief, 0.0) * (vec3(1.0, 0.997, 0.985) - cMid) - clamp(-relief * 1.5 - 0.3, 0.0, 1.0) * (cMid - cShade);
         // the tops: brighter, less so on their shaded side and under rain
         cb = mix(cb, vec3(1.0, 0.997, 0.985), top * uCloudK2.x * clamp(1.0 + 0.5 * relief - 0.45 * rain, 0.0, 1.0));
         // the fringe breaks into stipple dots below the edge of the bodies (none far out: stray dots read as dirt)

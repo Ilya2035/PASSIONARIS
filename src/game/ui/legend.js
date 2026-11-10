@@ -71,7 +71,7 @@ function koppenLegend() {
     return `<span class="lg-chip${L < 0.52 ? ' dark' : ''}" style="background:${css(c)}" title="${k.code} — ${k.nameRu}">${k.code}</span>`;
   };
   const rows = KOPPEN_GROUPS.map(g => `<div class="lg-kg"><b>${g.key}</b>${g.nameRu}</div><div class="lg-chips">${KOPPEN.filter(k => k.group === g.key).map(chip).join('')}</div>`);
-  return `${rows.join('')}${note('вторая буква — сухой сезон: f — нет, s — летом, w — зимой; третья — лето: a жаркое, b тёплое, c прохладное, d — лютая зима; в сухих поясах h — жарко, k — холодно. Наведите на значок — название. Пояса этой эпохи: они сдвигаются вместе с климатом')}`;
+  return `${rows.join('')}${note('вторая буква — сухой сезон: f — нет, s — летом, w — зимой; третья — лето: a — жаркое, b — тёплое, c — прохладное, d — лютая зима; h и k — жаркая и холодная сушь. Название пояса — при наведении на значок. Пояса показаны для этой эпохи')}`;
 }
 
 // «Плодородие»: the ramp with its six named tiers
