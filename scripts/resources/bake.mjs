@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { RESOURCES, RES_INDEX, ALBUM_GRID, chunkI, chunkJ, chunkLat, chunkLon, strHash } from './lib.mjs';
 import { csvObjects, gzip, gunzip } from './lib-node.mjs';
+import { BONUS, SIZE, REF100, DENSITY, CLASSES, KNOWN } from './reference.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const P = (...a) => path.join(ROOT, ...a);
@@ -204,27 +205,8 @@ function albumGrid() {
     const a = hpx[k], bb = hpx[k + 1], c = hpx[k + hb.w], d = hpx[k + hb.w + 1];
     return ((a * (1 - fx) + bb * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy) / 4 - 8192;
   };
-  // Bog iron as the swamp aspect sees it (docs/album/swamp.md): the same chunks, heights, rivers and named wetlands,
-  // the same natural swamp and the same swampIron() — so the rusty mires on the map and the iron in the table agree.
-  async function bogIron() {
-    const { Chunks } = await import('../../src/album/chunks.js');
-    const { naturalSwamp, swampIron } = await import('../../src/album/aspects/swamp.js');
-    const wetlands = JSON.parse(fs.readFileSync(P('public', 'assets', 'album', 'swamp', 'wetlands.json'), 'utf8')).wetlands;
-    const ch = new Chunks(baseAt, vec.rivers);                              // as src/album/main.js builds them
-    const natural = naturalSwamp(ch, baseAt, { rivers: vec.rivers, wetlands });
-    // Chunks have natural outlines now (docs/ALBUM-CHUNKS.md); the table keeps the 10 km squares, so a chunk's iron
-    // goes to the square of its seed (chunks 0 … 16383 are numbered by that square). The album itself takes the
-    // iron chunk by chunk from album.swamp.ironOf(k); this square copy is for the table and for the tests.
-    const out = new Float32Array(g.W * g.H);
-    for (let k = 0; k < Math.min(ch.count, out.length); k++) {
-      ch.setNatural('swamp', k, natural[k]);
-      const c = ch.centre(k);
-      out[k] = swampIron(ch.get('swamp', k), c.lat, c.lon, ch.height[k]);   // album.swamp.ironOf(k)
-    }
-    return out;
-  }
   return {
-    name: 'album', W: g.W, H: g.H, N: g.W * g.H, bogIron,
+    name: 'album', W: g.W, H: g.H, N: g.W * g.H,
     meta: { ...g, bbox: b, cell: '(j − j0) · W + (i − i0); row 0 = southmost — the same numbering as src/album/chunks.js',
       note: 'x = lon · 111.195 · cos 40°, y = lat · 111.195 (km); chunk (i, j) = (floor(x / 10), floor(y / 10))' },
     inBox: () => true,
@@ -238,21 +220,20 @@ function albumGrid() {
   };
 }
 function worldGrid() {
-  const W = 720, H = 360;
+  const W = 360, H = 180, DEG = 1;   // 1° cells: 52 resources at 0.5° would weigh tens of megabytes
   const world = loadWorldMap();
   return {
     name: 'world', W, H, N: W * H,
-    meta: { kind: 'latlon', W, H, resolutionDeg: 0.5, cell: 'row · 720 + col; row 0 = 90°N … 89.5°N, col 0 = 180°W',
-      note: 'same grid as public/assets/climate/normals.json' },
+    meta: { kind: 'latlon', W, H, resolutionDeg: DEG, cell: 'row · 360 + col; row 0 = 90°N … 89°N, col 0 = 180°W' },
     inBox: () => true,
     cellOf(lat, lon) {
-      const y = Math.floor((90 - lat) / 0.5), x = Math.floor((lon + 180) / 0.5);
+      const y = Math.floor((90 - lat) / DEG), x = Math.floor((lon + 180) / DEG);
       return y < 0 || y >= H || x < 0 || x >= W ? -1 : y * W + x;
     },
-    sample(c, fx, fy) { return { lat: 90 - (Math.floor(c / W) + fy) * 0.5, lon: -180 + (c % W + fx) * 0.5 }; },
-    areaKm2(c) { const lat = 90 - (Math.floor(c / W) + 0.5) * 0.5; return (0.5 * 111.195) ** 2 * Math.cos(lat * D); },
+    sample(c, fx, fy) { return { lat: 90 - (Math.floor(c / W) + fy) * DEG, lon: -180 + (c % W + fx) * DEG }; },
+    areaKm2(c) { const lat = 90 - (Math.floor(c / W) + 0.5) * DEG; return (DEG * 111.195) ** 2 * Math.cos(lat * D); },
     height: world.height, lake: world.lake,
-    S: 10, nearKm: 60,
+    S: 16, nearKm: 120,
   };
 }
 
@@ -272,7 +253,8 @@ function features(grid, inp) {
     land: new Float32Array(N), lake: new Float32Array(N), sea: new Float32Array(N), shelf: new Float32Array(N),
     hMean: new Float32Array(N), relief: new Float32Array(N), forest: new Float32Array(N), wet: new Float32Array(N),
     river: new Float32Array(N), chl: new Float32Array(N).fill(NaN), glim: new Array(N), ice: new Float32Array(N),
-    clim: new Array(N), coast: new Float32Array(N),
+    clim: new Array(N), coast: new Float32Array(N), lat: new Float32Array(N),
+    biome: new Float32Array(N * 13),   // share of the land of each natural zone (BIOME), 13 per cell
   };
   const hs = new Float32Array(S * S);
   for (let c = 0; c < N; c++) {
@@ -286,6 +268,7 @@ function features(grid, inp) {
         land++; hsum += h;
         const b = inp.biome(lat, lon);
         forest += FOREST_SHARE[b] ?? 0;
+        f.biome[c * 13 + b]++;
         if (b === BIOME.wetland) wet++;
         if (b === BIOME.ice) ice++;
       } else { sea++; if (h > -200) shelf++; }
@@ -296,6 +279,7 @@ function features(grid, inp) {
     f.forest[c] = land ? forest / land : 0;
     f.wet[c] = land ? wet / land : 0;
     f.ice[c] = land ? ice / land : 0;
+    if (land) for (let b = 0; b < 13; b++) f.biome[c * 13 + b] /= land;
     // relief: mean height step between neighbouring land samples, scaled to metres per km
     let steps = 0, ns = 0;
     for (let v = 0; v < S; v++) for (let u = 0; u < S; u++) {
@@ -310,6 +294,7 @@ function features(grid, inp) {
     const ctr = grid.sample(c, 0.5, 0.5);
     f.clim[c] = inp.climate(ctr.lat, ctr.lon);
     f.glim[c] = inp.glim(ctr.lat, ctr.lon);
+    f.lat[c] = ctr.lat;
   }
   // rivers: length (km) inside each cell × size weight
   for (const r of inp.rivers) {
@@ -349,78 +334,132 @@ function features(grid, inp) {
   return f;
 }
 
-// =================================================================== rules (amounts per 10 × 10 km; × area / 100)
-// fish: the sea part by shelf and productivity, plus rivers and lakes
+// =================================================================== rules: real amounts in each resource's unit
+// Every rule returns the amount of one cell (scripts/resources/reference.mjs, DENSITY; × area / 100 by the caller).
+const DZ = DENSITY;
+const BIOME_KEYS = Object.keys(BIOME);
+const byBiome = (f, c, table) => { let v = 0; for (let b = 0; b < 13; b++) v += f.biome[c * 13 + b] * (table[BIOME_KEYS[b]] ?? 0); return v; };
+const productivity = (f, c) => clamp(Math.log10((isNaN(f.chl[c]) ? 0.3 : f.chl[c]) / 0.08) / Math.log10(4 / 0.08));
+// fish (t): an ordinary shelf … the richest upwelling, open sea far poorer; rivers and lakes add fresh-water fish
 function fishOf(f, c) {
-  const chl = isNaN(f.chl[c]) ? 0.3 : f.chl[c];
-  const prod = clamp(Math.log10(chl / 0.08) / Math.log10(4 / 0.08), 0.05, 1); // 0.08 mg/m³ desert sea … 4 upwelling
-  const sea = f.sea[c] * (f.shelf[c] + 0.12 * (1 - f.shelf[c])) * prod * 100;
-  const fresh = Math.min(50, f.river[c] * 3) * (f.clim[c].tAnn > -8 ? 1 : 0.3) + f.lake[c] * 50;
-  return Math.min(100, sea + fresh);
+  const prod = productivity(f, c);
+  const shelf = DZ.fish.shelf * Math.pow(DZ.fish.rich / DZ.fish.shelf, prod);
+  const sea = f.sea[c] * (f.shelf[c] * shelf + (1 - f.shelf[c]) * DZ.fish.ocean * (0.5 + prod));
+  const fresh = Math.min(DZ.fish.shelf * 0.3, f.river[c] * 20) * (f.clim[c].tAnn > -8 ? 1 : 0.3) + f.lake[c] * DZ.fish.shelf * 0.5;
+  return sea + fresh;
 }
-// wood: natural forest cover of the land part (no fields — the map starts in 5000 BC)
-const woodOf = (f, c) => 100 * f.land[c] * f.forest[c] * (f.hMean[c] > 2400 ? 0.3 : 1);
-// stone: everywhere on land, more in rugged terrain, less on loose sediments and under ice
+// marine mammals (t): richer in cold productive seas
+function seamammalsOf(f, c) {
+  if (!f.sea[c]) return 0;
+  const cold = clamp((Math.abs(f.lat[c]) - 25) / 40), prod = productivity(f, c);
+  const per = f.shelf[c] * DZ.seamammals.shelf + (1 - f.shelf[c]) * DZ.seamammals.ocean;
+  return f.sea[c] * per * (0.3 + 0.7 * cold) * (0.4 + 1.2 * prod) * (cold > 0.6 ? DZ.seamammals.rich / DZ.seamammals.shelf / 4 : 1);
+}
+// game (t): wild herbivores of the natural zones
+const gameOf = (f, c) => f.land[c] * byBiome(f, c, DZ.game);
+// timber (m³): standing wood of the natural forest (no fields — the map starts in 5000 BC)
+const woodOf = (f, c) => f.land[c] * byBiome(f, c, DZ.woodPerHa) * 1e4 * (f.hMean[c] > 2400 ? 0.3 : 1);
+// fresh water (m³ a year): runoff = rain − evaporation (Turc), over land and lakes
+function waterOf(f, c) {
+  const { pAnn: P, tAnn: t } = f.clim[c];
+  const L = 300 + 25 * t + 0.05 * t ** 3, et = L > 0 ? P / Math.sqrt(0.9 + (P / L) ** 2) : 0;
+  // dry lands keep some runoff in storms and springs: at least 6 % of the rain (Murcia ≈ 44 mm of 300)
+  return (f.land[c] + f.lake[c]) * Math.max(0.06 * P, P - et) * DZ.waterPerMm;
+}
+// building stone (t): everywhere on land, more in rugged terrain, less on loose sediments and under ice
 function stoneOf(f, c) {
   const lith = byRock(f.glim[c], { su: 0.4, ig: 0.1, ev: 0.6 }, 1);
-  return f.land[c] * (1 - 0.9 * f.ice[c]) * (15 + 85 * clamp(f.relief[c] / 120)) * lith;
+  return f.land[c] * (1 - 0.9 * f.ice[c]) * (0.15 + 0.85 * clamp(f.relief[c] / 120)) * lith * DZ.stone;
 }
-// clay: flat valleys with rivers and loose or soft sediments; none under ice sheets
+// limestone and chalk (t): carbonate rocks
+const limestoneOf = (f, c) => f.land[c] * (1 - f.ice[c]) * byRock(f.glim[c], { sc: 1, sm: 0.35, mt: 0.1 }, 0) * DZ.limestone;
+// clay (t): flat valleys with rivers and loose or soft sediments
 function clayOf(f, c) {
   const flat = 1 - clamp(f.relief[c] / 80);
   const soft = byRock(f.glim[c], { su: 1, ss: 0.6, sm: 0.6, sc: 0.35 }, 0.2);
   const river = clamp(f.river[c] / 8);
-  return f.land[c] * (1 - f.ice[c]) * 100 * clamp(0.08 + 0.45 * flat * river + 0.35 * flat * soft + 0.12 * f.wet[c]);
+  return f.land[c] * (1 - f.ice[c]) * clamp(0.08 + 0.45 * flat * river + 0.35 * flat * soft + 0.12 * f.wet[c]) * DZ.clay;
 }
-// salt pans on warm dry flat coasts (sea salt by evaporation)
+// sand and gravel (t): river beds, loose sediments, beaches
+function sandOf(f, c) {
+  const flat = 1 - clamp(f.relief[c] / 100);
+  return f.land[c] * (1 - f.ice[c]) * clamp(0.05 + 0.5 * byRock(f.glim[c], { su: 1 }, 0) + 0.3 * flat * clamp(f.river[c] / 8) + 0.2 * f.coast[c]) * DZ.sand;
+}
+// silica sand (t): clean sandstones and quartz-rich loose sands, coastal dunes
+const quartzOf = (f, c) => f.land[c] * (1 - f.ice[c]) * clamp(byRock(f.glim[c], { ss: 0.5, su: 0.2 }, 0) + 0.2 * f.coast[c]) * DZ.quartz;
+// sea salt pans (t) on warm dry flat coasts
 function saltPanOf(f, c) {
   if (!f.coast[c]) return 0;
   const cl = f.clim[c];
-  const evap = clamp((cl.tWarm - 21) / 5) * clamp((750 - cl.pAnn) / 400);
-  return 40 * evap * (1 - clamp(f.relief[c] / 60));
+  return clamp((cl.tWarm - 21) / 5) * clamp((750 - cl.pAnn) / 400) * (1 - clamp(f.relief[c] / 60)) * DZ.saltPan;
 }
-// bog iron: wet flat lowlands of cool humid climates (weight of a field; placed by the world seed)
-function bogIronOf(f, c) {
+// peat (t): mires of cool wet climates
+function peatOf(f, c) {
   const cl = f.clim[c];
-  const wetGround = clamp(f.wet[c] * 1.5 + clamp(f.river[c] / 10) * 0.5 * (1 - clamp(f.relief[c] / 40)) + f.lake[c] * 0.5);
-  const climate = clamp((cl.pAnn - 450) / 350) * clamp((17 - cl.tAnn) / 7) * (cl.tWarm > 8 ? 1 : 0);
-  return f.land[c] * wetGround * climate;
+  return f.land[c] * f.wet[c] * clamp((15 - cl.tAnn) / 10) * clamp((cl.pAnn - 400) / 400) * DZ.peat;
 }
-// rare stone fields by lithology: flint in carbonates and chalk, obsidian in acid volcanics, marble in metamorphics
-const RARE_FIELDS = { sc: 0.5, va: 1, py: 0.8, mt: 0.45, ev: 0.25 }; // ev: alabaster (gypsum)
+// fields of rare kinds of stone by rock type: flint in chalk and limestone, obsidian in acid volcanics; marble in
+// metamorphic rocks; gypsum and alabaster in evaporites — the place inside is known only roughly
+const FIELD_ROCK = { flint: { sc: 0.5, va: 1, py: 0.8 }, marble: { mt: 1 }, gypsum: { ev: 1 } };
 
 // =================================================================== deposits from the databases
+// commodity names of MRDS and «Major mineral deposits» → resource. MRDS splits names that hold a comma
+// («Stone, Dimension», «Sand and Gravel, Construction»), so the parts are matched too.
 const RES_BY_COMMODITY = [
-  [/^iron$/i, 'iron'], [/^copper( oxide| sulfide)?$/i, 'copper'], [/^tin$/i, 'tin'], [/^lead$/i, 'lead'],
+  [/^iron$/i, 'iron'], [/^copper( oxide| sulfide)?$/i, 'copper'], [/^tin$/i, 'tin'], [/^lead$/i, 'lead'], [/^zinc$/i, 'zinc'],
   [/^silver$/i, 'silver'], [/^gold$/i, 'gold'], [/^mercury$/i, 'mercury'],
-  [/^(salt|halite|potash|potassium)$/i, 'salt'],
-  [/^(coal|lignite|bituminous|subbituminous|anthracite)$/i, 'coal'],
-  [/^(petroleum \(oil\)|oil shale|oil sands|rock asphalt|gilsonite)$/i, 'oil'], [/^natural gas$/i, 'gas'],
-  [/gem|diamond|sapphire|ruby|emerald|jade|opal|turquoise|amber|lapis|topaz|amethyst|agate|tourmaline|aquamarine|beryl|spinel|peridot/i, 'gems'],
-  [/^(marble|dimension|travertine|slate|alabaster|flint|obsidian|perlite|onyx)$/i, 'rarestone'],
-  [/^(clay|kaolin|ball clay|fire clay \(refractory\)|brick clay|bentonite|fullers earth|high alumina clay)$/i, 'clay'],
+  [/^(platinum|pge|palladium|rhodium|iridium|osmium|ruthenium)$/i, 'platinum'],
+  [/^manganese$/i, 'manganese'], [/^chromium|chromite$/i, 'chromium'], [/^nickel( laterite)?$/i, 'nickel'], [/^cobalt$/i, 'cobalt'],
+  [/^tungsten$/i, 'tungsten'], [/^molybdenum$/i, 'molybdenum'], [/^(aluminum|aluminium|bauxite)$/i, 'aluminium'],
+  [/^titanium(-ilmenite|-rutile|-heavy minerals)?$/i, 'titanium'], [/^(magnesite|magnesium compounds|magnesium)$/i, 'magnesium'],
+  [/^lithium$/i, 'lithium'], [/^(ree|cerium|yttrium|lanthanum|neodymium|rare earths?)$/i, 'ree'],
+  [/^(tantalum|niobium \(columbium\)|niobium|beryllium|gallium|germanium|indium)$/i, 'raremetals'],
+  [/^uranium$/i, 'uranium'], [/^thorium$/i, 'thorium'],
+  [/^(salt|halite)$/i, 'salt'], [/^(potash|potassium)$/i, 'potash'], [/^phosphorus-phosphates|phosphate/i, 'phosphate'],
+  [/^nitrogen-nitrates|nitrate/i, 'nitrate'], [/^(sulfur|sulfur-pyrite|pyrite)$/i, 'sulfur'],
+  [/^(boron-borates|sodium carbonate|soda ash|trona)$/i, 'borates'], [/^fluorine-fluorite|fluorspar/i, 'fluorite'], [/^graphite$/i, 'graphite'],
+  [/^kaolin$/i, 'kaolin'], [/^(gypsum-anhydrite|gypsum|alabaster)$/i, 'gypsum'],
+  [/^(marble|dimension|travertine|slate|flagstone|onyx)$/i, 'marble'], [/^(flint|obsidian|perlite)$/i, 'flint'],
+  [/^(limestone|high calcium|cement rock|dolomite|chalk)$/i, 'limestone'],
+  [/^(silica|industrial\/frac sand|quartz|glass sand)$/i, 'quartz'], [/^(sand and gravel|sand|construction|aggregate)$/i, 'sand'],
+  [/^(crushed\/broken|granite)$/i, 'stone'],
+  [/^(clay|ball clay|fire clay \(refractory\)|brick clay|bentonite|fullers earth|high alumina clay)$/i, 'clay'],
+  [/^(gemstone|diamond|sapphire|ruby|emerald)$/i, 'gems'],
+  [/^(semiprecious gemstone|jade|amber|turquoise|lapis lazuli|opal|agate|garnet|topaz|beryl)$/i, 'ornamental'],
+  [/^peat$/i, 'peat'], [/^(coal|lignite|bituminous|subbituminous|anthracite)$/i, 'coal'],
+  [/^(petroleum \(oil\)|oil shale|oil sands|rock asphalt|gilsonite|bitumen)$/i, 'oil'], [/^natural gas$/i, 'gas'], [/^helium$/i, 'helium'],
 ];
 const resOfCommodity = s => { for (const [re, r] of RES_BY_COMMODITY) if (re.test(s.trim())) return r; return null; };
 // Wikidata: class or product label → resource
 const RES_BY_WORD = [
-  [/coal|lignite|anthracite/i, 'coal'], [/iron|hematite|magnetite|siderite/i, 'iron'], [/copper|malachite|chalcopyrite/i, 'copper'],
-  [/\btin\b|cassiterite/i, 'tin'], [/\blead\b|galena/i, 'lead'], [/silver/i, 'silver'], [/\bgold\b/i, 'gold'],
-  [/mercury|cinnabar/i, 'mercury'], [/salt|halite|potash|sylvite/i, 'salt'], [/oil|petroleum|bitumen|asphalt/i, 'oil'],
-  [/natural gas|\bgas\b/i, 'gas'],
-  [/gem|diamond|sapphire|ruby|emerald|jade|opal|turquoise|amber|lapis|topaz|amethyst|agate|garnet|tourmaline|beryl/i, 'gems'],
-  [/marble|alabaster|flint|obsidian|slate|travertine|porphyry|jasper|chert|soapstone|onyx|limestone dimension/i, 'rarestone'],
-  [/kaolin|clay|bentonite/i, 'clay'],
+  [/coal|lignite|anthracite/i, 'coal'], [/\biron\b|hematite|magnetite|siderite/i, 'iron'], [/copper|malachite|chalcopyrite/i, 'copper'],
+  [/\btin\b|cassiterite/i, 'tin'], [/\blead\b|galena/i, 'lead'], [/\bzinc\b|sphalerite|calamine/i, 'zinc'], [/silver/i, 'silver'],
+  [/\bgold\b/i, 'gold'], [/mercury|cinnabar/i, 'mercury'], [/platinum|palladium/i, 'platinum'], [/manganese/i, 'manganese'],
+  [/chrom/i, 'chromium'], [/nickel/i, 'nickel'], [/cobalt/i, 'cobalt'], [/tungsten|wolfram|scheelite/i, 'tungsten'],
+  [/molybden/i, 'molybdenum'], [/bauxite|alumin/i, 'aluminium'], [/titan|ilmenite|rutile/i, 'titanium'], [/magnesi/i, 'magnesium'],
+  [/lithium|spodumene|lepidolite/i, 'lithium'], [/rare.earth|monazite|bastn/i, 'ree'],
+  [/tantal|niobi|coltan|beryllium|gallium|germanium|indium/i, 'raremetals'], [/uranium/i, 'uranium'], [/thorium/i, 'thorium'],
+  [/potash|sylvite|potassium/i, 'potash'], [/salt|halite/i, 'salt'], [/phosphat/i, 'phosphate'], [/nitrate|saltpet/i, 'nitrate'],
+  [/sulfur|sulphur|pyrite/i, 'sulfur'], [/borax|borate|trona|soda ash/i, 'borates'], [/fluorite|fluorspar/i, 'fluorite'],
+  [/graphite/i, 'graphite'], [/kaolin/i, 'kaolin'], [/gypsum|alabaster/i, 'gypsum'],
+  [/marble|slate|travertine|porphyry|onyx|dimension stone/i, 'marble'], [/flint|obsidian|chert/i, 'flint'],
+  [/limestone|chalk|dolomite/i, 'limestone'], [/silica|quartz/i, 'quartz'], [/gravel|\bsand\b/i, 'sand'], [/granite|basalt|sandstone/i, 'stone'],
+  [/clay|bentonite/i, 'clay'], [/diamond|sapphire|ruby|emerald|gemstone/i, 'gems'],
+  [/amber|jade|nephrite|turquoise|lapis|opal|agate|garnet|jasper/i, 'ornamental'], [/\bpeat\b|turf/i, 'peat'],
+  [/\boil\b|petroleum|bitumen|asphalt|oil shale/i, 'oil'], [/natural gas|\bgas\b/i, 'gas'], [/helium/i, 'helium'],
 ];
 const resOfWord = s => { const out = new Set(); for (const [re, r] of RES_BY_WORD) if (re.test(s)) out.add(r); return out; };
 
-const MRDS_SIZE = { L: 100, M: 30, S: 10, Y: 20, N: 5 };
-const MRDS_STAT = { Producer: 20, 'Past Producer': 15, Prospect: 8, Occurrence: 5, Plant: 15, Unknown: 5 };
+// size class of a deposit: 0 trace … 4 giant (reference.mjs CLASSES); its amount = SIZE[res][class]
+const MRDS_CLASS = { L: 3, M: 2, S: 1, Y: 2, N: 0 };
+const MRDS_STAT_CLASS = { Producer: 2, 'Past Producer': 2, Plant: 2, Prospect: 1, Occurrence: 0, Unknown: 0 };
+const sizeOf = (res, cls) => SIZE[res][Math.max(0, Math.min(4, cls))];
 const NOT_A_DEPOSIT = /smelter|refiner|refinery|foundry|\bworks?\b|\bplant\b|\boper\b|operations|siderurg|hornos|steel|mill\b|\bhq\b/i;
 function depthOfMrds(r, res) {
   const w = (r.oper_type + ' ' + r.work_type + ' ' + r.dep_type).toLowerCase();
-  if (res === 'oil' || res === 'gas') return 2;
-  if (/brine/.test(w) && res === 'salt') return 0;
-  if (/placer/.test(w)) return res === 'gold' || res === 'tin' || res === 'gems' ? 0 : 1;
+  if (res === 'oil' || res === 'gas' || res === 'helium') return 2;
+  if (/brine/.test(w) && (res === 'salt' || res === 'lithium' || res === 'borates' || res === 'potash')) return 0;
+  if (/placer/.test(w)) return res === 'gold' || res === 'tin' || res === 'gems' || res === 'titanium' ? 0 : 1;
   if (/underground|well|offshore/.test(w) && !/surface/.test(w)) return 2;
   if (/surface/.test(w)) return 1;
   return RESOURCES[RES_INDEX[res]].depth;
@@ -447,16 +486,17 @@ function mrdsDeposits() {
     if (NOT_A_DEPOSIT.test(r.site_name) || /processing plant/i.test(r.oper_type)) continue;
     const shared = byXY.get(lat.toFixed(3) + ',' + lon.toFixed(3)).size;
     const precise = shared < 8;
-    const base = MRDS_SIZE[r.prod_size] ?? MRDS_STAT[r.dev_stat] ?? 5;
-    const q = r.score === 'A' || r.score === 'B' ? 1.25 : 1;
+    const base = MRDS_CLASS[r.prod_size] ?? MRDS_STAT_CLASS[r.dev_stat] ?? 0;
     const seen = new Set();
-    [[r.commod1, 1], [r.commod2, 0.4], [r.commod3, 0.15]].forEach(([list, k]) => {
+    // major commodities at the deposit's class, minor ones one class lower, traces two lower
+    [[r.commod1, 0], [r.commod2, 1], [r.commod3, 2]].forEach(([list, down]) => {
       for (const com of (list || '').split(/[,;]/)) {
         const res = resOfCommodity(com);
         if (!res || seen.has(res)) continue;
         seen.add(res);
-        out.push({ src: 'MRDS', id: 'mrds:' + r.dep_id, name: r.site_name, country: r.country, lat, lon, res,
-          amount: Math.max(2, Math.round(base * q * k)), depth: depthOfMrds(r, res), precise, norm: normName(r.site_name) });
+        const cls = Math.max(0, base - down);
+        out.push({ src: 'MRDS', id: 'mrds:' + r.dep_id, name: r.site_name, country: r.country, lat, lon, res, cls,
+          amount: sizeOf(res, cls), depth: depthOfMrds(r, res), precise, norm: normName(r.site_name) });
       }
     });
     if (precise) (preciseNames.get(r.country) ?? preciseNames.set(r.country, new Set()).get(r.country)).add(normName(r.site_name));
@@ -475,42 +515,45 @@ function mrdsDeposits() {
       }
     }
     if (!twins) return true;
-    for (const t of twins) if (t.res === d.res) t.amount = Math.max(t.amount, d.amount);
+    for (const t of twins) if (t.res === d.res && d.amount > t.amount) { t.amount = d.amount; t.cls = d.cls; }
     return false;
   });
   log('MRDS', rows.length, 'records →', kept.length, 'deposit entries,', kept.filter(d => !d.precise).length, 'with unknown place');
   return kept;
 }
 
+// «Major mineral deposits of the world» are major: class 3 (large)
 function majorDeposits() {
   const rows = csvObjects(fs.readFileSync(path.join(RAW, 'major', 'deposit.csv'), 'utf8'));
   const out = [];
   for (const r of rows) {
-    const res = resOfCommodity(r.commodity) ?? (/salt|potash/i.test(r.commodity) ? 'salt' : null);
+    const res = resOfCommodity(r.commodity) ?? (/potash/i.test(r.commodity) ? 'potash' : /salt/i.test(r.commodity) ? 'salt' : null);
     if (!res) continue;
-    out.push({ src: 'USGS major', id: 'major:' + r.gid, name: r.dep_name, lat: +r.latitude, lon: +r.longitude, res,
-      amount: 100, depth: RESOURCES[RES_INDEX[res]].depth, precise: true });
+    out.push({ src: 'USGS major', id: 'major:' + r.gid, name: r.dep_name, lat: +r.latitude, lon: +r.longitude, res, cls: 3,
+      amount: sizeOf(res, 3), depth: RESOURCES[RES_INDEX[res]].depth, precise: true });
   }
   log('major deposits', out.length);
   return out;
 }
 
-// VMS deposits: ore tonnage (Mt) and grades → contained metal → units (10 · √kt for base metals)
+// VMS deposits: ore tonnage (Mt) and grades → the real contained metal (t; gold and silver kg)
 function vmsDeposits() {
   const rows = csvObjects(fs.readFileSync(path.join(RAW, 'vms', 'main.csv'), 'utf8'));
   const out = [];
-  const add = (r, res, units) => {
-    if (!(units >= 2)) return;
-    out.push({ src: 'USGS VMS', id: 'vms:' + r.rec_id, name: r.depname, lat: +r.latitude, lon: +r.longitude, res,
-      amount: Math.min(1000, Math.round(units)), depth: 1, precise: true });
+  const add = (r, res, amount) => {
+    if (!(amount > 0)) return;
+    const cls = SIZE[res].reduce((c, v, k) => amount >= v ? k : c, 0);
+    out.push({ src: 'USGS VMS', id: 'vms:' + r.rec_id, name: r.depname, lat: +r.latitude, lon: +r.longitude, res, cls,
+      amount, depth: 1, precise: true, measured: true });
   };
   for (const r of rows) {
     const mt = +r.oreton;
     if (!(mt > 0)) continue;
-    add(r, 'copper', 10 * Math.sqrt(mt * 1000 * (+r.cugrd || 0) / 100));
-    add(r, 'lead', 10 * Math.sqrt(mt * 1000 * (+r.pbgrd || 0) / 100));
-    add(r, 'gold', 10 * Math.sqrt(mt * (+r.augrd || 0)));          // Mt × g/t = t; 100 t → 100 units
-    add(r, 'silver', 10 * Math.sqrt(mt * (+r.aggrd || 0) / 10));   // 1000 t → 100 units
+    add(r, 'copper', mt * 1e6 * (+r.cugrd || 0) / 100);
+    add(r, 'zinc', mt * 1e6 * (+r.zngrd || 0) / 100);
+    add(r, 'lead', mt * 1e6 * (+r.pbgrd || 0) / 100);
+    add(r, 'gold', mt * 1e6 * (+r.augrd || 0) / 1000);      // Mt × g/t = t → kg
+    add(r, 'silver', mt * 1e6 * (+r.aggrd || 0) / 1000);
   }
   log('VMS', rows.length, 'deposits →', out.length, 'entries');
   return out;
@@ -518,10 +561,11 @@ function vmsDeposits() {
 
 function potashDeposits() {
   const j = JSON.parse(fs.readFileSync(path.join(RAW, 'potash', 'potash.geojson'), 'utf8'));
-  const out = j.features.filter(f => f.geometry).map(f => ({
-    src: 'USGS potash', id: 'potash:' + f.properties.rec_no, name: f.properties.site_name,
-    lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], res: 'salt', amount: 30, depth: 2, precise: true,
-  }));
+  const out = [];
+  for (const f of j.features.filter(f => f.geometry)) {
+    for (const res of ['potash', 'salt']) out.push({ src: 'USGS potash', id: 'potash:' + f.properties.rec_no, name: f.properties.site_name,
+      lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], res, cls: 2, amount: sizeOf(res, 2), depth: 2, precise: true });
+  }
   log('potash', out.length);
   return out;
 }
@@ -534,7 +578,7 @@ function wikidataDeposits() {
   for (const it of j.items) {
     const roots = new Set(it.classes.map(c => j.classes[c]?.root));
     const words = [...it.classes.map(c => j.classes[c]?.label ?? ''), ...it.products].join(' | ');
-    let res = resOfWord(words);
+    const res = resOfWord(words);
     if (roots.has('oil field')) res.add('oil');
     if (roots.has('natural gas field')) res.add('gas');
     if (roots.has('coal deposit')) res.add('coal');
@@ -542,11 +586,11 @@ function wikidataDeposits() {
     if (res.has('oil') && /oil and gas|gas condensate/i.test(words)) res.add('gas');
     if (res.has('gas') && !roots.has('natural gas field') && /oil field/i.test(words) && !/gas/i.test(it.products.join())) res.delete('gas');
     const pan = roots.has('saltworks') || roots.has('salt evaporation pond');
-    const quarry = roots.has('quarry');
+    const cls = roots.has('quarry') || pan ? 1 : 2;   // a quarry or a salt pan is small, a mine or a field medium
+    const pit = r => r === 'coal' && !roots.has('coal deposit');   // a coal pit is one working of a basin: small
     for (const r of res) {
       out.push({ src: 'Wikidata', id: 'wd:' + it.id, name: /^Q\d+$/.test(it.name) ? `без названия (${it.id})` : it.name, lat: it.lat, lon: it.lon, res: r,
-        amount: quarry ? 10 : r === 'oil' || r === 'gas' ? 60 : 30,
-        depth: r === 'salt' && pan ? 0 : RESOURCES[RES_INDEX[r]].depth, precise: true });
+        cls: pit(r) ? 1 : cls, amount: sizeOf(r, pit(r) ? 1 : cls), depth: r === 'salt' && pan ? 0 : RESOURCES[RES_INDEX[r]].depth, precise: true });
     }
   }
   log('Wikidata', j.items.length, 'sites →', out.length, 'entries');
@@ -555,7 +599,7 @@ function wikidataDeposits() {
 
 // The same site under the same name in several databases, up to 75 km apart (old databases round coordinates):
 // one record at the coordinates of the most trusted source, the largest amount, the shallowest depth.
-const SRC_RANK = { Wikidata: 5, 'USGS VMS': 4, 'USGS major': 3, 'USGS potash': 3, MRDS: 1 };
+const SRC_RANK = { 'литература': 6, Wikidata: 5, 'USGS VMS': 4, 'USGS major': 3, 'USGS potash': 3, MRDS: 1 };
 // names match: equal, one inside the other (≥ 5 letters), or one typo apart (≥ 6 letters: «Almanden» = «Almaden»)
 function sameName(a, b) {
   if (a === b) return true;
@@ -588,7 +632,7 @@ function mergeByName(list) {
       (heads.get(bx + ',' + by) ?? heads.set(bx + ',' + by, []).get(bx + ',' + by)).push(o);
       continue;
     }
-    h.amount = Math.max(h.amount, d.amount);
+    if (d.amount > h.amount) { h.amount = d.amount; h.cls = d.cls; }
     h.depth = Math.min(h.depth, d.depth);
     if (!h.srcList.includes(d.src)) h.srcList.push(d.src);
     h.idList.push(d.id);
@@ -622,8 +666,31 @@ function cluster(list, km) {
   return out;
 }
 
+// =================================================================== the 0–100 scale
+// 100 = the richest chunk (100 km²) of the world for this resource: the literature figure (REF100), the largest deposit
+// of the databases or the fullest ground of an area rule — whichever is bigger. With the owner's 15 % on top.
+function ref100Of(res, maxDeposit) {
+  const z = DENSITY, max = (o) => Math.max(...Object.values(o));
+  const area = {
+    fish: z.fish.rich, seamammals: z.seamammals.rich, game: max(z.game), wood: max(z.woodPerHa) * 1e4,
+    water: 4000 * z.waterPerMm, stone: z.stone, limestone: z.limestone, clay: z.clay, sand: z.sand, quartz: z.quartz,
+    salt: z.saltPan, peat: z.peat,
+  }[res] ?? 0;
+  // the literature figure, when there is one, is the 100; otherwise the richest deposit chunk or the fullest ground
+  return (REF100[res]?.amount ?? Math.max(maxDeposit ?? 0, area)) * BONUS;
+}
+
 // =================================================================== bake one grid
-async function bake(grid, inp, deposits) {
+const AREA_RULES = [['fish', fishOf], ['seamammals', seamammalsOf], ['game', gameOf], ['wood', woodOf], ['water', waterOf],
+  ['stone', stoneOf], ['limestone', limestoneOf], ['clay', clayOf], ['sand', sandOf], ['quartz', quartzOf], ['salt', saltPanOf], ['peat', peatOf]];
+// fields of rare stone: chance per 10 × 10 km chunk that a suitable one holds a small deposit
+const FIELDS = [
+  { id: 'field:flint', res: 'flint', chance: 0.06, depth: 0, about: 'кремень в известняках и мелу, обсидиан в кислых вулканитах' },
+  { id: 'field:marble', res: 'marble', chance: 0.03, depth: 1, about: 'мрамор в метаморфических породах' },
+  { id: 'field:gypsum', res: 'gypsum', chance: 0.05, depth: 1, about: 'гипс и алебастр в толщах эвапоритов' },
+];
+
+async function bake(grid, inp, deposits, ref100) {
   log(grid.name, `${grid.W}×${grid.H} cells`);
   const f = features(grid, inp);
   const { N } = grid, R = RESOURCES.length;
@@ -634,60 +701,41 @@ async function bake(grid, inp, deposits) {
     amount[k] += v;
     if (d < depth[k]) depth[k] = d;
   };
-  const zones = [];
-  const fieldW = { bogiron: new Float32Array(N), rarestone: new Float32Array(N), salt: new Float32Array(N) };
   for (let c = 0; c < N; c++) {
-    const a = grid.areaKm2(c) / 100;
-    put('fish', c, fishOf(f, c) * a, 0);
-    put('wood', c, woodOf(f, c) * a, 0);
-    put('stone', c, stoneOf(f, c) * a, 0);
-    put('clay', c, clayOf(f, c) * a, 0);
-    put('salt', c, saltPanOf(f, c) * a, 0);
-    fieldW.bogiron[c] = bogIronOf(f, c);
-    fieldW.rarestone[c] = f.land[c] * (1 - f.ice[c]) * byRock(f.glim[c], RARE_FIELDS, 0);
-    fieldW.salt[c] = f.land[c] * (f.glim[c].ev ?? 0);
+    const a = grid.areaKm2(c) / 100 * BONUS;
+    for (const [res, rule] of AREA_RULES) put(res, c, rule(f, c) * a, 0);
   }
-  // fields: chance per 10 × 10 km chunk; a coarse cell gets the expected value instead (see docs)
-  const FIELDS = [
-    { id: 'field:bogiron', res: 'bogiron', chance: 0.35, amount: 8, depth: 0, about: 'болотная руда в сырых низинах прохладного влажного климата' },
-    { id: 'field:rarestone', res: 'rarestone', chance: 0.06, amount: 10, depth: 0, about: 'кремень в известняках и мелу, обсидиан в кислых вулканитах, мрамор в метаморфических породах, алебастр в эвапоритах' },
-    { id: 'field:salt', res: 'salt', chance: 0.05, amount: 20, depth: 1, about: 'соляные пласты и источники в толщах эвапоритов' },
-  ];
-  // album: bog iron follows the swamp aspect — every iron-bearing mire holds some, the world seed decides how much
-  if (grid.bogIron) {
-    const iron = await grid.bogIron(), cells = [], weights = [];
-    for (let c = 0; c < N; c++) if (iron[c] > 0) { cells.push(c); weights.push(Math.max(1, Math.round(clamp(iron[c]) * 255))); }
-    zones.push({ id: 'rich:bogiron', res: 'bogiron', kind: 'rich', amount: 15, depth: 0, src: 'часть альбома «Болота»: swampIron()',
-      about: 'болотная руда в пресных болотах влажного климата выше досягаемости моря (правило части «Болота»)', cells, weights });
-  }
+  // fields: zones on the album; expected values on the coarse world grid
+  const zones = [];
   for (const fd of FIELDS) {
-    const w = fieldW[fd.res];
-    if (fd.res === 'bogiron' && grid.bogIron) continue;
+    const piece = sizeOf(fd.res, 1) * BONUS;
+    const w = c => f.land[c] * (1 - f.ice[c]) * byRock(f.glim[c], FIELD_ROCK[fd.res], 0);
     if (grid.name === 'album') {
       const cells = [], weights = [];
-      for (let c = 0; c < N; c++) if (w[c] > 0.02) { cells.push(c); weights.push(Math.max(1, Math.round(clamp(w[c]) * 255))); }
-      if (cells.length) zones.push({ ...fd, kind: 'field', cells, weights });
+      for (let c = 0; c < N; c++) { const v = w(c); if (v > 0.02) { cells.push(c); weights.push(Math.max(1, Math.round(clamp(v) * 255))); } }
+      if (cells.length) zones.push({ ...fd, kind: 'field', amount: Math.round(piece), cells, weights });
     } else {
-      for (let c = 0; c < N; c++) put(fd.res, c, w[c] * fd.chance * fd.amount * grid.areaKm2(c) / 100, fd.depth);
+      for (let c = 0; c < N; c++) put(fd.res, c, w(c) * fd.chance * piece * grid.areaKm2(c) / 100, fd.depth);
     }
   }
-  // deposits
+  // deposits: known ones in their cell (on the album's natural chunks they spread a little to their neighbours, see
+  // spreadToChunks); a place known only roughly and the unfound part of fuel basins are zones
   const inGrid = deposits.filter(d => grid.inBox(d.lat, d.lon) && grid.cellOf(d.lat, d.lon) >= 0);
   const exact = cluster(mergeByName(inGrid.filter(d => d.precise)), grid.name === 'album' ? 5 : 10);
   const vague = inGrid.filter(d => !d.precise);
   const list = [];
   for (const d of exact) {
-    const c = grid.cellOf(d.lat, d.lon);
-    put(d.res, c, d.amount, d.depth);
+    const c = grid.cellOf(d.lat, d.lon), v = Math.round(d.amount * BONUS);
+    put(d.res, c, v, d.depth);
     list.push({ id: d.ids[0], res: d.res, name: d.name, lat: +d.lat.toFixed(4), lon: +d.lon.toFixed(4), cell: c,
-      amount: d.amount, depth: d.depth, src: d.srcs.join(', ') });
+      amount: v, cls: d.cls, depth: d.depth, src: d.srcs.join(', '), ...(d.measured ? { measured: true } : {}) });
   }
-  // place known only roughly: a zone of land cells within 250 km, one piece
+  const step = grid.name === 'album' ? 0.05 : 1;
   const landCellsNear = (lat, lon, km, needLand = true) => {
     const cells = [];
     const dLat = km / 111, dLon = km / (111 * Math.max(0.2, Math.cos(lat * D)));
-    for (let y = lat - dLat; y <= lat + dLat; y += grid.name === 'album' ? 0.05 : 0.5) {
-      for (let x = lon - dLon; x <= lon + dLon; x += grid.name === 'album' ? 0.05 : 0.5) {
+    for (let y = lat - dLat; y <= lat + dLat; y += step) {
+      for (let x = lon - dLon; x <= lon + dLon; x += step) {
         const c = grid.cellOf(y, x);
         if (c < 0 || (needLand && f.land[c] < 0.3) || kmBetween(lat, lon, y, x) > km) continue;
         cells.push(c);
@@ -698,8 +746,8 @@ async function bake(grid, inp, deposits) {
   for (const v of cluster(vague, 1)) {
     const cells = landCellsNear(v.lat, v.lon, 250);
     if (!cells.length) continue;
-    zones.push({ id: 'vague:' + v.ids[0] + ':' + v.res, res: v.res, kind: 'zone', pieces: 1, amount: v.amount, depth: v.depth,
-      about: `${v.name}: в источнике только условная точка (центр страны или района)`, src: v.src,
+    zones.push({ id: 'vague:' + v.ids[0] + ':' + v.res, res: v.res, kind: 'zone', pieces: 1, amount: Math.round(v.amount * BONUS),
+      depth: v.depth, about: `${v.name}: в источнике только условная точка (центр страны или района)`, src: v.src,
       cells, weights: cells.map(() => 255) });
   }
   // basins around known coal, oil and gas: half as much again, not yet found, somewhere within 60 km
@@ -707,7 +755,7 @@ async function bake(grid, inp, deposits) {
     const known = exact.filter(d => d.res === res);
     for (const b of cluster(known.map(d => ({ ...d })), 60)) {
       const members = known.filter(d => kmBetween(d.lat, d.lon, b.lat, b.lon) <= 60);
-      const total = members.reduce((s, d) => s + d.amount, 0);
+      const total = members.reduce((s, d) => s + d.amount * BONUS, 0);
       const cells = landCellsNear(b.lat, b.lon, 60, res === 'coal');
       if (!cells.length) continue;
       zones.push({ id: `basin:${res}:${strHash(b.ids[0]).toString(36)}`, res, kind: 'zone',
@@ -716,59 +764,85 @@ async function bake(grid, inp, deposits) {
         cells, weights: cells.map(() => 255) });
     }
   }
-  // world: zones are counted in as expected values, so the coarse table already shows them
   if (grid.name === 'world') {
     for (const z of zones) {
       const each = z.amount / z.cells.length; // a zone's amount is its whole amount, split among its pieces
       for (const c of z.cells) put(z.res, c, each, z.depth);
     }
   }
-  // pack
-  const bytes = new Uint8Array(R * N * 3);
-  const a16 = new Uint16Array(bytes.buffer, 0, R * N);
-  for (let k = 0; k < R * N; k++) {
-    a16[k] = Math.min(65535, Math.round(amount[k]));
-    if (a16[k] === 0) depth[k] = 255;
-  }
-  bytes.set(depth, R * N * 2);
+  // pack: whole numbers in each resource's unit; a step (scale) per resource keeps them inside Uint32
+  const bytes = new Uint8Array(R * N * 5);
+  const u32 = new Uint32Array(bytes.buffer, 0, R * N);
+  const scales = RESOURCES.map((r, k) => {
+    let mx = 0;
+    for (let c = 0; c < N; c++) mx = Math.max(mx, amount[k * N + c]);
+    let s = 1;
+    while (mx / s > 4e9) s *= 10;
+    return s;
+  });
   const stats = {};
   RESOURCES.forEach((r, k) => {
-    let s = 0, n = 0, mx = 0;
-    for (let c = 0; c < N; c++) { const v = a16[k * N + c]; s += v; if (v) n++; if (v > mx) mx = v; }
-    stats[r.id] = { total: s, cells: n, max: mx };
+    let total = 0, cells = 0, mx = 0;
+    for (let c = 0; c < N; c++) {
+      const v = Math.round(amount[k * N + c] / scales[k]);
+      u32[k * N + c] = v;
+      if (!v) depth[k * N + c] = 255;
+      else { total += v * scales[k]; cells++; mx = Math.max(mx, v * scales[k]); }
+    }
+    stats[r.id] = { total, cells, max: mx };
   });
+  bytes.set(depth, R * N * 4);
   const meta = {
-    format: 'passionaris-resources', version: 1, grid: grid.meta,
+    format: 'passionaris-resources', version: 2, grid: grid.meta,
     file: `${grid.name}.bin.gz`,
-    layers: { amount: 'Uint16 little-endian [resource][row][col], units (docs/RESOURCES.md)',
-      depth: 'Uint8 [resource][row][col] after the amounts: 0 surface, 1 shallow, 2 deep, 255 nothing' },
-    resources: RESOURCES.map(({ id, name, kind, depth: d, era }) => ({ id, name, kind, depth: d, era })),
+    layers: {
+      amount: 'Uint32 little-endian [resource][row][col]; × resources[].scale = the real amount in resources[].unit',
+      depth: 'Uint8 [resource][row][col] after the amounts: 0 surface, 1 shallow, 2 deep, 255 nothing',
+    },
+    resources: RESOURCES.map((r, k) => ({ ...r, scale: scales[k], ref100: Math.round(ref100[r.id]) })),
+    classes: CLASSES, bonus: BONUS,
     stats, baked: new Date().toISOString().slice(0, 10),
-    sources: 'data/sources/resources.md',
+    sources: 'data/sources/resources.md; numbers: scripts/resources/reference.mjs',
     zonesNote: grid.name === 'album'
       ? 'zones are NOT in the table: place them with scatterZone()/withZones() from scripts/resources/lib.mjs and the world seed'
       : 'zones are already in the table as expected values (coarse grid); exact placement is done on the chunk grid',
   };
   if (grid.name === 'album') { meta.deposits = list; meta.zones = zones; }
   else {
-    meta.deposits = list.filter(d => d.amount >= 100);
-    meta.depositsNote = 'only deposits of 100 units and more (large and giant)';
+    meta.deposits = list.filter(d => d.cls >= 3);
+    meta.depositsNote = 'only large and giant deposits (class 3 and 4)';
   }
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, `${grid.name}.bin.gz`), gzip(bytes));
   fs.writeFileSync(path.join(OUT, `${grid.name}.json`), JSON.stringify(meta));
   const kb = f2 => (fs.statSync(path.join(OUT, f2)).size / 1024).toFixed(0) + ' KB';
   log(grid.name, '→', kb(`${grid.name}.bin.gz`), '+', kb(`${grid.name}.json`), '|', list.length, 'deposits,', zones.length, 'zones');
-  for (const r of RESOURCES) log('  ', r.id.padEnd(10), JSON.stringify(stats[r.id]));
+  for (const r of RESOURCES) log('  ', r.id.padEnd(11), r.unit.padEnd(3), `cells ${stats[r.id].cells}`, `max ${stats[r.id].max.toExponential(2)}`, `total ${stats[r.id].total.toExponential(2)}`);
 }
 
 // =================================================================== main
 const inp = { climate: loadClimate(), biome: loadBiome(), glim: loadGlim(), rivers: loadRivers() };
 const deposits = [...mrdsDeposits(), ...majorDeposits(), ...vmsDeposits(), ...potashDeposits(), ...wikidataDeposits()]
   .filter(d => isFinite(d.lat) && isFinite(d.lon) && Math.abs(d.lat) <= 90 && Math.abs(d.lon) <= 180);
+// the literature's amount for well-known deposits (reference.mjs KNOWN) replaces the rough size class
+for (const k of KNOWN) {
+  let hit = 0;
+  for (const d of deposits) {
+    if (d.res !== k.res || !k.name.test(d.name ?? '') || kmBetween(d.lat, d.lon, k.lat, k.lon) > 60) continue;
+    d.amount = k.amount; d.area = k.area; d.cls = SIZE[k.res].reduce((c, v, i) => k.amount >= v ? i : c, 0); d.measured = true; d.precise = true; hit++;
+  }
+  if (!hit) deposits.push({ src: 'литература', id: 'lit:' + k.res + ':' + strHash(k.label).toString(36), name: k.label, lat: k.lat, lon: k.lon,
+    res: k.res, cls: SIZE[k.res].reduce((c, v, i) => k.amount >= v ? i : c, 0), amount: k.amount, area: k.area,
+    depth: RESOURCES[RES_INDEX[k.res]].depth, precise: true, measured: true });
+}
+log('known deposits from the literature:', KNOWN.length);
+const maxDeposit = {};
+// a deposit bigger than one chunk counts by its amount per chunk (its area in whole chunks, reference.mjs KNOWN)
+for (const d of deposits) if (d.precise) maxDeposit[d.res] = Math.max(maxDeposit[d.res] ?? 0, d.amount / Math.max(1, Math.ceil((d.area ?? 100) / 100)));
+const ref100 = Object.fromEntries(RESOURCES.map(r => [r.id, ref100Of(r.id, maxDeposit[r.id])]));
 for (const t of TARGETS) {
   const grid = t === 'album' ? albumGrid() : t === 'world' ? worldGrid() : null;
   if (!grid) throw new Error('unknown target ' + t);
-  await bake(grid, { ...inp, chl: loadChl(t === 'album' ? 'album-' : 'world') }, deposits);
+  await bake(grid, { ...inp, chl: loadChl(t === 'album' ? 'album-' : 'world') }, deposits, ref100);
 }
 log('done');

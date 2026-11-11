@@ -3,29 +3,80 @@
 // The resource list and every rule are described in docs/RESOURCES.md.
 
 // ------------------------------------------------------------------ resources
+// The owner's list of base raw materials (docs/RESOURCES.md, «Список сырья»), 52 kinds, no alloys or refined products.
+// unit:  the real unit of the stock — 't' tonnes (metals: tonnes of the metal itself), 'kg', 'l' litres, 'm3';
+//        stocks are whole numbers in that unit (metric only).
+// group: живое | вода | стройка | драгоценное | древние металлы | промышленные металлы | ядерное | химия | топливо
+// kind:  'living' — a stock that moves and breeds: it belongs to a sea or a province, not to a chunk (pool);
+//        'flow'   — renews every year (fresh water, timber regrowth); 'common' — ground that is almost everywhere;
+//        'deposit' — a finite deposit.
 // depth: 0 — на поверхности, видно сразу; 1 — неглубоко, находится простой разведкой; 2 — глубоко, нужна разведка
-// с техникой. era: с какой эпохи ресурс можно добывать (годы; отрицательные — до н. э.).
+//        с техникой. era: с какого года ресурс можно добывать (отрицательные — до н. э.).
 // color: цвет режима карты — средней яркости, чтобы читался и на светлой «бумаге», и на натуральной земле.
+const R = (id, name, en, unit, group, kind, depth, era, color, extra = {}) => ({ id, name, en, unit, group, kind, depth, era, color, ...extra });
 export const RESOURCES = [
-  { id: 'fish',     name: 'Рыба',                 kind: 'renewable', depth: 0, era: -5000, color: '#2f78b0' },
-  { id: 'wood',     name: 'Лес',                  kind: 'renewable', depth: 0, era: -5000, color: '#2e7a34' },
-  { id: 'stone',    name: 'Камень',               kind: 'common',    depth: 0, era: -5000, color: '#6c665c' },
-  { id: 'rarestone', name: 'Редкий камень',       kind: 'deposit',   depth: 0, era: -5000, color: '#7a5c8c' },
-  { id: 'gems',     name: 'Драгоценные камни',    kind: 'deposit',   depth: 1, era: -5000, color: '#b0307e' },
-  { id: 'clay',     name: 'Глина',                kind: 'common',    depth: 0, era: -5000, color: '#b0602e' },
-  { id: 'salt',     name: 'Соль',                 kind: 'deposit',   depth: 0, era: -5000, color: '#2e9a96' },
-  { id: 'coal',     name: 'Уголь',                kind: 'deposit',   depth: 2, era: 1200,  color: '#2c2c30' },
-  { id: 'bogiron',  name: 'Болотное железо',      kind: 'deposit',   depth: 0, era: -1200, color: '#8a5a22' },
-  { id: 'iron',     name: 'Железная руда',        kind: 'deposit',   depth: 1, era: -1000, color: '#8a3626' },
-  { id: 'copper',   name: 'Медь',                 kind: 'deposit',   depth: 1, era: -5000, color: '#c0602a' },
-  { id: 'tin',      name: 'Олово',                kind: 'deposit',   depth: 1, era: -3000, color: '#4e7484' },
-  { id: 'lead',     name: 'Свинец',               kind: 'deposit',   depth: 1, era: -3500, color: '#4a4e72' },
-  { id: 'silver',   name: 'Серебро',              kind: 'deposit',   depth: 1, era: -3000, color: '#5a82aa' },
-  { id: 'gold',     name: 'Золото',               kind: 'deposit',   depth: 1, era: -5000, color: '#c8961a' },
-  { id: 'mercury',  name: 'Ртуть',                kind: 'deposit',   depth: 1, era: -5000, color: '#b02828' },
-  { id: 'oil',      name: 'Нефть',                kind: 'deposit',   depth: 2, era: 1850,  color: '#1c1c26' },
-  { id: 'gas',      name: 'Газ',                  kind: 'deposit',   depth: 2, era: 1900,  color: '#2a6ab0' },
+  // живое и вода
+  R('fish', 'Рыба', 'Fish', 't', 'живое', 'living', 0, -5000, '#2f78b0', { pool: 'sea' }),
+  R('seamammals', 'Морской зверь', 'Marine mammals', 't', 'живое', 'living', 0, -3000, '#3a5f8a', { pool: 'sea' }),
+  R('game', 'Дичь', 'Game', 't', 'живое', 'living', 0, -5000, '#8a6a3a', { pool: 'province' }),
+  R('wood', 'Лес', 'Timber', 'm3', 'живое', 'common', 0, -5000, '#2e7a34'),
+  R('water', 'Пресная вода', 'Fresh water', 'm3', 'вода', 'flow', 0, -5000, '#3a9ac8'),
+  // стройка
+  R('stone', 'Камень', 'Building stone', 't', 'стройка', 'common', 0, -5000, '#6c665c'),
+  R('limestone', 'Известняк и мел', 'Limestone and chalk', 't', 'стройка', 'common', 0, -5000, '#a8a070'),
+  R('clay', 'Глина', 'Clay', 't', 'стройка', 'common', 0, -5000, '#b0602e'),
+  R('kaolin', 'Каолин', 'Kaolin', 't', 'стройка', 'deposit', 1, 600, '#c8a0a0'),
+  R('sand', 'Песок и гравий', 'Sand and gravel', 't', 'стройка', 'common', 0, -5000, '#c09050'),
+  R('quartz', 'Кварцевый песок', 'Silica sand', 't', 'стройка', 'deposit', 0, -2500, '#8ab0b8'),
+  R('gypsum', 'Гипс и алебастр', 'Gypsum', 't', 'стройка', 'deposit', 1, -5000, '#b8a8c0'),
+  R('marble', 'Мрамор и облицовочный камень', 'Marble and dimension stone', 't', 'стройка', 'deposit', 1, -3000, '#7a5c8c'),
+  R('flint', 'Кремень и обсидиан', 'Flint and obsidian', 't', 'стройка', 'deposit', 0, -5000, '#4a4a5a'),
+  // драгоценное
+  R('gems', 'Драгоценные камни', 'Gemstones', 'kg', 'драгоценное', 'deposit', 1, -5000, '#b0307e'),
+  R('ornamental', 'Поделочные камни', 'Ornamental stones', 'kg', 'драгоценное', 'deposit', 1, -5000, '#c07a30'),
+  R('gold', 'Золото', 'Gold', 'kg', 'драгоценное', 'deposit', 1, -5000, '#c8961a'),
+  R('silver', 'Серебро', 'Silver', 'kg', 'драгоценное', 'deposit', 1, -3000, '#5a82aa'),
+  R('platinum', 'Платина и платиноиды', 'Platinum group metals', 'kg', 'драгоценное', 'deposit', 2, 1750, '#7a8a9a'),
+  // металлы древности
+  R('copper', 'Медь', 'Copper', 't', 'древние металлы', 'deposit', 1, -5000, '#c0602a'),
+  R('tin', 'Олово', 'Tin', 't', 'древние металлы', 'deposit', 1, -3000, '#4e7484'),
+  R('lead', 'Свинец', 'Lead', 't', 'древние металлы', 'deposit', 1, -3500, '#4a4e72'),
+  R('zinc', 'Цинк', 'Zinc', 't', 'древние металлы', 'deposit', 1, -100, '#6a7a6a'),
+  R('mercury', 'Ртуть', 'Mercury', 't', 'древние металлы', 'deposit', 1, -5000, '#b02828'),
+  R('iron', 'Железо', 'Iron', 't', 'древние металлы', 'deposit', 1, -1200, '#8a3626'),
+  // металлы промышленности
+  R('manganese', 'Марганец', 'Manganese', 't', 'промышленные металлы', 'deposit', 1, 1850, '#8a4a6a'),
+  R('chromium', 'Хром', 'Chromium', 't', 'промышленные металлы', 'deposit', 1, 1890, '#3a7a5a'),
+  R('nickel', 'Никель', 'Nickel', 't', 'промышленные металлы', 'deposit', 1, 1850, '#5a8a4a'),
+  R('cobalt', 'Кобальт', 'Cobalt', 't', 'промышленные металлы', 'deposit', 1, -1500, '#2a4ab0'),
+  R('tungsten', 'Вольфрам', 'Tungsten', 't', 'промышленные металлы', 'deposit', 1, 1900, '#5a5a6a'),
+  R('molybdenum', 'Молибден', 'Molybdenum', 't', 'промышленные металлы', 'deposit', 2, 1900, '#6a6a8a'),
+  R('aluminium', 'Алюминий (бокситы)', 'Aluminium (bauxite)', 't', 'промышленные металлы', 'deposit', 0, 1890, '#b06a50'),
+  R('titanium', 'Титан', 'Titanium', 't', 'промышленные металлы', 'deposit', 0, 1950, '#7a8a8a'),
+  R('magnesium', 'Магний', 'Magnesium', 't', 'промышленные металлы', 'deposit', 1, 1900, '#9a9aaa'),
+  R('lithium', 'Литий', 'Lithium', 't', 'промышленные металлы', 'deposit', 1, 1950, '#a0a0c8'),
+  R('ree', 'Редкоземельные металлы', 'Rare earth elements', 't', 'промышленные металлы', 'deposit', 1, 1950, '#8a6aa8'),
+  R('raremetals', 'Редкие металлы', 'Rare metals (Ta, Nb, Be, Ga, Ge, In)', 't', 'промышленные металлы', 'deposit', 1, 1950, '#6a8aa8'),
+  // ядерное
+  R('uranium', 'Уран', 'Uranium', 't', 'ядерное', 'deposit', 2, 1940, '#6a9a2a'),
+  R('thorium', 'Торий', 'Thorium', 't', 'ядерное', 'deposit', 1, 1950, '#8aa04a'),
+  // химическое сырьё
+  R('salt', 'Соль', 'Salt', 't', 'химия', 'deposit', 0, -5000, '#2e9a96'),
+  R('potash', 'Калийные соли', 'Potash', 't', 'химия', 'deposit', 2, 1860, '#c86a8a'),
+  R('phosphate', 'Фосфаты', 'Phosphate rock', 't', 'химия', 'deposit', 1, 1850, '#9a8a4a'),
+  R('nitrate', 'Селитра', 'Nitrates', 't', 'химия', 'deposit', 0, 1300, '#c8c0a0'),
+  R('sulfur', 'Сера', 'Sulfur', 't', 'химия', 'deposit', 1, -1000, '#c8b020'),
+  R('borates', 'Бораты и природная сода', 'Borates and soda ash', 't', 'химия', 'deposit', 0, 800, '#a0b8a0'),
+  R('fluorite', 'Плавиковый шпат', 'Fluorspar', 't', 'химия', 'deposit', 1, 1500, '#8a5ab0'),
+  R('graphite', 'Графит', 'Graphite', 't', 'химия', 'deposit', 1, 1550, '#3a3a3a'),
+  // топливо
+  R('peat', 'Торф', 'Peat', 't', 'топливо', 'deposit', 0, -1000, '#6a4a2a'),
+  R('coal', 'Уголь', 'Coal', 't', 'топливо', 'deposit', 2, 1200, '#2c2c30'),
+  R('oil', 'Нефть', 'Oil (with bitumen and oil shale)', 'l', 'топливо', 'deposit', 2, -3000, '#1c1c26'),
+  R('gas', 'Газ', 'Natural gas', 'm3', 'топливо', 'deposit', 2, 1900, '#2a6ab0'),
+  R('helium', 'Гелий', 'Helium', 'm3', 'топливо', 'deposit', 2, 1910, '#c0a0c8'),
 ];
+export const UNIT_NAMES = { t: 'т', kg: 'кг', l: 'л', m3: 'м³' };
 export const RES_INDEX = Object.fromEntries(RESOURCES.map((r, k) => [r.id, k]));
 export const DEPTH_NAMES = ['на поверхности', 'неглубоко', 'глубоко'];
 
@@ -50,16 +101,19 @@ export function gridForBox(b) {
 }
 
 // ------------------------------------------------------------------ table
-// A table: meta (the .json) + bytes (the gunzipped .bin). Layout of the bytes, per meta.layers:
-//   amount: Uint16 little-endian [R][H][W]   — units of each resource in each cell (see docs/RESOURCES.md)
-//   depth:  Uint8 [R][H][W]                  — 0/1/2 depth of what lies there (255 where nothing)
+// A table: meta (the .json) + bytes (the gunzipped .bin), format 2. Layout of the bytes:
+//   amount: Uint32 little-endian [R][H][W]  × meta.resources[r].scale = the real amount in meta.resources[r].unit
+//   depth:  Uint8 [R][H][W]                 — 0/1/2 depth of what lies there (255 where nothing)
 // Cell index = row · W + col; for the chunk grid row = j − j0, col = i − i0 (row 0 = southmost).
+// table.amount holds the real amounts (whole numbers in the resource's unit) as Float64.
 export function openTable(meta, bytes) {
   const R = meta.resources.length, N = meta.grid.W * meta.grid.H;
-  if (bytes.byteLength !== N * R * 3) throw new Error(`resources table: ${bytes.byteLength} bytes, expected ${N * R * 3}`);
+  if (bytes.byteLength !== N * R * 5) throw new Error(`resources table: ${bytes.byteLength} bytes, expected ${N * R * 5}`);
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  const amount = new Uint16Array(buf, 0, N * R);
-  const depth = new Uint8Array(buf, N * R * 2, N * R);
+  const u32 = new Uint32Array(buf, 0, N * R);
+  const depth = new Uint8Array(buf, N * R * 4, N * R);
+  const amount = new Float64Array(N * R);
+  meta.resources.forEach((r, k) => { const s = r.scale ?? 1; for (let c = 0; c < N; c++) amount[k * N + c] = u32[k * N + c] * s; });
   const ri = Object.fromEntries(meta.resources.map((r, k) => [r.id, k]));
   const g = meta.grid;
   const cell = (i, j) => (i < g.i0 || j < g.j0 || i >= g.i0 + g.W || j >= g.j0 + g.H) ? -1 : (j - g.j0) * g.W + (i - g.i0);
@@ -69,6 +123,20 @@ export function openTable(meta, bytes) {
     getDepth(res, i, j) { const c = cell(i, j); return c < 0 ? 255 : depth[ri[res] * N + c]; },
     layer(res) { return amount.subarray(ri[res] * N, (ri[res] + 1) * N); },
   };
+}
+
+// The owner's 0–100 scale (docs/RESOURCES.md): 100 = the richest 100 km² of the world for this resource (ref100);
+// a place gets its share of that, a whole number; anything there at all is at least 1.
+export function index100(amount, ref100, areaKm2 = 100) {
+  if (!(amount > 0)) return 0;
+  return Math.max(1, Math.min(100, Math.round(100 * amount / (areaKm2 / 100) / ref100)));
+}
+// how a whole number reads: 12 300 000 → «12,3 млн»
+export function fmtAmount(v, unit) {
+  const u = UNIT_NAMES[unit] ?? unit;
+  const steps = [[1e12, 'трлн'], [1e9, 'млрд'], [1e6, 'млн'], [1e3, 'тыс.']];
+  for (const [d, w] of steps) if (v >= d) return `${(v / d).toFixed(v >= 10 * d ? 0 : 1).replace('.', ',')} ${w} ${u}`;
+  return `${Math.round(v)} ${u}`;
 }
 
 // ------------------------------------------------------------------ reproducible randomness
@@ -155,6 +223,8 @@ export function withZones(table, zones, seed) {
 // texels, split evenly among them: fish among its texels in water chunks (in land chunks when the square has no water —
 // river fish), everything else among its texels in land chunks (in water chunks when it has no land). Known deposits go
 // to the chunk under their coordinates. Totals are kept. Returns a table-like object for withZones().
+// share of a deposit that goes to its neighbours, by size class (trace, small, medium, large, giant)
+export const SPREAD = [0, 0, 0.25, 0.4, 0.55];
 export function spreadToChunks(table, meta, g) {
   const R = table.R ?? meta.resources.length, N = table.N, SW = meta.grid.W, n = g.count;
   const area = Float32Array.from(table.amount);
@@ -178,13 +248,21 @@ export function spreadToChunks(table, meta, g) {
       depth[r * n + k] = 0;
     }
   }
+  // Known deposits: in the chunk under their coordinates; a medium or bigger one also spreads gently into the
+  // neighbouring chunks (by the length of the shared border), so the map has no «100 next to 0» (owner's rule).
   const at = [];
+  const add = (r, k, v, d) => { amount[r * n + k] += v; depth[r * n + k] = Math.min(depth[r * n + k], d); };
   for (const d of meta.deposits) {
     const k = g.at(d.lat, d.lon), r = table.index[d.res];
     at.push(k);
     if (k < 0) continue;
-    amount[r * n + k] += d.amount;
-    depth[r * n + k] = Math.min(depth[r * n + k], d.depth);
+    const share = g.links ? SPREAD[d.cls ?? 0] ?? 0 : 0;
+    const sea = d.res === 'oil' || d.res === 'gas' || d.res === 'helium';
+    const nb = share ? g.links[k].filter(l => sea || g.kind[l.k] === g.kind[k]) : [];
+    const border = nb.reduce((t, l) => t + l.km, 0);
+    if (!border) { add(r, k, d.amount, d.depth); continue; }
+    add(r, k, d.amount * (1 - share), d.depth);
+    for (const l of nb) add(r, l.k, d.amount * share * l.km / border, d.depth);
   }
   return { amount, depth, index: table.index, N: n, R, depositChunk: at };
 }
