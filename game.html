@@ -16,7 +16,7 @@
     })();
   </script>
 </head>
-<body class="grain">
+<body>
   <canvas id="view"></canvas>
 
   <div id="loading">
@@ -29,8 +29,8 @@
   </div>
 
   <!-- the only permanent element: date & time, top right -->
-  <div id="clock" class="paper">
-    <div class="paper-body">
+  <div id="clock" class="panel">
+    <div class="panel-body">
       <div id="clock-date" class="title-font">—</div>
       <div id="clock-time">—</div>
       <div id="clock-speed" role="group" aria-label="Скорость времени">
@@ -45,21 +45,21 @@
   </div>
 
   <!-- legend of the current map mode (click to fold) -->
-  <div id="legend" class="paper hidden" title="Щёлкните, чтобы свернуть"><div class="paper-body"><div class="lg-title"></div><div class="lg-body"></div></div></div>
+  <div id="legend" class="panel hidden" title="Щёлкните, чтобы свернуть"><div class="panel-body"><div class="lg-title"></div><div class="lg-body"></div></div></div>
 
-  <!-- map modes: hexagons, bottom right -->
+  <!-- map modes: square buttons, bottom right -->
   <nav id="modes" aria-label="Режимы карты"></nav>
 
   <!-- small scale + compass, bottom left -->
   <div id="hud-left">
-    <svg id="compass" viewBox="0 0 48 48" aria-label="Компас"><circle cx="24" cy="24" r="21" fill="rgba(239,232,218,.85)" stroke="#4a3622"/><g id="compass-needle"><path d="M24 6 L29 24 L24 21 L19 24 Z" fill="#7a5730"/><path d="M24 42 L29 24 L24 27 L19 24 Z" fill="#b8ab93"/></g></svg>
+    <svg id="compass" viewBox="0 0 48 48" aria-label="Компас"><rect x="1" y="1" width="46" height="46" fill="#1b2130" stroke="#4a576f" stroke-width="2"/><g id="compass-needle"><path d="M24 5 L30 24 L18 24 Z" fill="#f3f5f9"/><path d="M24 43 L30 24 L18 24 Z" fill="#6b7489"/></g></svg>
     <div class="scale"><div id="scale-bar"></div><span id="scale-text"></span></div>
-    <button id="chronicle-btn" class="hex small" title="Хроника мира (J)" aria-label="Хроника мира"><svg viewBox="0 0 24 24"><path d="M6 4h10a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2H8a2 2 0 0 1-2-2V4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 4a2 2 0 0 0-2 2v2h2M9 8h6M9 11h6M9 14h4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <button id="chronicle-btn" class="btn icon" title="Хроника мира (J)" aria-label="Хроника мира"><svg viewBox="0 0 24 24"><path d="M6 4h10a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2H8a2 2 0 0 1-2-2V4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 4a2 2 0 0 0-2 2v2h2M9 8h6M9 11h6M9 14h4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
   </div>
 
   <!-- info window: opens on click -->
-  <aside id="info" class="paper hidden">
-    <div class="paper-body">
+  <aside id="info" class="panel hidden">
+    <div class="panel-body">
       <button class="close" id="info-close" title="Закрыть">×</button>
       <div class="info-kicker" id="info-kicker"></div>
       <h1 id="info-title"></h1>
@@ -73,17 +73,17 @@
 
   <!-- pause menu -->
   <div class="modal-back" id="menu">
-    <div class="modal paper"><div class="paper-body">
+    <div class="modal panel"><div class="panel-body">
       <h2>Пауза</h2>
       <div class="dim" id="menu-version"></div>
       <div class="rule"></div>
       <div class="menu-actions">
-        <button class="btn primary" id="menu-resume">Продолжить</button>
-        <button class="btn stone" id="menu-save">Сохранить</button>
-        <button class="btn stone" id="menu-load">Загрузить</button>
-        <button class="btn stone" id="menu-settings">Настройки</button>
-        <button class="btn stone" id="menu-launcher">В лаунчер</button>
-        <button class="btn stone" id="menu-quit">Выйти из игры</button>
+        <button class="btn" id="menu-resume">Продолжить</button>
+        <button class="btn" id="menu-save">Сохранить</button>
+        <button class="btn" id="menu-load">Загрузить</button>
+        <button class="btn" id="menu-settings">Настройки</button>
+        <button class="btn" id="menu-launcher">В лаунчер</button>
+        <button class="btn danger" id="menu-quit">Выйти из игры</button>
       </div>
       <div class="keys dim"><kbd>ЛКМ</kbd> тянуть · <kbd>Колесо</kbd> зум · <kbd>Пробел</kbd> пауза · <kbd>1–5</kbd> скорость · <kbd>F5</kbd> быстрое сохранение · <kbd>F9</kbd> загрузка</div>
     </div></div>
@@ -91,18 +91,18 @@
 
   <!-- saves -->
   <div class="modal-back" id="saves">
-    <div class="modal paper wide"><div class="paper-body">
+    <div class="modal panel wide"><div class="panel-body">
       <button class="close" data-close="saves">×</button>
       <h2 id="saves-title">Сохранения</h2>
       <div class="rule"></div>
-      <div class="save-new"><input id="save-name" maxlength="60" placeholder="Название сохранения" /><button class="btn primary" id="save-do">Сохранить</button></div>
+      <div class="save-new"><input id="save-name" maxlength="60" placeholder="Название сохранения" /><button class="btn ok" id="save-do">Сохранить</button></div>
       <div id="save-list"></div>
     </div></div>
   </div>
 
   <!-- chronicle: the great events of the world so far -->
   <div class="modal-back" id="chronicle">
-    <div class="modal paper wide"><div class="paper-body">
+    <div class="modal panel wide"><div class="panel-body">
       <button class="close" data-close="chronicle">×</button>
       <h2>Хроника мира</h2>
       <div class="rule"></div>
@@ -112,7 +112,7 @@
 
   <!-- settings -->
   <div class="modal-back" id="settings">
-    <div class="modal paper wide"><div class="paper-body">
+    <div class="modal panel wide"><div class="panel-body">
       <button class="close" data-close="settings">×</button>
       <h2>Настройки</h2>
       <div class="rule"></div>

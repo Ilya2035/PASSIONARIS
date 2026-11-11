@@ -188,7 +188,7 @@ export function createSettingsPanel({ settings, packs = [], displays = null, onC
       bar.className = 'sys-bar';
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'btn stone sm';
+      btn.className = 'btn sm';
       btn.textContent = 'Открыть папку сохранений';
       btn.onclick = () => bridge.openSavesFolder().catch(() => {});
       bar.appendChild(btn);

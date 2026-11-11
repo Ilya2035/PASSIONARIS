@@ -19,22 +19,6 @@ export function autoUiScale(w = window.innerWidth, h = window.innerHeight, dpr =
   k = Math.min(2.2, Math.max(k, 0.7, 0.85 / dpr));
   return Math.round(k * 20) / 20;
 }
-// Seamless paper for the HUD windows. The shared stipple tile (src/shared/stipple.js) bakes its light→dark gradient
-// into 320 px, which shows as light bands across windows taller than one tile (the info window, settings; more of
-// them at 1440p / 4K). Here the dots come from a flat tile and game.css lays the gradient over the whole window.
-export function applySeamlessPaper() {
-  const n = 320, cv = document.createElement('canvas');
-  cv.width = cv.height = n;
-  const c = cv.getContext('2d');
-  let s = 3;
-  const R = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
-  for (let i = 0; i < n * n * 0.35; i++) {
-    c.fillStyle = R() < 0.5 ? 'rgba(110,85,55,.16)' : 'rgba(255,255,255,.5)';
-    c.fillRect(R() * n, R() * n, 1, 1);
-  }
-  document.documentElement.style.setProperty('--tex-paper-dots', `url("${cv.toDataURL('image/png')}")`);
-}
-
 let ui = 1;
 export const uiScale = () => ui;
 // setting: 'auto' | number. Returns { ui, auto, wanted }: auto = what 'auto' would pick for this window,
@@ -55,8 +39,8 @@ export function applyUiScale(setting) {
   return { ui, auto, wanted };
 }
 
-// Bottom-right hexagon map-mode buttons. available: Set of feature keys ('climate', 'hazards', 'regions').
-// (grouped modes open a column above their group's hexagon: src/game/ui/icons.js)
+// Bottom-right map-mode buttons. available: Set of feature keys ('climate', 'hazards', 'regions').
+// (grouped modes open a column above their group's button: src/game/ui/icons.js)
 export function buildModes(onSelect, available) { buildModeButtons($('modes'), onSelect, available); }
 export function markMode(id) { markModeButtons($('modes'), id); }
 
@@ -97,7 +81,7 @@ export function showTooltip(html, x, y) {
 }
 export function hideTooltip() { $('tooltip').classList.add('hidden'); }
 
-// Event toasts (eruptions, quakes …): small paper slips that fade away
+// Event toasts (eruptions, quakes …): small slips with an amber edge that fade away
 export function toast(html, ms = 5000, onClick = null) {
   const box = $('toasts');
   const el = document.createElement('div');

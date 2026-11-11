@@ -1,4 +1,4 @@
-// Simple geometric line icons (stroke = currentColor), sharp joins to match the angular style.
+// Simple geometric line icons (stroke = currentColor) for the map-mode buttons.
 const svg = body => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="miter" stroke-linecap="square" aria-hidden="true">${body}</svg>`;
 
 export const ICONS = {
@@ -24,7 +24,7 @@ export const ICONS = {
 };
 
 // Map modes. `needs` = a feature key of the world systems (src/game/world/systems.js); `group` gathers modes under
-// one hexagon whose column opens above it (keeps the row short).
+// one button whose column opens above it (keeps the row short).
 export const MODE_GROUPS = {
   climate: { name: 'Климат и погода', hint: 'температура, осадки, пояса, погода, воздух, ветры' },
 };
@@ -42,69 +42,69 @@ export const MODE_DEFS = [
   { id: 'regions', name: 'Районы', hint: 'Природные районы и морские зоны', needs: 'regions' },
 ];
 
-const CARET = '<i class="hex-caret" aria-hidden="true"></i>';
+const CARET = '<i class="mode-caret" aria-hidden="true"></i>';
 let closerBound = false;
 
-// The hexagon row (bottom right). available: Set of feature keys. Grouped modes sit in a column above their group's
-// hexagon (opens on hover or click, each with its name on a paper slip); a group with one member is a plain button.
+// The row of map-mode buttons (bottom right). available: Set of feature keys. Grouped modes sit in a column above their group's
+// button (opens on hover or click, each with its name on a slip); a group with one member is a plain button.
 export function buildModeButtons(el, onSelect, available) {
   el.innerHTML = '';
   const groups = new Map();
-  const hex = m => {
+  const modeBtn = m => {
     const b = document.createElement('button');
-    b.className = 'hex'; b.dataset.mode = m.id; b.title = `${m.name} — ${m.hint}`;
+    b.className = 'mode-btn'; b.dataset.mode = m.id; b.title = `${m.name} — ${m.hint}`;
     b.setAttribute('aria-label', m.name);
     b.innerHTML = ICONS[m.id] || '';
-    b.onclick = () => { b.closest('.hex-group')?.classList.remove('open'); onSelect(m.id); };
+    b.onclick = () => { b.closest('.mode-group')?.classList.remove('open'); onSelect(m.id); };
     return b;
   };
   for (const m of MODE_DEFS) {
     if (m.needs && !available.has(m.needs)) continue;
-    const b = hex(m);
+    const b = modeBtn(m);
     if (!m.group) { el.appendChild(b); continue; }
     let g = groups.get(m.group);
     if (!g) {
       const def = MODE_GROUPS[m.group] || { name: m.group, hint: '' };
       const wrap = document.createElement('div');
-      wrap.className = 'hex-group'; wrap.dataset.group = m.group;
+      wrap.className = 'mode-group'; wrap.dataset.group = m.group;
       const head = document.createElement('button');
-      head.className = 'hex hex-head'; head.title = `${def.name} — ${def.hint}`;
+      head.className = 'mode-btn mode-head'; head.title = `${def.name} — ${def.hint}`;
       head.setAttribute('aria-label', def.name); head.setAttribute('aria-haspopup', 'true');
       head.innerHTML = (ICONS[m.group] || '') + CARET;
       head.onclick = () => wrap.classList.toggle('open');
       const fly = document.createElement('div');
-      fly.className = 'hex-fly';
+      fly.className = 'mode-fly';
       wrap.append(fly, head);
       el.appendChild(wrap);
       g = { wrap, fly };
       groups.set(m.group, g);
     }
     const item = document.createElement('div');
-    item.className = 'hex-item';
+    item.className = 'mode-item';
     const label = document.createElement('span');
-    label.className = 'hex-label'; label.textContent = m.name;
+    label.className = 'mode-label'; label.textContent = m.name;
     label.onclick = () => b.click();
     item.append(label, b);
     g.fly.appendChild(item);
   }
   for (const g of groups.values()) {
-    if (g.fly.children.length === 1) g.wrap.replaceWith(g.fly.querySelector('.hex'));
+    if (g.fly.children.length === 1) g.wrap.replaceWith(g.fly.querySelector('.mode-btn'));
   }
   if (!closerBound) {
     closerBound = true;
     document.addEventListener('pointerdown', e => {
-      for (const g of document.querySelectorAll('.hex-group.open')) if (!g.contains(e.target)) g.classList.remove('open');
+      for (const g of document.querySelectorAll('.mode-group.open')) if (!g.contains(e.target)) g.classList.remove('open');
     });
   }
 }
 
-// Marks the active mode; a group's hexagon takes the icon and the name of its active member.
+// Marks the active mode; a group's button takes the icon and the name of its active member.
 export function markModeButtons(el, id) {
-  for (const b of el.querySelectorAll('.hex[data-mode]')) b.classList.toggle('active', b.dataset.mode === id);
-  for (const g of el.querySelectorAll('.hex-group')) {
+  for (const b of el.querySelectorAll('.mode-btn[data-mode]')) b.classList.toggle('active', b.dataset.mode === id);
+  for (const g of el.querySelectorAll('.mode-group')) {
     const key = g.dataset.group, def = MODE_GROUPS[key] || { name: key, hint: '' };
-    const m = MODE_DEFS.find(d => d.id === id && d.group === key && g.querySelector(`.hex[data-mode="${id}"]`));
-    const head = g.querySelector('.hex-head');
+    const m = MODE_DEFS.find(d => d.id === id && d.group === key && g.querySelector(`.mode-btn[data-mode="${id}"]`));
+    const head = g.querySelector('.mode-head');
     head.classList.toggle('active', !!m);
     head.innerHTML = (ICONS[m ? m.id : key] || '') + CARET;
     head.title = m ? `${def.name}: ${m.name} — ${m.hint}` : `${def.name} — ${def.hint}`;

@@ -1,138 +1,154 @@
-/* Passionaris visual identity (approved 2026-11-10):
-   stipple "canvas" textures, paper windows with ink text, bronze accents, sharp chamfered/hexagonal shapes,
-   light-gothic headings (Alegreya SC). Textures are generated at start-up by src/shared/stipple.js. */
+/* Passionaris — working interface (owner, 2026-11-11): every block is a plain rectangle marked with a "work colour"
+   that says what it is for. No textures, grain, decorative gradients, engraved frames or ornaments: an artist will
+   redraw each block later, and docs/UI.md lists them all (name, place, size, states, the class to put a drawing on).
+   One scheme for the three pages: the launcher (index.html), the game (game.html) and the graphics album (album.html). */
+@import '@fontsource/alegreya-sc/500.css';
+@import '@fontsource/alegreya-sc/700.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/600.css';
+
 :root {
-  --ink: #121211;
-  --ink-2: #1b1a18;
-  --panel: rgba(25, 24, 22, 0.93);
-  --panel-solid: #1b1a18;
-  --accent: #b3a37f;
-  --accent-hi: #dccfae;
-  --accent-soft: rgba(179, 163, 127, 0.3);
-  --text: #e8e3d7;
-  --text-dim: #b7b1a3;
-  --muted: #878275;
-  --btn-top: #ebe5d6;
-  --btn-bottom: #c4bba6;
-  --btn-text: #1b1a17;
-  --danger: #b4594a;
-  --ok: #8aa27f;
-  /* paper windows */
-  --paper: #efe8da;
-  --paper-ink: #2a1f15;
-  --paper-ink-dim: #5e4f3d;
-  --paper-line: #4a3622;
-  --bronze: #b58a52;
-  --font-display: 'Alegreya SC', 'Cormorant Garamond', Georgia, serif;
-  --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  --radius: 2px;
-  --cut: 10px;
+  /* ---- work colours: a colour = a purpose (table in docs/UI.md) */
+  --c-blue: #2b6de0;         /* main action and navigation; the chosen tab, mode, page, row */
+  --c-blue-hover: #4384f2;
+  --c-blue-press: #1f55b5;
+  --c-green: #178a4a;        /* confirm, done, «Подходит», switched on */
+  --c-green-hover: #1fa75b;
+  --c-green-press: #11703b;
+  --c-red: #d33232;          /* dangerous action, delete, close, quit, «Не то», errors */
+  --c-red-hover: #e84b4b;
+  --c-red-press: #ac2424;
+  --c-amber: #f2a51a;        /* time, speed, warnings, events (dark text on it) */
+  --c-amber-hover: #f8bb47;
+  --c-amber-press: #d4890a;
+  --c-amber-text: #1b1304;
+  --c-grey: #4a5366;         /* not chosen (a tab, a mode, a speed): grey until chosen */
+  --c-grey-hover: #5b6579;
+  --c-grey-press: #3d4556;
+  --c-off: #333a48;          /* switched off / unavailable (disabled) */
+  --c-off-text: #7d8597;
+  /* ---- surfaces: one flat fill for every panel, a slightly lighter one for rows and fields inside it */
+  --c-ink: #0e121a;          /* page background behind everything */
+  --c-panel: #1b2130;        /* every panel and window */
+  --c-field: #10141d;        /* inputs, selects, text areas */
+  --c-row: #252d3f;          /* a row / item inside a panel */
+  --c-row-hover: #303a50;
+  --c-line: #4a576f;         /* panel borders and dividers */
+  --c-line-soft: #343e52;    /* thin dividers between rows */
+  --c-text: #f3f5f9;         /* text on panels and on coloured buttons */
+  --c-text-dim: #b3bccc;     /* secondary text: hints, captions, dates */
+  --c-focus: #ffffff;        /* keyboard focus ring */
+  --c-backdrop: rgba(6, 9, 15, 0.62);   /* behind modal windows */
+
+  /* ---- four text sizes (owner's rule): huge — the game's name only; large — window titles; medium — text and
+     buttons; small — hints, captions, dates, chips */
+  --fs-huge: 56px;
+  --fs-l: 24px;
+  --fs-m: 16px;
+  --fs-s: 13px;
+  --font-display: 'Alegreya SC', Georgia, serif;     /* names, titles, buttons */
+  --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif; /* running text, numbers */
+
+  /* ---- one shape */
+  --radius: 3px;             /* every button and field */
+  --border: 2px;             /* every panel and button border */
   /* interface scale: the game sets it from settings.uiScale (src/game/ui/hud.js); zoomed blocks use it */
   --ui: 1;
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); font-family: var(--font-ui); font-size: 14px; }
+html, body { margin: 0; height: 100%; background: var(--c-ink); color: var(--c-text); font-family: var(--font-ui); font-size: var(--fs-m); }
 button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
 
-/* dark glass panel (legacy, launcher side panels) */
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--accent-soft);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
-  border-radius: var(--radius);
-  position: relative;
-}
-.panel::before, .panel::after {
-  content: ''; position: absolute; width: 9px; height: 9px; pointer-events: none;
-  border-color: var(--accent); border-style: solid;
-}
-.panel::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
-.panel::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+/* ------------------------------------------------------------------ panel: a flat rectangle with a clear border
+   <div class="panel"><div class="panel-body">…</div></div> (the body holds padding and scrolling) */
+.panel { position: relative; background: var(--c-panel); border: var(--border) solid var(--c-line); color: var(--c-text); }
+.panel > .panel-body { position: relative; padding: 16px 18px; }
+.panel h1, .panel h2, .panel h3 { font-family: var(--font-display); font-weight: 700; color: var(--c-text); margin: 0; letter-spacing: 0.02em; }
+.panel h2 { font-size: var(--fs-l); line-height: 1.15; }
+.dim { color: var(--c-text-dim); }
+.rule { height: 0; border: 0; border-top: var(--border) solid var(--c-line); margin: 12px 0; }
+.panel ::-webkit-scrollbar { width: 10px; height: 10px; }
+.panel ::-webkit-scrollbar-track { background: transparent; }
+.panel ::-webkit-scrollbar-thumb { background: var(--c-grey); border: 2px solid var(--c-panel); }
+.panel ::-webkit-scrollbar-thumb:hover { background: var(--c-grey-hover); }
 
-/* paper window: chamfered stipple card with engraved double border and a stipple shadow */
-.paper {
-  position: relative; color: var(--paper-ink);
-  filter: drop-shadow(3px 5px 0 rgba(20, 15, 10, 0.22)) drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
-}
-.paper > .paper-body {
-  position: relative;
-  /* the stipple stays at screen-pixel grain whatever the interface zoom (crisp dots at 1440p / 4K) */
-  background: var(--tex-paper, var(--paper)) center / calc(320px / var(--ui, 1));
-  clip-path: polygon(var(--cut) 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, var(--cut) 100%, 0 calc(100% - var(--cut)), 0 var(--cut));
-  padding: 16px 18px;
-}
-.paper > .paper-body::before {
-  content: ''; position: absolute; inset: 4px; pointer-events: none;
-  border: 1px solid rgba(74, 54, 34, 0.55);
-  clip-path: polygon(calc(var(--cut) - 3px) 0, calc(100% - var(--cut) + 3px) 0, 100% calc(var(--cut) - 3px), 100% calc(100% - var(--cut) + 3px), calc(100% - var(--cut) + 3px) 100%, calc(var(--cut) - 3px) 100%, 0 calc(100% - var(--cut) + 3px), 0 calc(var(--cut) - 3px));
-}
-.paper h1, .paper h2, .paper h3 { font-family: var(--font-display); color: var(--paper-ink); margin: 0; letter-spacing: 0.02em; }
-.paper .dim { color: var(--paper-ink-dim); }
-.paper .rule { background: linear-gradient(90deg, transparent, rgba(74, 54, 34, 0.45), transparent); }
-
-/* buttons */
+/* ------------------------------------------------------------------ button: ONE shape, the colour says the purpose
+   .btn — blue (main action, navigation) · .btn.ok — green (confirm) · .btn.danger — red (delete, close, quit)
+   .btn.warn — amber (time, overwrite, warning) · .btn.off — grey (a choice not taken yet) · :disabled — dark grey
+   sizes: .btn.big (the main button of a screen), .btn (36 px), .btn.sm (30 px), .btn.icon (square, an icon inside) */
 .btn {
+  --b: var(--c-blue); --b-hover: var(--c-blue-hover); --b-press: var(--c-blue-press); --b-text: var(--c-text);
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 9px 16px; cursor: pointer; user-select: none;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--accent-soft); border-radius: var(--radius);
-  color: var(--text); letter-spacing: 0.04em; transition: border-color .15s, background .15s, color .15s, filter .15s;
+  min-height: 36px; margin: 0; padding: 0 16px; cursor: pointer; user-select: none; text-align: center;
+  background: var(--b); color: var(--b-text);
+  border: var(--border) solid rgba(0, 0, 0, 0.4); border-radius: var(--radius);
+  font: 700 var(--fs-m)/1.15 var(--font-display); letter-spacing: 0.04em;
 }
-.btn:hover { border-color: var(--accent); color: #fff; background: rgba(255, 255, 255, 0.07); }
-.btn.active { border-color: var(--accent-hi); background: rgba(255, 255, 255, 0.12); color: #fff; }
-.btn:disabled { opacity: 0.4; cursor: default; }
-/* bronze / stone stipple buttons with pointed ends */
-.btn.primary, .btn.stone {
-  border: 0; border-radius: 0; color: var(--paper-ink); font-family: var(--font-display); font-weight: 700;
-  letter-spacing: 0.14em; font-size: 17px; padding: 12px 30px;
-  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
-  background: var(--tex-bronze, linear-gradient(180deg, var(--btn-top), var(--btn-bottom))) center / cover;
+.btn:hover { background: var(--b-hover); }
+.btn:active { background: var(--b-press); }
+.btn.ok { --b: var(--c-green); --b-hover: var(--c-green-hover); --b-press: var(--c-green-press); }
+.btn.danger { --b: var(--c-red); --b-hover: var(--c-red-hover); --b-press: var(--c-red-press); }
+.btn.warn { --b: var(--c-amber); --b-hover: var(--c-amber-hover); --b-press: var(--c-amber-press); --b-text: var(--c-amber-text); }
+.btn.off { --b: var(--c-grey); --b-hover: var(--c-grey-hover); --b-press: var(--c-grey-press); --b-text: var(--c-text); }
+.btn:disabled, .btn[aria-disabled="true"] { background: var(--c-off); color: var(--c-off-text); cursor: default; }
+.btn[hidden], .close[hidden] { display: none; }
+.btn.big { min-height: 52px; padding: 0 24px; font-size: var(--fs-l); }
+.btn.sm { min-height: 30px; padding: 0 12px; }
+.btn.icon { min-height: 0; width: 36px; height: 36px; padding: 0; }
+.btn.icon svg { width: 20px; height: 20px; }
+/* close (×) of a window: a small red square in its top right corner */
+.close {
+  position: absolute; top: 10px; right: 10px; z-index: 2; width: 28px; height: 28px; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--c-red); color: var(--c-text); border: var(--border) solid rgba(0, 0, 0, 0.4); border-radius: var(--radius);
+  font: 700 var(--fs-m)/1 var(--font-ui);
 }
-.btn.stone { background: var(--tex-stone, #e3dccb) center / cover; font-size: 15px; }
-.btn.primary:hover, .btn.stone:hover { filter: brightness(1.07); color: #000; }
-.btn.primary:active, .btn.stone:active { filter: brightness(0.95); }
-.btn.primary:disabled, .btn.stone:disabled { filter: grayscale(0.6) brightness(0.8); opacity: 0.6; }
-/* hexagon icon button */
-.hex {
-  width: 46px; height: 52px; border: 0; padding: 0; cursor: pointer; color: var(--paper-ink);
-  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-  background: var(--tex-stone, #e3dccb) center / cover;
-  display: inline-flex; align-items: center; justify-content: center; transition: filter .15s, transform .15s;
-}
-.hex svg { width: 22px; height: 22px; }
-.hex:hover { filter: brightness(1.08); }
-.hex.active { background: var(--tex-bronze, #c9a26a) center / cover; transform: translateY(-2px); }
+.close:hover { background: var(--c-red-hover); }
+.close:active { background: var(--c-red-press); }
 
 .title-font { font-family: var(--font-display); font-weight: 700; }
 .version-chip {
-  font-family: var(--font-ui); font-size: 11px; letter-spacing: 0.08em;
-  padding: 2px 7px; border: 1px solid var(--accent-soft); border-radius: 20px; color: var(--accent-hi);
+  font-family: var(--font-ui); font-size: var(--fs-s); letter-spacing: 0.04em;
+  padding: 1px 7px; border: 1px solid var(--c-line); background: var(--c-row); color: var(--c-text);
 }
-.rule { height: 1px; background: linear-gradient(90deg, transparent, var(--accent-soft), transparent); border: 0; margin: 12px 0; }
-.muted { color: var(--muted); }
+.muted { color: var(--c-text-dim); }
 kbd {
-  font-family: var(--font-ui); font-size: 10px; padding: 1px 5px; border-radius: 2px;
-  border: 1px solid rgba(74, 54, 34, 0.4); color: var(--paper-ink-dim); background: rgba(255, 255, 255, 0.35);
+  font-family: var(--font-ui); font-size: var(--fs-s); padding: 0 5px; border-radius: var(--radius);
+  border: 1px solid var(--c-line); color: var(--c-text); background: var(--c-row);
 }
 
-.field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(74, 54, 34, 0.14); }
-.field label { color: var(--paper-ink-dim); }
-.field input[type=range] { width: 170px; accent-color: var(--bronze); }
-.field select {
-  background: rgba(255, 255, 255, 0.55); color: var(--paper-ink); border: 1px solid rgba(74, 54, 34, 0.45); border-radius: var(--radius); padding: 5px 8px;
-  font: inherit;
+/* ------------------------------------------------------------------ fields */
+.field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--c-line-soft); }
+.field label { color: var(--c-text); }
+input[type=range] { accent-color: var(--c-blue); }
+input[type=checkbox] { accent-color: var(--c-green); }
+.field input[type=range] { width: 170px; }
+.field input[type=checkbox] { width: 18px; height: 18px; }
+select, input[type=text], input:not([type]), textarea {
+  background: var(--c-field); color: var(--c-text); border: var(--border) solid var(--c-line); border-radius: var(--radius);
+  padding: 5px 8px; font: inherit; font-size: var(--fs-m);
 }
-.field input[type=checkbox] { accent-color: var(--bronze); width: 16px; height: 16px; }
+select:hover, input[type=text]:hover, input:not([type]):hover, textarea:hover { border-color: var(--c-grey-hover); }
+select:focus, input[type=text]:focus, input:not([type]):focus, textarea:focus { border-color: var(--c-blue); outline: none; }
+/* on / off switch: grey track when off, green when on; a square knob */
+input[type=checkbox].toggle {
+  appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 44px; height: 22px; margin: 0; cursor: pointer;
+  border: var(--border) solid rgba(0, 0, 0, 0.4); border-radius: var(--radius); background: var(--c-grey);
+}
+input[type=checkbox].toggle::before {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 2px; background: var(--c-text);
+  transition: left .12s;
+}
+input[type=checkbox].toggle:hover { background: var(--c-grey-hover); }
+input[type=checkbox].toggle:checked { background: var(--c-green); }
+input[type=checkbox].toggle:checked:hover { background: var(--c-green-hover); }
+input[type=checkbox].toggle:checked::before { left: 24px; }
+input[type=checkbox].toggle:disabled { background: var(--c-off); cursor: default; }
 
-.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: none; align-items: center; justify-content: center; z-index: 50; }
+/* ------------------------------------------------------------------ modal windows */
+.modal-back { position: fixed; inset: 0; background: var(--c-backdrop); display: none; align-items: center; justify-content: center; z-index: 50; }
 .modal-back.open { display: flex; }
 .modal { width: min(460px, calc(100vw / var(--ui, 1) - 32px)); }
-.modal h2 { font-size: 28px; margin: 0 0 4px; }
-
-/* faint film grain over everything */
-.grain::after {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 200; opacity: 0.06; mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-}
+.modal h2 { font-size: var(--fs-l); margin: 0 0 4px; }

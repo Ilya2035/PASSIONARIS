@@ -1,4 +1,4 @@
-// Sharp-cornered tab strip in the paper style (launcher: news/roadmap codex and the settings modal).
+// Tab strip (launcher: changelog/plan panel and the settings modal): grey tabs, the chosen one blue (launcher.css).
 //
 //   const tabs = createTabs({ strip, panes: id => element, items: [{id, label}], storageKey, onChange });
 //   tabs.select('graphics');  tabs.current

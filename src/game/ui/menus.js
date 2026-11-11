@@ -83,7 +83,7 @@ export function buildSettings(settings, apply) {
       let input;
       if (f.type === 'select') input = `<select id="${id}"></select>`;
       else if (f.type === 'range') input = `<span class="ctl"><input type="range" id="${id}" min="${f.min}" max="${f.max}" step="${f.step}" /><output for="${id}"></output></span>`;
-      else input = `<input type="checkbox" id="${id}" />`;
+      else input = `<input type="checkbox" class="toggle" id="${id}" />`;
       row.innerHTML = `<label for="${id}">${esc(f.label)}${f.reload ? RELOAD : ''}</label>${input}${f.hint ? '<div class="hint"></div>' : ''}`;
       page.appendChild(row);
       const el = row.querySelector('select, input');
@@ -148,7 +148,7 @@ export async function openSaves(api, mode /* 'save' | 'load' */) {
       const thumb = typeof s.meta?.thumbnail === 'string' && THUMB_RE.test(s.meta.thumbnail) ? s.meta.thumbnail : '';
       row.innerHTML = `<div class="thumb${thumb ? '' : ' empty'}">${thumb ? '<img alt="" decoding="async" />' : ''}</div>
         <div><div class="nm">${esc(s.name)}</div><div class="meta">${esc(s.meta?.dateText || '')}${s.meta?.saved ? ' · ' + esc(new Date(s.meta.saved).toLocaleString('ru-RU')) : ''}</div></div>
-        <button data-act="${mode === 'save' ? 'over' : 'load'}">${mode === 'save' ? 'Перезаписать' : 'Загрузить'}</button><button data-act="del">Удалить</button>`;
+        <button class="btn sm${mode === 'save' ? ' warn' : ''}" data-act="${mode === 'save' ? 'over' : 'load'}">${mode === 'save' ? 'Перезаписать' : 'Загрузить'}</button><button class="btn sm danger" data-act="del">Удалить</button>`;
       if (thumb) row.querySelector('img').src = thumb;
       const id = s.id ?? s.name;
       row.querySelector('[data-act="del"]').onclick = async () => { await api.remove(id); render(); };

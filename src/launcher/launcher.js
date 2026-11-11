@@ -1,8 +1,3 @@
-import '@fontsource/alegreya-sc/500.css';
-import '@fontsource/alegreya-sc/700.css';
-import '@fontsource/cormorant-garamond/600.css';
-import '@fontsource/inter/400.css';
-import '@fontsource/inter/600.css';
 import '../shared/theme.css';
 import './launcher.css';
 import changelogMd from '../../CHANGELOG.md?raw';
@@ -10,36 +5,9 @@ import { APP_NAME, VERSION, VERSION_LABEL, EPOCH_LABEL } from '../shared/version
 import { loadSettings, saveSettings, isElectron } from '../shared/settings.js';
 import { applyUiPalette } from '../shared/palettes.js';
 import { applyPackData } from '../engine/packs.js';
-import { applyStippleTheme } from '../shared/stipple.js';
 import { createTabs } from './tabs.js';
 import { createSavesPanel } from './saves.js';
 import { createSettingsPanel } from './settingsPanel.js';
-applyStippleTheme();
-tallPaper();
-
-// The shared paper tile is 320 px tall with a top→bottom gradient: on tall panels (wide layout, the settings modal)
-// its repeats show as bands. The launcher's panels get one tall tile instead: the same stipple, a gentler gradient.
-function tallPaper() {
-  try {
-    const w = 320, h = 1200;
-    const cv = document.createElement('canvas');
-    cv.width = w; cv.height = h;
-    const c = cv.getContext('2d');
-    const g = c.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#f1ebdf'); g.addColorStop(0.42, '#e7ddcc'); g.addColorStop(1, '#ddd2be');
-    c.fillStyle = g; c.fillRect(0, 0, w, h);
-    let s = 11 >>> 0;
-    const R = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-    for (let i = 0; i < w * h * 0.35; i++) {
-      const y = R() * h;
-      c.fillStyle = R() < 0.25 + 0.5 * Math.min(1, y / 520) ? 'rgba(110,85,55,.16)' : 'rgba(255,255,255,.5)';
-      c.fillRect(R() * w, y, 1, 1);
-    }
-    // a blob URL keeps the (noisy, ~1 MB) image out of the style text
-    cv.toBlob(b => { if (b) document.documentElement.style.setProperty('--tex-paper-tall', `url("${URL.createObjectURL(b)}")`); }, 'image/png');
-  } catch { /* the regular tile stays */ }
-}
-
 const $ = id => document.getElementById(id);
 if (!isElectron) document.body.classList.add('browser');
 // screens for the resolution list: asked early (IPC), used by the settings modal
@@ -49,53 +17,12 @@ $('ver').textContent = VERSION_LABEL;
 $('epoch').textContent = EPOCH_LABEL;
 $('foot-ver').textContent = `${APP_NAME} ${VERSION_LABEL}`;
 
-// the art and the logo first: nothing below may delay them (settings, packs and saves are awaited later)
+// the art first: nothing below may delay it (settings, packs and saves are awaited later)
 // ------------------------------------------------------------- menu art
 // Rendered by the game engine itself (scripts/render-menu-art.mjs) — v1: the Nile Delta.
 const MENU_ART = "assets/ui/menu-nile-delta";
 $("bg").style.backgroundImage = `url("${MENU_ART}.jpg")`;
 fetch(`${MENU_ART}.json`).then(r => r.ok ? r.json() : null).then(j => { if (j?.caption) $("art-caption").textContent = j.caption; }).catch(() => {});
-
-// ------------------------------------------------------------- logo: light-gothic letters filled with bronze stipple
-// Redrawn when the window is resized (the canvas follows the layout: 960×600 … large screens).
-let logoSize = '';
-function drawLogo() {
-  const cv = $('logo');
-  const d = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
-  if (!w || !h || `${w}x${h}x${d}` === logoSize) return;
-  logoSize = `${w}x${h}x${d}`;
-  cv.width = w * d; cv.height = h * d;
-  const c = cv.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0);
-  // measure with letter spacing applied, then fit the width (two passes: spacing scales with size) and the height
-  let fs = 92;
-  const setFont = size => { c.font = `700 ${size}px "Alegreya SC"`; if (c.letterSpacing !== undefined) c.letterSpacing = `${size * 0.04}px`; };
-  setFont(fs);
-  for (let k = 0; k < 2; k++) { fs = Math.min(96, h * 0.62, fs * (w - 14) / c.measureText('PASSIONARIS').width); setFont(fs); }
-  const tw = c.measureText('PASSIONARIS').width;
-  const x0 = 2, yb = h * 0.62;
-  const m = document.createElement('canvas'); m.width = cv.width; m.height = cv.height;
-  const mc = m.getContext('2d'); mc.setTransform(d, 0, 0, d, 0, 0); mc.font = c.font; if (mc.letterSpacing !== undefined) mc.letterSpacing = c.letterSpacing;
-  mc.fillText('PASSIONARIS', x0, yb);
-  const md = mc.getImageData(0, 0, m.width, m.height).data;
-  c.fillStyle = 'rgba(0,0,0,.45)'; c.fillText('PASSIONARIS', x0 + 2, yb + 3);
-  c.fillStyle = '#5a4026'; c.fillText('PASSIONARIS', x0, yb);
-  let s = 77; const R = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  const top = [242, 222, 172], bot = [140, 98, 52];
-  for (let i = 0; i < w * h * 1.6; i++) {
-    const x = R() * w, y = R() * h; const px = Math.floor(x * d), py = Math.floor(y * d);
-    if (md[(py * m.width + px) * 4 + 3] < 128) continue;
-    const t = Math.min(1, Math.max(0, (y - (yb - fs * 0.75)) / (fs * 0.8)));
-    const col = top.map((v, k) => Math.round(v + (bot[k] - v) * t));
-    c.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},.95)`; c.fillRect(x, y, 0.9, 0.9);
-  }
-  c.lineWidth = 0.7; c.strokeStyle = 'rgba(30,20,10,.8)'; c.strokeText('PASSIONARIS', x0, yb);
-  const ly = yb + fs * 0.24; c.strokeStyle = '#b58a52'; c.lineWidth = 1.2;
-  c.beginPath(); c.moveTo(x0, ly); c.lineTo(x0 + tw * 0.44, ly); c.moveTo(x0 + tw * 0.56, ly); c.lineTo(x0 + tw, ly); c.stroke();
-  c.fillStyle = '#d9b77c'; c.beginPath(); c.moveTo(x0 + tw / 2, ly - 6); c.lineTo(x0 + tw / 2 + 8, ly); c.lineTo(x0 + tw / 2, ly + 6); c.lineTo(x0 + tw / 2 - 8, ly); c.closePath(); c.fill();
-}
-document.fonts.load('700 80px "Alegreya SC"').then(drawLogo, drawLogo);
-let logoTimer = 0;
-window.addEventListener('resize', () => { clearTimeout(logoTimer); logoTimer = setTimeout(drawLogo, 120); });
 
 // ------------------------------------------------------------- changelog
 function mdToHtml(md) {

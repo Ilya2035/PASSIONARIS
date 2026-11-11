@@ -1,4 +1,4 @@
-// Small styled confirmation dialog (paper card) instead of window.confirm. Markup: #confirm in index.html.
+// Small confirmation dialog (a flat panel) instead of window.confirm. Markup: #confirm in index.html.
 //
 //   if (await confirmDialog({ title: 'Удалить сохранение?', text: '…', yes: 'Удалить', danger: true })) …
 //
@@ -20,7 +20,9 @@ export function confirmDialog({ title, text = '', note = '', yes = 'Да', no = 
   const yesBtn = $('confirm-yes'), noBtn = $('confirm-no');
   yesBtn.textContent = yes;
   noBtn.textContent = no;
+  // the yes button: red for a dangerous action (delete), green otherwise (docs/UI.md)
   yesBtn.classList.toggle('danger', danger);
+  yesBtn.classList.toggle('ok', !danger);
   const before = document.activeElement;
   back.classList.add('open');
   noBtn.focus();

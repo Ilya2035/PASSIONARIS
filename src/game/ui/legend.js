@@ -1,4 +1,4 @@
-// Map legend: a small paper slip above the mode buttons that says what the colours mean in the current mode.
+// Map legend: a small panel above the mode buttons that says what the colours mean in the current mode.
 // The ramps of the older modes are JS copies of the shader ramps in src/game/shaders.js (hypso, tempRamp, precRamp,
 // hazardRamp); the climate belts, weather, air and winds read the same table as the shader (./mapcolors.js), and
 // the fertility ramp comes straight from src/sim/climate/fertility.js — so those cannot drift from the map.
@@ -50,7 +50,7 @@ function steps(colors) {
   return `linear-gradient(90deg, ${colors.map((c, i) => `${css(c)} ${(i / n * 100).toFixed(2)}% ${((i + 1) / n * 100).toFixed(2)}%`).join(', ')})`;
 }
 const bar = (bg, ticks) => `<div class="lg-bar" style="background:${bg}"></div><div class="lg-ticks">${ticks.map(([p, t]) => `<span style="left:${p}%">${t}</span>`).join('')}</div>`;
-// a swatch with a name; cls: 'hatch' (diagonal strokes) or 'dots' (stipple) drawn in the colour over paper
+// a swatch with a name; cls: 'hatch' (diagonal strokes) or 'dots' (the map's cloud dots) drawn in the colour over the map's paper land
 const sw = (c, name, cls = '') => `<span><i class="${cls}" style="--c:${css(c)};background:${cls ? css(PAPER) : css(c)}"></i>${name}</span>`;
 // a swatch of several flat steps (thin → thick)
 const swSteps = (colors, name) => `<span><i class="wide" style="background:${steps(colors)}"></i>${name}</span>`;

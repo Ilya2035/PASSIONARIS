@@ -1,46 +1,48 @@
-/* Legend extras (Köppen chips, hatched swatches) and the grouped map-mode hexagons (src/game/ui/icons.js). */
-#legend .lg-kg { display: flex; align-items: baseline; gap: 6px; margin: 5px 0 2px; color: var(--paper-ink-dim); }
+/* Legend extras (Köppen chips, hatched swatches) and the grouped map-mode buttons (src/game/ui/icons.js). */
+#legend .lg-kg { display: flex; align-items: baseline; gap: 6px; margin: 5px 0 2px; color: var(--c-text-dim); }
 #legend .lg-kg:first-child { margin-top: 0; }
-#legend .lg-kg b { font-family: var(--font-display); font-size: 12px; color: var(--paper-ink); }
+#legend .lg-kg b { font-family: var(--font-display); font-weight: 700; color: var(--c-text); }
 #legend .lg-chips { display: flex; flex-wrap: wrap; gap: 2px; }
-#legend .lg-chip { min-width: 22px; padding: 0 3px; font-size: 9.5px; line-height: 14px; text-align: center; color: var(--paper-ink);
-  border: 1px solid rgba(60, 46, 30, 0.3); cursor: help; }
-#legend .lg-chip.dark { color: #f3eee4; }
+#legend .lg-chip { min-width: 26px; padding: 0 3px; font-size: var(--fs-s); line-height: 16px; text-align: center; color: #10141d;
+  border: 1px solid rgba(0, 0, 0, 0.35); cursor: help; }
+#legend .lg-chip.dark { color: #f3f5f9; }
+/* the map's own symbols, copied into the swatches: diagonal strokes (drought, ash on the ground) and dots (cloud cover)
+   — they show what is drawn on the map, they are not decoration of the interface */
 #legend i.hatch { background: repeating-linear-gradient(45deg, var(--c) 0 2px, transparent 2px 5px) !important; }
-/* stipple (cloud cover): dots of the colour over the swatch's paper */
 #legend i.dots { background-image: radial-gradient(var(--c) 0.9px, transparent 1.3px) !important; background-size: 3.5px 3.5px !important; }
 /* a swatch of several flat steps (thin → thick), a caption above a group, one- and three-column groups */
 #legend i.wide { width: 38px; }
-#legend .lg-sub { margin: 7px 0 3px; color: var(--paper-ink-dim); font-size: 10.5px; letter-spacing: 0.02em; }
+#legend .lg-sub { margin: 7px 0 3px; color: var(--c-text-dim); }
 #legend .lg-sub:first-child { margin-top: 0; }
 #legend .lg-grid.one { grid-template-columns: 1fr; }
 #legend .lg-grid.three { grid-template-columns: repeat(3, auto); justify-content: space-between; }
 #legend .lg-grid + .lg-grid, #legend .lg-ticks + .lg-grid { margin-top: 5px; }
 
-/* a group of map modes: its hexagon in the row, the members in a column above it (hover or click) */
-#modes .hex-group { position: relative; display: inline-flex; }
-#modes .hex-fly {
+/* a group of map modes: its button in the row, the members in a column above it (hover or click) */
+#modes .mode-group { position: relative; display: inline-flex; }
+#modes .mode-fly {
   position: absolute; right: 0; bottom: 100%; padding-bottom: 8px; z-index: 2;
   display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
   visibility: hidden; opacity: 0; transform: translateY(4px);
   transition: opacity .14s, transform .14s, visibility 0s .14s;
 }
-#modes .hex-group:hover .hex-fly, #modes .hex-group.open .hex-fly { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
-#modes .hex-item { display: flex; align-items: center; gap: 6px; }
-#modes .hex-label {
-  font-family: var(--font-display); font-size: 13px; letter-spacing: 0.02em; white-space: nowrap; cursor: pointer;
-  padding: 3px 10px 2px 12px; color: var(--paper-ink); background: rgba(239, 232, 218, 0.96);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); clip-path: polygon(7px 0, 100% 0, 100% 100%, 7px 100%, 0 50%);
+#modes .mode-group:hover .mode-fly, #modes .mode-group.open .mode-fly { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+#modes .mode-item { display: flex; align-items: center; gap: 6px; }
+/* the name of a mode in the column: a flat slip, blue when that mode is shown */
+#modes .mode-label {
+  font: 700 var(--fs-s)/1.2 var(--font-display); letter-spacing: 0.03em; white-space: nowrap; cursor: pointer;
+  padding: 5px 10px; color: var(--c-text); background: var(--c-panel); border: var(--border) solid var(--c-line);
 }
-#modes .hex-item:hover .hex-label { background: #f7f2e8; }
-#modes .hex-item .hex.active ~ .hex-label, #modes .hex-item:has(.hex.active) .hex-label { background: var(--tex-bronze, #c9a26a) center / cover; }
-#modes .hex-caret {
-  position: absolute; top: 6px; left: 50%; width: 7px; height: 4px; margin-left: -3.5px;
-  background: currentColor; opacity: 0.6; clip-path: polygon(50% 0, 100% 100%, 0 100%);
+#modes .mode-item:hover .mode-label { background: var(--c-row-hover); }
+#modes .mode-item:has(.mode-btn.active) .mode-label { background: var(--c-blue); border-color: var(--c-blue); }
+/* a small triangle on a group's button: it opens a column */
+#modes .mode-caret {
+  position: absolute; top: 4px; left: 50%; width: 8px; height: 5px; margin-left: -4px;
+  background: currentColor; clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
-/* short windows: the column becomes two columns of bare hexagons (the names stay in the tooltips) */
-body.hud-short #modes .hex-fly { display: grid; grid-template-columns: repeat(2, auto); gap: 4px 6px; }
-body.hud-short #modes .hex-label { display: none; }
+/* short windows: the column becomes two columns of bare buttons (the names stay in the tooltips) */
+body.hud-short #modes .mode-fly { display: grid; grid-template-columns: repeat(2, auto); gap: 4px 6px; }
+body.hud-short #modes .mode-label { display: none; }
 /* while a group's column is open it stands where the legend is: the legend steps aside */
 #legend { transition: opacity .12s; }
-body:has(#modes .hex-group.open) #legend, body:has(#modes .hex-group:hover) #legend { opacity: 0; pointer-events: none; }
+body:has(#modes .mode-group.open) #legend, body:has(#modes .mode-group:hover) #legend { opacity: 0; pointer-events: none; }

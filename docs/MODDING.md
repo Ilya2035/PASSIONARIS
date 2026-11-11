@@ -28,7 +28,7 @@ public/packs/
   "author": "…",
   "description": "…",
   "enabledByDefault": false,         // у DLC по умолчанию true
-  "palettes": { "nightink": { "name": "…", "ui": { "--accent": "#8ea0c2" }, "map": { "deep": [0.2, 0.25, 0.34] } } },
+  "palettes": { "nightink": { "name": "…", "ui": { "--c-blue": "#3a5fd0" }, "map": { "deep": [0.2, 0.25, 0.34] } } },
   "biomeColors": { "desert": "#e5d3a0" },
   "scripts": ["main.js"]
 }
@@ -38,7 +38,7 @@ public/packs/
 
 | Поле | Что делает |
 |---|---|
-| `palettes` | новые палитры интерфейса и карты; недостающие ключи берутся из «Графита» (`src/shared/palettes.js`) |
+| `palettes` | новые палитры карты; недостающие ключи берутся из «Графита» (`src/shared/palettes.js`). Интерфейс пока в рабочих цветах (`docs/UI.md`): `ui` может переопределить их переменные (`--c-blue` и другие) |
 | `biomeColors` | цвета природных зон в режиме «Местность»: `water, ice, tundra, taiga, temperate_forest, steppe, mediterranean, desert, semi_desert, savanna, tropical_forest, wetland, highland` |
 
 ## Скрипты

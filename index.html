@@ -5,9 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Passionaris — лаунчер</title>
 </head>
-<body class="grain">
+<body>
   <div id="bg" class="menu-art"></div>
-  <div class="vignette"></div>
 
   <div id="titlebar">
     <span class="tb-title">Passionaris</span>
@@ -19,27 +18,28 @@
 
   <main id="launcher">
     <section class="hero">
-      <h1 class="sr-only">Passionaris</h1>
-      <canvas id="logo" aria-hidden="true"></canvas>
-      <p class="tagline">Великая стратегия о восходе и закате народов</p>
-      <div class="version-row">
-        <span class="version-chip" id="ver"></span>
-        <span class="epoch" id="epoch"></span>
-      </div>
+      <div class="hero-box panel"><div class="panel-body">
+        <h1 class="game-title" id="logo">Passionaris</h1>
+        <p class="tagline">Великая стратегия о восходе и закате народов</p>
+        <div class="version-row">
+          <span class="version-chip" id="ver"></span>
+          <span class="epoch" id="epoch"></span>
+        </div>
 
-      <div class="actions">
-        <button class="btn primary big" id="play" title="Новая игра: мир с 5000 г. до н.э.">Играть</button>
-        <button class="btn stone two-line" id="continue" disabled title="Сохранений пока нет">
-          <span>Продолжить</span><small id="continue-sub"></small>
-        </button>
-        <button class="btn stone" id="open-settings">Настройки</button>
-        <button class="btn stone" id="open-album" title="Альбом графики: варианты вида карты, которые можно вертеть и оценивать">Альбом графики</button>
-        <button class="btn stone electron-only" id="quit">Выход</button>
-      </div>
+        <div class="actions">
+          <button class="btn big" id="play" title="Новая игра: мир с 5000 г. до н.э.">Играть</button>
+          <button class="btn two-line" id="continue" disabled title="Сохранений пока нет">
+            <span>Продолжить</span><small id="continue-sub"></small>
+          </button>
+          <button class="btn" id="open-settings">Настройки</button>
+          <button class="btn" id="open-album" title="Альбом графики: варианты вида карты, которые можно вертеть и оценивать">Альбом графики</button>
+          <button class="btn danger electron-only" id="quit">Выход</button>
+        </div>
+      </div></div>
     </section>
 
     <aside class="side">
-      <section class="paper saves" id="saves-panel" aria-labelledby="saves-title"><div class="paper-body">
+      <section class="panel saves" id="saves-panel" aria-labelledby="saves-title"><div class="panel-body">
         <header class="panel-head">
           <h2 id="saves-title">Сохранения</h2>
           <span class="count" id="saves-count"></span>
@@ -48,17 +48,17 @@
           <div class="saves-empty loading"><span>Читаю сохранения…</span></div>
         </div>
         <div class="saves-bar">
-          <button class="btn primary sm" id="save-load" disabled>Загрузить</button>
-          <button class="btn stone sm" id="save-delete" disabled>Удалить</button>
+          <button class="btn sm" id="save-load" disabled>Загрузить</button>
+          <button class="btn sm danger" id="save-delete" disabled>Удалить</button>
           <span class="saves-status" id="saves-status" role="status"></span>
-          <button class="tool-btn" id="saves-folder" title="Открыть папку сохранений" hidden>
+          <button class="btn sm tool-btn" id="saves-folder" title="Открыть папку сохранений" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="miter"/><path d="M3 10.5h18" stroke="currentColor" stroke-width="1"/></svg>
             <span>Папка</span>
           </button>
         </div>
       </div></section>
 
-      <section class="paper codex" id="codex"><div class="paper-body">
+      <section class="panel codex" id="codex"><div class="panel-body">
         <div class="codex-head">
           <div class="tabs" id="codex-tabs"></div>
           <select id="version-select" title="Версии игры"></select>
@@ -75,7 +75,7 @@
   </footer>
 
   <div class="modal-back" id="settings">
-    <div class="modal paper settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div class="paper-body">
+    <div class="modal panel settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div class="panel-body">
       <header class="s-head">
         <h2 id="settings-title">Настройки</h2>
         <div class="dim">Сохраняются сразу и действуют при запуске игры</div>
@@ -83,21 +83,21 @@
       <div class="tabs" id="s-tabs"></div>
       <div class="s-panes" id="s-panes"></div>
       <footer class="s-foot">
-        <button class="btn stone sm" id="s-reset">Сбросить</button>
+        <button class="btn sm danger" id="s-reset">Сбросить</button>
         <span class="grow"></span>
-        <button class="btn primary sm" id="s-close">Готово</button>
+        <button class="btn sm ok" id="s-close">Готово</button>
       </footer>
     </div></div>
   </div>
 
   <div class="modal-back confirm-back" id="confirm">
-    <div class="modal paper confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text"><div class="paper-body">
+    <div class="modal panel confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text"><div class="panel-body">
       <h2 id="confirm-title"></h2>
       <p id="confirm-text"></p>
       <p id="confirm-note" class="dim"></p>
       <div class="confirm-buttons">
-        <button class="btn stone sm" id="confirm-no">Отмена</button>
-        <button class="btn stone sm" id="confirm-yes">Да</button>
+        <button class="btn sm" id="confirm-no">Отмена</button>
+        <button class="btn sm ok" id="confirm-yes">Да</button>
       </div>
     </div></div>
   </div>

@@ -9,7 +9,6 @@ import * as THREE from 'three';
 import { APP_NAME, VERSION_LABEL, EPOCH_LABEL } from '../shared/version.js';
 import { loadSettings, updateStoredSettings, isElectron } from '../shared/settings.js';
 import { getPalette, applyUiPalette } from '../shared/palettes.js';
-import { applyStippleTheme } from '../shared/stipple.js';
 import { loadWorld } from './data.js';
 import { Globe } from './globe.js';
 import { GlobeCamera, vecToGeo } from './camera.js';
@@ -41,7 +40,6 @@ if (params.has('shaders')) settings.shaders = params.get('shaders');
 if (params.has('packs')) settings.packs = Object.fromEntries(params.get('packs').split(',').filter(Boolean).map(id => [id, true]));
 const packs = await applyPackData(settings, { biomeColors: BIOME_COLORS }).catch(e => { console.warn('packs', e); return { enabled: [] }; });
 applyUiPalette(settings.palette);
-applyStippleTheme();
 if (params.has('uiscale')) settings.uiScale = params.get('uiscale'); // captures: ?uiscale=auto|1.25
 if (params.has('fps')) settings.fpsLimit = +params.get('fps');        // checks: ?fps=30
 // checks: ?scale=0.5|0.75|1|auto — the render scale; ?upscale=0 — the old upscale filter (before/after), =fsr|lite —
@@ -49,7 +47,6 @@ if (params.has('fps')) settings.fpsLimit = +params.get('fps');        // checks:
 // ?gputimer=0 — dynamic resolution without GPU timer queries (judged by frame times alone)
 if (params.has('scale')) settings.renderScale = params.get('scale') === 'auto' ? 'auto' : +params.get('scale');
 hud.applyUiScale(settings.uiScale);
-hud.applySeamlessPaper();
 const PAL = getPalette(settings.palette).map;
 
 document.title = `${APP_NAME} ${VERSION_LABEL}`;
