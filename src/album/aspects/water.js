@@ -86,7 +86,7 @@ vec3 waterBody(float depth, int kind) {
 vec3 waterLit(Wtr w) {
   vec2 pk = w.pk; float px = w.px, t = uTime;
   float ice = w.cB.r, melt = 0.;
-  if (uWaterThaw > 0. && ice > .004) melt = texture(tWaterMelt, chunkUV(pk)).r * smoothstep(.04, .3, ice);
+  if (uWaterThaw > 0. && ice > .004) melt = textureLod(tWaterMelt, chunkUV(pk), 0.).r * smoothstep(.04, .3, ice);
   vec2 wq = vec2(dot(pk, W_WIND), dot(pk, W_WINX));                 // km along and across the wind
   float sunUp = max(uSun.z, 0.);
 
@@ -253,13 +253,17 @@ void sheetVertex(vec2 ll, float hKm) {
 export const SHEET_FRAG = /* glsl */`
 uniform float uTime; varying vec2 vLL; varying vec3 vPos; varying vec2 vZW;
 ${WATER_CORE}
-// what the water must know about this pixel of a sheet, the way the ground shader tells it (depth is left to the caller)
-Wtr sheetWater(int kind) {
-  Wtr w; vec2 pk = vec2(vLL.y * KM * COSREF, vLL.x * KM);
+// flat km of this pixel and km per screen pixel: ask for them at the top of main(), before any branch
+vec2 sheetPk() { return vec2(vLL.y * KM * COSREF, vLL.x * KM); }
+float sheetPx(vec2 pk) { return (length(dFdx(pk)) + length(dFdy(pk))) * .7; }
+// what the water must know about this pixel of a sheet, the way the ground shader tells it (depth is left to the
+// caller). No screen derivatives in here, so it can be called after the cheap tests that throw a pixel away.
+Wtr sheetWater(int kind, vec2 pk, float px) {
+  Wtr w;
   vec3 up = normalize(vPos + vec3(0., RKM, 0.)), Vw = normalize(cameraPosition - vPos); float dl = radians(vLL.y - LON0);
   vec3 east = normalize(vec3(cos(dl), -sin(dl) * C0, -sin(dl) * S0)), north = cross(up, east);
-  w.pk = pk; w.px = (length(dFdx(pk)) + length(dFdy(pk))) * .7; w.V = vec3(dot(Vw, east), dot(Vw, north), dot(Vw, up));
-  w.day = albumDay(); w.sh = 1.; w.sunCol = albumSunCol(); w.skyCol = albumSkyCol(); w.cB = texture(tChunkB, chunkUV(pk));
+  w.pk = pk; w.px = px; w.V = vec3(dot(Vw, east), dot(Vw, north), dot(Vw, up));
+  w.day = albumDay(); w.sh = 1.; w.sunCol = albumSunCol(); w.skyCol = albumSkyCol(); w.cB = textureLod(tChunkB, chunkUV(pk), 0.);
   w.depth = 1.; w.surf = 1e3; w.kind = kind;
   return w;
 }

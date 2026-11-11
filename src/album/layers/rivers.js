@@ -103,12 +103,12 @@ export default async function init(album) {
       ${SHEET_FRAG}
       uniform vec3 uFlat; varying float vSide, vEnd; varying vec3 vRiv; varying vec2 vAcross;
       void main() {
-        Wtr w = sheetWater(2);
-        float wKm = vRiv.x, s = vSide, far = smoothstep(.2, .07, w.px / wKm);               // 0 when the bed is only a few pixels wide
+        vec2 pk = sheetPk(); float px = sheetPx(pk);
+        float wKm = vRiv.x, s = vSide, far = smoothstep(.2, .07, px / wKm);               // 0 when the bed is only a few pixels wide
         // the channel swings across the bed; its edges wander a little
         float sw = (wNoise(vec2(vRiv.y / (wKm * 3.2), vRiv.z + 9.)) - .5) * 4.5, c = clamp(sw, -1., 1.) * .4 * far;
         float hw = mix(.8, .56 + .14 * wNoise(vec2(vRiv.y / (wKm * 1.9), vRiv.z + 4.)), far);       // half of the channel, in halves of the bed
-        float x = (s - c) / hw, aa = max(w.px / wKm * 2. / hw, .012);
+        float x = (s - c) / hw, aa = max(px / wKm * 2. / hw, .012);
         float edge = 1. - abs(x) + (wNoise(vec2(vRiv.y / (wKm * .7), vRiv.z + s * 2.)) - .5) * .22 * far;
         float water = smoothstep(-aa, aa, edge), bed = (1. - smoothstep(.74, .97, abs(s) + (wNoise(vec2(vRiv.y / (wKm * .9), vRiv.z + s * 3. + 5.)) - .5) * .3)) * far;
         // the river ends where the height data says sea (the coarse data only, so it ends at the same place from any height)
@@ -118,6 +118,7 @@ export default async function init(album) {
         vec3 col;
         if (uStyle == 2 || uStyle == 3 || uStyle == 6) { col = uFlat * (.35 + .65 * albumDay()) * (1.05 - .5 * smoothstep(.3, .74, abs(s))); alpha = (1. - smoothstep(.7, .8, abs(s))) * (1. - sea); }
         else {
+          Wtr w = sheetWater(2, pk, px);
           float deep = 1.4 + 5. * smoothstep(.2, .6, wKm), t = x - sign(c) * .35 * far;       // the deep thread hugs the outer bank
           w.depth = mix(deep * .6, deep * clamp(1. - t * t * .75, 0., 1.) * smoothstep(0., .3, edge), far);
           w.cB.r = clamp(w.cB.r * 1.25 - .25, 0., 1.);                                       // running water freezes later than still water

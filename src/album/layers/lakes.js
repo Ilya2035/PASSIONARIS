@@ -70,7 +70,7 @@ export default async function init(album) {
       ${SHEET_FRAG}
       varying float vSd; varying vec4 vLake;
       void main() {
-        Wtr w = sheetWater(1);
+        vec2 pk = sheetPk(); float px = sheetPx(pk);
         if (vLake.w > 1.5) {
           // A shoal of the sea, not a lake: wherever the coarse heights of the region say sea, there is sea, whatever
           // the fine heights say — the same sea the ground shader draws beside it (same depth, same water), so the
@@ -80,7 +80,7 @@ export default async function init(album) {
           float sea = smoothstep(vLake.x + .12, vLake.x - .18, hb) * smoothstep(0., .4, vSd);
           // The colour is needed only where the fine heights put land on that sea; elsewhere the ground has already
           // drawn the same water.
-          float hd = wD > 0. ? textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., log2(w.px / .029))).r : 0.;
+          float hd = wD > 0. ? textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., log2(px / .029))).r : 0.;
           float cover = sea * smoothstep(.2, .5, hd) * smoothstep(0., .05, wD);
           // The depth is written toward the eye all over the shoal, islands included, which hides the trees of the
           // specks. It comes on gently, over a couple of km, away from the mainland and from the outline, and has no
@@ -92,15 +92,16 @@ export default async function init(album) {
             gl_FragColor = vec4(0.); gl_FragDepth = mix(gl_FragCoord.z, clamp(vZW.x / vZW.y * .5 + .5, 0., 1.), pull);
             return;
           }
-          w.kind = 0; w.depth = max(-hb, 1.5);
-          sheetOut(waterLit(w), cover, pull);
+          Wtr s = sheetWater(0, pk, px); s.depth = max(-hb, 1.5);
+          sheetOut(waterLit(s), cover, pull);
           return;
         }
-        float grow = clamp(w.px * .9 - .012, 0., ${GROW.toFixed(2)});                       // a small lake stays a few pixels wide from any height
-        float sd = vSd + grow + (wNoise(w.pk / .16 + vLake.z) - .5) * .05 * smoothstep(.12, .02, w.px);   // the shore is never a ruled line
-        float aa = max(w.px * .8, .003), water = smoothstep(-aa, aa, sd);
-        float bw = max(.03, w.px * 1.6), beach = smoothstep(-bw, -bw * .2, sd) * (1. - smoothstep(.5, 1.6, w.px));
+        float grow = clamp(px * .9 - .012, 0., ${GROW.toFixed(2)});                       // a small lake stays a few pixels wide from any height
+        float sd = vSd + grow + (wNoise(pk / .16 + vLake.z) - .5) * .05 * smoothstep(.12, .02, px);   // the shore is never a ruled line
+        float aa = max(px * .8, .003), water = smoothstep(-aa, aa, sd);
+        float bw = max(.03, px * 1.6), beach = smoothstep(-bw, -bw * .2, sd) * (1. - smoothstep(.5, 1.6, px));
         if (max(water, beach) < .004) discard;
+        Wtr w = sheetWater(1, pk, px);
         // the bottom: a shelf along the shore, then down to the deep middle; shallow lagoons stay pale all over
         float shelf = .05 + vLake.y * .0042;
         w.depth = vLake.y * (1. - exp(-max(sd, 0.) / shelf)) * (.85 + .3 * wNoise(w.pk / .6 + vLake.z));
