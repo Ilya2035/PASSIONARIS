@@ -92,14 +92,21 @@ export function strHash(s) {
 }
 
 // ------------------------------------------------------------------ «место известно неточно»
-// A zone lists candidate cells and their weights (0..255). Two kinds:
-//   field — every candidate independently becomes a deposit with chance · weight / 255 (bog iron, flint in chalk…);
+// A zone lists candidate cells and their weights (0..255). Three kinds:
+//   rich  — every candidate holds the resource; the seed decides how rich: amount · weight / 255 · (0.25 … 1.75),
+//           1 on average (bog iron: every iron-bearing mire of the swamp aspect has some, but which is richer is unknown);
+//   field — every candidate independently becomes a deposit with chance · weight / 255 (flint in chalk, obsidian…);
 //   zone  — exactly `pieces` deposits among the candidates, chosen with probability ∝ weight (a deposit known only by
 //           its region: imprecise coordinates, a basin around known fields…). The zone's amount is split evenly.
 // Placement depends only on (world seed, zone id, cell), so it is the same on every run for the same seed.
 export function scatterZone(zone, seed) {
   const zh = strHash(zone.id), out = [];
-  if (zone.kind === 'field') {
+  if (zone.kind === 'rich') {
+    for (let k = 0; k < zone.cells.length; k++) {
+      const f = 0.25 + 1.5 * hash01(seed, zh, zone.cells[k], 3);
+      out.push({ cell: zone.cells[k], amount: Math.max(1, Math.round(zone.amount * zone.weights[k] / 255 * f)) });
+    }
+  } else if (zone.kind === 'field') {
     for (let k = 0; k < zone.cells.length; k++) {
       const p = zone.chance * zone.weights[k] / 255;
       if (hash01(seed, zh, zone.cells[k], 1) < p) out.push({ cell: zone.cells[k], amount: zone.amount });

@@ -194,8 +194,35 @@ function albumGrid() {
   const vec = JSON.parse(fs.readFileSync(P('public', 'album-data', 'vectors.json'), 'utf8'));
   const lakes = (vec.lakes ?? []).map(l => l.ring);
   const lake = (lat, lon) => lakes.some(r => inRing(r, lon, lat)) || (!(lon >= b.lon0 && lon <= b.lon1 && lat >= b.lat0 && lat <= b.lat1) && world.lake(lat, lon));
+  // The album's own CPU height: bilinear, clamped at the edge — data.base.at in src/album/data.js, line for line
+  const rect = [hb.x0 / 2 ** hb.z, hb.y0 / 2 ** hb.z, 2 ** hb.z * 256 / hb.w, 2 ** hb.z * 256 / hb.h];
+  const mercY = lat => { const r = lat * D; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; };
+  const baseAt = (lat, lon) => {
+    const x = Math.max(0, Math.min(hb.w - 1.001, ((lon + 180) / 360 - rect[0]) * rect[2] * hb.w - 0.5));
+    const y = Math.max(0, Math.min(hb.h - 1.001, (mercY(lat) - rect[1]) * rect[3] * hb.h - 0.5));
+    const i = x | 0, j = y | 0, fx = x - i, fy = y - j, k = j * hb.w + i;
+    const a = hpx[k], bb = hpx[k + 1], c = hpx[k + hb.w], d = hpx[k + hb.w + 1];
+    return ((a * (1 - fx) + bb * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy) / 4 - 8192;
+  };
+  // Bog iron as the swamp aspect sees it (docs/album/swamp.md): the same chunks, heights, rivers and named wetlands,
+  // the same natural swamp and the same swampIron() — so the rusty mires on the map and the iron in the table agree.
+  async function bogIron() {
+    const { Chunks } = await import('../../src/album/chunks.js');
+    const { naturalSwamp, swampIron } = await import('../../src/album/aspects/swamp.js');
+    const wetlands = JSON.parse(fs.readFileSync(P('public', 'assets', 'album', 'swamp', 'wetlands.json'), 'utf8')).wetlands;
+    const ch = new Chunks(baseAt);
+    if (ch.count !== g.W * g.H) throw new Error('album chunk grid changed: ' + ch.count);
+    const natural = naturalSwamp(ch, baseAt, { rivers: vec.rivers, wetlands });
+    const out = new Float32Array(ch.count);
+    for (let k = 0; k < ch.count; k++) {
+      ch.setNatural('swamp', k, natural[k]);
+      const c = ch.centre(k);
+      out[k] = swampIron(ch.get('swamp', k), c.lat, c.lon, ch.height[k]);   // album.swamp.ironOf(k)
+    }
+    return out;
+  }
   return {
-    name: 'album', W: g.W, H: g.H, N: g.W * g.H,
+    name: 'album', W: g.W, H: g.H, N: g.W * g.H, bogIron,
     meta: { ...g, bbox: b, cell: '(j − j0) · W + (i − i0); row 0 = southmost — the same numbering as src/album/chunks.js',
       note: 'x = lon · 111.195 · cos 40°, y = lat · 111.195 (km); chunk (i, j) = (floor(x / 10), floor(y / 10))' },
     inBox: () => true,
@@ -594,7 +621,7 @@ function cluster(list, km) {
 }
 
 // =================================================================== bake one grid
-function bake(grid, inp, deposits) {
+async function bake(grid, inp, deposits) {
   log(grid.name, `${grid.W}×${grid.H} cells`);
   const f = features(grid, inp);
   const { N } = grid, R = RESOURCES.length;
@@ -624,8 +651,16 @@ function bake(grid, inp, deposits) {
     { id: 'field:rarestone', res: 'rarestone', chance: 0.06, amount: 10, depth: 0, about: 'кремень в известняках и мелу, обсидиан в кислых вулканитах, мрамор в метаморфических породах, алебастр в эвапоритах' },
     { id: 'field:salt', res: 'salt', chance: 0.05, amount: 20, depth: 1, about: 'соляные пласты и источники в толщах эвапоритов' },
   ];
+  // album: bog iron follows the swamp aspect — every iron-bearing mire holds some, the world seed decides how much
+  if (grid.bogIron) {
+    const iron = await grid.bogIron(), cells = [], weights = [];
+    for (let c = 0; c < N; c++) if (iron[c] > 0) { cells.push(c); weights.push(Math.max(1, Math.round(clamp(iron[c]) * 255))); }
+    zones.push({ id: 'rich:bogiron', res: 'bogiron', kind: 'rich', amount: 15, depth: 0, src: 'часть альбома «Болота»: swampIron()',
+      about: 'болотная руда в пресных болотах влажного климата выше досягаемости моря (правило части «Болота»)', cells, weights });
+  }
   for (const fd of FIELDS) {
     const w = fieldW[fd.res];
+    if (fd.res === 'bogiron' && grid.bogIron) continue;
     if (grid.name === 'album') {
       const cells = [], weights = [];
       for (let c = 0; c < N; c++) if (w[c] > 0.02) { cells.push(c); weights.push(Math.max(1, Math.round(clamp(w[c]) * 255))); }
@@ -732,6 +767,6 @@ const deposits = [...mrdsDeposits(), ...majorDeposits(), ...vmsDeposits(), ...po
 for (const t of TARGETS) {
   const grid = t === 'album' ? albumGrid() : t === 'world' ? worldGrid() : null;
   if (!grid) throw new Error('unknown target ' + t);
-  bake(grid, { ...inp, chl: loadChl(t === 'album' ? 'album-' : 'world') }, deposits);
+  await bake(grid, { ...inp, chl: loadChl(t === 'album' ? 'album-' : 'world') }, deposits);
 }
 log('done');

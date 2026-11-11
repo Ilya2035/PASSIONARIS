@@ -25,6 +25,7 @@
 | `public/album-data/height-base.u16.gz` | высоты и глубины моря в области альбома (≈ 230 м) | AWS Terrain Tiles, открытые данные с указанием источников |
 | `public/assets/map/height.delta.bin.gz`, `cells.bin.gz` | высоты, глубины и озёра всего мира | AWS Terrain Tiles + Natural Earth |
 | `data/raw/ne_10m_rivers_lake_centerlines.geojson` | реки с классом размера | Natural Earth, общественное достояние |
+| `src/album/aspects/swamp.js`, `public/assets/album/swamp/wetlands.json` | болота альбома и правило болотного железа части «Болота» (`naturalSwamp`, `swampIron`) | собственные правила и перечень проекта (`docs/album/swamp.md`) |
 
 ## Что проверено и отвергнуто
 

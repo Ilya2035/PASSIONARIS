@@ -98,6 +98,7 @@ test('«место известно неточно»: same seed → same places,
     const inside = new Set(z.cells);
     for (const p of a) assert.ok(inside.has(p.cell), z.id);
     if (z.kind === 'zone') assert.equal(a.length, Math.min(z.pieces, z.cells.length), z.id);
+    if (z.kind === 'rich') assert.equal(a.length, z.cells.length, z.id);
   }
   const big = meta.zones.find(z => z.kind === 'field' && z.cells.length > 100);
   assert.ok(big, 'a field with many candidate chunks');
@@ -201,4 +202,24 @@ test('world table (0.5°): format, and a few places of the whole globe', () => {
   assert.ok(at('oil', 26, 50, 2) > 0, 'oil around the Persian Gulf');
   assert.ok(at('copper', -22.3, -68.9, 1) >= 100, 'copper of Chuquicamata');
   assert.ok(at('copper', 37.7, -6.6, 0) >= 100, 'Rio Tinto on the world grid too');
+});
+
+test('bog iron: the rule of the swamp aspect — every iron-bearing mire holds some, the seed decides how much', () => {
+  const z = meta.zones.find(q => q.res === 'bogiron');
+  assert.ok(z && z.kind === 'rich' && z.cells.length > 50, 'a rich zone of iron-bearing mires');
+  assert.equal(z.depth, 0, 'bog ore lies on the surface');
+  const a = scatterZone(z, 1), b = scatterZone(z, 2);
+  assert.deepEqual(a.map(p => p.cell), z.cells, 'every candidate holds bog iron');
+  assert.ok(a.every(p => p.amount >= 1));
+  assert.notDeepEqual(a.map(p => p.amount), b.map(p => p.amount), 'another seed makes other mires the rich ones');
+  // on average the seed factor is 1: the sum stays near amount · weight
+  const expect = z.cells.reduce((s, _, k) => s + z.amount * z.weights[k] / 255, 0);
+  for (const seed of [1, 2, 3]) {
+    const sum = scatterZone(z, seed).reduce((s, p) => s + p.amount, 0);
+    assert.ok(Math.abs(sum - expect) < expect * .2 + z.cells.length, `seed ${seed}: ${sum} vs ${expect}`);
+  }
+  // where: the Landes and the wet north-west; none in the dry south-east
+  const at = z.cells.map(c => ({ lat: chunkLat(meta.grid.j0 + Math.floor(c / meta.grid.W)), lon: chunkLon(meta.grid.i0 + c % meta.grid.W) }));
+  assert.ok(at.filter(p => p.lat > 43.5 && p.lon > -1.6 && p.lon < 0.5).length > z.cells.length / 3, 'mostly the Landes');
+  assert.equal(at.filter(p => p.lat < 39.5 && p.lon > -4).length, 0, 'none in the dry south-east');
 });
