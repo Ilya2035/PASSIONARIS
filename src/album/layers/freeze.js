@@ -5,7 +5,7 @@
 // works it out from the ice of the chunk and two numbers for the whole sea that this model keeps (state.thaw,
 // state.retreat). This file sets the natural values and runs the freeze model: ice grows from the shore and from the
 // north, later over deep water, spreads from chunk to chunk, and melts back the same way.
-import { CN } from '../chunks.js';
+import { CHUNK_KM, CI0 } from '../chunks.js';
 import { WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../aspects/water.js';
 
 const sat = x => Math.max(0, Math.min(1, x));
@@ -14,7 +14,7 @@ const hash = k => { let x = Math.imul(k + 1, 2654435761) >>> 0; x ^= x >>> 15; x
 
 export const SPAN = .14;          // how much colder than its threshold a chunk must be to freeze solid
 export const SEA_CHANNEL = 'spareB';
-// rows of states laid side by side for the album pages ("Показ воды"): each band is `width` chunks wide
+// rows of states laid side by side for the album pages ("Показ воды"): each band is `width` × 10 km wide
 export const SHOWS = {
   sea: { title: 'Состояния моря', bands: [0, .22, .45, .7, 1], width: 3 },
   ice: { title: 'Стадии льда', bands: [.1, .26, .45, .62, .8, .9, 1], width: 2 },
@@ -32,33 +32,36 @@ export function makeFreeze(ch, heightAt) {
   const state = { thaw: 0, retreat: 0 };
   const centres = Array.from({ length: n }, (_, k) => ch.centre(k));
 
-  // mean depth of the water of each chunk, and how far it lies from the land (in chunks)
-  const queue = [];
+  // Chunks are natural cells, each all land or all water (ch.kind). The mean depth of a water chunk is taken from
+  // nine points in and around its middle; how far it lies from the land is counted in chunks.
+  const queue = [], KX = 111.195 * Math.cos(40 * Math.PI / 180);
   for (let k = 0; k < n; k++) {
-    const { i, j } = ch.ij(k); let sum = 0, cnt = 0;
-    if (heightAt && ch.land[k] < 1) for (let b = 0; b < 4; b++) for (let a = 0; a < 4; a++) {
-      const x = (i + (a + .5) / 4) * 10, y = (j + (b + .5) / 4) * 10, h = heightAt(y / 111.195, x / (111.195 * Math.cos(40 * Math.PI / 180)));
+    water[k] = (ch.kind ? ch.kind[k] === 0 : ch.land[k] < .6) ? 1 : 0;
+    let sum = 0, cnt = 0;
+    if (heightAt && water[k]) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
+      const h = heightAt((centres[k].y + b * 2.5) / 111.195, (centres[k].x + a * 2.5) / KX);
       if (h <= 0) { sum -= h; cnt++; }
     }
-    depth[k] = cnt ? sum / cnt : 0; water[k] = ch.land[k] < .6 ? 1 : 0;
-    if (ch.land[k] > .3) { off[k] = 0; queue.push(k); }
+    depth[k] = cnt ? sum / cnt : 0;
+    if (!water[k]) { off[k] = 0; queue.push(k); }
   }
   for (let q = 0; q < queue.length; q++) for (const m of ch.neighbours(queue[q])) if (off[m] > off[queue[q]] + 1) { off[m] = off[queue[q]] + 1; queue.push(m); }
 
   // how cold it must get before a chunk starts to freeze: 0 at once .. ~.86 last of all
   for (let k = 0; k < n; k++) {
-    const c = centres[k], north = sat((c.lat - 35.2) / 9.6), jit = hash(k), land = ch.land[k];
+    const c = centres[k], north = sat((c.lat - 35.2) / 9.6), jit = hash(k), land = water[k] ? 0 : 1;
     const onLand = .10 + .22 * (1 - north) - .12 * sat(ch.height[k] / 1500);                                   // lakes and rivers: mountain water first
     const atSea = .16 + .26 * (1 - north) + .20 * Math.sqrt(sat(depth[k] / 2000)) + .028 * Math.min(off[k] === 1e9 ? 8 : off[k], 8);   // salt, deep, far from the shore: last
     res[k] = Math.max(.02, onLand * land + atSea * (1 - land) + (jit - .5) * .03);
     // the natural state of the sea: the ocean is rougher than the inner sea, the open water rougher than the coast
     const ocean = ss(-5.2, -6.2, c.lon) + ss(43.2, 43.6, c.lat) * ss(-1.2, -2, c.lon), far = sat((off[k] === 1e9 ? 8 : off[k]) / 8);
     const patch = .5 + .5 * Math.sin(c.x * .021 + 1.3) * Math.cos(c.y * .017 + .4);
-    seaNat[k] = land > .97 ? 0 : sat(.16 + .14 * Math.min(1, ocean) + .12 * far + .12 * patch);
+    seaNat[k] = land ? 0 : sat(.16 + .14 * Math.min(1, ocean) + .12 * far + .12 * patch);
   }
 
   const target = (k, o) => ss(0, SPAN, (o.cold || 0) - (o.thaw || 0) * .2 - res[k]);
-  const band = (k, show) => { const s = SHOWS[show], x = k % CN; return s.bands[Math.floor(x / s.width) % s.bands.length]; };
+  // a row of states: bands run north to south, each `width` × 10 km wide; a chunk takes the band its middle lies in
+  const band = (k, show) => { const s = SHOWS[show], x = Math.max(0, Math.floor(centres[k].x / CHUNK_KM) - CI0); return s.bands[Math.floor(x / s.width) % s.bands.length]; };
   // the melt water on the ice of a chunk, the way the shader works it out (without its noise)
   const meltOf = i => (i > .02 ? Math.max(state.thaw * .85, state.retreat * sat((MELT_TOP - i) / MELT_SPAN)) : 0);
   // where the ice, the snow and the sea of a chunk are headed under the knobs o = { cold, thaw, snow, sea, show }
@@ -110,7 +113,7 @@ export function makeFreeze(ch, heightAt) {
       if (!o.keepIce && !(pin[k] & 1)) {
         if (t.ice > cur) {
           // ice comes from the shore and from a frozen neighbour, never out of the open sea
-          let hold = off[k] <= 1 || cur > .2;
+          let hold = off[k] <= 1 || cur > .2;                         // (a chunk of land holds the ice of its own lakes and rivers)
           if (!hold) for (const m of ch.neighbours(k)) if (ice[m] > .3) { hold = true; break; }
           if (hold) next[k] = Math.min(t.ice, cur + dt * .3);
         } else if (t.ice < cur) {
