@@ -125,7 +125,7 @@ void aspSettle(Px p, inout Land L) {
   if (!close && fieldsV < .004) return;
   if (m > -.6) m += min(.25, .3 * r) * setWob(p.pk) * min(1., 1. + m / .6);          // the wobble of the edge fades out away from it
   // houses stand on dry, level ground only; a settlement too small for its pixels still shows as a mark
-  float tm = 0., mt = m + max(0., 1.6 * px - r);
+  float tm = 0., mt = m + max(0., 2.2 * px - r);
   if (mt > -.03) tm = smoothstep(-.03, .015, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
   float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
   if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
@@ -190,7 +190,10 @@ void aspSettle(Px p, inout Land L) {
     if (c2 > .5 && c2 < 3.5) col *= 1. - .36 * sh * (1. - cover) * p.day * seam;
   }
   if (night > 0.) col += vec3(1.4, .9, .45) * night * blocks * (1. - cover) * (1. - smoothstep(-.02, .3, edge)) * step(cls, 3.5) * step(.5, cls) * step(.4, rnd.y) * .42;   // light spills into the street
-  col = mix(col, mix(earth, settleMat(0, atl, .3), .5), smoothstep(.25, .5, px / S) * (1. - blocks));   // cells of a pixel or two melt into one tone
+  // cells of a pixel or two melt into one tone; from high up, where a whole settlement is a few pixels, the tone is
+  // that of its roofs, so the mark stands out from the land
+  float far = smoothstep(.6, 2.5, px / S);
+  col = mix(col, mix(earth, settleMat(0, atl, .3) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));
   L.col = mix(L.col, col, tm); L.cover *= 1. - tm;
 }`;
 
