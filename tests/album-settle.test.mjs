@@ -201,3 +201,19 @@ test('settle album: the aspect, its knobs and its pages', () => {
   const showcase = rows(planShowcase(0, 4400, 3));
   assert.equal(showcase.length, 36); assert.deepEqual([...new Set(showcase.map(r => r[3]))].sort((a, b) => a - b), KINDS.map((_, i) => i)); assert.equal(showcase.filter(r => r[7] & 1).length, 18);
 });
+
+test('settle classes: the mark of a settlement follows its people, as the owner set it', async () => {
+  const { CLASSES, classOf, peopleOf } = await import('../src/album/town/rules.js');
+  assert.deepEqual(CLASSES.map(c => c.mark), ['circle', 'triangle', 'diamond', 'square', 'pentagon']);
+  assert.deepEqual([0, 999, 1000, 19999, 20000, 59999, 60000, 999999, 1e6, 3e7].map(n => classOf(n)), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
+  assert.deepEqual([5, 10, 50, 300, 1500].map(a => classOf(0, a)), [0, 1, 2, 3, 4], 'a place that sprawls is of a higher class');
+  assert.ok(peopleOf(.1) < 1000 && peopleOf(.22) < 1000 && peopleOf(.4) >= 1000 && peopleOf(2.2) >= 60000, 'a hamlet and a village are villages, a full-grown city is a city');
+  clear();
+  const m = growTowns(ch, [place(-205, 4405, 5.6e6), place(-405, 4455, 20000)], 3, at);
+  const big = m.towns.find(t => t.index === 0), small = m.towns.find(t => t.index === 1);
+  assert.equal(big.cls, 3); assert.equal(big.people, peopleOf(big.R)); assert.equal(small.cls, classOf(small.people));
+  const { MARK_FROM, markSvg } = await import('../src/album/layers/labels.js');
+  assert.ok(MARK_FROM[0] < 60 && MARK_FROM.every((h, i) => !i || h > MARK_FROM[i - 1]), 'villages are marked only from close by, greater places from higher');
+  for (let c = 0; c < 5; c++) assert.match(markSvg(c), c === 0 ? /<circle/ : c === 3 ? /<rect/ : /<polygon/);
+  const ids = settle.pages.map(p => p.id); assert.ok(ids.includes('town-marks') && ids.includes('town-marks-near'));
+});

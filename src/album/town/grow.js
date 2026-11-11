@@ -7,7 +7,7 @@
 // and felling spread from the chunk of the settlement to its neighbours over land, and a great river stops them.
 // A settlement by a river stands on one bank: its site is moved off the water until its houses touch the bank.
 import { FKM, FN, kmOf, llOf } from '../chunks.js';
-import { GX0, GY0, stageOf, fieldsBeyond } from './rules.js';
+import { GX0, GY0, stageOf, fieldsBeyond, peopleOf, classOf } from './rules.js';
 
 export const RCAP = 2.2;                                            // km: the largest settlement the album founds
 // radius of a place at full growth, km: the smallest places of the data are villages, the largest a great city
@@ -38,7 +38,7 @@ export function reachOf(ch, home, steps, ford) {
 }
 
 // places: [{ lat, lon, pop }]; growth: the knob; at(xKm, yKm) → metres; river(xKm, yKm) → km to the nearest river bank
-// → { built, fields, keep (share of the forest left), towns: [{ index, x, y, R, stage, home, byte }] }
+// → { built, fields, keep (share of the forest left), towns: [{ index, x, y, R, stage, home, byte, people, cls }] }
 export function growTowns(ch, places, growth, at, river = () => 1e9) {
   const n = ch.count, built = new Float32Array(n), fields = new Float32Array(n), keep = new Float32Array(n).fill(1), taken = new Set(), towns = [];
   const order = places.map((_, i) => i).sort((a, b) => places[b].pop - places[a].pop);
@@ -72,7 +72,8 @@ export function growTowns(ch, places, growth, at, river = () => 1e9) {
       s[1] += FKM * FKM * (part(Rc, d) + .5 * (part(far, d) - part(Rc, d)));
     }
     for (const [c, s] of sum) { fields[c] = Math.max(fields[c], Math.min(1, s[0] / ch.area[c]) * .95); keep[c] = Math.min(keep[c], Math.max(0, 1 - s[1] / ch.area[c])); }
-    towns.push({ index, x, y, R, stage: stageOf(R), home, byte });
+    const people = peopleOf(R);
+    towns.push({ index, x, y, R, stage: stageOf(R), home, byte, people, cls: classOf(people, Math.PI * R * R) });
   }
   return { built, fields, keep, towns };
 }

@@ -26,6 +26,18 @@ export const STAGES = [
   { id: 'smalltown', title: 'городок', r: .4 }, { id: 'town', title: 'город', r: .7 },
 ];
 export const stageOf = r => { let s = 0; for (let i = 0; i < STAGES.length; i++) if (r >= STAGES[i].r) s = i; return s; };
+// ---- classes of settlements, for the mark on the map (the owner's table of 12.11.2026). The people decide; the area
+// only raises the class of a place that sprawls. Later the class will come from what stands in the settlement.
+export const DENSITY = 5000;     // people on a km² of built-up land
+export const CLASSES = [
+  { id: 'village', title: 'деревня', people: 0, area: 0, mark: 'circle' },
+  { id: 'smalltown', title: 'малый городок', people: 1000, area: 10, mark: 'triangle' },
+  { id: 'midtown', title: 'средний город', people: 20000, area: 50, mark: 'diamond' },
+  { id: 'city', title: 'город', people: 60000, area: 300, mark: 'square' },
+  { id: 'megapolis', title: 'мегаполис', people: 1e6, area: 1500, mark: 'pentagon' },
+];
+export const peopleOf = r => Math.round(Math.PI * r * r * DENSITY);
+export const classOf = (people, areaKm2 = 0) => { let c = 0; for (let i = 0; i < CLASSES.length; i++) if (people >= CLASSES[i].people || areaKm2 >= CLASSES[i].area) c = i; return c; };
 // how far the fields reach beyond the last houses, km
 export const fieldsBeyond = r => .5 + 2.5 * r;
 
