@@ -193,6 +193,7 @@ export class Chunks {
     this.raster = { A: new Uint8Array(SN * SN * 4), B: new Uint8Array(SN * SN * 4), C: new Uint8Array(SN * SN * 4) };
     this.scratch = [new Uint8Array(SN * SN * 4), new Uint8Array(SN * SN * 4)];
     this.palW = Math.ceil(Math.sqrt(n)); this.pal = new Uint8Array(this.palW * this.palW * 4);
+    this.bytes.D = this.pal;             // the colours of show(), four bytes per chunk (the old name of this array)
     const tex = (data, w, h, format, filter) => { const t = new DataTexture(data, w, h, format, UnsignedByteType); t.magFilter = t.minFilter = filter; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true; return t; };
     this.tex = { A: tex(this.raster.A, SN, SN, RGBAFormat, LinearFilter), B: tex(this.raster.B, SN, SN, RGBAFormat, LinearFilter), C: tex(this.raster.C, SN, SN, RGBAFormat, LinearFilter),
       id: tex(new Uint8Array(cell.buffer), FN, FN, RGFormat, NearestFilter), pal: tex(this.pal, this.palW, this.palW, RGBAFormat, NearestFilter) };
