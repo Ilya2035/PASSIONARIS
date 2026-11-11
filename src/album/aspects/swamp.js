@@ -6,7 +6,7 @@
 
 import { FKM, FN, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
 
-// ---- rules on the CPU: the same numbers as in the GLSL below, for the natural state, the resources, the tests
+// ---- rules on the CPU: the same numbers as in the GLSL below, for the natural state, the map of swamps, the tests
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM;   // flat km, as in chunks.js
 // the CPU twin of albumWet() in glsl.js, without its noise: 0 dry steppe .. 1 Atlantic forest
@@ -32,7 +32,8 @@ export function swampKind(lat, lon, h) {
 }
 // Bog iron (docs/album/swamp.md): it settles where fresh, acid ground water that carries iron comes out into a mire.
 // A chunk holds it when its swamp is ≥ 0.10, lies above the reach of the sea and the climate is humid; the dome of a
-// raised bog is fed by rain alone and holds little. Returns the richness 0..1 (0 = none); the resources take this rule.
+// raised bog is fed by rain alone and holds little. Returns the strength 0..1 (0 = none). It fills the map «Болотное
+// железо»; the rusty tint is its twin in the GLSL. The resources do not read it (v0.6.20): bog iron is plain iron there.
 export function swampIron(swamp, lat, lon, h) {
   if (!(swamp >= .1)) return 0;
   const v = swamp * ss(3, 8, h) * ss(.58, .70, wetAt(lat, lon, h)) * (1 - .6 * swampKind(lat, lon, h).bog);
@@ -305,9 +306,9 @@ export default {
     { id: 'swamp-winter', group: 'Болота', title: 'Зима на болоте', note: 'Двигайте «Показ: мороз на болотах» (раздел «Режимы и бедствия»): сначала замерзают мелкие края окон, потом протоки; на лёд ложится снег, тростник желтеет.', p: { look: 'winter', swampFrost: .8, forest3d: 0 }, cam: cam(39.14, -3.7, 30, 48, 10) },
     { id: 'swamp-iron', group: 'Болота', title: 'Болотное железо', note: 'Ржавый оттенок берегов и мелкой воды там, где в болоте оседает железо: пресные болота влажного климата. Сила оттенка — «Болотное железо» (раздел «Земля»).', p: { swampIron: 1.6, forest3d: 0 }, cam: cam(44.3, -0.9, 24, 45, 0) },
     { id: 'swamp-seam', group: 'Болота', title: 'Стык чанков: край болота', note: 'У соседних чанков разная доля болота. Границы по сетке не видно: при малой доле остаются только самые низкие и мокрые места.', p: { forest3d: 0 }, cam: cam(37.22, -6.2, 110, 25, 0) },
-    { id: 'swamp-seam-grid', group: 'Болота', title: 'Тот же стык с сеткой и числами', note: 'Цвет квадрата — доля болота в чанке. Картинка рисуется из этих чисел.', p: { grid: 1, swampMap: 'share', forest3d: 0, towns: 0, labels: 0 }, cam: cam(37.22, -6.2, 110, 25, 0) },
+    { id: 'swamp-seam-grid', group: 'Болота', title: 'Тот же стык с сеткой и числами', note: 'Цвет чанка — доля болота в нём. Картинка рисуется из этих чисел.', p: { grid: 1, swampMap: 'share', forest3d: 0, towns: 0, labels: 0 }, cam: cam(37.22, -6.2, 110, 25, 0) },
     { id: 'swamp-map', group: 'Болота', title: 'Карта болот региона', note: 'Все чанки с болотом до осушения. Цвет — вид болота: бурый — верховой торфяник, зелёный — тростниковая топь, синий — приморские марши, тёмно-зелёный — заболоченный лес.', p: { swampMap: 'kind', forest3d: 0, towns: 0, labels: 0, roadsOn: 0 }, cam: cam(40.5, -3.0, 1750) },
-    { id: 'swamp-map-iron', group: 'Болота', title: 'Карта болотного железа', note: 'Чанки, где в болоте есть железо: болота не меньше десятой части чанка, выше досягаемости моря, во влажном климате.', p: { swampMap: 'iron', forest3d: 0, towns: 0, labels: 0, roadsOn: 0 }, cam: cam(40.5, -3.0, 1750) },
+    { id: 'swamp-map-iron', group: 'Болота', title: 'Карта болотного железа', note: 'Чанки, где в болоте есть железо: болота не меньше десятой части чанка, выше досягаемости моря, во влажном климате. Это вид болот, а не сырьё: в ресурсах болотное железо — то же железо.', p: { swampMap: 'iron', forest3d: 0, towns: 0, labels: 0, roadsOn: 0 }, cam: cam(40.5, -3.0, 1750) },
   ],
   async init(album) {
     const ch = album.chunks, p = album.params;

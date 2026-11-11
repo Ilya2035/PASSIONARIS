@@ -171,7 +171,9 @@ test('natural swamp on the real heights: the known swamps are where they should 
     return ((raw[k] * (1 - fx) + raw[k + 1] * fx) * (1 - fy) + (raw[k + b.w] * (1 - fx) + raw[k + b.w + 1] * fx) * fy) / 4 - 8192;
   };
   const rivers = JSON.parse(fs.readFileSync(new URL('../public/album-data/vectors.json', import.meta.url), 'utf8')).rivers;
-  const ch = new Chunks(at, rivers), nat = naturalSwamp(ch, at, { wetlands: LIST });
+  // the chunks as the album builds them (main.js): the lakes of the water aspect are cut out of the land
+  const lakes = (JSON.parse(fs.readFileSync(new URL('../public/assets/album/water/lakes.json', import.meta.url), 'utf8')).lakes || []).filter(l => !l.shoal && l.ring);
+  const ch = new Chunks(at, rivers, lakes), nat = naturalSwamp(ch, at, { wetlands: LIST });
   const near = (lat, lon) => { const k = ch.at(lat, lon); return Math.max(nat[k], ...ch.neighbours(k).map(m => nat[m])); };
   for (const [name, lat, lon, min] of [['Guadalquivir', 37, -6.25, .7], ['Daimiel', 39.14, -3.7, .6], ['Ebro delta', 40.7, .75, .5], ['Albufera', 39.33, -.35, .5], ['Landes', 44.2, -.7, .3], ['Xistral', 43.47, -7.6, .25],
     ['Antela', 42.08, -7.75, .25], ['Tagus', 38.92, -8.92, .5], ['La Janda', 36.25, -5.85, .4], ['Aveiro', 40.68, -8.67, .4]]) assert.ok(near(lat, lon) >= min, `${name}: ${near(lat, lon).toFixed(2)}`);
