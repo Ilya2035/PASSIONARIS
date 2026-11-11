@@ -239,3 +239,29 @@ test('division of the album: reproducible; seas named; names of districts', { sk
   assert.equal(new Set(names).size, names.length, 'no two districts share a name');
   for (const id of ['aragon', 'crown', 'portugal']) assert.ok(stateMask(div, LANDS, id).some(Boolean), id);
 });
+
+test('division of the album: the seas are real seas, divided into zones and districts', { skip }, () => {
+  const { ch, div } = real, seaName = k => LANDS.seas[div.seaOf[k]]?.name;
+  for (const [lat, lon, name] of [[43.6, -3.8, 'Бискайский залив'], [43.0, -9.6, 'Атлантический океан у Галисии и Португалии'], [38.5, -9.6, 'Атлантический океан у Галисии и Португалии'],
+    [36.6, -7.0, 'Кадисский залив'], [35.97, -5.6, 'Гибралтарский пролив'], [36.1, -4.0, 'Море Альборан'], [40.5, 1.5, 'Балеарское море'], [43.0, 4.0, 'Лионский залив'], [37.5, 2.0, 'Алжиро-Прованский бассейн']]) {
+    const k = ch.at(lat, lon);
+    assert.equal(div.kind[k], SEA, `${lat}, ${lon} is sea`); assert.equal(seaName(k), name, `${lat}, ${lon}`);
+  }
+  // every sea hangs together; a sea district lies in one sea; its zone and region are that sea's
+  for (let s = 0; s < LANDS.seas.length; s++) {
+    const list = []; for (let k = 0; k < ch.count; k++) if (div.seaOf[k] === s) list.push(k);
+    assert.ok(list.length, LANDS.seas[s].name);
+    const inS = new Set(list), q = [list[0]], got = new Set(q);
+    for (let h = 0; h < q.length; h++) for (const l of ch.links[q[h]]) if (inS.has(l.k) && !got.has(l.k)) { got.add(l.k); q.push(l.k); }
+    assert.equal(got.size, list.length, `${LANDS.seas[s].name} hangs together`);
+  }
+  for (let d = 0; d < div.count; d++) {
+    if (div.kinds[d] !== SEA) continue;
+    const seasOf = new Set(div.chunks[d].map(k => div.seaOf[k]));
+    assert.equal(seasOf.size, 1, `sea district ${d} lies in one sea`);
+    const s = [...seasOf][0], p = div.provinces[div.province[d]];
+    assert.equal(p.sea, s); assert.equal(div.regions[div.region[div.province[d]]].name, LANDS.seas[s].name);
+    assert.ok(p.name === LANDS.seas[s].name || (p.name.startsWith(`${LANDS.seas[s].name}, зона `) && /\d$/.test(p.name)), p.name);
+  }
+  for (let k = 0; k < ch.count; k++) if (div.kind[k] !== SEA) assert.equal(div.seaOf[k], -1, 'land and lakes have no sea');
+});

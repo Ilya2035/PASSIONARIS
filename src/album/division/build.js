@@ -219,6 +219,48 @@ function landProvinces(ch, kind, rel, lands, admin) {
   return { prov, moved };
 }
 
+// ---- the seas: every sea chunk to a real sea of lands.json. A sea has an outline after the descriptions of the
+// International Hydrographic Organization (its borders run from cape to cape, across straits); the middle of a chunk
+// inside it puts the chunk into that sea (the first outline that holds it). A chunk no outline holds takes the sea
+// nearest over the water, and a piece of a sea cut off from the rest of it joins the sea it borders longest.
+export function seaChunks(ch, kind, seas) {
+  const n = ch.count, seaOf = new Int32Array(n).fill(-1);
+  for (let k = 0; k < n; k++) {
+    if (kind[k] !== SEA) continue;
+    const c = ch.centre(k);
+    for (let i = 0; i < seas.length; i++) if (seas[i].outline && pointInRing(c.lon, c.lat, seas[i].outline)) { seaOf[k] = i; break; }
+  }
+  for (let i = 0; i < seas.length; i++) if (!seas[i].outline) for (const [lat, lon] of seas[i].at) { const k = ch.at(lat, lon); if (k >= 0 && kind[k] === SEA) seaOf[k] = i; }
+  const dist = new Float64Array(n).fill(Infinity), heap = minHeap();
+  for (let k = 0; k < n; k++) if (seaOf[k] >= 0) { dist[k] = 0; heap.push(0, k); }
+  while (heap.size) {
+    const [d, k] = heap.pop(); if (d > dist[k]) continue;
+    for (const l of ch.links[k]) { if (kind[l.k] !== SEA) continue; const nd = d + Math.hypot(ch.cx[k] - ch.cx[l.k], ch.cy[k] - ch.cy[l.k]); if (nd < dist[l.k]) { dist[l.k] = nd; seaOf[l.k] = seaOf[k]; heap.push(nd, l.k); } }
+  }
+  for (let k = 0; k < n; k++) if (kind[k] === SEA && seaOf[k] < 0) seaOf[k] = 0;
+  for (let round = 0; round < 3; round++) {
+    const comp = new Int32Array(n).fill(-1), comps = [];
+    for (let s = 0; s < n; s++) {
+      if (kind[s] !== SEA || comp[s] >= 0) continue;
+      const list = [s]; comp[s] = comps.length;
+      for (let h = 0; h < list.length; h++) for (const l of ch.links[list[h]]) if (kind[l.k] === SEA && comp[l.k] < 0 && seaOf[l.k] === seaOf[s]) { comp[l.k] = comps.length; list.push(l.k); }
+      comps.push({ s: seaOf[s], list });
+    }
+    const biggest = new Map(); comps.forEach((c, i) => { if (!biggest.has(c.s) || comps[biggest.get(c.s)].list.length < c.list.length) biggest.set(c.s, i); });
+    let changed = 0;
+    comps.forEach((c, i) => {
+      if (biggest.get(c.s) === i) return;
+      const border = new Map();
+      for (const k of c.list) for (const l of ch.links[k]) if (kind[l.k] === SEA && seaOf[l.k] !== c.s) border.set(seaOf[l.k], (border.get(seaOf[l.k]) || 0) + l.km);
+      if (!border.size) return;
+      let best = -1, bk = 0; for (const [s, km] of [...border].sort((a, b) => a[0] - b[0])) if (km > bk) { bk = km; best = s; }
+      for (const k of c.list) seaOf[k] = best; changed++;
+    });
+    if (!changed) break;
+  }
+  return seaOf;
+}
+
 // how many people a chunk feeds, for the size of districts: districts are smaller on fertile lowland and the coast,
 // larger in the mountains and on the dry plateau (a district is about the same "weight")
 function weight(ch, kind, k) {
@@ -264,18 +306,9 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   take(lk.label, lk.count, k => lakeP[lk.label[k]]);
   const nLake = count;
 
-  // 3. the sea: every sea chunk to the nearest named sea (over the water); along the shore pieces facing the land
-  // districts, so a landing is possible everywhere; farther out even pieces
-  const seas = lands.seas, seaOf = new Int32Array(n).fill(-1);
-  {
-    const dist = new Float64Array(n).fill(Infinity), heap = minHeap();
-    seas.forEach((s, i) => { for (const [lat, lon] of s.at) { let k = ch.at(lat, lon); if (k < 0 || kind[k] !== SEA) continue; if (dist[k] > 0) { dist[k] = 0; seaOf[k] = i; heap.push(0, k); } } });
-    while (heap.size) {
-      const [d, k] = heap.pop(); if (d > dist[k]) continue;
-      for (const l of ch.links[k]) { if (kind[l.k] !== SEA) continue; const nd = d + Math.hypot(X[k] - X[l.k], Y[k] - Y[l.k]); if (nd < dist[l.k]) { dist[l.k] = nd; seaOf[l.k] = seaOf[k]; heap.push(nd, l.k); } }
-    }
-    for (let k = 0; k < n; k++) if (kind[k] === SEA && seaOf[k] < 0) seaOf[k] = 0;
-  }
+  // 3. the sea: every sea chunk to its real sea (seaChunks); in it, along the shore, pieces facing the land districts,
+  // so a landing is possible everywhere; farther out even pieces
+  const seas = lands.seas, seaOf = seaChunks(ch, kind, seas);
   const reach = Math.max(1, Math.round(size / 15)) * 10 + 5;
   const sdist = new Float64Array(n).fill(Infinity), from = new Int32Array(n).fill(-1), heap = minHeap();
   for (let k = 0; k < n; k++) if (kind[k] === LAND && ch.links[k].some(l => kind[l.k] === SEA)) { sdist[k] = 0; from[k] = k; heap.push(0, k); }
@@ -327,8 +360,8 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   const spSea = new Int32Array(sp.count); for (let d = 0; d < nSD; d++) spSea[sp.label[d]] = sdSea[d];
   for (let i = 0; i < sp.count; i++) seaCountIn[spSea[i]]++;
   const seaSeen = new Int32Array(seas.length);
-  for (let i = 0; i < sp.count; i++) { const s = spSea[i]; provinces.push({ name: seaCountIn[s] > 1 ? `${seas[s].name}, часть ${++seaSeen[s]}` : seas[s].name, region: nLR + s, kind: SEA }); }
-  const regions = [...lands.regions.map(r => ({ name: r.name, kind: LAND })), ...seas.map(s => ({ name: s.name, kind: SEA }))];
+  for (let i = 0; i < sp.count; i++) { const s = spSea[i]; provinces.push({ name: seaCountIn[s] > 1 ? `${seas[s].name}, зона ${++seaSeen[s]}` : seas[s].name, region: nLR + s, kind: SEA, sea: s }); }
+  const regions = [...lands.regions.map(r => ({ name: r.name, kind: LAND })), ...seas.map((s, i) => ({ name: s.name, kind: SEA, sea: i }))];
   for (let d = 0; d < nSD; d++) dProv[sd0 + d] = seaProvBase + sp.label[d];
 
   const kinds = new Uint8Array(count);

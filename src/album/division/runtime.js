@@ -117,10 +117,18 @@ export async function startDivision(album, U) {
     provinceOf: d => cur.div.province[d] ?? -1,
     regionOf: pv => cur.div.region[pv] ?? -1,
     provinceName: pv => cur.div.provinces[pv]?.name ?? '',
+    // for every chunk: its province (on land; a lake belongs to the land around it) and its sea (on water, else −1)
+    provinceOfChunk: k => (cur.div.district[k] >= 0 ? cur.div.province[cur.div.district[k]] : -1),
+    seaOfChunk: k => cur.div.seaOf[k] ?? -1,
+    get seas() { return lands.seas.length; },
+    // the name at a level: 'district', 'province', 'region' or 'sea' (the sea's number from seaOfChunk); name(d) alone —
+    // the name of district d, as before
+    name: (level, id) => (typeof level === 'number' ? cur.div.names[level] : level === 'district' ? cur.div.names[id] : level === 'province' ? cur.div.provinces[id]?.name
+      : level === 'region' ? cur.div.regions[id]?.name : level === 'sea' ? lands.seas[id]?.name : undefined) ?? '',
     regionName: r => cur.div.regions[r]?.name ?? '',
     neighbours: d => cur.div.neighbours[d] || [],
     kind: d => KIND_ID[cur.div.kinds[d]],
-    name: d => cur.div.names[d],
+    districtName: d => cur.div.names[d],
     districtAt,
     summary: d => districtSummary(cur.div, d, ch),
     select, get selected() { return sel; },
