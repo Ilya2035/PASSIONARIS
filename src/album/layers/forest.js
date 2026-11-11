@@ -104,8 +104,8 @@ export default async function init(album) {
         float n1 = fbm(pk / 38.), n2 = fbm(pk / 7.3 + 5.), n3 = vnoise(pk / 1.1), st = vnoise(pk / 2.6 + 11.);
         vec2 cuv = chunkUV(pk); vec4 cA = texture(tChunkA, cuv), cC = texture(tChunkC, cuv);       // the state of the chunk the tree stands in
         float wet = albumWet(ll, hl, n1), fc = albumForestShare(wet, hl, slope, n1);
-        float pat = albumPatch(n2, n3) + albumRough(pk);
-        vec2 stand = albumStand(fc, uForestK, pat, albumOrder(pk, pat, 0.), cA.r, 1.);            // x: share under canopy, y: how deep inside
+        float pat = albumPatch(n2, n3); pat += albumRough(pk) * smoothstep(.3, .16, abs(albumMargin(fc, uForestK, pat)));
+        vec2 stand = albumStand(fc, uForestK, pat, albumOrder(pat, albumOrderOwn(pk, 0.)), cA.r, 1.);            // x: share under canopy, y: how deep inside
         vec2 r = hash22(c0 + 3.1), q = hash22(c0 + 17.3), v = hash22(c0 + 5.5);
         float snowline = 2980. - (ll.x - 37.) * 55. + uSnow;
         float age = albumAge(cA.b, stand.y, st);

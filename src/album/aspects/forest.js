@@ -145,11 +145,12 @@ float albumCover(float fc, float k, float pat) { return smoothstep(-.10, .10, al
 // The order in which a chunk loses its stands as it is felled, 0 last .. 1 first, spread about evenly over the ground.
 // The weak stands go first (the patch noise), in shapes of their own that follow no lattice: three noises of 1.9,
 // 0.7 and 0.3 km, two of them turned. px: km per pixel, the small noises fade out with distance (0 = keep all).
-float albumOrder(vec2 pk, float pat, float px) {
+float albumOrderOwn(vec2 pk, float px) {                           // the three noises of its own
   vec2 q = mat2(.8, -.6, .6, .8) * pk;
   float b = px < .35 ? mix(.5, vnoise(q.yx / .7 + 7.), smoothstep(.35, .15, px)) : .5, c = px < .15 ? mix(.5, vnoise(pk / .31 + 3.), smoothstep(.15, .06, px)) : .5;
-  return smoothstep(.28, .70, pat * .45 + vnoise(q / 1.9 + 31.) * .275 + b * .165 + c * .11);
+  return vnoise(q / 1.9 + 31.) * .275 + b * .165 + c * .11;
 }
+float albumOrder(float pat, float own) { return smoothstep(.28, .70, pat * .45 + own); }
 // Felling. The state of a chunk says how much of its natural forest stands (have, 0 .. 1). Half of a loss is whole
 // stands, taken in the order above. The other half is the canopy of what is left opening up. Together the ground
 // under canopy is the natural cover times have.
@@ -226,25 +227,33 @@ vec4 crowns(vec2 p) {
 // 1 on the crowns that stand when the canopy is closed by the share g, 0 between them; its mean over the ground is g
 float crownMask(vec4 w, float g) { return 1. - smoothstep(g * 1.14 - .14, g * 1.14, smoothstep(.12, 1.08, w.z * .9 + w.w * .45)); }
 // what forestCover() worked out about the pixel, kept for aspForest(): share of trees by nature, the patch noise
-// (roughened where an edge of the natural forest is near), how far the noises of felling have faded, the stand
-float fFc, fPat, fFade; vec2 fStand;
+// (roughened where an edge of the natural forest is near), how far the noises of felling have faded, the own noises
+// of the felling order, the stand
+float fFc, fPat, fFade, fOwn; vec2 fStand;
 // The colour that comes out gain times lighter on the screen than seen would, under this light and behind this much
-// air: the end of the ground shader (light, air, albumFinish in glsl.js) run forward, lifted, and run back — gamma,
-// saturation, tone curve, exposure, air, light.
+// air. The end of the ground shader is run forward and back: light, air, exposure and the tone curve of albumFinish()
+// (glsl.js). Its saturation and gamma need no undoing: a lift by gain on the screen is a lift by gain^2.2 in front of
+// them. If the tone curve of albumFinish() changes, this one changes with it.
 vec3 forestLift(vec3 seen, vec3 light, float gain, float haze) {
-  vec3 air = albumHazeCol() * haze;
-  vec3 c = pow(min(albumFinish(pow(seen, vec3(2.2)) * light * (1. - haze) + air) * gain, vec3(.97)), vec3(2.2));
-  float l = dot(c, vec3(.2126, .7152, .0722)); c = max(l + (c - l) / uSat, 0.);
+  vec3 air = albumHazeCol() * haze, k = max(light, vec3(.02)) * (1. - haze);
+  vec3 c = (pow(seen, vec3(2.2)) * k + air) * uExposure;
+  c = min(c * (2.51 * c + .03) / (c * (2.43 * c + .59) + .14) * pow(gain, 2.2), vec3(.93));
   vec3 a = 2.51 - 2.43 * c, b = .03 - .59 * c;
   c = (-b + sqrt(b * b + .56 * a * c)) / (2. * a) / uExposure;
-  return pow(max(c - air, 0.) / ((1. - haze) * max(light, vec3(.02))), vec3(1. / 2.2));
+  return pow(max(c - air, 0.) / k, vec3(1. / 2.2));
+}
+// the air between the eye and the pixel, as albumHaze() of glsl.js counts it, from what the pixel already knows: the
+// way through the air is the height of the eye above the ground over the cosine of the view
+float forestHaze(Px p) {
+  float alt = length(cameraPosition + vec3(0., RKM, 0.)) - RKM, up = max(p.V.z, .03);
+  return 1. - exp(-(uHaze * max(alt - p.hl * uExag / 1000., 0.) / up / (alt * 2.2 + 25.) + .012 / up));
 }
 float forestCover(Px p) {
-  float have = p.cA.r, order = 0.;
+  float have = p.cA.r; fOwn = .275;
   fFc = albumForestShare(p.wet, p.hl, p.slope, p.n1); fPat = albumPatch(p.n2, p.n3); fFade = smoothstep(1.2, .5, p.px);
-  if (p.px < .5 && abs(albumMargin(fFc, uForestK, fPat)) < .22) fPat += albumRough(p.pk) * smoothstep(.5, .2, p.px);
-  if (have < .999 && have > .001 && fFade > 0.) order = albumOrder(p.pk, fPat, p.px);
-  fStand = albumStand(fFc, uForestK, fPat, order, have, fFade);
+  if (p.px < .5) fPat += albumRough(p.pk) * smoothstep(.5, .2, p.px) * smoothstep(.3, .16, abs(albumMargin(fFc, uForestK, fPat)));   // fades in toward the edge: no step in the noise
+  if (have < .999 && have > .001 && fFade > 0.) fOwn = albumOrderOwn(p.pk, p.px);
+  fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade);
   return fStand.x;
 }
 
@@ -265,15 +274,15 @@ void aspForest(Px p, inout Land L) {
     }
   }
 
-  // ---- the same question a step toward the sun: a lit rim and cast shade. Only an edge of the forest can answer it
-  // differently, so deep inside and far outside it is not asked.
+  // ---- the same question a step toward the sun: a lit rim and cast shade. The patch noise is asked again there; the
+  // own noises of the felling order are taken as they are here, which is close enough over a fifth of a km. (Reading
+  // the change off the screen with dFdx was tried: at close range it speckles the edges.)
   float coverS = dens;
   if (px < .7 && abs(fStand.y) < .34 && have > .02) {
     vec2 pks = pk + p.sd * .22;
     float ps = albumPatch(mix(.5, fbm(pks / 7.3 + 5.), smoothstep(5., 1.5, px)), mix(.5, vnoise(pks / 1.1), smoothstep(.7, .25, px)));
-    if (px < .5) ps += albumRough(pks) * smoothstep(.5, .2, px);
-    float s = albumStand(fc, uForestK, ps, have < .999 && fFade > 0. ? albumOrder(pks, ps, px) : 0., have, fFade).x;
-    coverS = mix(dens, s * (own > .001 ? min(dens / own, 1.) : 1.), smoothstep(.7, .4, px));
+    if (px < .5) ps += albumRough(pks) * smoothstep(.5, .2, px) * smoothstep(.3, .16, abs(albumMargin(fc, uForestK, ps)));
+    coverS = mix(dens, albumStand(fc, uForestK, ps, albumOrder(ps, fOwn), have, fFade).x * (own > .001 ? min(dens / own, 1.) : 1.), smoothstep(.7, .4, px));
   }
   if (dens < .003 && coverS < .003) return;
 
@@ -314,7 +323,7 @@ void aspForest(Px p, inout Land L) {
   vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day) * (dens > .01 ? mix(vec3(1.), texDetail(tForest, pk, px, p.pdx, p.pdy), .35) : vec3(1.));
   // the finishing pass (post.js) darkens the ground between 3D trees: under them the canopy is painted lighter by as much
   float zone = smoothstep(1., .66, length(pk - uTreeZone.xy) / uTreeZone.z); zone *= zone * uTreeZone.w * (1. + .04 * kind);
-  if (zone > .002) canopy = forestLift(canopy, p.sunCol * max(dot(p.n, uSun), 0.) * p.sh * 1.25 + p.skyCol * (.4 + .6 * p.n.z) * p.ao, albumTreeGain(zone, p.V.z), albumHaze(worldOf(p.ll, p.hl * uExag / 1000.)));
+  if (zone > .002) canopy = forestLift(canopy, p.sunCol * max(dot(p.n, uSun), 0.) * p.sh * 1.25 + p.skyCol * (.4 + .6 * p.n.z) * p.ao, albumTreeGain(zone, p.V.z), forestHaze(p));
   // rim and shade grow with the height of the stand; the ground between the crowns of an open stand is mostly in the sun
   float tall = .3 + .7 * ya, rim = clamp(mask - coverS, 0., 1.) * tall, castS = clamp(coverS - mask, 0., 1.) * coverS * tall;
   L.col = mix(L.col * (1. - .5 * castS * p.day), canopy * (1. + .35 * rim * p.day), mask);
@@ -378,7 +387,7 @@ export default {
     lay();
     const time = { id: 'forestTime', update(dt) {
       if (pending) { pending = false; acc = 0; model.restart(); model.sync(); model.step(+p.get('regrow') || 0); return; }
-      acc += dt; if (acc < .25) return;                              // four times a second is enough for a forest
+      acc += dt; if (acc < (p.get('play') > 2 ? .1 : .25)) return;   // a few times a second is enough for a forest
       const years = album.shot ? 0 : acc * p.get('play') * YEARS_PER_SECOND; acc = 0;
       model.sync(); model.step(years);
     } };
