@@ -28,6 +28,11 @@ export const LAKES = [
   { id: 'janda', name: 'Лагуна Ла-Ханда', lat: 36.255, lon: -5.86, level: 2.6, rise: 2.2, r: 10, depth: 3, note: 'осушена в 1960-х; в 5000 г. до н. э. была' },
   { id: 'villafafila', name: 'Лагуны Вильяфафилы', lat: 41.83, lon: -5.607, level: null, rise: 1.4, r: 4, depth: 1.5, salt: 1, note: 'солёные степные лагуны' },
   { id: 'cazaux', name: 'Озеро Казо и Сангине', lat: 44.49, lon: -1.16, level: null, rise: 1.2, r: 10, depth: 23, since: -1000, note: 'подпружено дюнами Ландов; моложе 5000 г. до н. э.' },
+  // not a lake: the delta of the Ebro. It is mostly younger than 5000 BC and the coarse heights of the region have it
+  // as a shoal, but the fine heights around the delta fill the flat with noise, land and water in specks. Inside this
+  // outline the sea is drawn wherever the coarse heights say sea (layers/lakes.js), so the shoal is one clean sheet.
+  { id: 'ebro-shoal', name: 'Отмели дельты Эбро', lat: 40.7, lon: .76, level: .6, depth: 2, shoal: 1, note: 'не озеро: море поверх шума в подробных высотах дельты',
+    outline: [[.60, 40.87], [.80, 40.91], [1.02, 40.77], [.99, 40.60], [.79, 40.49], [.61, 40.49], [.49, 40.60], [.49, 40.75]] },
   { id: 'biscarrosse', name: 'Озеро Бискаррос и Парантис', lat: 44.345, lon: -1.175, level: null, rise: 1.2, r: 9, depth: 20, since: -1000, note: 'подпружено дюнами Ландов; моложе 5000 г. до н. э.' },
 ];
 
@@ -49,6 +54,11 @@ function oval(lake) {
     ring.push([Math.round((lake.lon + (x * ca - y * sa) / (KM * c)) * 1e5) / 1e5, Math.round((lake.lat + (x * sa + y * ca) / KM) * 1e5) / 1e5]);
   }
   return { ring, area: Math.PI * a * b, level: lake.level };
+}
+function shoelace(lake) {
+  const c = Math.cos(lake.lat * D), p = lake.outline.map(q => [q[0] * KM * c, q[1] * KM]); let a = 0;
+  for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i][0] * q[1] - q[0] * p[i][1]; }
+  return Math.abs(a) / 2;
 }
 function trace(lake) {
   const step = Math.max(.04, lake.r / 90), N = Math.ceil(lake.r / step) * 2 + 1, c = Math.cos(lake.lat * D), half = (N - 1) / 2;
@@ -94,10 +104,10 @@ function trace(lake) {
 
 const lakes = [];
 for (const lake of LAKES) {
-  const t = lake.oval ? oval(lake) : trace(lake);
+  const t = lake.outline ? { ring: lake.outline, level: lake.level, area: shoelace(lake) } : lake.oval ? oval(lake) : trace(lake);
   console.log(`${lake.id.padEnd(14)} level ${String(t.level).padStart(7)} m  area ${t.area.toFixed(1).padStart(6)} km²  ${t.ring.length} points`);
   if (process.argv.includes('--print') && t.inside) { const s = Math.ceil(t.N / 70); for (let j = 0; j < t.N; j += s * 2) { let row = ''; for (let i = 0; i < t.N; i += s) row += t.inside[j * t.N + i] ? '#' : '.'; console.log(row); } }
-  const { r, rise, level, oval: _, ...rest } = lake;
+  const { r, rise, level, oval: _, outline: __, ...rest } = lake;
   lakes.push({ ...rest, level: t.level, area: Math.round(t.area * 10) / 10, ring: t.ring });
 }
 mkdirSync(OUT, { recursive: true });

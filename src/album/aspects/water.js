@@ -80,7 +80,7 @@ vec3 waterLit(Wtr w) {
 
   // ---- the state of the surface: 0 calm .. 1 storm. Gusts and slicks make it uneven; ice calms it.
   float st = w.kind == 0 ? w.cB.a : (w.kind == 1 ? .2 : .1);
-  float gust = px < 4. ? mix(.5, wFbm(pk / 6.2 + vec2(t * .012, t * .005)), smoothstep(4., 1.5, px)) : .5;
+  float gust = px < 4. ? mix(.5, wNoise(pk / 6.2 + vec2(t * .012, t * .005)) * .64 + wNoise(pk / 2.3 + vec2(t * .02, -t * .008) + 9.) * .36, smoothstep(4., 1.5, px)) : .5;
   st = clamp(st * (.45 + 1.1 * gust) + (gust - .5) * .1, 0., 1.) * (1. - smoothstep(.03, .4, ice));
 
   // ---- waves: three sizes drawn out across the wind, each fading into roughness once it is smaller than a pixel
@@ -182,10 +182,10 @@ vec3 waterLit(Wtr w) {
         floe *= cake;
       }
       // the solid sheet keeps the scars of its leads; where floes were driven together, ridges stand
-      float sheet = smoothstep(.78, .9, a), f1 = 1. - smoothstep(.5, 1.5, pq), crack = 0., ridge = 0., side = 0.;
-      if (sheet > 0. && f1 > 0.) {
-        crack = (1. - smoothstep(0., aa * 1.2 + .014, F.x)) * smoothstep(.3, .52, wNoise(q / 1.6 + 9.)) * sheet * f1;
-        float rA = smoothstep(.86, 1., a) * f1, wR = .05 + .07 * wNoise(q / .7 + 2.);
+      float sheet = smoothstep(.78, .9, a), fb = 1. - smoothstep(.5, 1.5, pq), crack = 0., ridge = 0., side = 0.;
+      if (sheet > 0. && fb > 0.) {
+        crack = (1. - smoothstep(0., aa * 1.2 + .014, F.x)) * smoothstep(.3, .52, wNoise(q / 1.6 + 9.)) * sheet * fb;
+        float rA = smoothstep(.86, 1., a) * fb, wR = .05 + .07 * wNoise(q / .7 + 2.);
         ridge = (1. - smoothstep(wR * .25, wR, F.x)) * smoothstep(.5, .72, wNoise(q / 2.3 + 40.) + rA * .4) * rA;
         side = dot(normalize(F.zw + 1e-5), sun2);                     // > 0 on the flank of the ridge that faces the sun
       }
@@ -253,9 +253,11 @@ Wtr sheetWater(int kind) {
 }
 // the ground beside the water (a beach, a bank), lit like the land: its colour as seen on screen
 vec3 sheetGround(vec3 seen, vec3 n) { return albumLit(seen, n, .4 + .6 * normalize(n).z); }
-void sheetOut(vec3 col, float alpha) {
+// pull: 1 = the depth is written uPull km toward the eye, 0 = where the sheet really lies (a sheet that ends in open
+// water fades its pull out there, or the finishing pass would shade the step in depth as a dark line)
+void sheetOut(vec3 col, float alpha, float pull) {
   gl_FragColor = vec4(albumFinish(albumAir(col, vPos)), alpha);
-  gl_FragDepth = clamp(vZW.x / vZW.y * .5 + .5, 0., 1.);
+  gl_FragDepth = mix(gl_FragCoord.z, clamp(vZW.x / vZW.y * .5 + .5, 0., 1.), pull);
 }`;
 export const sheetUniforms = album => {
   const T = album.terrain.u;
@@ -283,6 +285,8 @@ vec3 aspWater(Px p) {
     float hC = heightLod(p.ll, lod), hE = heightLod(p.ll + vec2(0., e / (KM * cl)), lod), hN = heightLod(p.ll + vec2(e / KM, 0.), lod);
     float gs = length(vec2(hE - hC, hN - hC)) / (e * 1000.);          // rise over run of the smoothed bottom
     w.surf = w.depth / (1000. * max(gs, 1e-4)) + 4. * (1. - smoothstep(.0012, .004, gs));
+    // the sea charts step from one depth to the next along jagged lines; the smoothed bottom rounds those steps off
+    w.depth = mix(w.depth, max(-hC, 0.), .65 * smoothstep(14., 6., w.depth) * smoothstep(0., 1.2, w.depth));
   }
   return waterLit(w);
 }`;

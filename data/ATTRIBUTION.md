@@ -39,6 +39,12 @@
 | 3D-модели домов, строек, стен, деревьев и скал (41 штука) | [KayKit : Medieval Hexagon Pack 1.0](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0), Kay Lousberg (www.kaylousberg.com) | CC0 1.0 |
 | Текстуры земли, 16 штук (`aerial_*`, `forest_floor`, `snow_*` и другие) | [Poly Haven](https://polyhaven.com/textures) | CC0 1.0 |
 
+### Альбом: вода
+
+| Данные | Источник | Лицензия |
+|---|---|---|
+| Естественные озёра региона (`public/assets/album/water/lakes.json`, в репозитории) | Перечень свой: названия, места, уровни и глубины записаны в `scripts/album/water-lakes.mjs`. Очертания сняты этим скриптом с высот альбома ([AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/)) | Перечень — свой. Высоты — открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
+
 ## Ресурсы
 
 Таблица ресурсов `public/assets/resources/` собрана из открытых данных скриптами `scripts/resources/download.mjs` и

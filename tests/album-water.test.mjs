@@ -78,6 +78,7 @@ test('water: snow lies only on ice that can bear it; a thaw wets the ice and tak
   const before = ch.get('ice', near);
   m.settle({ cold: .45, snow: .8, thaw: .6 });
   assert.ok(ch.get(MELT_CHANNEL, near) > .3 && ch.get('snow', near) < .2 && ch.get('ice', near) < before && ch.get('ice', near) > 0);
+  assert.equal(ch.get(MELT_CHANNEL, land), 0, 'on a chunk of land alone flood is left for water over the land');
 });
 
 test('water: a reset of the chunks is followed by the model laying its state again; the brush is taken as the truth', () => {
@@ -101,7 +102,8 @@ test('water: the rows of states for the album pages cover every stage in order',
     assert.ok(water.params.find(p => p.key === 'waterShow').options.some(o => o[0] === id));
     m.settle({ show: id });
     const name = id === 'sea' ? SEA_CHANNEL : id === 'ice' ? 'ice' : id === 'snow' ? 'snow' : MELT_CHANNEL;
-    for (let b = 0; b < s.bands.length; b++) assert.ok(Math.abs(ch.get(name, row + s.width * s.bands.length + b * s.width) - s.bands[b]) < .01 || name === 'snow', `${id} band ${b}`);
+    const period = s.width * s.bands.length, sea = period * Math.ceil(70 / period);      // the first whole row of bands that lies in the sea of this world
+    for (let b = 0; b < s.bands.length; b++) assert.ok(Math.abs(ch.get(name, row + sea + b * s.width) - s.bands[b]) < .01, `${id} band ${b}`);
   }
   m.settle({ show: 'sea' }); assert.equal(ch.get('ice', row + 100), 0);
   assert.equal(winterPhase(0), 0); assert.equal(winterPhase(50), 1); assert.ok(winterPhase(20) > 0 && winterPhase(20) < 1 && winterPhase(105) === 0);
@@ -109,19 +111,19 @@ test('water: the rows of states for the album pages cover every stage in order',
 
 test('water: lakes — a small open list of natural lakes with outlines inside the region', () => {
   const { lakes } = JSON.parse(readFileSync(new URL('../public/assets/album/water/lakes.json', import.meta.url), 'utf8'));
-  assert.ok(lakes.length >= 8 && lakes.length <= 40);
+  assert.ok(lakes.filter(l => !l.shoal).length >= 8 && lakes.length <= 40);
   assert.ok(readFileSync(new URL('../public/assets/album/water/lakes.json', import.meta.url)).length < 200e3, 'a small tracked file');
   const ids = new Set();
   for (const l of lakes) {
     assert.ok(l.id && l.name && !ids.has(l.id)); ids.add(l.id);
     assert.ok(!/водохранилищ|embalse|reservoir/i.test(l.name + (l.note || '')), `${l.id}: no reservoirs in 5000 BC`);
-    assert.ok(l.ring.length >= 20 && l.depth > 0 && l.level >= 0 && l.area > .3 && l.area < 120, l.id);
+    assert.ok(l.ring.length >= (l.shoal ? 6 : 20) && l.depth > 0 && l.level >= 0 && l.area > .3 && l.area < (l.shoal ? 2500 : 120), l.id);
     for (const [lon, lat] of l.ring) assert.ok(lon > BBOX.lon0 && lon < BBOX.lon1 && lat > BBOX.lat0 && lat < BBOX.lat1, `${l.id}: inside the region`);
     const g = lakeGrid(l), c = Math.cos(l.lat * Math.PI / 180), ring = l.ring.map(p => [(p[0] - l.lon) * 111.195 * c, (p[1] - l.lat) * 111.195]);
     assert.ok(g.idx.length >= 6 && g.idx.every(i => i >= 0 && i < g.n) && g.n < 60000, `${l.id}: a sound grid`);
     let inside = 0; for (let k = 0; k < g.n; k++) if (g.sd[k] > 0) inside++;
     assert.ok(inside > 20, `${l.id}: water inside its shore`);
-    assert.ok(Math.max(...g.sd) < 12 && Math.abs(ringDistance(ring, ring[0][0], ring[0][1])) < 1e-6);
+    assert.ok(Math.max(...g.sd) < 25 && Math.abs(ringDistance(ring, ring[0][0], ring[0][1])) < 1e-6);
   }
   const sq = [[0, 0], [4, 0], [4, 4], [0, 4]];
   assert.equal(ringDistance(sq, 2, 2), 2); assert.equal(ringDistance(sq, 2, 5), -1); assert.equal(ringDistance(sq, -3, 2), -3); assert.ok(Math.abs(ringDistance(sq, 1, 2) - 1) < 1e-9);
@@ -139,6 +141,12 @@ test('water: rivers — wider by rank, growing from the source down, running dow
   assert.ok(a.width.every(w => w === riverWidth(5)));
   assert.ok(b.width[0] < b.width[b.width.length - 1] && b.width[b.width.length - 1] <= riverWidth(5) && b.width[0] > .2 * riverWidth(5));
   assert.ok(b.dist.every((d, i) => !i || d > b.dist[i - 1]) && b.pts.length === b.width.length);
+  assert.ok(!a.mouth && a.fade.every(v => v === 1), 'a river that never meets the sea is drawn whole');
+  // the sea lies east of 3° W, with an island in it: the river stops at the shore and does not come out on the island
+  const coast = (lat, lon) => (lon < -3 ? 300 - lon : lon > -2.9 && lon < -2.8 ? 5 : -20);
+  const [m] = riverLines([{ name: 'M', rank: 6, pts: line(-4, 41, 40) }], coast), last = m.pts[m.pts.length - 1];
+  assert.ok(m.mouth && last[0] > -3.01 && last[0] < -2.95, `the mouth is at the shore, got ${last[0]}`);
+  assert.equal(m.fade[m.fade.length - 1], 0); assert.equal(m.fade[0], 1); assert.ok(m.fade.every((v, i) => !i || v <= m.fade[i - 1]));
 });
 
 test('water: the album shows it — pages for every state, from 20, 200 and 500 km, and knobs for the model', () => {

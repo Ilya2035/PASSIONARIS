@@ -1,6 +1,7 @@
 // The natural lakes of the region (public/assets/album/water/lakes.json, baked by scripts/album/water-lakes.mjs):
 // each a sheet of the same water as the sea, level at the height of its shore, with a shoal along the edge, a beach
 // outside it and a depth that grows toward the middle. Lakes freeze with their chunk, with the same ice as the sea.
+// The list also holds one shoal of the sea (the delta of the Ebro), drawn by the same mesh: see the shader.
 import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, CustomBlending, SrcAlphaFactor, OneMinusSrcAlphaFactor } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT } from '../glsl.js';
 import { SHEET_VERT, SHEET_FRAG, sheetUniforms, sheetPull } from '../aspects/water.js';
@@ -50,7 +51,7 @@ export default async function init(album) {
   lakes.forEach((l, li) => {
     const g = grids[li];
     ll.set(g.ll, v * 2); sd.set(g.sd, v);
-    for (let k = 0; k < g.n; k++) { const o = (v + k) * 4; info[o] = l.level; info[o + 1] = l.depth; info[o + 2] = li * 7.31 + 1.7; info[o + 3] = l.salt ? 1 : 0; }
+    for (let k = 0; k < g.n; k++) { const o = (v + k) * 4; info[o] = l.level; info[o + 1] = l.depth; info[o + 2] = li * 7.31 + 1.7; info[o + 3] = l.shoal ? 2 : l.salt ? 1 : 0; }
     for (const i of g.idx) index.push(v + i);
     v += g.n;
   });
@@ -70,6 +71,27 @@ export default async function init(album) {
       varying float vSd; varying vec4 vLake;
       void main() {
         Wtr w = sheetWater(1);
+        if (vLake.w > 1.5) {
+          // A shoal of the sea, not a lake: wherever the coarse heights of the region say sea, there is sea, whatever
+          // the fine heights say — the same sea the ground shader draws beside it (same depth, same water), so the
+          // noise of the fine heights on a flat delta is covered by one clean sheet and the join does not show.
+          vec2 m = merc(vLL); float wD = detailWeight(m);
+          float hb = textureLod(uBase, (m - uBaseRect.xy) * uBaseRect.zw, 0.).r;
+          float sea = smoothstep(vLake.x + .12, vLake.x - .18, hb) * smoothstep(0., .4, vSd);
+          // The colour is needed only where the fine heights put land on that sea; elsewhere the ground has already
+          // drawn the same water.
+          float hd = wD > 0. ? textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., log2(w.px / .029))).r : 0.;
+          float cover = sea * smoothstep(.2, .5, hd) * smoothstep(0., .05, wD);
+          // The depth is written toward the eye all over the shoal, islands included, which hides the trees of the
+          // specks. It comes on gently, over a couple of km, away from the mainland and from the outline, and has no
+          // step anywhere: the finishing pass would shade a step in depth as if it were relief.
+          float hs = textureLod(uBase, (m - uBaseRect.xy) * uBaseRect.zw, 3.2).r;
+          float pull = smoothstep(.2, 2.6, vLake.x - hs) * smoothstep(1., 5., vSd);
+          if (cover < .004 && pull < .004) discard;
+          w.kind = 0; w.depth = max(-hb, 1.5);
+          sheetOut(cover > .004 ? waterLit(w) : vec3(0.), cover, pull);
+          return;
+        }
         float grow = clamp(w.px * .9 - .012, 0., ${GROW.toFixed(2)});                       // a small lake stays a few pixels wide from any height
         float sd = vSd + grow + (wNoise(w.pk / .16 + vLake.z) - .5) * .05 * smoothstep(.12, .02, w.px);   // the shore is never a ruled line
         float aa = max(w.px * .8, .003), water = smoothstep(-aa, aa, sd);
@@ -82,7 +104,7 @@ export default async function init(album) {
         vec3 sand = mix(vec3(.60, .55, .40), vec3(.80, .80, .76), vLake.w) * (.92 + .16 * wNoise(w.pk / .05 + 3.));   // a salt lagoon has a white rim
         col = mix(sheetGround(sand * mix(.82, 1., smoothstep(-bw * .5, -bw, sd)), vec3(0., 0., 1.)), col, water);       // wet at the waterline
         if (uStyle == 2 || uStyle == 3) col = mix(uStyle == 2 ? vec3(.50, .68, .82) : vec3(.60, .69, .74), col, .25);
-        sheetOut(col, max(water, beach * .85));
+        sheetOut(col, max(water, beach * .85), 1.);
       }`,
   });
   const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = -6;       // after the ground (−20 … −12), before trees and houses

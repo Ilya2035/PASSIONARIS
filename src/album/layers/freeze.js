@@ -1,6 +1,6 @@
 // The state of the water of every chunk and how it changes (docs/album/water.md). Four numbers of a chunk are the
-// water's own: ice, snow (on water chunks), flood (on a water chunk: melt water on the ice) and spareB (the state of
-// the sea, 0 calm .. 1 storm). This file sets their natural values and runs the freeze model: ice grows from the
+// water's own: ice, snow (on chunks that are mostly water), flood (on a chunk with sea in it: melt water on the ice)
+// and spareB (the state of the sea, 0 calm .. 1 storm). This file sets their natural values and runs the freeze model: ice grows from the
 // shore and from the north, later over deep water, spreads from chunk to chunk, and melts back the same way.
 import { CN } from '../chunks.js';
 
@@ -69,7 +69,7 @@ export function makeFreeze(ch, heightAt) {
   // lays the model's numbers into the chunks (only where they changed)
   function write(o = {}) {
     for (let k = 0; k < n; k++) {
-      if (!o.keepIce) { put('ice', k, ice[k]); put(MELT_CHANNEL, k, melt[k]); }
+      if (!o.keepIce) { put('ice', k, ice[k]); if (ch.land[k] < .97) put(MELT_CHANNEL, k, melt[k]); }   // on a chunk of land alone, flood stays what it is: water over the land
       if (!o.keepSnow && water[k]) put('snow', k, snow[k]);
       put(SEA_CHANNEL, k, sea[k]);
     }
