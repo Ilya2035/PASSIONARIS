@@ -61,11 +61,10 @@ function line(x0, y0, x1, y1, mark) {
   for (let guard = 0; (tx !== ex || ty !== ey) && guard < 8192; guard++) { if (mx < my) { mx += ax; tx += sx; } else { my += ay; ty += sy; } mark(tx, ty); }
 }
 
-// Divides the fine raster into chunks. Every seed spreads over the texels around it, all seeds at the same pace; where
-// two spreading chunks meet is their border. Spreading is slower uphill and across broken ground and pays a toll to
-// cross a river, so borders settle on rivers and at the foot of slopes; land and water never share a chunk, so the
-// coast is always a border. The seeds stand in staggered rows with a little scatter, which makes the cells rounded,
-// like a honeycomb pulled out of shape, instead of square.
+// Divides the fine raster into chunks. Every chunk grows from a seed; where two growing chunks meet is their border.
+// On land the growth is a flood rising from the low ground, so in broken country a chunk is a piece of a valley with
+// its slopes and its border is the crest; on level ground chunks are rounded cells, and a river is a border. Land and
+// water never share a chunk, so the coast is always a border. The seeds stand in staggered rows with some scatter.
 //   heightAt(lat, lon) → metres (missing = all land); rivers: [{ pts: [[lon, lat], …], rank }]
 export function buildCells(heightAt, rivers = []) {
   const n = FN * FN, land = new Uint8Array(n), hgt = new Float32Array(n), riv = new Uint8Array(n), pace = new Float32Array(n);
@@ -86,38 +85,42 @@ export function buildCells(heightAt, rivers = []) {
     }
   }
   // seeds: land where the square is at least three tenths land, otherwise water; off the rivers where possible
-  const cell = new Uint16Array(n).fill(NONE), dist = new Int32Array(n).fill(1 << 30), kind = [], seed = new Uint8Array(n);
-  const NB = 64, buckets = Array.from({ length: NB }, () => []);
-  let pending = 0;
+  const cell = new Uint16Array(n).fill(NONE), dist = new Int32Array(n).fill(1 << 30), kind = [], seed = new Uint8Array(n), seedAt = new Int32Array(CN * CN);
+  const MAXC = 8192, buckets = new Array(MAXC), put = (t, c) => { const b = c < MAXC ? c : MAXC - 1; (buckets[b] || (buckets[b] = [])).push(t); };
   for (let yj = 0; yj < CN; yj++) for (let xi = 0; xi < CN; xi++) {
-    let nl = 0;
-    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) nl += land[(yj * Q + b) * FN + xi * Q + a];
+    let nl = 0, low = 1e9;
+    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FN + xi * Q + a; nl += land[t]; if (land[t] && hgt[t] < low) low = hgt[t]; }
     const isLand = nl >= Q * Q * .3 ? 1 : 0;
     const cx = (xi + .5) * Q + ((yj & 1) ? 2 : -2) + (hash2(xi, yj, 11) - .5) * 4.4, cy = (yj + .5) * Q + (hash2(xi, yj, 23) - .5) * 4.4;
+    // On land the seed goes down into the low ground of its square: the valley floor, the plain.
     let best = -1, bd = 1e9;
     for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) {
       const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] !== isLand) continue;
-      const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0); if (d < bd) { bd = d; best = t; }
+      const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0) + (isLand ? Math.min(90, (hgt[t] - low) * .09) : 0);
+      if (d < bd) { bd = d; best = t; }
     }
-    kind.push(isLand); cell[best] = yj * CN + xi; dist[best] = 0; seed[best] = 1; buckets[0].push(best); pending++;
+    kind.push(isLand); cell[best] = yj * CN + xi; seedAt[yj * CN + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(hgt[best])) : 0; put(best, dist[best]);
   }
-  // all seeds spread at once, cheapest step first (costs are whole numbers under 64, so 64 rotating buckets do)
-  const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1];
-  for (let c = 0; pending > 0; c++) {
-    const bucket = buckets[c % NB];
+  // The flood. Every land seed is a spring: its water rises and spreads, level by level, and takes the ground it
+  // reaches first. Water from the valley floor climbs both slopes and meets the water of the next valley on the crest,
+  // so the crest becomes the border. On level ground the height says nothing and the way decides: LAM metres of level
+  // per km of way, which gives rounded cells. A river costs extra to cross. The sea spreads by the way alone.
+  const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1], LAM = 24;
+  for (let c = 0; c < MAXC; c++) {
+    const bucket = buckets[c]; if (!bucket) continue;
     for (let q = 0; q < bucket.length; q++) {
-      const t = bucket[q]; pending--; if (dist[t] !== c) continue;
-      const tx = t % FN, ty = (t / FN) | 0, id = cell[t], lt = land[t], rt = riv[t], ht = hgt[t];
+      const t = bucket[q]; if (dist[t] !== c && !(c === MAXC - 1 && dist[t] >= c)) continue;
+      const tx = t % FN, ty = (t / FN) | 0, id = cell[t], lt = land[t], rt = riv[t], lvl = dist[t];
       for (let d = 0; d < 8; d++) {
         const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
         const m = y * FN + x; if (land[m] !== lt) continue;
-        let step = (d < 4 ? 4 : 5.66) * pace[m];
-        if (lt) { step += Math.min(10, Math.abs(hgt[m] - ht) * .04); if (riv[m] !== rt) step += Math.max(riv[m], rt) === 2 ? 18 : 12; }   // a river is paid for on entering and on leaving
-        const nd = c + Math.max(1, Math.round(step));
-        if (nd < dist[m]) { dist[m] = nd; cell[m] = id; buckets[nd % NB].push(m); pending++; }
+        let way = (d < 4 ? FKM : FKM * 1.414) * LAM * pace[m];
+        if (lt && riv[m] !== rt) way += Math.max(riv[m], rt) === 2 ? 80 : 50;      // a river is paid for on entering and on leaving
+        const nd = Math.round(Math.max(lvl, lt ? hgt[m] : 0) + way);               // the level has to rise to the ground it takes
+        if (nd < dist[m]) { dist[m] = nd; cell[m] = id; put(m, nd); }
       }
     }
-    bucket.length = 0;
+    buckets[c] = null;
   }
   // what no seed reached — an island in a square of open sea, a lagoon behind a bar: a chunk of its own if it is big
   // enough, otherwise part of the chunk it lies in
@@ -147,7 +150,22 @@ export function buildCells(heightAt, rivers = []) {
       if (same <= 3 && on >= 4) cell[t] = other;
     }
   }
-  return { cell, count: kind.length, kind: Uint8Array.from(kind), land, hgt, riv };
+  // A chunk its neighbours squeezed down to a scrap (under 25 km²) takes ground back from the large neighbours of its
+  // own kind, ring by ring, until it is about 30 km². An island keeps its chunk however small.
+  const size = new Uint32Array(kind.length), own = new Map();
+  for (let t = 0; t < n; t++) size[cell[t]]++;
+  for (let t = 0; t < n; t++) { const k = cell[t]; if (size[k] < 16) { let l = own.get(k); if (!l) own.set(k, l = []); l.push(t); } }
+  for (const [k, list] of own) {
+    for (let q = 0; q < list.length && size[k] < 20; q++) {
+      const t = list[q], tx = t % FN, ty = (t / FN) | 0;
+      for (let d = 0; d < 4 && size[k] < 20; d++) {
+        const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
+        const m = y * FN + x, o = cell[m];
+        if (o !== k && kind[o] === kind[k] && land[m] === land[t] && size[o] > 40 && !seed[m]) { cell[m] = k; size[k]++; size[o]--; list.push(m); }
+      }
+    }
+  }
+  return { cell, count: kind.length, kind: Uint8Array.from(kind), land, hgt, riv, seedAt };
 }
 
 export class Chunks {
@@ -173,7 +191,9 @@ export class Chunks {
     this.cx = new Float32Array(n); this.cy = new Float32Array(n);
     for (let k = 0; k < n; k++) {
       const c = Math.max(1, cnt[k]);
-      this.area[k] = cnt[k] * FKM * FKM; this.cx[k] = X0 + sx[k] / c * FKM; this.cy[k] = Y0 + sy[k] / c * FKM;
+      this.area[k] = cnt[k] * FKM * FKM;
+      if (cnt[k]) { this.cx[k] = X0 + sx[k] / c * FKM; this.cy[k] = Y0 + sy[k] / c * FKM; }
+      else { const s = g.seedAt[k]; this.cx[k] = X0 + ((s % FN) + .5) * FKM; this.cy[k] = Y0 + (((s / FN) | 0) + .5) * FKM; }   // a number without ground: where its seed stood
       this.height[k] = this.land[k] ? this.height[k] / this.land[k] : 0; this.land[k] /= c;
     }
     // neighbours: for every chunk, the chunks it borders, the length of the shared border in km and whether a river

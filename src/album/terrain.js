@@ -228,7 +228,8 @@ void main() {
   if (uGrid > 0 || uChunkShow > 0. || uChunkHoverId >= 0.) {
     vec2 cc = chunkCell(pk); float edge = cc.y * ${(FKM / 2).toFixed(4)};          // km from the border of the chunk
     if (uChunkShow > 0.) { vec4 dc = texelFetch(tChunkPal, chunkTexel(cc.x), 0); col = mix(col, pow(dc.rgb, vec3(2.2)) * (.5 + .9 * dot(col, vec3(.33))), dc.a * uChunkShow); }
-    if (uGrid > 0) col = mix(col, vec3(1., .95, .8), (1. - smoothstep(px * .5, px * 1.5, edge)) * (.22 + .2 * landA) * smoothstep(1.6, .3, px));
+    if (uGrid > 0) { bool pale = uStyle == 3 || uStyle == 2;                // dark lines on the pale maps, light ones on the natural land
+      col = mix(col, pale ? vec3(.10, .08, .06) : vec3(1., .95, .8), (1. - smoothstep(px * .5, px * 1.5, edge)) * (pale ? .55 : .22 + .2 * landA) * smoothstep(1.6, .3, px)); }
     if (cc.x == uChunkHoverId) col = mix(col, vec3(1.6, 1.3, .5), .18 + .6 * (1. - smoothstep(px * 1.2, px * 2.8, edge)));
   }
   if (uQuake.z > 0. && landA > .5) {                               // what each district felt, and the rupture
