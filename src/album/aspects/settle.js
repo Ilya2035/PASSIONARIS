@@ -132,7 +132,7 @@ void aspSettle(Px p, inout Land L) {
 
   // ---- fields: the land next to the houses is ploughed first, then the best of the rest of the chunk
   if (fieldsV > .004 && tm < .997 && p.slope < .6 && p.hl < 1700.) {
-    float want = .12 + .6 * fieldsV + (close ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - p.n2 * .6 - p.n3 * .4;
+    float want = .04 + .68 * fieldsV + (close ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - p.n2 * .6 - p.n3 * .4;
     if (want > -.25) {                                               // far below the threshold no furlong can be a field: nothing more to work out
       float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
       vec2 cid = vec2(0.), ff = vec2(.5);
