@@ -7,21 +7,21 @@
 //   g  snow        snow lying on the ice (on the land the ground shader draws it)
 //   b  flood       not the water's: water over the land, read by the swamps
 //   a  spareB      the state of the sea: 0 calm .. 1 storm with whitecaps
-// Melt water on the ice (0 frozen hard .. 1 rotten ice full of thaw holes) has no channel of its own in the chunks,
-// so the water keeps it in a texture of its own, one byte per chunk, read at the same point as the chunks.
+// Melt water on thawing ice has no channel in the chunks, and the ground shader has no texture unit left for a
+// texture of the water's own (it uses all 16), so it is worked out from the ice of the chunk and two numbers for the
+// whole sea, uWaterThaw, kept by the freeze model (layers/freeze.js).
 // One water for everything: WATER_CORE is the same code in the ground shader (the sea), in the lakes and in the rivers.
-import { DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
+import { Vector2 } from 'three';
 import { lightUniforms } from '../glsl.js';
-import { CN } from '../chunks.js';
 
-export const MELT_BYTES = new Uint8Array(CN * CN);                  // written by the freeze model (layers/freeze.js)
-const meltTex = new DataTexture(MELT_BYTES, CN, CN, RedFormat, UnsignedByteType);
-meltTex.magFilter = meltTex.minFilter = LinearFilter; meltTex.wrapS = meltTex.wrapT = ClampToEdgeWrapping; meltTex.needsUpdate = true;
-// uWaterThaw: 1 while any chunk holds melt water; without it the shader never looks at the texture
-export const WATER_UNIFORMS = { tWaterMelt: { value: meltTex }, uWaterThaw: { value: 0 } };
+// Ice in retreat stands in melt water once it is no longer whole: none at MELT_TOP of ice and more, all of it MELT_SPAN
+// lower. The freeze model and the shader use the same two numbers.
+export const MELT_TOP = .92, MELT_SPAN = .14;
+// uWaterThaw.x: a thaw lies on all the ice, 0..1. uWaterThaw.y: the ice is in retreat, 0..1.
+export const WATER_UNIFORMS = { uWaterThaw: { value: new Vector2(0, 0) } };
 
 export const WATER_CORE = /* glsl */`
-uniform sampler2D tWaterMelt; uniform float uWaterThaw;
+uniform vec2 uWaterThaw;
 const vec2 W_WIND = vec2(.83, -.558), W_WINX = vec2(.558, .83);    // the wind blows toward the east-south-east; W_WINX lies across it
 
 // what the water is told about a pixel
@@ -85,8 +85,7 @@ vec3 waterBody(float depth, int kind) {
 
 vec3 waterLit(Wtr w) {
   vec2 pk = w.pk; float px = w.px, t = uTime;
-  float ice = w.cB.r, melt = 0.;
-  if (uWaterThaw > 0. && ice > .004) melt = textureLod(tWaterMelt, chunkUV(pk), 0.).r * smoothstep(.04, .3, ice);
+  float ice = w.cB.r;
   vec2 wq = vec2(dot(pk, W_WIND), dot(pk, W_WINX));                 // km along and across the wind
   float sunUp = max(uSun.z, 0.);
 
@@ -149,6 +148,8 @@ vec3 waterLit(Wtr w) {
     float big = pq < 30. ? wFbm(q / 11. + 31.) : .5, room = ice * (1. - ice);
     float a = clamp(ice + (big - .5) * 1.7 * room + (1. - smoothstep(0., 30., w.depth)) * .9 * room, 0., 1.);   // shallows freeze first
     vec3 direct = w.sunCol * sunUp * w.sh * 1.25, amb = w.skyCol;
+    // melt water on the ice: a thaw wets all of it, unevenly; ice in retreat stands in water once it is no longer whole
+    float melt = min(max(uWaterThaw.x * (.55 + .9 * big), uWaterThaw.y * clamp((${MELT_TOP} - ice) / ${MELT_SPAN}, 0., 1.)), 1.) * smoothstep(.04, .3, ice);
 
     // 1. grease ice and slush: matt streaks along the wind that kill the ripple
     float gz = pq < 3. ? mix(.5, wFbm(vec2(qw.x / 3.1, qw.y / .55) + 3. + t * .004), smoothstep(3., .8, pq)) : .5;

@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Chunks, CHANNELS, CN } from '../src/album/chunks.js';
-import water, { WATER_CORE, SHEET_FRAG, sheetPull, MELT_BYTES, WATER_UNIFORMS } from '../src/album/aspects/water.js';
+import water, { WATER_CORE, SHEET_FRAG, sheetPull, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
 import { riverLines, riverWidth } from '../src/album/layers/rivers.js';
@@ -19,8 +19,10 @@ const world = () => { const ch = new Chunks(heightAt); return { ch, m: makeFreez
 test('water: the channels of the chunk are the ones the docs name, and the aspect keeps its contract', () => {
   assert.equal(SEA_CHANNEL, 'spareB');
   for (const name of ['ice', 'snow', SEA_CHANNEL]) assert.equal(CHANNELS[name][0], 'B', `${name} is read as p.cB`);
-  assert.equal(MELT_BYTES.length, CN * CN); assert.equal(water.uniforms, WATER_UNIFORMS);
-  assert.ok(WATER_UNIFORMS.tWaterMelt.value.image.data === MELT_BYTES && WATER_UNIFORMS.uWaterThaw.value === 0, 'melt water has a texture of its own, off until something thaws');
+  assert.equal(water.uniforms, WATER_UNIFORMS);
+  assert.ok(Object.values(WATER_UNIFORMS).every(u => !u.value?.isTexture), 'the ground shader has no texture unit to spare: the water brings none');
+  assert.ok(WATER_UNIFORMS.uWaterThaw.value.x === 0 && WATER_UNIFORMS.uWaterThaw.value.y === 0, 'no thaw until something thaws');
+  assert.ok(!/texture\(|sampler/.test(WATER_CORE), 'and reads none of its own');
   assert.ok(!WATER_CORE.includes('cB.b'), 'flood is water over the land: the water never reads it');
   assert.match(water.glsl, /vec3 aspWater\(Px p\)/);
   assert.ok(SHEET_FRAG.includes(WATER_CORE), 'lakes and rivers run the same water code as the sea');
@@ -33,7 +35,7 @@ test('water: no ice without cold; the natural sea has its own weather, rougher o
   m.natural(); m.settle({ cold: 0 });
   const sea = ch.at(43.5, 1), shore = ch.at(43.5, -2.6), inland = ch.at(41, -6);
   for (const k of [sea, shore, inland]) { assert.equal(ch.get('ice', k), 0); assert.equal(m.melt[k], 0); }
-  assert.equal(m.state.thaw, false);
+  assert.deepEqual(m.state, { thaw: 0, retreat: 0 });
   assert.equal(ch.get(SEA_CHANNEL, inland), 0, 'no sea state where there is no water');
   assert.ok(ch.get(SEA_CHANNEL, sea) > .1 && ch.get(SEA_CHANNEL, sea) < .7, 'the open sea is neither dead calm nor a storm');
   assert.equal(ch.getNatural(SEA_CHANNEL, sea), ch.get(SEA_CHANNEL, sea), 'the weather of the sea is its natural state: reset() keeps it');
@@ -68,10 +70,11 @@ test('water: in time the ice spreads chunk by chunk from the shore, then melts b
   for (let i = 0; i < 1200; i++) { m.step(.1, o); assert.ok(m.ice[far] >= prev - 1e-6 && m.ice[far] <= m.target(far, o) + 1e-6); prev = m.ice[far]; }
   assert.ok(Math.abs(ch.get('ice', far) - m.target(far, o)) < .01, 'in the end every chunk reaches its target');
   // warmer: the ice goes, and while it goes it carries melt water
-  m.step(.5, { cold: 0 }); m.step(.5, { cold: 0 });
-  assert.ok(m.melt[near] > .3 && ch.get('ice', near) < 1 && ch.get('ice', near) > 0); assert.equal(m.state.thaw, true);
+  for (let i = 0; i < 6; i++) m.step(.5, { cold: 0 });
+  assert.ok(m.state.retreat > .5 && m.state.thaw === 0, 'the sea is in retreat');
+  assert.ok(m.melt[near] > .3 && ch.get('ice', near) < MELT_TOP && ch.get('ice', near) > 0, 'ice that is no longer whole stands in melt water');
   for (let i = 0; i < 400; i++) m.step(.2, { cold: 0 });
-  assert.equal(ch.get('ice', near), 0); assert.equal(ch.get('ice', far), 0); assert.equal(m.melt[near], 0); assert.equal(m.state.thaw, false);
+  assert.equal(ch.get('ice', near), 0); assert.equal(ch.get('ice', far), 0); assert.equal(m.melt[near], 0); assert.ok(m.state.retreat < .01, 'the retreat is over');
   for (let k = 0; k < ch.count; k += 37) assert.equal(ch.get('flood', k), 0, 'the water never writes the flood of a chunk');
 });
 
@@ -83,11 +86,8 @@ test('water: snow lies only on ice that can bear it; a thaw wets the ice and tak
   const before = ch.get('ice', near);
   m.settle({ cold: .45, snow: .8, thaw: .6 });
   assert.ok(m.melt[near] > .3 && ch.get('snow', near) < .2 && ch.get('ice', near) < before && ch.get('ice', near) > 0);
-  // the melt water goes to the water's own bytes when the model is given them
-  const bytes = new Uint8Array(ch.count), m2 = makeFreeze(ch, heightAt, bytes);
-  m2.settle({ cold: .45, thaw: .6 });
-  assert.ok(bytes[near] > 80 && m2.state.meltDirty && m2.state.thaw); assert.equal(bytes[far], 0, 'no melt water where there is no ice');
-  m2.settle({ cold: .45 }); assert.equal(bytes[near], 0); assert.equal(m2.state.thaw, false);
+  assert.equal(m.state.thaw, .6); assert.equal(m.state.retreat, 0); assert.equal(m.melt[far], 0, 'no melt water where there is no ice');
+  m.settle({ cold: .45 }); assert.equal(m.melt[near], 0); assert.equal(m.state.thaw, 0);
 });
 
 test('water: a reset of the chunks is followed by the model laying its state again; a chunk changed by hand is left alone', () => {
@@ -116,7 +116,9 @@ test('water: the rows of states for the album pages cover every stage in order',
     const period = s.width * s.bands.length, sea = period * Math.ceil(70 / period);      // the first whole row of bands that lies in the sea of this world
     for (let b = 0; b < s.bands.length; b++) assert.ok(Math.abs((name ? ch.get(name, row + sea + b * s.width) : m.melt[row + sea + b * s.width]) - s.bands[b]) < .01, `${id} band ${b}`);
   }
-  m.settle({ show: 'sea' }); assert.equal(ch.get('ice', row + 100), 0);
+  assert.deepEqual(m.state, { thaw: 0, retreat: 1 }, 'the rows of thawing ice are laid with the sea in retreat');
+  assert.ok(MELT_TOP - MELT_SPAN > .7 && MELT_TOP < .95, 'thawing ice is still a sheet');
+  m.settle({ show: 'sea' }); assert.equal(ch.get('ice', row + 100), 0); assert.equal(m.state.retreat, 0);
   assert.equal(winterPhase(0), 0); assert.equal(winterPhase(50), 1); assert.ok(winterPhase(20) > 0 && winterPhase(20) < 1 && winterPhase(105) === 0);
 });
 
