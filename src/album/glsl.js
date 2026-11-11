@@ -92,20 +92,19 @@ vec4 chunkA(vec2 pk) { return texture(tChunkA, chunkUV(pk)); }   // forest, coni
 vec4 chunkB(vec2 pk) { return texture(tChunkB, chunkUV(pk)); }   // ice, snow, flood, spare
 vec4 chunkC(vec2 pk) { return texture(tChunkC, chunkUV(pk)); }   // built, fields, building manner, burnt
 // Which chunk a point lies in: x = the number of the chunk, y = 0 on its border .. 1 deep inside. The outline is
-// smoothed inside the fine raster (the chunk that holds most of the four texels around the point wins), so borders
-// run as slanting, rounded lines, not as steps. One km of distance from a border is 1.6 of y.
+// smoothed inside the fine raster: the nine texels around the point each weigh in with a smooth bell (a quadratic
+// B-spline) and the chunk that weighs most wins, so borders run as clean curves, not as steps of the raster.
+// One km of distance from a border is 1.6 of y.
 float chunkIdTexel(ivec2 i) { vec2 v = texelFetch(tChunkId, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).rg; return floor(v.r * 255. + .5) + floor(v.g * 255. + .5) * 256.; }
 vec2 chunkCell(vec2 pk) {
-  vec2 q = pk + (vec2(vnoise(pk / 1.7 + 5.3), vnoise(pk / 1.7 + 17.9)) - .5) * .5;
-  vec2 t = (q - uChunkRect.xy) / ${FKM.toFixed(4)} - .5, f = fract(t); ivec2 i = ivec2(floor(t));
-  float a = chunkIdTexel(i), b = chunkIdTexel(i + ivec2(1, 0)), c = chunkIdTexel(i + ivec2(0, 1)), d = chunkIdTexel(i + ivec2(1, 1));
-  float wa = (1. - f.x) * (1. - f.y), wb = f.x * (1. - f.y), wc = (1. - f.x) * f.y, wd = f.x * f.y;
-  float sa = wa + (b == a ? wb : 0.) + (c == a ? wc : 0.) + (d == a ? wd : 0.), sb = wb + (a == b ? wa : 0.) + (c == b ? wc : 0.) + (d == b ? wd : 0.);
-  float sc = wc + (a == c ? wa : 0.) + (b == c ? wb : 0.) + (d == c ? wd : 0.), sd = wd + (a == d ? wa : 0.) + (b == d ? wb : 0.) + (c == d ? wc : 0.);
-  float best = a, w1 = sa;
-  if (sb > w1) { best = b; w1 = sb; } if (sc > w1) { best = c; w1 = sc; } if (sd > w1) { best = d; w1 = sd; }
-  float w2 = 0.;
-  if (a != best) w2 = max(w2, sa); if (b != best) w2 = max(w2, sb); if (c != best) w2 = max(w2, sc); if (d != best) w2 = max(w2, sd);
+  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t); ivec2 c = ivec2(floor(t));
+  float wx[3] = float[3](.5 * (1. - f.x) * (1. - f.x), .75 - (f.x - .5) * (f.x - .5), .5 * f.x * f.x);
+  float wy[3] = float[3](.5 * (1. - f.y) * (1. - f.y), .75 - (f.y - .5) * (f.y - .5), .5 * f.y * f.y);
+  float ids[9], ws[9];
+  for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) { ids[j * 3 + i] = chunkIdTexel(c + ivec2(i - 1, j - 1)); ws[j * 3 + i] = wx[i] * wy[j]; }
+  float best = ids[4], w1 = 0., w2 = 0.;
+  for (int a = 0; a < 9; a++) { float s = 0.; for (int b = 0; b < 9; b++) if (ids[b] == ids[a]) s += ws[b]; if (s > w1) { w1 = s; best = ids[a]; } }
+  for (int a = 0; a < 9; a++) if (ids[a] != best) { float s = 0.; for (int b = 0; b < 9; b++) if (ids[b] == ids[a]) s += ws[b]; w2 = max(w2, s); }
   return vec2(best, w1 - w2);
 }
 // the texel of a square per-chunk texture (uChunkPalW a side) that belongs to a chunk: for texelFetch

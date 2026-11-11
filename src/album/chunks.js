@@ -74,7 +74,18 @@ export function buildCells(heightAt, rivers = []) {
       const lon = (X0 + (tx + .5) * FKM) / (KM_PER_DEG * COS_REF);
       const h = !heightAt ? 100 : (inLat && lon > BBOX.lon0 && lon < BBOX.lon1 ? heightAt(lat, lon) : -3200);
       hgt[t] = h; land[t] = h > 0 ? 1 : 0;
-      pace[t] = .72 + .8 * vnoise(tx / 6.3, ty / 6.3, 5) + .1 * vnoise(tx / 2.1, ty / 2.1, 9);
+      pace[t] = .82 + .5 * vnoise(tx / 7.1, ty / 7.1, 5);            // an even pace with slow swells: neat rounded cells, none alike
+    }
+  }
+  // The lie of the land for the flood: heights with the small bumps ironed out (the mean within 2.5 km). A furrow or
+  // a hillock on a plain then does not bend a border, while a real valley and a real crest still do.
+  const lie = new Float32Array(n);
+  {
+    const W = FN + 1, sum = new Float64Array(W * W), R = 2;
+    for (let y = 0; y < FN; y++) { let row = 0; for (let x = 0; x < FN; x++) { row += Math.max(0, hgt[y * FN + x]); sum[(y + 1) * W + x + 1] = sum[y * W + x + 1] + row; } }
+    for (let y = 0; y < FN; y++) for (let x = 0; x < FN; x++) {
+      const x0 = Math.max(0, x - R), x1 = Math.min(FN, x + R + 1), y0 = Math.max(0, y - R), y1 = Math.min(FN, y + R + 1);
+      lie[y * FN + x] = (sum[y1 * W + x1] - sum[y0 * W + x1] - sum[y1 * W + x0] + sum[y0 * W + x0]) / ((x1 - x0) * (y1 - y0));
     }
   }
   for (const rv of rivers) {
@@ -89,34 +100,41 @@ export function buildCells(heightAt, rivers = []) {
   const MAXC = 8192, buckets = new Array(MAXC), put = (t, c) => { const b = c < MAXC ? c : MAXC - 1; (buckets[b] || (buckets[b] = [])).push(t); };
   for (let yj = 0; yj < CN; yj++) for (let xi = 0; xi < CN; xi++) {
     let nl = 0, low = 1e9;
-    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FN + xi * Q + a; nl += land[t]; if (land[t] && hgt[t] < low) low = hgt[t]; }
+    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FN + xi * Q + a; nl += land[t]; if (land[t] && lie[t] < low) low = lie[t]; }
     const isLand = nl >= Q * Q * .3 ? 1 : 0;
     const cx = (xi + .5) * Q + ((yj & 1) ? 2 : -2) + (hash2(xi, yj, 11) - .5) * 4.4, cy = (yj + .5) * Q + (hash2(xi, yj, 23) - .5) * 4.4;
     // On land the seed goes down into the low ground of its square: the valley floor, the plain.
     let best = -1, bd = 1e9;
     for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) {
       const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] !== isLand) continue;
-      const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0) + (isLand ? Math.min(90, (hgt[t] - low) * .09) : 0);
+      const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0) + (isLand ? Math.min(90, (lie[t] - low) * .09) : 0);
       if (d < bd) { bd = d; best = t; }
     }
-    kind.push(isLand); cell[best] = yj * CN + xi; seedAt[yj * CN + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(hgt[best])) : 0; put(best, dist[best]);
+    kind.push(isLand); cell[best] = yj * CN + xi; seedAt[yj * CN + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(lie[best])) : 0; put(best, dist[best]);
   }
   // The flood. Every land seed is a spring: its water rises and spreads, level by level, and takes the ground it
   // reaches first. Water from the valley floor climbs both slopes and meets the water of the next valley on the crest,
   // so the crest becomes the border. On level ground the height says nothing and the way decides: LAM metres of level
   // per km of way, which gives rounded cells. A river costs extra to cross. The sea spreads by the way alone.
-  const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1], LAM = 24;
+  // Steps go to the 8 texels around and to the 8 a knight's move away: with sixteen directions the way is close to
+  // a straight line, so a cell on level ground comes out round, not eight-sided.
+  const DX = [1, -1, 0, 0, 1, 1, -1, -1, 2, 2, -2, -2, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 2, -2, 2, -2], LAM = 36;
   for (let c = 0; c < MAXC; c++) {
     const bucket = buckets[c]; if (!bucket) continue;
     for (let q = 0; q < bucket.length; q++) {
       const t = bucket[q]; if (dist[t] !== c && !(c === MAXC - 1 && dist[t] >= c)) continue;
       const tx = t % FN, ty = (t / FN) | 0, id = cell[t], lt = land[t], rt = riv[t], lvl = dist[t];
-      for (let d = 0; d < 8; d++) {
-        const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
+      for (let d = 0; d < 16; d++) {
+        const dx = DX[d], dy = DY[d], x = tx + dx, y = ty + dy; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
         const m = y * FN + x; if (land[m] !== lt) continue;
-        let way = (d < 4 ? FKM : FKM * 1.414) * LAM * pace[m];
-        if (lt && riv[m] !== rt) way += Math.max(riv[m], rt) === 2 ? 80 : 50;      // a river is paid for on entering and on leaving
-        const nd = Math.round(Math.max(lvl, lt ? hgt[m] : 0) + way);               // the level has to rise to the ground it takes
+        let way = (d < 4 ? FKM : d < 8 ? FKM * 1.414 : FKM * 2.236) * LAM * pace[m], top = lt ? lie[m] : 0, tolls = riv[m] !== rt ? 1 : 0;
+        if (d >= 8) {                     // a knight's move passes over two texels: it may not jump the coast, a crest or a river
+          const a = t + (dx === 2 || dx === -2 ? dx / 2 : dy / 2 * FN), b = a + (dx === 2 || dx === -2 ? dy * FN : dx);
+          if (land[a] !== lt || land[b] !== lt) continue;
+          if (lt) { top = Math.max(top, lie[a], lie[b]); if (!tolls && (riv[a] !== rt || riv[b] !== rt)) tolls = 2; }
+        }
+        if (lt && tolls) way += tolls * (Math.max(riv[m], rt, 1) === 2 ? 80 : 50);  // a river is paid for on entering and on leaving
+        const nd = Math.round(Math.max(lvl, top) + way);                           // the level has to rise to the ground it takes
         if (nd < dist[m]) { dist[m] = nd; cell[m] = id; put(m, nd); }
       }
     }
@@ -140,20 +158,41 @@ export function buildCells(heightAt, rivers = []) {
     if (comp.length >= 8 || host === NONE) { id = kind.length; kind.push(lt); }
     for (const t of comp) cell[t] = id;
   }
-  // round the outlines off: a texel that sticks out into a neighbour goes over to it
-  for (let pass = 0; pass < 4; pass++) {
-    const prev = cell.slice();
-    for (let ty = 1; ty < FN - 1; ty++) for (let tx = 1; tx < FN - 1; tx++) {
-      const t = ty * FN + tx, id = prev[t]; if (seed[t]) continue;
-      let same = 0, other = NONE, on = 0;
-      for (let d = 0; d < 8; d++) { const v = prev[t + DY[d] * FN + DX[d]]; if (v === id) same++; else if (kind[v] === kind[id]) { if (v === other) on++; else if (on === 0) { other = v; on = 1; } } }
-      if (same <= 3 && on >= 4) cell[t] = other;
+  // Round the outlines off. Every texel near a border looks at the texels within 2.5 km, each weighted by a bell
+  // around itself, and joins the chunk of its own kind that weighs most there: spurs and corners go, the outline
+  // becomes a clean curve. Texels on and beside a river stay put, so that border keeps to the river.
+  const BELL = [];
+  for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) BELL.push(dy * FN + dx, Math.exp(-(dx * dx + dy * dy) / 8));
+  for (let pass = 0; pass < 2; pass++) {
+    const prev = cell.slice(), ids = new Uint16Array(49), ws = new Float32Array(49);
+    for (let ty = 3; ty < FN - 3; ty++) for (let tx = 3; tx < FN - 3; tx++) {
+      const t = ty * FN + tx, id = prev[t];
+      if (seed[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FN] || riv[t + FN]) continue;
+      if (prev[t - 3] === id && prev[t + 3] === id && prev[t - 3 * FN] === id && prev[t + 3 * FN] === id
+        && prev[t - 2 * FN - 2] === id && prev[t + 2 * FN + 2] === id && prev[t - 2 * FN + 2] === id && prev[t + 2 * FN - 2] === id) continue;   // deep inside its chunk
+      let nIds = 0;
+      for (let b = 0; b < BELL.length; b += 2) {
+        const m = t + BELL[b], v = prev[m]; if (land[m] !== land[t] || kind[v] !== kind[id]) continue;
+        let j = 0; while (j < nIds && ids[j] !== v) j++;
+        if (j === nIds) { ids[nIds] = v; ws[nIds++] = 0; }
+        ws[j] += BELL[b + 1];
+      }
+      let best = id, bw = 0;
+      for (let j = 0; j < nIds; j++) if (ws[j] > bw) { bw = ws[j]; best = ids[j]; }
+      cell[t] = best;
     }
   }
   // A chunk its neighbours squeezed down to a scrap (under 25 km²) takes ground back from the large neighbours of its
   // own kind, ring by ring, until it is about 30 km². An island keeps its chunk however small.
   const size = new Uint32Array(kind.length), own = new Map();
   for (let t = 0; t < n; t++) size[cell[t]]++;
+  // a seed the rounding left alone inside a neighbour's ground, while its own chunk lives on beside it, joins the neighbour
+  for (let k = 0; k < CN * CN; k++) {
+    const t = seedAt[k], tx = t % FN, ty = (t / FN) | 0; if (cell[t] !== k || size[k] < 2 || tx < 1 || ty < 1 || tx >= FN - 1 || ty >= FN - 1) continue;
+    let alone = true, to = -1;
+    for (let d = 0; d < 4; d++) { const v = cell[t + DY[d] * FN + DX[d]]; if (v === k) alone = false; else if (kind[v] === kind[k]) to = v; }
+    if (alone && to >= 0) { cell[t] = to; seed[t] = 0; size[k]--; size[to]++; }
+  }
   for (let t = 0; t < n; t++) { const k = cell[t]; if (size[k] < 16) { let l = own.get(k); if (!l) own.set(k, l = []); l.push(t); } }
   for (const [k, list] of own) {
     for (let q = 0; q < list.length && size[k] < 20; q++) {
@@ -161,7 +200,7 @@ export function buildCells(heightAt, rivers = []) {
       for (let d = 0; d < 4 && size[k] < 20; d++) {
         const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
         const m = y * FN + x, o = cell[m];
-        if (o !== k && kind[o] === kind[k] && land[m] === land[t] && size[o] > 40 && !seed[m]) { cell[m] = k; size[k]++; size[o]--; list.push(m); }
+        if (o !== k && kind[o] === kind[k] && land[m] === land[t] && size[o] > 26 && !seed[m]) { cell[m] = k; size[k]++; size[o]--; list.push(m); }
       }
     }
   }

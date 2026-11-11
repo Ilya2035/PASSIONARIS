@@ -58,7 +58,8 @@ test('chunks: land and water never share a chunk, the coast and a river are bord
   let across = 0, plain = 0, n = 0;
   for (let lat = 36.5; lat <= 43.5; lat += .05, n++) {
     if (world.at(lat, -6.035) !== world.at(lat, -5.965)) across++;       // 3 km either side of the river
-    if (world.at(lat, -8.035) !== world.at(lat, -7.965)) plain++;        // the same step where there is no river
+    // the same step where there is no river, at four places across the width of a chunk (the seeds stand in rows)
+    for (const lon of [-8, -8.03, -8.06, -8.09]) if (world.at(lat, lon - .035) !== world.at(lat, lon + .035)) plain += .25;
   }
   assert.ok(across / n > .88, `the river divides chunks along ${across} of ${n} points`);
   assert.ok(across - plain > n * .2, `far more often than open ground does (${plain})`);

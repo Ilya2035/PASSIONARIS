@@ -213,7 +213,9 @@ test('division of the album: reproducible, lakes and the sea apart, islands link
   // names: the largest settlement of a land district, a number for the rest
   const names = districtNames(a, data.vectors.places);
   assert.equal(names.length, a.count);
-  assert.equal(names[a.district[real.ch.at(40.40, -3.69)]], 'Мадрид');
+  // (until the division is rebuilt on the chunks' real outlines it numbers chunks by lattice square: look the square up)
+  const [mx, my] = kmOf(40.40, -3.69);
+  assert.equal(names[a.district[real.ch.k(Math.floor(mx / 10), Math.floor(my / 10))]], 'Мадрид');
   // as drawn: the district the player sees around the town has its name
   const drawnAt = (lat, lon) => { const [x, y] = kmOf(lat, lon); return pick(fa.land, x, y, fa.river); };
   const drawn = districtNames(a, data.vectors.places, drawnAt);
