@@ -1,88 +1,78 @@
 // How settlements grow, as numbers of chunks. A place has a size; the size times the «Рост городов» knob is the radius
-// of its settlement: хутор → деревня → село → городок → город (STAGES in rules.js). From the radius the model works out
-// what every chunk around holds: the share under houses (`built`), under fields (`fields`), and how much of the
-// natural forest still stands. It only returns numbers — the layer writes them into the chunks, and the picture is
-// then drawn from the chunks alone.
-import { CHUNK_KM, CN, kmOf } from '../chunks.js';
-import { RMAX, siteBytes, stageOf } from './rules.js';
+// of its settlement, at its real size: хутор → деревня → село → городок → город (STAGES in rules.js). From the radius
+// the model works out what the chunks around hold: the share under houses (`built`), under fields (`fields`), and
+// how much of the natural forest still stands. It only returns numbers — the layer writes them into the chunks.
+//
+// Chunks have natural outlines (docs/ALBUM-CHUNKS.md), so the model walks from chunk to chunk by their links: fields
+// and felling spread from the chunk of the settlement to its neighbours over land, and a great river stops them.
+// A settlement by a river stands on one bank: its site is moved off the water until its houses touch the bank.
+import { FKM, FN, kmOf, llOf } from '../chunks.js';
+import { GX0, GY0, stageOf, fieldsBeyond } from './rules.js';
 
-export const RCAP = 9;                                              // km: the largest settlement the album draws
+export const RCAP = 2.2;                                            // km: the largest settlement the album founds
 // radius of a place at full growth, km: the smallest places of the data are villages, the largest a great city
 export function fullRadius(pop) {
   const l = Math.max(0, Math.min(1, Math.log(Math.max(pop, 1) / 15000) / Math.log(5.6e6 / 15000)));
-  return .7 + 7.3 * l ** 1.6;
+  return .12 + 1.5 * l ** 1.6;
 }
-// how far the fields and the felling reach around a settlement of radius r, km
-export const fieldReach = r => r + .6 + 1.15 * r;
-export const fellReach = r => fieldReach(r) + .4 + .25 * r;
+// how far the felling reaches beyond the fields, km
+export const fellBeyond = r => .3 + .5 * r;
 
-// 5 × 5 samples of every chunk: bit 0 land, bit 1 land that can be ploughed (not steep, not high)
-export function sampleLand(ch, at) {
-  const out = new Uint8Array(ch.count * 25), e = .6;
-  for (let k = 0; k < ch.count; k++) {
-    if (ch.land[k] <= 0) continue;
-    const { i, j } = ch.ij(k);
-    for (let b = 0; b < 5; b++) for (let a = 0; a < 5; a++) {
-      const x = (i + (a + .5) / 5) * CHUNK_KM, y = (j + (b + .5) / 5) * CHUNK_KM, h = at(x, y);
-      if (h <= 1) continue;
-      const slope = Math.hypot(at(x + e, y) - at(x - e, y), at(x, y + e) - at(x, y - e)) / (2 * e * 1000);
-      out[k * 25 + b * 5 + a] = 1 | (slope < .2 && h < 1500 ? 2 : 0);
-    }
-  }
-  return out;
-}
 // the nearest dry point to (x, y) within 4 km, or null
 export function landNear(at, x, y) {
   if (at(x, y) > 2) return [x, y];
-  for (let r = .4; r <= 4; r += .4) for (let a = 0; a < 12; a++) {
+  for (let r = .2; r <= 4; r += .2) for (let a = 0; a < 12; a++) {
     const px = x + r * Math.cos(a * .5236), py = y + r * Math.sin(a * .5236);
     if (at(px, py) > 2) return [px, py];
   }
   return null;
 }
+// the chunks that can be reached from `home` over land in `steps` steps without crossing a river greater than `ford`
+export function reachOf(ch, home, steps, ford) {
+  const seen = new Map([[home, 0]]), q = [home];
+  for (let n = 0; n < q.length; n++) {
+    const c = q[n], d = seen.get(c); if (d >= steps) continue;
+    for (const l of ch.links[c]) if (!seen.has(l.k) && ch.kind[l.k] === 1 && l.river <= ford) { seen.set(l.k, d + 1); q.push(l.k); }
+  }
+  return seen;
+}
 
-// places: [{ lat, lon, pop }]; growth: the knob; at(xKm, yKm) → metres; land: sampleLand()
-// → { built, fields, keep (share of the forest left), sites: Map chunk → [bx, by], towns: [{ index, x, y, R, stage, k, chunks }] }
-export function growTowns(ch, places, growth, at, land) {
-  const n = ch.count, built = new Float32Array(n), fields = new Float32Array(n), keep = new Float32Array(n).fill(1), sites = new Map(), towns = [];
+// places: [{ lat, lon, pop }]; growth: the knob; at(xKm, yKm) → metres; river(xKm, yKm) → km to the nearest river bank
+// → { built, fields, keep (share of the forest left), towns: [{ index, x, y, R, stage, home, byte }] }
+export function growTowns(ch, places, growth, at, river = () => 1e9) {
+  const n = ch.count, built = new Float32Array(n), fields = new Float32Array(n), keep = new Float32Array(n).fill(1), taken = new Set(), towns = [];
   const order = places.map((_, i) => i).sort((a, b) => places[b].pop - places[a].pop);
   for (const index of order) {
     const pl = places[index], R = Math.min(RCAP, fullRadius(pl.pop) * growth);
-    if (R < .3) continue;
+    if (R < .04) continue;
     const dry = landNear(at, ...kmOf(pl.lat, pl.lon)); if (!dry) continue;
-    const [x, y] = dry, ci = Math.floor(x / CHUNK_KM), cj = Math.floor(y / CHUNK_KM), k0 = ch.k(ci, cj);
-    if (k0 < 0 || sites.has(k0)) continue;                          // one settlement per chunk: the larger came first
-    built[k0] = Math.max(built[k0], (Math.min(R, RMAX) / RMAX) ** 2); sites.set(k0, siteBytes(x, y));
-    const town = { index, x, y, R, stage: stageOf(R), k: k0, chunks: [k0] };
-    // a town larger than a chunk can hold spills into its neighbours: each takes a lobe that reaches as far as R
-    if (R > RMAX + .4) for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      if (!di && !dj) continue;
-      const kn = ch.k(ci + di, cj + dj); if (kn < 0 || sites.has(kn) || ch.land[kn] < .3) continue;
-      const x0 = (ci + di) * CHUNK_KM, y0 = (cj + dj) * CHUNK_KM, ux = x0 + 5 - x, uy = y0 + 5 - y, ul = Math.hypot(ux, uy);
-      const qx = Math.max(x0 + .4, Math.min(x0 + CHUNK_KM - .4, x + ux / ul * R * .62)), qy = Math.max(y0 + .4, Math.min(y0 + CHUNK_KM - .4, y + uy / ul * R * .62));
-      const rl = Math.min(RMAX, R - Math.hypot(qx - x, qy - y));
-      if (rl < 1 || at(qx, qy) <= 2) continue;
-      built[kn] = Math.max(built[kn], (rl / RMAX) ** 2); sites.set(kn, siteBytes(qx, qy)); town.chunks.push(kn);
+    let [x, y] = dry;
+    for (let pass = 0; pass < 3; pass++) {                          // off the river: the houses reach the bank and stop there
+      const d = river(x, y), need = R * 1.1 + .03; if (d >= need) break;
+      const e = .05, gx = river(x + e, y) - river(x - e, y), gy = river(x, y + e) - river(x, y - e), gl = Math.hypot(gx, gy); if (gl < 1e-6) break;
+      const nx = x + gx / gl * (need - d), ny = y + gy / gl * (need - d); if (at(nx, ny) <= 2) break;
+      x = nx; y = ny;
     }
-    // fields around the houses, the forest felled a little further out
-    const Rf = fieldReach(R), Rc = fellReach(R), reach = Rc * 1.5, c0 = Math.floor((x - reach) / CHUNK_KM), c1 = Math.floor((x + reach) / CHUNK_KM), d0 = Math.floor((y - reach) / CHUNK_KM), d1 = Math.floor((y + reach) / CHUNK_KM);
-    for (let j = d0; j <= d1; j++) for (let i = c0; i <= c1; i++) {
-      const k = ch.k(i, j); if (k < 0 || ch.land[k] <= 0) continue;
-      let nLand = 0, nField = 0, cut = 0;
-      for (let b = 0; b < 10; b++) for (let a = 0; a < 10; a++) {     // every square kilometre of the chunk
-        const f = land[k * 25 + (b >> 1) * 5 + (a >> 1)]; if (!(f & 1)) continue;
-        const d = Math.hypot((i + (a + .5) / 10) * CHUNK_KM - x, (j + (b + .5) / 10) * CHUNK_KM - y);
-        nLand++;
-        if ((f & 2) && d > R && d < Rf) nField++;
-        cut += d < Rc ? 1 : d < reach ? .5 * (1 - (d - Rc) / (reach - Rc)) : 0;
-      }
-      if (!nLand) continue;
-      fields[k] = Math.max(fields[k], nField / 100 * .95); keep[k] = Math.min(keep[k], 1 - cut / nLand);
+    const p = llOf(x, y), home = ch.at(p.lat, p.lon);
+    if (home < 0 || ch.kind[home] !== 1 || taken.has(home)) continue;   // one settlement a chunk: the larger came first
+    taken.add(home);
+    const byte = Math.max(1, Math.min(255, Math.round(Math.PI * R * R / ch.area[home] * 255)));
+    built[home] = Math.max(built[home], byte / 255);
+    // fields around the houses, the forest felled a little further out: over land, from chunk to chunk, not across a great river
+    const Rf = R + fieldsBeyond(R), Rc = Rf + fellBeyond(R), far = Rc * 1.5, ok = reachOf(ch, home, 4, 1), sum = new Map();
+    const tx0 = Math.max(0, Math.floor((x - far - GX0) / FKM)), tx1 = Math.min(FN - 1, Math.floor((x + far - GX0) / FKM)), ty0 = Math.max(0, Math.floor((y - far - GY0) / FKM)), ty1 = Math.min(FN - 1, Math.floor((y + far - GY0) / FKM));
+    const part = (rad, d) => Math.max(0, Math.min(1, (rad - d) / FKM + .5));   // how much of a texel of the fine raster lies within a radius
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      const c = ch.cell[ty * FN + tx]; if (!ok.has(c)) continue;
+      const cx = GX0 + (tx + .5) * FKM, cy = GY0 + (ty + .5) * FKM, d = Math.hypot(cx - x, cy - y); if (d > far + FKM) continue;
+      const h = at(cx, cy); if (h <= 1) continue;
+      const s = sum.get(c) || sum.set(c, [0, 0]).get(c);
+      const flat = h < 1500 && Math.hypot(at(cx + .5, cy) - at(cx - .5, cy), at(cx, cy + .5) - at(cx, cy - .5)) / 1000 < .2;
+      if (flat) s[0] += FKM * FKM * (part(Rf, d) - part(R, d));
+      s[1] += FKM * FKM * (part(Rc, d) + .5 * (part(far, d) - part(Rc, d)));
     }
-    towns.push(town);
+    for (const [c, s] of sum) { fields[c] = Math.max(fields[c], Math.min(1, s[0] / ch.area[c]) * .95); keep[c] = Math.min(keep[c], Math.max(0, 1 - s[1] / ch.area[c])); }
+    towns.push({ index, x, y, R, stage: stageOf(R), home, byte });
   }
-  return { built, fields, keep, sites, towns };
+  return { built, fields, keep, towns };
 }
-// the chunk of a place and where the model would put it, for pages and tests
-export const placeChunk = (ch, pl) => { const [x, y] = kmOf(pl.lat, pl.lon); return ch.k(Math.floor(x / CHUNK_KM), Math.floor(y / CHUNK_KM)); };
-export { CN };

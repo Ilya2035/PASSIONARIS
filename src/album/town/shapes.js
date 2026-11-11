@@ -177,6 +177,45 @@ const DEFS = [
     .box(.02, -.22, .26, -.06, .03, { top: MAT.timber, side: MAT.timber, faces: 'se', v: 2 })
     .box(.14, .12, .17, .15, .14, { side: MAT.timber, lid: false, v: 2 })
     .pyramid(-.2, -.2, -.02, -.02, 0, .04, MAT.hay)],
+  // ---- more shapes of the same things, so that no two streets look alike
+  // квартал покоем: three wings around a court that opens to the street behind a low wall
+  ['quarterU', 'Квартал покоем', () => S()
+    .bar(-.5, .24, .5, .5, .075, { v: 0 })
+    .bar(.26, -.5, .5, .24, .09, { ends: 'a', v: 1 })
+    .bar(-.5, -.5, -.26, .24, .06, { ends: 'a', v: 3 })
+    .box(-.26, -.5, .26, -.46, .03, { top: MAT.fence, side: MAT.fence, faces: 'ns', open: .9 })],
+  // квартал углом: two wings at a right angle and two small houses in the yard
+  ['quarterL', 'Квартал углом', () => S()
+    .bar(-.5, .2, .5, .5, .075, { v: 0 })
+    .bar(.2, -.5, .5, .2, .11, { ends: 'a', v: 1 })
+    .bar(-.46, -.2, -.1, .06, .045, { v: 2 })
+    .bar(-.4, -.48, .06, -.3, .045, { v: 3 })],
+  // большой дом: a hall, two wings toward the street and a tower over the roofs
+  ['palace', 'Большой дом с башней', () => S()
+    .bar(-.5, .1, .5, .42, .11, { v: 0 })
+    .bar(-.5, -.44, -.2, .1, .09, { ends: 'a', v: 1 })
+    .bar(.2, -.44, .5, .1, .09, { ends: 'a', v: 2 })
+    .box(-.1, .18, .1, .34, .2, { side: MAT.stone, lid: false })
+    .pyramid(-.1, .18, .1, .34, .2, .25, MAT.roof, 3)],
+  // переулки: four short rows of houses side by side with lanes between
+  ['lanes', 'Ряды с переулками', () => S()
+    .bar(-.5, -.5, -.3, .5, .075, { v: 0 })
+    .bar(-.22, -.3, -.02, .5, .045, { v: 1 })
+    .bar(.06, -.5, .26, .36, .075, { v: 2 })
+    .bar(.32, -.5, .5, .5, .06, { v: 3 })],
+  // усадьба: a large house with a wing, a walled garden and a round dovecote
+  ['villa', 'Усадьба', () => S()
+    .bar(-.5, .1, .3, .5, .09, { v: 0 })
+    .bar(.3, -.2, .5, .5, .06, { v: 1 })
+    .box(-.5, -.5, -.46, .1, .025, { top: MAT.fence, side: MAT.fence, faces: 'ew', open: .9 })
+    .box(-.46, -.5, .5, -.46, .025, { top: MAT.fence, side: MAT.fence, faces: 'ns', open: .9 })
+    .prism(-.2, -.2, .09, .08, SK, .1, 5, MAT.wall)
+    .cone(-.2, -.2, .1, .1, .15, 5, MAT.roof, 2)],
+  // дом-башня: a tall house under a pointed roof with a low annex
+  ['tower', 'Дом-башня', () => S()
+    .box(-.5, -.3, .1, .5, .15, { lid: false })
+    .pyramid(-.5, -.3, .1, .5, .15, .2, MAT.roof, 1)
+    .box(.1, -.3, .5, .3, .05, { top: MAT.roof, faces: 'nse', v: 2 })],
 ];
 
 export const KINDS = DEFS.map(d => d[0]);

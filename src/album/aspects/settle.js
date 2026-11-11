@@ -3,22 +3,23 @@
 // the rest of the album is in docs/ALBUM-CHUNKS.md, the notes of this part in docs/album/settle.md.
 //   aspSettle(p, L) → paints the settlement and the fields over the ground colour L.col and clears the forest there
 //
-// The state comes from the chunks: p.cC = (built, fields, building manner, burnt). A built chunk draws one patch of
-// settlement around its site (town/rules.js); the patches of neighbouring chunks join into one town. Near the camera
-// blocks stand on the patch (layers/towns.js) and this shader paints only the ground under them: streets, yards,
-// gardens, the shade of the houses. From afar there are no blocks, and the same cells are painted as roofs.
+// Everything is at its real size. The state comes from the chunks: p.cC = (built, fields, building manner, burnt).
+// A built chunk has a patch of settlement (town/rules.js, town/state.js). Near the camera blocks stand on the patch
+// (layers/towns.js) and this shader paints only the ground under them: streets, yards, gardens, the shade of the
+// houses, the lanes that run out between the fields. From afar there are no blocks: the same cells are painted as
+// roofs, then melt into one tone, and at last the settlement is a mark of a pixel or two.
 import { RULES_GLSL, PALETTE_GLSL } from '../town/rules.js';
 import { settleUniforms } from '../town/state.js';
 
 const GLSL = /* glsl */`
-uniform sampler2D tSettle; uniform vec4 uSettle;   // cell of the lattice km · blocks standing 0..1 · height of houses × · how much larger than life (0 = hidden)
+uniform sampler2D tSettle; uniform vec4 uSettle;   // cell of the lattice km · blocks standing 0..1 · height of houses × · settlements shown 0 / 1
 ${RULES_GLSL}
 ${PALETTE_GLSL}
-// The roof over lattice point q of a patch: how much of the pixel it covers. cls = class of the cell, fl = the place
-// inside the footprint (−1..1), ang = turn of the building against the lattice, edge = distance out of the footprint.
-float setRoof(vec2 q, vec2 site, float r, float rs, float cs, float sn, float cul, int k, float S, float aa, out float cls, out vec2 fl, out float ang, out vec4 rnd, out float edge) {
+// The roof over point q of the bent lattice of a patch: how much of the pixel it covers. cls = class of the cell,
+// fl = the place inside the footprint (−1..1), ang = turn of the building against the lattice, edge = distance out of it.
+float setRoof(vec2 q, vec2 site, float r, float cs, float sn, float cul, int k, float S, float aa, out float cls, out vec2 fl, out float ang, out vec4 rnd, out float edge) {
   ivec2 id = ivec2(floor(q + .5)); vec2 hs, off;
-  cls = setCell(id, site, r, rs, cs, sn, cul, k, S, hs, off, ang, rnd);
+  cls = setCell(id, site, r, cs, sn, cul, k, S, hs, off, ang, rnd);
   fl = vec2(0.); edge = 1.;
   if (cls < .5) return 0.;
   vec2 f = q - vec2(id) - off;
@@ -65,24 +66,24 @@ vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, flo
   float kind = atl > .5 ? (h1 < .3 ? 0. : h1 < .88 ? 2. : 1.) : (h1 < .62 ? 0. : h1 < .74 ? 1. : h1 < .87 ? 2. : 3.);
   vec3 c;
   if (kind < .5) {                                                   // ploughland in strips along the furlong, each with its own crop
-    float n = floor(5. + 5. * h3), sc = h2 > .78 ? f.x * n * 1.6 : f.y * n, si = floor(sc), sf = sc - si, thin = n * px / fs;
+    float n = floor(4. + 4. * h3), sc = h2 > .78 ? f.x * n * 1.6 : f.y * n, si = floor(sc), sf = sc - si, thin = n * px / fs;
     float cr = setHash(ic, int(si) + 64, 16);
     c = cr < .34 ? vec3(.71, .64, .42) : cr < .56 ? mix(vec3(.45, .53, .26), vec3(.66, .58, .36), uSeason) : cr < .72 ? vec3(.61, .55, .41) : cr < .86 ? vec3(.50, .40, .31) : vec3(.40, .47, .26);
     c *= 1. - .22 * clamp(1. - min(sf, 1. - sf) / (.07 + thin), 0., 1.);       // the balk between two strips
     c = mix(vec3(.61, .57, .37), c, clamp(2.2 - 4. * thin, 0., 1.));           // strips thinner than two pixels melt together
-  } else if (kind < 1.5) c = vec3(.61, .55, .42) * (.9 + .2 * setNoise(p.pk / .12));                       // fallow
+  } else if (kind < 1.5) c = vec3(.61, .55, .42) * (.9 + .2 * setNoise(p.pk / .04));                       // fallow
   else if (kind < 2.5) {                                             // common pasture with bushes
-    c = (atl > .5 ? vec3(.42, .50, .27) : vec3(.50, .53, .30)) * (.92 + .16 * setNoise(p.pk / .2));
-    vec2 bq = p.pk / .04;
-    if (px < .05) c = mix(c, vec3(.25, .33, .16), step(.78, setHash(ivec2(floor(bq)), 5, 21)) * smoothstep(.42, .25, length(fract(bq) - .5)) * smoothstep(.05, .02, px) * .8);
+    c = (atl > .5 ? vec3(.50, .60, .30) : vec3(.50, .53, .30)) * (.92 + .16 * setNoise(p.pk / .06));
+    vec2 bq = p.pk / .022;
+    if (px < .012) c = mix(c, vec3(.25, .33, .16), step(.8, setHash(ivec2(floor(bq)), 5, 21)) * smoothstep(.42, .25, length(fract(bq) - .5)) * clamp((.012 - px) * 250., 0., 1.) * .8);
   } else {                                                           // a grove: trees in rows on pale earth
-    float tv = clamp((.04 - px) * 40., 0., 1.);
-    c = mix(vec3(.68, .61, .46), vec3(.31, .38, .21), smoothstep(.36, .26, length(fract(p.pk / .055 + h2) - .5)) * tv + .28 * (1. - tv));
+    float tv = clamp((.014 - px) * 200., 0., 1.);
+    c = mix(vec3(.68, .61, .46), vec3(.31, .38, .21), smoothstep(.38, .26, length(fract(p.pk / .028 + h2) - .5)) * tv + .32 * (1. - tv));
   }
-  c = mix(ground, c, atl > .5 ? .42 : .62);
+  c = mix(ground, c, atl > .5 ? .58 : .62);
   // the edge of a furlong: a balk or a trodden path, or a hedge in the wet lands
   vec3 bc = atl > .5 ? vec3(.26, .32, .18) : h3 > .62 ? vec3(.72, .66, .54) : vec3(.42, .43, .27);
-  c = mix(c, bc, clamp(1.7 - border / max(.005, px * .7), 0., 1.) * (atl > .5 ? .3 + .45 * h2 : .5));
+  c = mix(c, bc, clamp(1.7 - border / max(.003, px * .6), 0., 1.) * (atl > .5 ? .3 + .45 * h2 : .5));
   if (p.slope > .09) {                                               // terraces on a slope: walls along the contours
     float tc = p.hl / 14., tf = fract(tc), tw = .014 / max(p.slope, .05), ter = smoothstep(.09, .17, p.slope) * (1. - .5 * atl);
     vec3 tcol = mix(fract(floor(tc) * .618) > .5 ? vec3(.45, .50, .28) : vec3(.58, .57, .34), vec3(.47, .43, .36), 1. - smoothstep(0., .22, tf));
@@ -91,22 +92,22 @@ vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, flo
   return c;
 }
 
-// one of the chunks around a point: if it holds a patch that lies deeper over the point than the best so far, it wins
+// one of the squares of the grid around a point: if it holds a patch that lies deeper over the point than the best so far, it wins
 void setTry(ivec2 c, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec2 bc) {
-  if (c.x < 0 || c.y < 0 || c.x >= SET_CN || c.y >= SET_CN) return;
+  if (c.x < 0 || c.y < 0 || c.x >= SET_GN || c.y >= SET_GN) return;
   vec4 t = texelFetch(tSettle, c, 0);
   if (t.b <= 0.) return;
-  float d = min(t.b * SET_RMAX * uSettle.w, SET_RVIS) - distance(pk, uChunkRect.xy + (vec2(c) + (t.rg * 255. + .5) / 256.) * 10.);   // drawn larger than life from high up
+  float d = t.b * t.b * SET_RMAX - distance(pk, SET_G0 + (vec2(c) + (t.rg * 255. + .5) / 256.) * SET_GK);
   if (d > own) { riv = own; own = d; best = t; bc = c; } else if (d > riv) riv = d;
 }
 void aspSettle(Px p, inout Land L) {
   float fieldsV = p.cC.g;
-  ivec2 c0 = ivec2(floor((p.pk - uChunkRect.xy) * .1));
-  int code = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_CN && c0.y < SET_CN ? int(texelFetch(tSettle, c0, 0).a * 255. + .5) : 0;
+  ivec2 c0 = ivec2(floor((p.pk - SET_G0) / SET_GK));
+  int code = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_GN && c0.y < SET_GN ? int(texelFetch(tSettle, c0, 0).a * 255. + .5) : 0;
   if ((code == 0 && fieldsV < .004) || p.h < .4) return;
-  // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 chunks around.
-  // The code of the chunk says which of the nine hold a patch: most often it is one or two, and only those are read.
-  float own = -1e3, riv = -1e3, r = 0., rs = 0., th = 0., cul = 1.; vec2 site = vec2(0.); int ck = 0;
+  // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 squares around.
+  // The code of the square says which of the nine hold a patch: most often it is one or two, and only those are read.
+  float own = -1e3, riv = -1e3, r = 0., th = 0., cul = 1.; vec2 site = vec2(0.); int ck = 0;
   vec4 best = vec4(0.); ivec2 bc = c0;
   if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), p.pk, own, riv, best, bc); }
   else if (code > 0) {
@@ -116,26 +117,28 @@ void aspSettle(Px p, inout Land L) {
   }
   if (best.b > 0.) {
     vec2 b = floor(best.rg * 255. + .5); float ca = floor(best.a * 255. + .5);
-    rs = best.b * SET_RMAX; r = min(rs * uSettle.w, SET_RVIS); site = uChunkRect.xy + (vec2(bc) + (b + .5) / 256.) * 10.;
-    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.; ck = bc.y * SET_CN + bc.x;
+    r = best.b * best.b * SET_RMAX; site = SET_G0 + (vec2(bc) + (b + .5) / 256.) * SET_GK;
+    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.; ck = bc.y * SET_GN + bc.x;
   }
-  float px = p.px, W = 1.2 + 1.6 * r, m = r > 0. ? own : -1e3;      // W: how far the fields reach beyond the houses
-  bool close = m > -W - 1.;
+  float px = p.px, S = uSettle.x, W = .5 + 2.5 * r, m = r > 0. ? own : -1e3;        // W: how far the fields reach beyond the houses
+  bool close = m > -W - .3;
   if (!close && fieldsV < .004) return;
-  if (m > -2.5) m += min(.9, .3 * r) * setWob(p.pk) * min(1., 1. + m / 2.5);   // the wobble of the edge fades out away from it
+  if (m > -.6) m += min(.25, .3 * r) * setWob(p.pk) * min(1., 1. + m / .6);          // the wobble of the edge fades out away from it
   // houses stand on dry, level ground only; a settlement too small for its pixels still shows as a mark
   float tm = 0., mt = m + max(0., 1.6 * px - r);
-  if (mt > -.12) tm = smoothstep(-.12, .06, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
+  if (mt > -.03) tm = smoothstep(-.03, .015, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
+  float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
+  if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
 
   // ---- fields: the land next to the houses is ploughed first, then the best of the rest of the chunk
   if (fieldsV > .004 && tm < .997 && p.slope < .6 && p.hl < 1700.) {
     float want = .12 + .6 * fieldsV + (close ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - p.n2 * .6 - p.n3 * .4;
     if (want > -.25) {                                               // far below the threshold no furlong can be a field: nothing more to work out
-      float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .36 : .62, near = clamp((.5 - px) * 3., 0., 1.), fm = 0., border = 1.;
+      float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
       vec2 cid = vec2(0.), ff = vec2(.5);
       if (near < 1.) fm = smoothstep(-.05, .05, want);               // from afar: a soft edge
       if (near > 0.) {                                               // close by a furlong is ploughed whole or not at all: the edge of the fields is the edge of furlongs
-        cid = setFurlong(p.pk, fs, (p.n3 - .5) * .3, ff, border);
+        cid = setFurlong(p.pk, fs, (p.n3 - .5) * .5, ff, border);
         fm = mix(fm, step(setHash(ivec2(cid), 3, 14), want * 2.3 + .5), near);
       }
       // the common case, good level land, costs nothing more; only shores, swamps, slopes and heights are weighed
@@ -144,25 +147,26 @@ void aspSettle(Px p, inout Land L) {
         vec3 fc = L.col;
         if (near > 0.) fc = setFields(p, L.col, atlF, cid, ff, border, fs);
         if (near < 1.) {                                             // from afar the fields are one calm tone
-          vec3 tone = mix(L.col, atlF > .5 ? vec3(.45, .53, .27) : mix(vec3(.70, .64, .38), vec3(.56, .59, .31), smoothstep(.42, .7, p.wet)), .68);
+          vec3 tone = mix(L.col, atlF > .5 ? vec3(.48, .57, .29) : mix(vec3(.70, .64, .38), vec3(.56, .59, .31), smoothstep(.42, .7, p.wet)), .68);
           fc = mix(tone, fc, near);
         }
         L.col = mix(L.col, fc, fm); L.cover *= 1. - fm;
       }
     }
   }
+  // ---- lanes: the two streets that cross by the middle of the settlement run on between the fields, toward the road
+  if (close && px < .04 && tm < .99) {
+    float lane = min(abs(q.x - .5), abs(q.y - .5)) * S, la = clamp(1.5 - lane / max(.003, px * .6), 0., 1.) * clamp(1.15 + m / W, 0., 1.) * (1. - tm) * (1. - smoothstep(.3, .5, p.slope));
+    if (la > 0.) { L.col = mix(L.col, vec3(.75, .69, .57), la * .75 * clamp((.04 - px) * 80., 0., 1.)); L.cover *= 1. - la; }
+  }
   if (tm < .003) return;
 
   // ---- the settlement itself
-  float S = uSettle.x, atl = cul > 1.5 ? 1. : 0., coarse = clamp((S - .7) / .6, 0., 1.);
-  vec3 earth = mix(mix(vec3(.68, .61, .48), vec3(.48, .45, .34), atl), L.col, .25 + .3 * atl) * (.93 + .14 * p.n3);
-  earth = mix(earth, settleMat(0, atl, .4), .3 * coarse * (1. - uSettle.y));         // from afar the streets are too thin to show their dust
-  vec3 col = earth;
-  float cs = cos(th), sn = sin(th); vec2 dl = p.pk - site;
-  vec2 q = vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S;        // the point in the lattice of the patch
+  float atl = cul > 1.5 ? 1. : 0.;
+  vec3 earth = mix(mix(vec3(.68, .61, .48), vec3(.48, .45, .34), atl), L.col, .25 + .3 * atl) * (.93 + .14 * p.n3), col = earth;
   float aa = clamp(px / S, .002, .5) * .9, seam = smoothstep(.3, .55, (own - riv) / S), blocks = uSettle.y, night = 1. - p.day;
   float cls, ang, edge; vec2 fl; vec4 rnd;
-  float cover = setRoof(q, site, r, rs, cs, sn, cul, ck, S, aa, cls, fl, ang, rnd, edge) * seam;
+  float cover = setRoof(q, site, r, cs, sn, cul, ck, S, aa, cls, fl, ang, rnd, edge) * seam;
   if (cls > 2.5 && cls < 3.5) {                                            // a house stands in its plot: a garden, a yard
     vec2 g = abs(q - floor(q + .5)); float plot = (1. - smoothstep(.40, .44, max(g.x, g.y))) * seam;
     vec3 gc = mix(mix(vec3(.47, .52, .27), vec3(.58, .48, .33), step(.5, rnd.x * 1.6)) * (.93 + .1 * step(.5, fract(q.x * 9.))), vec3(.41, .47, .25), atl);
@@ -182,7 +186,7 @@ void aspSettle(Px p, inout Land L) {
   if (p.day > .05 && cover < .99) {                                        // the shade of the houses toward the sun
     vec2 sl = vec2(cs * p.sd.x + sn * p.sd.y, -sn * p.sd.x + cs * p.sd.y);
     float len = .1 * uSettle.z / max(uSun.z / max(length(uSun.xy), 1e-3), .35), c2, a2, e2; vec2 f2; vec4 r2;
-    float sh = setRoof(q + sl * len * .6, site, r, rs, cs, sn, cul, ck, S, aa + .03, c2, f2, a2, r2, e2);
+    float sh = setRoof(q + sl * len * .6, site, r, cs, sn, cul, ck, S, aa + .03, c2, f2, a2, r2, e2);
     if (c2 > .5 && c2 < 3.5) col *= 1. - .36 * sh * (1. - cover) * p.day * seam;
   }
   if (night > 0.) col += vec3(1.4, .9, .45) * night * blocks * (1. - cover) * (1. - smoothstep(-.02, .3, edge)) * step(cls, 3.5) * step(.5, cls) * step(.4, rnd.y) * .42;   // light spills into the street
@@ -191,31 +195,31 @@ void aspSettle(Px p, inout Land L) {
 }`;
 
 const ZAR = { lat: 41.65, lon: -.89 }, G = 'Города и дороги';
-const zar = (h, tilt = 42, heading = 30) => ({ ...ZAR, h, tilt, heading });
+const zar = (h, tilt = 35, heading = 30) => ({ ...ZAR, h, tilt, heading });
 export default {
   id: 'settle', title: 'Поселения', glsl: GLSL, uniforms: settleUniforms,
   params: [
-    { key: 'houses', label: 'Размер домов', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
+    { key: 'houses', label: 'Размер домов', group: 'scale', min: 0, max: 4, step: .05, value: 1, unit: '×', zero: 'только рисунок на земле' },
     { key: 'houseH', label: 'Высота домов', group: 'scale', min: .5, max: 3, step: .05, value: 1.25, unit: '×' },
     { key: 'growth', label: 'Рост городов', group: 'scale', min: 0, max: 3, step: .01, value: 1, unit: '×' },
     { key: 'towns', label: 'Поселения', group: 'layers', type: 'toggle', value: 1 },
     { key: 'showcase', label: 'Витрина построек', group: 'layers', type: 'toggle', value: 0 },
   ],
   pages: [
-    { id: 'town-kinds', group: G, title: 'Витрина своих построек', note: 'Двенадцать видов построек, сверху в средиземноморской манере (черепица, побелка), снизу в атлантической (камень, тёмные крыши). По рядам слева направо: квартал с двором, ряды домов, дома с плоскими крышами, группа домов, двор-хутор, дом; храм, площадь с рынком, укрепление, мельница, причал, стройка. Облетайте и вращайте.', p: { showcase: 1, forest3d: 0, towns: 0, roadsOn: 0, labels: 0 }, cam: { lat: 39.25, lon: -3.0, h: 20, tilt: 50, heading: 0 } },
-    { id: 'grow-1', group: G, title: 'Рост: хутор', note: 'Начало поселения: несколько дворов, огороды и первые поля. «Рост городов» на 0,08; двигайте ползунок и смотрите, как поселение растёт.', p: { growth: .08, forest3d: 0, labels: 0 }, cam: zar(20) },
-    { id: 'grow-2', group: G, title: 'Рост: деревня', note: 'Дома с огородами вдоль тропы, дворы на краю, рядом стройки следующих домов. «Рост городов» на 0,16.', p: { growth: .16, forest3d: 0, labels: 0 }, cam: zar(20) },
-    { id: 'grow-3', group: G, title: 'Рост: село', note: 'Появился храм, в середине первые ряды домов, за околицей мельница. «Рост городов» на 0,3.', p: { growth: .3, forest3d: 0, labels: 0 }, cam: zar(20) },
-    { id: 'grow-4', group: G, title: 'Рост: городок', note: 'Площадь с рынком, вокруг неё кварталы с дворами, дальше ряды и отдельные дома. «Рост городов» на 0,55.', p: { growth: .55, forest3d: 0, labels: 0 }, cam: zar(22) },
-    { id: 'grow-5', group: G, title: 'Рост: город', note: 'Полный рост: сотни кварталов, храмы, укрепление на высоком месте, мельницы, поля до горизонта.', p: { forest3d: 0 }, cam: zar(24, 50) },
-    { id: 'town-50', group: G, title: 'Город с 50 км', note: 'Кварталы стали крупнее, улицы ещё видны.', p: { forest3d: 0 }, cam: zar(50, 45) },
-    { id: 'town-200', group: G, title: 'Город с 200 км', note: 'Обычная игровая высота: построек-объектов уже нет, город нарисован на земле пятном застройки с рисунком кварталов.', p: {}, cam: zar(200, 35, 10) },
-    { id: 'town-500', group: G, title: 'Город с 500 км', note: 'Высота больших держав: поселения читаются как отметки, поля вокруг сливаются в спокойный тон.', p: {}, cam: zar(500, 20, 0) },
-    { id: 'town-med', group: G, title: 'Манера: средиземноморская', note: 'Плотные кварталы с дворами, черепица и побелка, узкие улицы по сетке, площадь и храм в середине, причалы у воды.', p: { forest3d: 0 }, cam: { lat: 36.725, lon: -4.42, h: 22, tilt: 52, heading: 0 } },
-    { id: 'town-atl', group: G, title: 'Манера: атлантическая', note: 'Разбросанные каменные дворы под тёмными крышами, без сетки улиц; дворы обнесены стенами, вокруг выгоны с живыми изгородями.', p: { forest3d: 0 }, cam: { lat: 43.26, lon: -2.93, h: 22, tilt: 52, heading: 160 } },
-    { id: 'fields', group: G, title: 'Поля: наделы, пар, выгон, террасы', note: 'Полосы наделов со своими посевами, межи и тропы между ними, пар и выгон; на склонах террасы вдоль горизонталей. Издалека всё сливается в спокойный тон.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.75, lon: -4.468, h: 20, tilt: 48, heading: 35 } },
-    { id: 'town-build', group: G, title: 'Стройка на краю', note: 'На краю растущего поселения стоят стройки: фундаменты, леса, сложенный лес и камень. Двигайте «Рост городов»: стройки уходят дальше, на их месте встают дома.', p: { growth: .42, houses: 1.5, forest3d: 0, labels: 0 }, cam: { lat: 41.662, lon: -.878, h: 20, tilt: 50, heading: 20 } },
-    { id: 'town-night', group: G, title: 'Ночь: свет в окнах', note: 'После заката в окнах слабый тёплый свет, он чуть освещает улицы.', p: { hour: 21.5, forest3d: 0 }, cam: zar(22, 50) },
+    { id: 'town-kinds', group: G, title: 'Витрина своих построек', note: 'Восемнадцать видов построек, увеличены для показа: в игре они стоят в настоящую величину. Два верхних ряда в средиземноморской манере (черепица, побелка), два нижних в атлантической (камень, тёмные крыши). По рядам: кварталы с двором, покоем, углом, большой дом с башней, ряды домов, ряды с переулками, дома с плоскими крышами, группа домов, двор-хутор; усадьба, дом, дом-башня, храм, площадь с рынком, укрепление, мельница, причал, стройка.', p: { showcase: 1, forest3d: 0, towns: 0, roadsOn: 0, labels: 0 }, cam: { lat: 39.25, lon: -3.0, h: 20, tilt: 50, heading: 0 } },
+    { id: 'grow-1', group: G, title: 'Рост: хутор', note: 'Всё в настоящую величину, один к одному. Хутор — несколько дворов на сотню метров, вокруг первые поля. «Рост городов» на 0,08; двигайте ползунок и смотрите, как поселение растёт.', p: { growth: .082, forest3d: 0, labels: 0 }, cam: zar(20) },
+    { id: 'grow-2', group: G, title: 'Рост: деревня', note: 'Три сотни метров в поперечнике: дома с огородами, дворы на краю, стройки следующих домов, дорожки к полям. «Рост городов» на 0,18.', p: { growth: .176, forest3d: 0, labels: 0 }, cam: zar(20) },
+    { id: 'grow-3', group: G, title: 'Рост: село', note: 'Появился храм, в середине первые ряды домов, за околицей мельница. «Рост городов» на 0,33.', p: { growth: .33, forest3d: 0, labels: 0 }, cam: zar(20) },
+    { id: 'grow-4', group: G, title: 'Рост: городок', note: 'Километр в поперечнике: площадь с рынком, вокруг неё кварталы с дворами, дальше ряды и отдельные дома. «Рост городов» на 0,59.', p: { growth: .59, forest3d: 0, labels: 0 }, cam: zar(20) },
+    { id: 'grow-5', group: G, title: 'Рост: город', note: 'Полный рост: меньше двух километров в поперечнике, сотни кварталов, храмы, укрепление на высоком месте, мельницы, поля вокруг.', p: { forest3d: 0, labels: 0 }, cam: zar(20) },
+    { id: 'town-50', group: G, title: 'Город с 50 км', note: 'Тот же город, тот же план. Кварталы стали мельче пары пикселей, поэтому вместо объектов город нарисован на земле.', p: { forest3d: 0 }, cam: zar(50, 30) },
+    { id: 'town-200', group: G, title: 'Город с 200 км', note: 'Обычная игровая высота: город — небольшое пятно застройки среди полей.', p: {}, cam: zar(200, 25, 10) },
+    { id: 'town-500', group: G, title: 'Город с 500 км', note: 'Высота больших держав: поселение читается как отметка в пиксель-другой, заметнее пятно полей и вырубки вокруг.', p: {}, cam: zar(500, 15, 0) },
+    { id: 'town-med', group: G, title: 'Манера: средиземноморская', note: 'Плотные кварталы с дворами, черепица и побелка, узкие гнутые улицы, площадь и храм в середине, причал у воды.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.722, lon: -4.42, h: 20, tilt: 35, heading: 0 } },
+    { id: 'town-atl', group: G, title: 'Манера: атлантическая', note: 'Разбросанные каменные дворы под тёмными крышами, без сетки улиц; дворы обнесены стенами, вокруг выгоны с живыми изгородями.', p: { forest3d: 0, labels: 0 }, cam: { lat: 43.25, lon: -2.93, h: 20, tilt: 35, heading: 160 } },
+    { id: 'fields', group: G, title: 'Поля: наделы, пар, выгон, террасы', note: 'Наделы лежат рядами, в каждом полосы со своими посевами, между ними межи и тропы, пар и выгон; на склонах террасы вдоль горизонталей. От поселения к полям расходятся дорожки. Издалека всё сливается в спокойный тон.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.735, lon: -4.44, h: 20, tilt: 40, heading: 35 } },
+    { id: 'town-build', group: G, title: 'Стройка на краю', note: 'На краю растущего поселения стоят стройки: фундаменты, леса, сложенный лес и камень. Двигайте «Рост городов»: стройки уходят дальше, на их месте встают дома.', p: { growth: .42, forest3d: 0, labels: 0 }, cam: zar(20, 45, 20) },
+    { id: 'town-night', group: G, title: 'Ночь: свет в окнах', note: 'После заката в окнах слабый тёплый свет, он чуть освещает улицы.', p: { hour: 21.5, forest3d: 0, labels: 0 }, cam: zar(20, 40) },
   ],
   async init(album) { return (await import('../layers/towns.js')).default(album); },
 };

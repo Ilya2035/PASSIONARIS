@@ -1,18 +1,19 @@
-// Settlements that stand on the land. The picture comes from the chunks: a chunk with `built` > 0 draws a patch of
-// settlement (town/rules.js), and this layer puts blocks on the cells of that patch (town/plan.js). The blocks are the
-// album's own (town/shapes.js): a few flat faces each, all kinds in one small texture, every block of every kind an
-// instance of one strip of corners — the whole built world is one draw call. The model of growth (town/grow.js) turns
-// the places of the map and the «Рост городов» knob into the state of the chunks: houses, fields, felled forest.
-// Places are today's cities (Natural Earth) as stand-ins: the game has no peoples yet.
+// Settlements that stand on the land, at their real size. The picture comes from the chunks: a chunk with `built` > 0
+// has a patch of settlement (town/rules.js, town/state.js), and this layer puts blocks on the cells of that patch
+// (town/plan.js). The blocks are the album's own (town/shapes.js): a few flat faces each, all kinds in one small
+// texture, every block of every kind an instance of one strip of corners — the whole built world is one draw call,
+// drawn before the land so that under a roof the costly ground is never worked out. The model of growth
+// (town/grow.js) turns the places of the map and the «Рост городов» knob into the state of the chunks: houses,
+// fields, felled forest. Places are today's cities (Natural Earth) as stand-ins: the game has no peoples yet.
 import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter } from 'three';
 import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
-import { CHUNK_KM, kmOf } from '../chunks.js';
+import { kmOf, llOf } from '../chunks.js';
 import { smoothLine } from './ribbon.js';
-import { cellSize, cultureAt, zoomAt, zoomLobe, CELL20, PALETTE_GLSL } from '../town/rules.js';
+import { cellSize, cultureAt, CELL, PALETTE_GLSL } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle } from '../town/state.js';
 import { buildShapes, SLOTS, KINDS } from '../town/shapes.js';
-import { growTowns, sampleLand } from '../town/grow.js';
+import { growTowns } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 
 const MAX_BLOCKS = 40000;
@@ -62,31 +63,31 @@ export default async function init(album) {
   const at = (x, y) => base.at(y / KM_PER_DEG, x / (KM_PER_DEG * COS_REF));        // height in metres at a point of the flat km plane
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); ch.setNatural('culture', k, cultureAt(c.lat, c.lon) / 255); }
 
-  // ---- rivers as the blocks must know them: nothing stands on the ribbon of a river
+  // ---- rivers as the settlements must know them: nothing stands on the ribbon of a river
   const segs = [], grid = new Map(), GC = 4;
   for (const rv of album.data.vectors.rivers || []) {
     if (rv.pts.length <= 2) continue;
     const w = rv.rank <= 6 ? .2 : rv.rank <= 8 ? .12 : .07, pts = smoothLine(rv.pts, 1.2, 2).map(q => kmOf(q[1], q[0]));
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i], id = segs.length; segs.push([a[0], a[1], b[0], b[1], w]);
-      for (let gy = Math.floor((Math.min(a[1], b[1]) - 2) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + 2) / GC); gy++)
-        for (let gx = Math.floor((Math.min(a[0], b[0]) - 2) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + 2) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
+      for (let gy = Math.floor((Math.min(a[1], b[1]) - 3) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + 3) / GC); gy++)
+        for (let gx = Math.floor((Math.min(a[0], b[0]) - 3) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + 3) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
     }
   }
   let riverMin = 0, riverK = 1;                                     // least width of a ribbon in km, and the «Ширина рек» knob
-  const river = (x, y) => {
-    if (riverK <= 0) return 1e9;
+  const bank = (x, y, least, k) => {                                // km to the bank of the nearest river (negative on the water)
     let best = 1e9;
     for (const id of grid.get(Math.floor(x / GC) * 100000 + Math.floor(y / GC)) || []) {
       const s = segs[id], dx = s[2] - s[0], dy = s[3] - s[1], t = Math.max(0, Math.min(1, ((x - s[0]) * dx + (y - s[1]) * dy) / (dx * dx + dy * dy || 1)));
-      best = Math.min(best, Math.hypot(x - s[0] - dx * t, y - s[1] - dy * t) - Math.max(s[4], riverMin) * riverK * .5);
+      best = Math.min(best, Math.hypot(x - s[0] - dx * t, y - s[1] - dy * t) - Math.max(s[4], least) * k * .5);
     }
     return best;
   };
-  const env = { at, river, swamp: (x, y) => { const k = ch.k(Math.floor(x / CHUNK_KM), Math.floor(y / CHUNK_KM)); return k < 0 ? 0 : ch.get('swamp', k); } };
+  const env = { at, river: (x, y) => (riverK <= 0 ? 1e9 : bank(x, y, riverMin, riverK)),
+    swamp: (x, y) => { const q = llOf(x, y), k = ch.at(q.lat, q.lon); return k < 0 ? 0 : ch.get('swamp', k); } };
 
   // ---- growth: the places and the knob become the state of the chunks; after a reset of the chunks, again
-  const land = sampleLand(ch, at), written = new Map(), byteOf = (name, k) => Math.round(ch.get(name, k) * 255);
+  const written = new Map(), byteOf = (name, k) => Math.round(ch.get(name, k) * 255);
   let model = null, grown = -1;
   function applyGrowth(fresh) {
     if (!fresh) for (const [k, w] of written) {                     // take back what the model wrote, unless someone changed it since
@@ -95,12 +96,12 @@ export default async function init(album) {
       if (byteOf('forest', k) === w.forest) ch.set('forest', k, w.forest0);
     }
     written.clear(); grown = p.get('growth');
-    model = growTowns(ch, places, grown, at, land);
+    model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1));
     for (let k = 0; k < ch.count; k++) {
       const b = model.built[k], f = model.fields[k], keep = model.keep[k];
       if (!(b > 0 || f > 0 || keep < 1)) continue;
       const forest0 = ch.get('forest', k);
-      if (b > 0) ch.set('built', k, Math.max(ch.get('built', k), b, 1 / 255));
+      if (b > 0) ch.set('built', k, Math.max(ch.get('built', k), b));
       if (f > 0) ch.set('fields', k, Math.max(ch.get('fields', k), f));
       if (keep < 1) ch.set('forest', k, Math.min(forest0, keep));   // people fell the forest around them
       written.set(k, { built: byteOf('built', k), fields: byteOf('fields', k), forest: byteOf('forest', k), forest0 });
@@ -111,20 +112,9 @@ export default async function init(album) {
   applyGrowth(true);
 
   // ---- the mirror of the chunk state for the shaders, and the patches for the plan
-  const defSites = new Map();
-  function defaultSite(k) {                                         // a chunk built up by something else than the model: its best dry spot
-    let s = defSites.get(k); if (s) return s;
-    let bs = -1; s = [128, 128];
-    for (let b = 0; b < 5; b++) for (let a = 0; a < 5; a++) {
-      const f = land[k * 25 + b * 5 + a]; if (!(f & 1)) continue;
-      const sc = (f & 2 ? 2 : 1) - Math.hypot(a - 2, b - 2) * .2 + ((k * 31 + a * 7 + b * 13) % 10) * .01;
-      if (sc > bs) { bs = sc; s = [Math.floor((a + .5) / 5 * 256), Math.floor((b + .5) / 5 * 256)]; }
-    }
-    defSites.set(k, s); return s;
-  }
   let lobes = [], seen = -1, mirrorN = 0;
   function mirror() {
-    const r = mirrorSettle(ch, k => model.sites.get(k) || defaultSite(k));
+    const r = mirrorSettle(ch, model.towns);
     if (!r.changed && mirrorN) return;
     lobes = r.lobes; mirrorN++; settleTex.needsUpdate = true;
   }
@@ -135,7 +125,7 @@ export default async function init(album) {
   const slots = new Float32Array(SLOTS * 3); for (let i = 0; i < SLOTS; i++) slots[i * 3] = i;
   const mat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG,
     uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T),
-      tShapes: { value: tShapes }, uS: { value: CELL20 }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 } } });
+      tShapes: { value: tShapes }, uS: { value: CELL }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 } } });
   const mesh = new Mesh(new InstancedBufferGeometry(), mat); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
   mesh.renderOrder = -100;                                          // before the land: under a roof the costly ground shader is never run
   let cap = 0, count = 0, real = 0;
@@ -156,13 +146,12 @@ export default async function init(album) {
     g.instanceCount = count = n; for (const name of ['aA', 'aB', 'aC']) g.attributes[name].needsUpdate = true;
   }
   let planKey = '', cacheKey = ''; const cache = new Map();
-  function rebuild(tx, ty, D, band, zoom) {
-    const ck = `${band}|${mirrorN}|${riverK}|${zoom.toFixed(3)}`; if (ck !== cacheKey) { cache.clear(); cacheKey = ck; }   // plans of another cell size or another state are of no use
-    for (const L of lobes) zoomLobe(L, zoom);
-    const Sb = 1.04 ** band, near = lobes.filter(L => Math.hypot(L.x - tx, L.y - ty) < D + L.r).sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
+  function rebuild(tx, ty, D, S, ck) {
+    if (ck !== cacheKey) { cache.clear(); cacheKey = ck; }           // plans of another cell size or another state are of no use
+    const near = lobes.filter(L => Math.hypot(L.x - tx, L.y - ty) < D + L.r).sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
     const parts = []; let total = 0;
     for (const L of near) {
-      let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, Sb, env); cache.set(L.k, rows); }
+      let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, S, env); cache.set(L.k, rows); }
       parts.push(rows); total += rows.length; if (total >= MAX_BLOCKS * ROW) break;
     }
     const all = new Float32Array(total); let o = 0; for (const r of parts) { all.set(r, o); o += r.length; }
@@ -176,24 +165,26 @@ export default async function init(album) {
     model: () => model,
     update(dt, t, cam) {
       if (ch.version !== seen) { seen = ch.version; mirror(); }
-      const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look'));
-      const S = cellSize(h, kH || 1), stand = flat ? 1 : 1 - Math.min(1, Math.max(0, (h - 95) / 30));
+      const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look')), dom = album.renderer.domElement;
+      const S = cellSize(h, kH || 1), view = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360), cells = S / (view / Math.max(1, dom.height));   // a block in pixels of the picture
+      // blocks stand while a block is a few pixels wide; smaller than that the ground alone shows the settlement
+      const stand = Math.max(0, Math.min(1, flat ? (cells - .8) / .7 : (cells - 2.5) / 1.5));
       const c0 = 2 ** Math.round(Math.log2(Math.max(.03, Math.min(6, h * .0042))));
       u.uH.value = p.get('houseH'); u.uLod.value = Math.max(0, Math.log2(c0 / .234));
       const [tx, ty] = kmOf(cam.s.lat, cam.s.lon);
-      if (p.get('showcase')) {                                      // every kind in rows around the point the camera looks at
-        const Ss = h * .088, key = `show|${Ss.toFixed(3)}|${tx.toFixed(1)},${ty.toFixed(1)}`;
-        if (key !== planKey) { planKey = key; fill(planShowcase(tx, ty, Ss * 1.5)); }
+      if (p.get('showcase')) {                                      // every kind in rows around the point the camera looks at, far larger than life
+        const Ss = h * .05, key = `show|${Ss.toFixed(3)}|${tx.toFixed(1)},${ty.toFixed(1)}`;
+        if (key !== planKey) { planKey = key; fill(planShowcase(tx, ty, Ss * 1.45)); }
         u.uS.value = Ss; u.u3D.value = 1; mesh.visible = true; U.set(S, 0, u.uH.value, 0);
         return;
       }
-      const blocks = on && kH > 0 && stand > 0 && h < 900;
-      U.set(S, blocks ? stand * stand * (3 - 2 * stand) : 0, u.uH.value, on ? zoomAt(h) : 0);
+      const blocks = on && kH > 0 && stand > 0;
+      U.set(S, blocks ? stand * stand * (3 - 2 * stand) : 0, u.uH.value, on ? 1 : 0);
       mesh.visible = blocks; if (!blocks) return;
       u.uS.value = S; u.u3D.value = U.y;
-      riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 2.2 * 2 * h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, album.renderer.domElement.clientHeight);
-      const band = Math.round(Math.log(S) / Math.log(1.04)), key = `${band}|${kH}|${mirrorN}|${Math.round(tx / 15)},${Math.round(ty / 15)}|${riverK}`;
-      if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.max(60, h * 4.5), band, zoomAt(20 * (1.04 ** band / (CELL20 * kH)) ** (1 / .75))); }   // the plan is made for the height its cell size belongs to
+      riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 2.2 * view / Math.max(1, dom.clientHeight);
+      const ck = `${S}|${mirrorN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${Math.round(h / 8)}`;
+      if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.max(25, h * 2.5), S, ck); }
     } };
   return layer;
 }
