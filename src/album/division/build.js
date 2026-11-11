@@ -338,6 +338,25 @@ function colourise(n, nb, cls) {
 }
 
 // ---- what a district holds: sums over its chunks (state read from album.chunks, layers with sum: true)
+// ---- names: a land district takes the name of its largest settlement (album.data.vectors.places), a coastal town
+// in a chunk counted as sea names the land district beside it; the rest are numbered. at(lat, lon) — the district
+// as drawn (fine.js), when there is a drawing: by a river the drawing follows the river and may put a town on the
+// other bank than its chunk, and the name goes where the player sees the town.
+export function districtNames(div, places = [], at = null) {
+  const best = new Float64Array(div.count).fill(-1), name = new Array(div.count).fill(null);
+  for (const pl of places) {
+    const [x, y] = kmOf(pl.lat, pl.lon), i = Math.floor(x / CHUNK_KM) - CI0, j = Math.floor(y / CHUNK_KM) - CJ0;
+    if (i < 0 || j < 0 || i >= CN || j >= CN) continue;
+    const drawn = at ? at(pl.lat, pl.lon) : -1;
+    if (drawn >= 0 && div.kinds[drawn] === LAND) { if ((pl.pop || 0) > best[drawn]) { best[drawn] = pl.pop || 0; name[drawn] = pl.name; } continue; }
+    let k = j * CN + i;
+    if (div.kinds[div.district[k]] !== LAND) { const m = nbs(k).find(q => div.kinds[div.district[q]] === LAND); if (m === undefined) continue; k = m; }
+    const d = div.district[k], pop = pl.pop || 0;
+    if (pop > best[d]) { best[d] = pop; name[d] = pl.name; }
+  }
+  return name.map((n, d) => n || `${div.kinds[d] === SEA ? 'Морской район' : div.kinds[d] === LAKE ? 'Озеро' : 'Район'} № ${d + 1}`);
+}
+
 export function districtSummary(div, d, ch) {
   const list = div.chunks[d] || [];
   let area = 0, landA = 0;
@@ -355,7 +374,7 @@ export function districtSummary(div, d, ch) {
     let s = 0; for (const k of list) s += l.data[k] || 0;
     sums.push({ name: l.name, title: l.title, unit: l.unit || '', value: s });
   }
-  return { id: d, kind: KIND_ID[div.kinds[d]], area, landArea: landA, chunks: list.length, share, sums,
+  return { id: d, name: div.names ? div.names[d] : `Район № ${d + 1}`, kind: KIND_ID[div.kinds[d]], area, landArea: landA, chunks: list.length, share, sums,
     province: div.province[d], region: div.region[div.province[d]], neighbours: div.neighbours[d].length };
 }
 

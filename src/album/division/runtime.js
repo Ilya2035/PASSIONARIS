@@ -2,7 +2,7 @@
 // answers the cursor (hover lights a district up, a click opens what it holds) and serves the other aspects:
 //   album.division = { districtOf(k), chunksOf(d), provinceOf(d), regionOf(p), neighbours(d), kind(d), … }
 //   album.districts = { count, of(k), name(i) } — the same, in the form the resources work asked for
-import { buildDivision, districtSummary, KIND_ID, levelSizes } from './build.js';
+import { buildDivision, districtSummary, districtNames, KIND_ID, levelSizes } from './build.js';
 import { fineGrids, pick } from './fine.js';
 import { fineTexture, chunkTexture, tableTexture } from './gpu.js';
 import { createPanel } from './panel.js';
@@ -22,7 +22,7 @@ export function startDivision(album, U) {
   const want = () => p.get('division') > 0 || !!p.get('divPick') || p.get('hazard') === 'quake';
   const active = () => p.get('division') > 0 || !!p.get('divPick');
   function use(size) {
-    if (!cache.has(size)) cache.set(size, { div: buildDivision({ ...input, size }), fine: null, tex: null });
+    if (!cache.has(size)) { const div = buildDivision({ ...input, size }); div.names = districtNames(div, data.vectors.places || []); cache.set(size, { div, fine: null, tex: null }); }
     const next = cache.get(size);
     if (next === cur) return;
     cur = next; hover = -1; select(-1); api.version++;
@@ -36,6 +36,8 @@ export function startDivision(album, U) {
     if (!cur.fine) {
       cur.fine = fineGrids(cur.div, { rivers: input.rivers });
       cur.tex = { F: fineTexture(cur.fine), C: chunkTexture(cur.div), T: tableTexture(cur.div) };
+      const f = cur.fine;
+      cur.div.names = districtNames(cur.div, data.vectors.places || [], (lat, lon) => { const [x, y] = kmOf(lat, lon); return pick(f.land, x, y, f.river); });
     }
     U.tDivF.value = cur.tex.F; U.tDivC.value = cur.tex.C; U.tDivT.value = cur.tex.T;
     const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
@@ -89,6 +91,7 @@ export function startDivision(album, U) {
     regionOf: pv => cur.div.region[pv] ?? -1,
     neighbours: d => cur.div.neighbours[d] || [],
     kind: d => KIND_ID[cur.div.kinds[d]],
+    name: d => cur.div.names[d],
     districtAt,
     summary: d => districtSummary(cur.div, d, ch),
     select, get selected() { return sel; },
@@ -97,7 +100,7 @@ export function startDivision(album, U) {
   };
   album.division = api;
   // the short form the resources work reads (src/album/aspects/resources.js): { count, of(k), name(i) }
-  album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => `Район № ${i + 1}`, onChange: api.onChange };
+  album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => cur.div.names[i], onChange: api.onChange };
   use(+p.get('divSize') || 30);
 
   return { id: 'division', update() {

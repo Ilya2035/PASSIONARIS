@@ -24,20 +24,22 @@ export function createPanel(onClose) {
       if (!s) { box.remove(); return; }
       if (!box.isConnected) host().appendChild(box);
       cap.textContent = 'Район';
-      title.textContent = `${KIND_TITLE[KIND_ID.indexOf(s.kind)].replace(/^./, c => c.toUpperCase())} · № ${s.id + 1}`;
-      sub.textContent = `провинция № ${s.province + 1} · регион № ${s.region + 1} · соседей ${s.neighbours}`;
+      title.textContent = s.name;
+      sub.textContent = `${KIND_TITLE[KIND_ID.indexOf(s.kind)]} · район № ${s.id + 1} · провинция № ${s.province + 1} · регион № ${s.region + 1} · соседей ${s.neighbours}`;
       rows.textContent = '';
       row('Площадь', `${num(s.area)} км²`);
       if (s.kind === 'land') row('из них суша', `${num(s.landArea)} км²`);
       row('Чанков', String(s.chunks));
       if (s.kind === 'land') { row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built)); row('Поля', pct(s.share.fields)); }
       res.textContent = '';
-      if (s.sums.length) {
+      const some = s.sums.filter(r => r.value >= .5);
+      if (some.length) {
         res.append(el('div', 'cap', 'Ресурсы, сумма по чанкам'));
         const g = el('div', 'M'); g.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin-top:4px';
-        for (const r of s.sums) g.append(el('span', null, r.title), el('span', null, `${num(r.value)}${r.unit ? ' ' + r.unit : ''}`));
+        for (const r of some) g.append(el('span', null, r.title), el('span', null, `${num(r.value)}${r.unit ? ' ' + r.unit : ''}`));
         res.append(g);
-      } else res.textContent = 'Ресурсов в чанках пока нет: их положит часть «Ресурсы».';
+        if (some.length < s.sums.length) res.append(el('div', 'S', `Остальных ресурсов (${s.sums.length - some.length}) в районе нет.`));
+      } else res.textContent = s.sums.length ? 'Ресурсов в районе нет.' : 'Ресурсов в чанках пока нет: их положит часть «Ресурсы».';
     },
   };
 }

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, CN, CI0, CJ0, CHUNK_KM, kmOf, llOf } from '../src/album/chunks.js';
-import { buildDivision, districtSummary, riverCrossings, smoothRivers, levelSizes, LAND, SEA, LAKE } from '../src/album/division/build.js';
+import { buildDivision, districtSummary, districtNames, riverCrossings, smoothRivers, levelSizes, LAND, SEA, LAKE } from '../src/album/division/build.js';
 import { fineGrids, pick, G, FLAG } from '../src/album/division/fine.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division from '../src/album/aspects/division.js';
@@ -199,7 +199,8 @@ test('division of the album: the Ebro, the Tagus and the Douro run along borders
   }
 });
 
-test('division of the album: reproducible, lakes and the sea apart, islands linked', { skip: !real && 'public/album-data/ is not there' }, () => {
+test('division of the album: reproducible, lakes and the sea apart, islands linked, names', { skip: !real && 'public/album-data/ is not there' }, () => {
+  let open;
   const a = buildDivision({ ...real.input, size: 30 }), b = buildDivision({ ...real.input, size: 30 });
   assert.deepEqual(a.district, b.district); assert.deepEqual(a.province, b.province); assert.deepEqual(a.region, b.region);
   const fa = fineGrids(a, { rivers: real.input.rivers }), fb = fineGrids(b, { rivers: real.input.rivers });
@@ -209,7 +210,17 @@ test('division of the album: reproducible, lakes and the sea apart, islands link
   assert.equal(a.kinds[d], LAND, 'Mallorca is land');
   const p = a.province[d], members = [...a.province.keys()].filter(e => a.province[e] === p);
   assert.ok(members.length >= 2, 'the Balearic province has several districts');
+  // names: the largest settlement of a land district, a number for the rest
+  const names = districtNames(a, data.vectors.places);
+  assert.equal(names.length, a.count);
+  assert.equal(names[a.district[real.ch.at(40.40, -3.69)]], 'Мадрид');
+  // as drawn: the district the player sees around the town has its name
+  const drawnAt = (lat, lon) => { const [x, y] = kmOf(lat, lon); return pick(fa.land, x, y, fa.river); };
+  const drawn = districtNames(a, data.vectors.places, drawnAt);
+  for (const pl of data.vectors.places.filter(q => ['Мадрид', 'Сарагоса', 'Севилья', 'Барселона'].includes(q.name))) assert.equal(drawn[drawnAt(pl.lat, pl.lon)], pl.name);
+  assert.match(names[a.district[real.ch.at(40.5, -11.5 + 1.8)]], /^Морской район № \d+$/);
+  assert.equal(new Set(names).size, names.length, 'no two districts share a name');
   // a sea district at the open Atlantic is bigger than a coastal one
-  const open = a.district[real.ch.at(40.5, -11.5 + 1.8)], size = a.chunks[open].length;
+  open = a.district[real.ch.at(40.5, -11.5 + 1.8)]; const size = a.chunks[open].length;
   assert.equal(a.kinds[open], SEA); assert.ok(size >= 9, `open sea piece of ${size} chunks`);
 });
