@@ -1,152 +1,198 @@
-// Settlements. Every place gets a plan: a well, homes around it (a street grid in the old core, a loose spiral
-// further out), then a tavern, a church, a market, a smithy, towers, a castle, a mill and fields at the edge — in the
-// order a village grows into a town. The "Рост городов" knob moves along that order; buildings just beyond it stand as
-// construction sites. Near the camera the plan is drawn with real 3D models (KayKit Medieval Hexagon Pack, CC0); from
-// afar with plain blocks at the same spots. Nothing is drawn on water. Places are today's cities (Natural Earth) as
-// stand-ins: the game has no peoples yet.
-import { InstancedBufferGeometry, InstancedBufferAttribute, BoxGeometry, Mesh, ShaderMaterial, Box3, Vector3, SRGBColorSpace, NearestFilter } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+// Settlements that stand on the land. The picture comes from the chunks: a chunk with `built` > 0 draws a patch of
+// settlement (town/rules.js), and this layer puts blocks on the cells of that patch (town/plan.js). The blocks are the
+// album's own (town/shapes.js): a few flat faces each, all kinds in one small texture, every block of every kind an
+// instance of one strip of corners — the whole built world is one draw call. The model of growth (town/grow.js) turns
+// the places of the map and the «Рост городов» knob into the state of the chunks: houses, fields, felled forest.
+// Places are today's cities (Natural Earth) as stand-ins: the game has no peoples yet.
+import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter } from 'three';
 import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
-import { distKm } from '../geo.js';
+import { KM_PER_DEG, COS_REF } from '../geo.js';
+import { CHUNK_KM, kmOf } from '../chunks.js';
+import { smoothLine } from './ribbon.js';
+import { cellSize, cultureAt, zoomAt, zoomLobe, CELL20, PALETTE_GLSL } from '../town/rules.js';
+import { settleTex, settleUniforms, mirrorSettle } from '../town/state.js';
+import { buildShapes, SLOTS, KINDS } from '../town/shapes.js';
+import { growTowns, sampleLand } from '../town/grow.js';
+import { planLobe, planShowcase, ROW } from '../town/plan.js';
 
-const rng = seed => { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; };
-// type: [model, block size w d h, block tint]
-const TYPES = {
-  well: ['building_well_red', .35, .35, .3, 2], homeA: ['building_home_A_red', .8, .8, .55, 0], homeB: ['building_home_B_red', .85, .8, .6, 0],
-  tavern: ['building_tavern_red', 1, .9, .7, 0], church: ['building_church_red', 1, .7, 1.3, 2], market: ['building_market_red', 1.1, 1.1, .35, 1],
-  smith: ['building_blacksmith_red', .9, .9, .6, 0], tower: ['building_tower_A_red', .5, .5, 1.5, 2], castle: ['building_castle_red', 1.6, 1.6, 1.2, 2],
-  mill: ['building_windmill_red', .7, .7, 1.2, 2], field: ['building_grain', 1.15, 1.15, .05, 3], site: ['building_stage_B', .8, .8, .3, 1],
-};
-const SCALE = { well: .55, homeA: 1, homeB: 1.05, tavern: 1.25, church: 1.45, market: 1.4, smith: 1.15, tower: .9, castle: 2.3, mill: 1.2, field: 1.25, site: 1 };
-
-export function planTown(pl, index) {
-  const R = rng(index * 7919 + 17), n = Math.max(4, Math.min(150, Math.round(pl.pop ** .33))), items = [], ringy = pl.lat > 41.6 && pl.lon < -1.5;
-  const tilt = R() * Math.PI, ct = Math.cos(tilt), st = Math.sin(tilt), core = ringy ? 0 : Math.round(n * .4), side = Math.max(2, Math.ceil(Math.sqrt(core)));
-  const special = { 5: 'tavern', 8: 'church', 13: 'market', 19: 'smith', 31: 'tower', 58: 'castle', 76: 'tower', 110: 'tower' };
-  items.push({ type: 'well', x: 0, y: 0, rot: 0, rank: 0 });
-  for (let i = 0; i < n; i++) {
-    let x, y, rot;
-    if (i < core) { // old core: a street grid
-      const gx = (i % side) - (side - 1) / 2, gy = Math.floor(i / side) - (side - 1) / 2;
-      x = (gx * 1.3 + (gy % 2 ? .25 : 0)) * 1; y = gy * 1.45; const rx = x * ct - y * st; y = x * st + y * ct; x = rx; rot = -tilt + (R() < .5 ? 0 : Math.PI);
-      if (!gx && !gy) { x += .9; }
-    } else { // later growth: a loose spiral around the core
-      const k = i - core + 2, r = (side * .78 + (ringy ? 1.5 : 1.15) * Math.sqrt(k)) * (ringy ? 1.1 : 1), a = k * 2.39996 + R() * .4;
-      x = r * Math.cos(a); y = r * Math.sin(a); rot = Math.atan2(x, y) + (ringy ? R() * 6.28 : (R() - .5) * .7);
-    }
-    const type = special[i] && (!ringy || special[i] !== 'market') ? special[i] : (R() < .5 ? 'homeA' : 'homeB');
-    items.push({ type, x, y, rot, rank: (i + 1) / (n + 1) });
-  }
-  const rEdge = Math.max(...items.map(it => Math.hypot(it.x, it.y))) + 1.4, fields = Math.max(2, Math.round(n * .18));
-  for (let i = 0; i < fields; i++) { const a = i / fields * 6.283 + R(), r = rEdge + R() * 1.6; items.push({ type: i === 1 && n > 14 ? 'mill' : 'field', x: r * Math.cos(a), y: r * Math.sin(a), rot: R() * 3.14, rank: (.15 + .85 * i / fields) * .95 }); }
-  return items;
-}
-
-const VERT = (uv) => `${COMMON}
-  attribute vec2 aLL; attribute vec4 aOff; attribute vec3 aSize; attribute float aTint; ${uv ? 'varying vec2 vUv;' : ''}
-  uniform float uUnit, uGrowth, uSite;
-  varying vec3 vN, vW; varying float vT, vY;
+const MAX_BLOCKS = 40000;
+const VERT = /* glsl */`${COMMON}
+  attribute vec4 aA, aB, aC;        // site x, y (flat km), turn of the lattice, kind · cell i, j, own turn, flags · size x, y, tint, height
+  uniform sampler2D tShapes; uniform float uS, uH, u3D, uLod;
+  varying vec3 vN, vW, vL; varying vec4 vM;
   void main() {
-    float show = uSite > .5 ? step(uGrowth, aOff.w) * step(aOff.w, uGrowth + .07) : step(aOff.w, uGrowth);
-    float cr = cos(aOff.z), sr = sin(aOff.z), cl = cos(radians(aLL.x));
-    vec2 o = aOff.xy * uUnit;
-    vec2 ll = aLL + vec2(o.y / KM, o.x / (KM * cl));
-    float h0 = heightLod(ll, 0.);
-    show *= step(.6, h0);                                           // never on water
-    vec3 p = position * aSize * uUnit * show;
-    vec2 xz = vec2(p.x * cr + p.z * sr, -p.x * sr + p.z * cr);
-    vec3 up = normalize(worldOf(ll, 0.) + vec3(0., RKM, 0.)); float dl = radians(ll.y - LON0);
-    vec3 east = normalize(vec3(cos(dl), -sin(dl) * C0, -sin(dl) * S0)), north = cross(up, east);
-    vec2 nxz = vec2(normal.x * cr + normal.z * sr, -normal.x * sr + normal.z * cr);
-    vN = vec3(nxz.x, -nxz.y, normal.y); vT = aTint; vY = position.y; ${uv ? 'vUv = uv;' : ''}
-    vW = worldOf(ll, max(h0, 0.) * uExag / 1000.) + east * xz.x - north * xz.y + up * p.y;
-    gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.);
+    int slot = int(position.x + .5), kind = int(aA.w + .5);
+    vec4 sa = floor(texelFetch(tShapes, ivec2(slot, kind * 2), 0) * 255. + .5), sb = texelFetch(tShapes, ivec2(slot, kind * 2 + 1), 0);
+    vec3 lp = vec3((sa.xy - 128.) / 200., (sa.z - 16.) / 400.), ln = sb.xyz * (255. / 127.) - 128. / 127.;
+    float cs = cos(aA.z), sn = sin(aA.z), ra = aA.z + aB.z, cr = cos(ra), sr = sin(ra);
+    vec2 centre = aA.xy + vec2(cs * aB.x - sn * aB.y, sn * aB.x + cs * aB.y) * uS;        // the lattice grows with the camera height
+    vec2 lxy = lp.xy * aC.xy * uS, pkv = centre + vec2(cr * lxy.x - sr * lxy.y, sr * lxy.x + cr * lxy.y);
+    vec2 llc = vec2(centre.y / KM, centre.x / (KM * COSREF)), llv = vec2(pkv.y / KM, pkv.x / (KM * COSREF));
+    float show = max(step(1.5, aB.w), step(.6, heightLod(llc, 0.)));                    // never on water (a pier may reach over it)
+    float hv = max(heightLod(llv, uLod), 0.) * uExag / 1000.;                            // every corner stands on the relief
+    vW = worldOf(llv, hv + lp.z * uS * uH * aC.w * (lp.z > 0. ? u3D : 1.) + .0015);
+    vN = vec3(cr * ln.x - sr * ln.y, sr * ln.x + cr * ln.y, ln.z);
+    vM = vec4(mod(sa.w, 16.), floor(sa.w / 16.), sb.a * 1.5, aC.z);
+    vL = vec3(abs(ln.x) > abs(ln.y) ? lp.y : lp.x, lp.z, mod(aB.w, 2.));
+    gl_Position = show > .5 ? projectionMatrix * viewMatrix * vec4(vW, 1.) : vec4(0., 0., 2., 1.);
   }`;
-// the light, air and finish every thing on the land shares (LIGHT in glsl.js)
-const HEAD = `${COMMON}\n${LIGHT}\nvarying vec3 vW;`;
-const LIT = `float day = albumDay(); c = albumLit(c, vN, .5 + .5 * clamp(vY * 1.4, 0., 1.));`;
-const TONE = `gl_FragColor = vec4(albumFinish(albumAir(c, vW)), 1.);`;
+const FRAG = /* glsl */`${COMMON}
+  ${LIGHT}
+  ${PALETTE_GLSL}
+  varying vec3 vN, vW, vL; varying vec4 vM;   // vM: material, variant, openness to the sky, tint · vL: place along the ridge, height, manner
+  void main() {
+    int mat = int(vM.x + .5); vec3 n = normalize(vN);
+    // one roof is many houses: every few steps along the ridge the tint changes
+    float house = floor(vL.x * 7. + vM.y * 3.3), hr = hash21(vec2(house * .37 + 1.3, vM.w * 9.1 + vM.y * .71));
+    vec3 c = settleMat(mat, vL.z, mat == 5 ? fract(vM.y * .31 + vM.w) : fract(vM.w * 5.3 + vM.y * .37 + hr * .45));
+    if (mat == 0 || mat == 2) c *= .94 + .12 * hr;
+    vec3 lin;
+    if (uStyle == 6) lin = mix(vec3(.07, .09, .13), vec3(.85, .68, .38), pow(max(dot(n, uSun), 0.), 1.6) * .75 + .08);
+    else {
+      if (uStyle == 2 || uStyle == 3) c = mix(c, vec3(.45, .36, .28), .75);
+      lin = albumLit(c, n, vM.z);                                   // the light every thing on the land shares
+      float night = 1. - albumDay();                                // a weak warm light in some windows
+      if (night > 0. && (mat == 2 || mat == 3) && n.z < .5) lin += vec3(1., .6, .25) * night * step(.45, hash21(vec2(house + 3.7, floor(vL.y * 26.) + vM.w * 31.))) * 1.5;
+    }
+    gl_FragColor = vec4(albumFinish(albumAir(lin, vW)), 1.);
+  }`;
 
 export default async function init(album) {
-  const T = album.terrain.u, p = album.params, places = album.data.vectors.places;
-  const plans = places.map((pl, i) => planTown(pl, i));
-  const shared = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T), uUnit: { value: .05 }, uGrowth: { value: 1 }, uPaper: { value: 0 } };
-  const instanced = (src, cap) => {
-    const g = new InstancedBufferGeometry(); g.index = src.index;
-    for (const k of ['position', 'normal', 'uv']) if (src.getAttribute(k)) g.setAttribute(k, src.getAttribute(k));
-    g.setAttribute('aLL', new InstancedBufferAttribute(new Float32Array(cap * 2), 2)); g.setAttribute('aOff', new InstancedBufferAttribute(new Float32Array(cap * 4), 4));
-    g.setAttribute('aSize', new InstancedBufferAttribute(new Float32Array(cap * 3), 3)); g.setAttribute('aTint', new InstancedBufferAttribute(new Float32Array(cap), 1));
-    g.instanceCount = 0; return g;
-  };
-  const fill = (g, rows) => { // rows: [lat, lon, x, y, rot, rank, sx, sy, sz, tint]
-    const a = g.attributes; let i = 0;
-    for (const r of rows) { if (i >= a.aTint.count) break; a.aLL.setXY(i, r[0], r[1]); a.aOff.setXYZW(i, r[2], r[3], r[4], r[5]); a.aSize.setXYZ(i, r[6], r[7], r[8]); a.aTint.setX(i, r[9]); i++; }
-    g.instanceCount = i; for (const k of ['aLL', 'aOff', 'aSize', 'aTint']) a[k].needsUpdate = true;
-  };
+  const T = album.terrain.u, p = album.params, ch = album.chunks, places = album.data.vectors.places, base = album.data.base;
+  const at = (x, y) => base.at(y / KM_PER_DEG, x / (KM_PER_DEG * COS_REF));        // height in metres at a point of the flat km plane
+  for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); ch.setNatural('culture', k, cultureAt(c.lat, c.lon) / 255); }
 
-  // ---- far: plain blocks at the planned spots
-  const boxSrc = new BoxGeometry(1, 1, 1); boxSrc.translate(0, .5, 0);
-  const rowsFar = [];
-  places.forEach((pl, i) => { const R = rng(i + 5); for (const it of plans[i]) { const t = TYPES[it.type]; rowsFar.push([pl.lat, pl.lon, it.x, it.y, it.rot, it.rank, t[1], t[3], t[2], t[4] + R() * .9]); } });
-  const boxGeo = instanced(boxSrc, rowsFar.length); fill(boxGeo, rowsFar);
-  const boxMat = new ShaderMaterial({ uniforms: { ...shared, uSite: { value: 0 } }, vertexShader: VERT(false),
-    fragmentShader: `${HEAD} uniform float uPaper; varying vec3 vN; varying float vT, vY;
-      void main() { float kind = floor(vT), r = fract(vT), roof = step(.5, vN.z);
-        vec3 wall = kind < .5 ? mix(vec3(.84, .78, .66), vec3(.74, .68, .58), r) : kind < 1.5 ? vec3(.62, .52, .38) : kind < 2.5 ? mix(vec3(.72, .70, .66), vec3(.60, .58, .55), r) : mix(vec3(.74, .68, .30), vec3(.62, .64, .28), r);
-        vec3 top = kind < .5 ? mix(vec3(.66, .32, .20), vec3(.58, .28, .18), r) : kind < 1.5 ? vec3(.60, .50, .36) : kind < 2.5 ? vec3(.50, .30, .22) : wall;
-        vec3 c = mix(wall, top, roof); c = mix(c, vec3(.36, .28, .22), uPaper);
-        ${LIT}
-        c += vec3(1., .62, .25) * (1. - day) * (1. - roof) * step(.7, r) * step(kind, .5) * .9;
-        ${TONE} }` });
-  const boxes = new Mesh(boxGeo, boxMat); boxes.frustumCulled = false; album.scene.add(boxes);
+  // ---- rivers as the blocks must know them: nothing stands on the ribbon of a river
+  const segs = [], grid = new Map(), GC = 4;
+  for (const rv of album.data.vectors.rivers || []) {
+    if (rv.pts.length <= 2) continue;
+    const w = rv.rank <= 6 ? .2 : rv.rank <= 8 ? .12 : .07, pts = smoothLine(rv.pts, 1.2, 2).map(q => kmOf(q[1], q[0]));
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], id = segs.length; segs.push([a[0], a[1], b[0], b[1], w]);
+      for (let gy = Math.floor((Math.min(a[1], b[1]) - 2) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + 2) / GC); gy++)
+        for (let gx = Math.floor((Math.min(a[0], b[0]) - 2) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + 2) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
+    }
+  }
+  let riverMin = 0, riverK = 1;                                     // least width of a ribbon in km, and the «Ширина рек» knob
+  const river = (x, y) => {
+    if (riverK <= 0) return 1e9;
+    let best = 1e9;
+    for (const id of grid.get(Math.floor(x / GC) * 100000 + Math.floor(y / GC)) || []) {
+      const s = segs[id], dx = s[2] - s[0], dy = s[3] - s[1], t = Math.max(0, Math.min(1, ((x - s[0]) * dx + (y - s[1]) * dy) / (dx * dx + dy * dy || 1)));
+      best = Math.min(best, Math.hypot(x - s[0] - dx * t, y - s[1] - dy * t) - Math.max(s[4], riverMin) * riverK * .5);
+    }
+    return best;
+  };
+  const env = { at, river, swamp: (x, y) => { const k = ch.k(Math.floor(x / CHUNK_KM), Math.floor(y / CHUNK_KM)); return k < 0 ? 0 : ch.get('swamp', k); } };
 
-  // ---- near: real models
-  const models = {}, meshes = {}, shows = {}; let tex = null, ready = false;
-  const modelMat = site => new ShaderMaterial({ uniforms: { ...shared, uSite: { value: site ? 1 : 0 }, uMap: { value: tex } }, vertexShader: VERT(true),
-    fragmentShader: `${HEAD} uniform float uPaper; uniform sampler2D uMap; varying vec3 vN; varying float vT, vY; varying vec2 vUv;
-      void main() { vec3 c = texture(uMap, vUv).rgb; c = pow(c, vec3(1. / 2.2)); c = mix(c, vec3(dot(c, vec3(.33))) * vec3(.9, .8, .7), uPaper * .7);
-        ${LIT}
-        c += vec3(1., .6, .25) * (1. - day) * .05;
-        ${TONE} }` });
-  (async () => {
-    try {
-      const list = (await (await fetch('album-data/models/models.json')).json()).models, loader = new GLTFLoader();
-      await Promise.all(list.map(async name => {
-        const gltf = await loader.loadAsync(`album-data/models/${name}.gltf`); let mesh = null; gltf.scene.traverse(o => { if (o.isMesh && !mesh) mesh = o; });
-        if (!mesh) return;
-        const g = mesh.geometry.clone(), b = new Box3().setFromBufferAttribute(g.getAttribute('position')), s = new Vector3(); b.getSize(s);
-        const k = 1 / Math.max(s.x, s.z, 1e-3); g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); g.scale(k, k, k);
-        models[name] = g; if (!tex && mesh.material.map) { tex = mesh.material.map; tex.colorSpace = SRGBColorSpace; tex.magFilter = NearestFilter; }
-      }));
-      for (const [type, t] of Object.entries(TYPES)) if (models[t[0]]) { const m = new Mesh(instanced(models[t[0]], 1400), modelMat(type === 'site')); m.frustumCulled = false; m.visible = false; album.scene.add(m); meshes[type] = m; }
-      for (const name of Object.keys(models)) { const m = new Mesh(instanced(models[name], 1), modelMat(false)); m.frustumCulled = false; m.visible = false; album.scene.add(m); shows[name] = m; }
-      album.models = Object.keys(models); ready = !!meshes.homeA;
-    } catch (e) { console.warn('[album] models not loaded, towns stay as blocks:', e.message); }
-  })();
-  let key = '', showKey = '';
-  function showRows(cam) { // every model once, in rows of seven, around the point the camera looks at
-    const c = cam.t, k = `${c.lat.toFixed(3)},${c.lon.toFixed(3)}`; if (k === showKey) return; showKey = k;
-    const names = Object.keys(shows), cols = 7;
-    names.forEach((n, i) => fill(shows[n].geometry, [[c.lat, c.lon, ((i % cols) - (cols - 1) / 2) * 2.5, (Math.floor(i / cols) - (Math.ceil(names.length / cols) - 1) / 2) * 2.7, .6, 0, 1.9, 1.9, 1.9, 0]]));
+  // ---- growth: the places and the knob become the state of the chunks; after a reset of the chunks, again
+  const land = sampleLand(ch, at), written = new Map(), byteOf = (name, k) => Math.round(ch.get(name, k) * 255);
+  let model = null, grown = -1;
+  function applyGrowth(fresh) {
+    if (!fresh) for (const [k, w] of written) {                     // take back what the model wrote, unless someone changed it since
+      if (byteOf('built', k) === w.built) ch.set('built', k, ch.getNatural('built', k));
+      if (byteOf('fields', k) === w.fields) ch.set('fields', k, ch.getNatural('fields', k));
+      if (byteOf('forest', k) === w.forest) ch.set('forest', k, w.forest0);
+    }
+    written.clear(); grown = p.get('growth');
+    model = growTowns(ch, places, grown, at, land);
+    for (let k = 0; k < ch.count; k++) {
+      const b = model.built[k], f = model.fields[k], keep = model.keep[k];
+      if (!(b > 0 || f > 0 || keep < 1)) continue;
+      const forest0 = ch.get('forest', k);
+      if (b > 0) ch.set('built', k, Math.max(ch.get('built', k), b, 1 / 255));
+      if (f > 0) ch.set('fields', k, Math.max(ch.get('fields', k), f));
+      if (keep < 1) ch.set('forest', k, Math.min(forest0, keep));   // people fell the forest around them
+      written.set(k, { built: byteOf('built', k), fields: byteOf('fields', k), forest: byteOf('forest', k), forest0 });
+    }
   }
-  function nearRows(cam) {
-    const s = cam.s, D = Math.max(70, s.h * 5), ids = []; places.forEach((pl, i) => { if (distKm(s, pl) < D) ids.push(i); });
-    const k = ids.join(','); if (k === key) return; key = k;
-    const by = {}; for (const t of Object.keys(TYPES)) by[t] = [];
-    for (const i of ids) { const pl = places[i]; for (const it of plans[i]) { const sc = SCALE[it.type] || 1; by[it.type].push([pl.lat, pl.lon, it.x, it.y, it.rot, it.rank, sc, sc, sc, 0]); if (it.type !== 'field' && it.type !== 'well') by.site.push([pl.lat, pl.lon, it.x, it.y, it.rot, it.rank, 1, 1, 1, 0]); } }
-    for (const [t, m] of Object.entries(meshes)) fill(m.geometry, by[t]);
+  ch.onReset(() => applyGrowth(true));
+  p.on(key => { if (key === 'growth' || (key == null && grown !== p.get('growth'))) applyGrowth(false); });
+  applyGrowth(true);
+
+  // ---- the mirror of the chunk state for the shaders, and the patches for the plan
+  const defSites = new Map();
+  function defaultSite(k) {                                         // a chunk built up by something else than the model: its best dry spot
+    let s = defSites.get(k); if (s) return s;
+    let bs = -1; s = [128, 128];
+    for (let b = 0; b < 5; b++) for (let a = 0; a < 5; a++) {
+      const f = land[k * 25 + b * 5 + a]; if (!(f & 1)) continue;
+      const sc = (f & 2 ? 2 : 1) - Math.hypot(a - 2, b - 2) * .2 + ((k * 31 + a * 7 + b * 13) % 10) * .01;
+      if (sc > bs) { bs = sc; s = [Math.floor((a + .5) / 5 * 256), Math.floor((b + .5) / 5 * 256)]; }
+    }
+    defSites.set(k, s); return s;
   }
-  return { id: 'towns', plans, update(dt, t, cam) {
-    const show = ready && !!p.get('showcase');
-    for (const m of Object.values(shows)) m.visible = show;
-    if (show) { boxes.visible = false; for (const m of Object.values(meshes)) m.visible = false; shared.uUnit.value = cam.s.h * .04; shared.uGrowth.value = 1; showRows(cam); return; }
-    showKey = '';
-    const on = !!p.get('towns') && p.get('houses') > 0 && cam.s.h < 900, near = on && ready && cam.s.h < 85;
-    boxes.visible = on && !near;
-    for (const m of Object.values(meshes)) m.visible = near;
-    if (!on) return;
-    shared.uUnit.value = .066 * (cam.s.h / 20) ** .8 * p.get('houses');
-    shared.uGrowth.value = p.get('growth'); shared.uPaper.value = ['paper', 'atlas'].includes(p.get('look')) ? 1 : 0;
-    if (near) nearRows(cam);
-  } };
+  let lobes = [], seen = -1, mirrorN = 0;
+  function mirror() {
+    const r = mirrorSettle(ch, k => model.sites.get(k) || defaultSite(k));
+    if (!r.changed && mirrorN) return;
+    lobes = r.lobes; mirrorN++; settleTex.needsUpdate = true;
+  }
+
+  // ---- the blocks: one geometry, one material, one draw call
+  const shapes = buildShapes(), tShapes = new DataTexture(shapes.data, shapes.width, shapes.height, RGBAFormat, UnsignedByteType);
+  tShapes.magFilter = tShapes.minFilter = NearestFilter; tShapes.needsUpdate = true;
+  const slots = new Float32Array(SLOTS * 3); for (let i = 0; i < SLOTS; i++) slots[i * 3] = i;
+  const mat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG,
+    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T),
+      tShapes: { value: tShapes }, uS: { value: CELL20 }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 } } });
+  const mesh = new Mesh(new InstancedBufferGeometry(), mat); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
+  let cap = 0, count = 0, real = 0;
+  function fill(rows) {
+    const n = Math.min(MAX_BLOCKS, rows.length / ROW);
+    if (n > cap || !cap) {                                          // the buffers grow by doubling; a small map never pays for a big one
+      cap = Math.max(1024, 2 ** Math.ceil(Math.log2(n)));
+      mesh.geometry.dispose();
+      const g = mesh.geometry = new InstancedBufferGeometry();
+      g.setAttribute('position', new BufferAttribute(slots, 3));
+      for (const name of ['aA', 'aB', 'aC']) g.setAttribute(name, new InstancedBufferAttribute(new Float32Array(cap * 4), 4));
+    }
+    const g = mesh.geometry, A = g.attributes.aA.array, B = g.attributes.aB.array, C = g.attributes.aC.array;
+    real = 0;
+    for (let i = 0; i < n; i++) { const o = i * ROW, q = i * 4;
+      A[q] = rows[o]; A[q + 1] = rows[o + 1]; A[q + 2] = rows[o + 2]; A[q + 3] = rows[o + 3]; B[q] = rows[o + 4]; B[q + 1] = rows[o + 5]; B[q + 2] = rows[o + 6]; B[q + 3] = rows[o + 7];
+      C[q] = rows[o + 8]; C[q + 1] = rows[o + 9]; C[q + 2] = rows[o + 10]; C[q + 3] = rows[o + 11]; real += shapes.tris[rows[o + 3]]; }
+    g.instanceCount = count = n; for (const name of ['aA', 'aB', 'aC']) g.attributes[name].needsUpdate = true;
+  }
+  let planKey = '', cacheKey = ''; const cache = new Map();
+  function rebuild(tx, ty, D, band, zoom) {
+    const ck = `${band}|${mirrorN}|${riverK}|${zoom.toFixed(3)}`; if (ck !== cacheKey) { cache.clear(); cacheKey = ck; }   // plans of another cell size or another state are of no use
+    for (const L of lobes) zoomLobe(L, zoom);
+    const Sb = 1.04 ** band, near = lobes.filter(L => Math.hypot(L.x - tx, L.y - ty) < D + L.r).sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
+    const parts = []; let total = 0;
+    for (const L of near) {
+      let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, Sb, env); cache.set(L.k, rows); }
+      parts.push(rows); total += rows.length; if (total >= MAX_BLOCKS * ROW) break;
+    }
+    const all = new Float32Array(total); let o = 0; for (const r of parts) { all.set(r, o); o += r.length; }
+    fill(all);
+  }
+  const U = settleUniforms.uSettle.value, u = mat.uniforms;
+  const layer = { id: 'towns', kinds: KINDS,
+    // numbers for the notes of this part (docs/album/settle.md)
+    stats: () => ({ blocks: count, triangles: real, slots: count * SLOTS / 3, drawCalls: mesh.visible ? 1 : 0, patches: lobes.length, towns: model.towns.length,
+      shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: cap * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
+    model: () => model,
+    update(dt, t, cam) {
+      if (ch.version !== seen) { seen = ch.version; mirror(); }
+      const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look'));
+      const S = cellSize(h, kH || 1), stand = flat ? 1 : 1 - Math.min(1, Math.max(0, (h - 95) / 30));
+      const c0 = 2 ** Math.round(Math.log2(Math.max(.03, Math.min(6, h * .0042))));
+      u.uH.value = p.get('houseH'); u.uLod.value = Math.max(0, Math.log2(c0 / .234));
+      const [tx, ty] = kmOf(cam.s.lat, cam.s.lon);
+      if (p.get('showcase')) {                                      // every kind in rows around the point the camera looks at
+        const Ss = h * .088, key = `show|${Ss.toFixed(3)}|${tx.toFixed(1)},${ty.toFixed(1)}`;
+        if (key !== planKey) { planKey = key; fill(planShowcase(tx, ty, Ss * 1.5)); }
+        u.uS.value = Ss; u.u3D.value = 1; mesh.visible = true; U.set(S, 0, u.uH.value, 0);
+        return;
+      }
+      const blocks = on && kH > 0 && stand > 0 && h < 900;
+      U.set(S, blocks ? stand * stand * (3 - 2 * stand) : 0, u.uH.value, on ? zoomAt(h) : 0);
+      mesh.visible = blocks; if (!blocks) return;
+      u.uS.value = S; u.u3D.value = U.y;
+      riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 2.2 * 2 * h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, album.renderer.domElement.clientHeight);
+      const band = Math.round(Math.log(S) / Math.log(1.04)), key = `${band}|${kH}|${mirrorN}|${Math.round(tx / 15)},${Math.round(ty / 15)}|${riverK}`;
+      if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.max(60, h * 4.5), band, zoomAt(20 * (1.04 ** band / (CELL20 * kH)) ** (1 / .75))); }   // the plan is made for the height its cell size belongs to
+    } };
+  return layer;
 }
