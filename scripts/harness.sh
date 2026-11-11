@@ -8,6 +8,7 @@
 #   scripts/harness.sh acap  <A> <name> "<query>" [W H] [eval.js] one frame of the graphics album, album.html?shot=1&<query>
 #   scripts/harness.sh acapp <A> <prefix> "<page ids>" [W H] ["&more=query"]  several album pages → <A>/<prefix>-<id>.jpg
 #   scripts/harness.sh atime <A> "<query>" [W H]                  time of one album frame at that view (not the hidden window's fps)
+#   scripts/harness.sh acheck <A> ["<query>"]                     do all shaders of the album compile? (tests cannot see that)
 #   scripts/harness.sh smoke <A> [eval.js]                        launcher → Play → map, fps probes, optional script in the game
 #   scripts/harness.sh test  [pattern]                            node --test on tests/*<pattern>*.test.mjs, one file at a time
 # Useful query keys: lat lon alt tilt date=YYYY-MM-DD mode=<id> ui=0 clean=1 fxdemo=<s> fxkind= fxlevel= fxvei= fxair=1
@@ -60,6 +61,10 @@ case "$cmd" in
     # time of one album frame at this view (scripts/album/frametime.js); prints one line
     A="$1"; Q="$2"; W="${3:-1600}"; H="${4:-900}"
     "$0" acap "$A" "atime" "$Q" "$W" "$H" "$ROOT/scripts/album/frametime.js" | grep "eval:" ;;
+  acheck)
+    # do the shaders of the album compile and link (scripts/album/shadercheck.js); prints one line
+    A="$1"; Q="${2:-page=land-20&ui=0}"
+    "$0" acap "$A" "acheck" "$Q" 800 450 "$ROOT/scripts/album/shadercheck.js" | grep "eval:" ;;
   smoke)
     A="$1"; EV="$2"; mkdir -p "$A/userdata" "$A/smoke"
     EVP=""; [ -n "$EV" ] && EVP="$(abs "$EV")"
