@@ -6,6 +6,8 @@
 #   scripts/harness.sh cap   <A> <name> "<query>" [W H] [eval.js] one frame of game.html?shot=1&<query> → <A>/<name>.png + .jpg
 #   scripts/harness.sh capl  <A> <name> [W H] [eval.js]           the launcher page → <A>/<name>.png + .jpg
 #   scripts/harness.sh acap  <A> <name> "<query>" [W H] [eval.js] one frame of the graphics album, album.html?shot=1&<query>
+#   scripts/harness.sh acapp <A> <prefix> "<page ids>" [W H] ["&more=query"]  several album pages → <A>/<prefix>-<id>.jpg
+#   scripts/harness.sh atime <A> "<query>" [W H]                  time of one album frame at that view (not the hidden window's fps)
 #   scripts/harness.sh smoke <A> [eval.js]                        launcher → Play → map, fps probes, optional script in the game
 #   scripts/harness.sh test  [pattern]                            node --test on tests/*<pattern>*.test.mjs, one file at a time
 # Useful query keys: lat lon alt tilt date=YYYY-MM-DD mode=<id> ui=0 clean=1 fxdemo=<s> fxkind= fxlevel= fxvei= fxair=1
@@ -50,6 +52,14 @@ case "$cmd" in
     PASSIONARIS_USERDATA="$(abs "$A/userdata")" PASSIONARIS_DIST="$(abs "$A/dist")" PASSIONARIS_CAPTURE="{\"page\":\"album.html\",\"query\":\"shot=1&$Q\",\"width\":$W,\"height\":$H,\"out\":\"$OUT\"$EVJ}" \
       timeout 240 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -12
     jpg "$OUT" "$(abs "$A/$NAME.jpg")" ;;
+  acapp)
+    # several album pages in a row: <A>/<prefix>-<page id>.png + .jpg
+    A="$1"; PRE="$2"; PAGES="$3"; W="${4:-1600}"; H="${5:-900}"; EXTRA="$6"
+    for pg in $PAGES; do "$0" acap "$A" "$PRE-$pg" "page=$pg&ui=0$EXTRA" "$W" "$H" | tail -1; done ;;
+  atime)
+    # time of one album frame at this view (scripts/album/frametime.js); prints one line
+    A="$1"; Q="$2"; W="${3:-1600}"; H="${4:-900}"
+    "$0" acap "$A" "atime" "$Q" "$W" "$H" "$ROOT/scripts/album/frametime.js" | grep "eval:" ;;
   smoke)
     A="$1"; EV="$2"; mkdir -p "$A/userdata" "$A/smoke"
     EVP=""; [ -n "$EV" ] && EVP="$(abs "$EV")"

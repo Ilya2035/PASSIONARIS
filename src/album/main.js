@@ -4,6 +4,7 @@
 import { WebGLRenderer, Scene, Clock } from 'three';
 import { loadData } from './data.js';
 import { Terrain } from './terrain.js';
+import { Chunks } from './chunks.js';
 import { AlbumCamera } from './camera.js';
 import { distKm } from './geo.js';
 import { createParams } from './params.js';
@@ -21,7 +22,8 @@ const album = window.__album = { ready: false, shot: SHOT, renderer, scene, fps:
 async function start() {
   const data = album.data = await loadData(step);
   step('сцена');
-  const terrain = album.terrain = new Terrain(data, scene);
+  const chunks = album.chunks = new Chunks(data.base.at);
+  const terrain = album.terrain = new Terrain(data, scene, chunks);
   const cam = album.cam = new AlbumCamera(canvas, data.base.at);
   const params = album.params = createParams(album);
 
@@ -53,6 +55,8 @@ async function start() {
 
   const post = new Post(renderer);
   const clock = new Clock();
+  // one picture, with or without the finishing pass (scripts/album/frametime.js times this call)
+  album.draw = () => { if (params.get('fx')) post.render(scene, cam.cam, cam.s.h, params.get('ao'), params.get('sharp')); else renderer.render(scene, cam.cam); };
   let frames = 0, tAcc = 0, t = 0, auto = 1, slow = 0, fast = 0;
   function size() {
     const w = canvas.clientWidth, h = canvas.clientHeight, pr = Math.min(devicePixelRatio, 2) * (params.get('renderScale') || 1) * auto;
@@ -66,8 +70,9 @@ async function start() {
     cam.update(SHOT ? 1 : dt, size());
     terrain.u.uTime.value = t + (SHOT ? 40 : 0);
     for (const l of Object.values(album.layers)) l.update?.(dt, t, cam);
+    chunks.flush();
     post.setSamples(auto <= .7 ? 0 : 4);
-    if (params.get('fx')) post.render(scene, cam.cam, cam.s.h, params.get('ao'), params.get('sharp')); else renderer.render(scene, cam.cam);
+    album.draw();
     if (!SHOT) { // step the picture scale down when frames run late, back up when there is room
       if (dt > .024) { slow++; fast = 0; } else if (dt < .012) { fast++; slow = 0; } else { slow = fast = 0; }
       if (slow > 12 && auto > .5) { auto = Math.max(.5, auto - .1); slow = 0; } else if (fast > 90 && auto < 1) { auto = Math.min(1, auto + .1); fast = 0; }

@@ -1,5 +1,6 @@
 // Shared GLSL of the album: geometry of the sphere patch, height sampling, noise.
 import { R, CENTRE, KM_PER_DEG, COS_REF } from './geo.js';
+import { CN } from './chunks.js';
 
 const f = n => Number(n).toFixed(8);
 const D = Math.PI / 180;
@@ -63,7 +64,6 @@ vec4 worleyV(vec2 p) {
   }
   return vec4(best, sqrt(d), id);
 }
-// ---- the living cover of the land, shared by the ground shader and the 3D trees
 // how wet a place is, 0 dry steppe .. 1 Atlantic forest (a stand-in for the climate data of the game)
 float albumWet(vec2 ll, float hl, float n1) {
   float lat = ll.x, lon = ll.y;
@@ -75,12 +75,58 @@ float albumWet(vec2 ll, float hl, float n1) {
     - .12 * exp(-dot(ll - vec2(39.3, -3.), ll - vec2(39.3, -3.)) / 2.6)
     + hl * .00016 + (n1 - .5) * .18;
 }
-float albumTreeline(float n1) { return 2150. + (n1 - .5) * 260.; }
-// share of the ground under trees before patchiness: closed forest where wet, open woodland where dry
-float albumForestShare(float wet, float hl, float slope, float n1) {
-  float steep = smoothstep(.40, .82, slope), tl = albumTreeline(n1);
-  float fc = smoothstep(.34, .58, wet) * (1. - smoothstep(tl - 180., tl + 40., hl)) * (1. - steep);
-  return max(fc, smoothstep(.20, .34, wet) * .38 * (1. - steep) * (1. - smoothstep(1500., 1900., hl)));
-}
-float albumCover(float fc, float k, float n2, float n3) { return smoothstep(-.10, .10, fc * k - (n2 * .65 + n3 * .35) * .9 + .05); }
 `;
+
+// ---- chunks: the state of the 10 km cells (chunks.js), read the same way by the ground, the trees, the houses
+export const CHUNK_GLSL = /* glsl */`
+uniform sampler2D tChunkA, tChunkB, tChunkC; uniform vec4 uChunkRect;
+// Where a point of the flat km plane falls in the chunk textures. Two things make neighbouring chunks join without a
+// seam. The point is pushed around by a slow noise, so the edge between two chunks is never a straight line: it
+// wanders by a few km like a natural boundary. And inside a chunk its value holds; it changes over toward the
+// neighbour only across the outer part of the chunk.
+vec2 chunkUV(vec2 pk) {
+  float wc = vnoise(pk / 2.9 + 7.1) - .5;
+  vec2 w = vec2(vnoise(pk / 8.3 + 3.7) + wc * .45, vnoise(pk / 8.3 + 41.3) - wc * .45) - .5;
+  vec2 t = (pk + w * 13. - uChunkRect.xy) * uChunkRect.zw * ${CN}. - .5, i = floor(t);
+  return (i + smoothstep(.18, .82, t - i) + .5) / ${CN}.;
+}
+vec4 chunkA(vec2 pk) { return texture(tChunkA, chunkUV(pk)); }   // forest, conifer share, forest age, swamp
+vec4 chunkB(vec2 pk) { return texture(tChunkB, chunkUV(pk)); }   // ice, snow, flood, spare
+vec4 chunkC(vec2 pk) { return texture(tChunkC, chunkUV(pk)); }   // built, fields, building manner, burnt
+`;
+
+// ---- one light for everything: the ground and anything that stands on it use the same sun, sky, air and finish
+export const LIGHT = /* glsl */`
+uniform vec3 uSun; uniform float uHaze, uExposure, uSat, uWarm; uniform int uStyle;
+float albumDay() { return smoothstep(-.08, .12, uSun.z); }
+vec3 albumSunCol() {
+  vec3 c = mix(vec3(1.25, .62, .30), vec3(1.22, 1.15, 1.02), smoothstep(.05, .45, uSun.z)) * albumDay();
+  return mix(c, c * vec3(1.06, 1., .9), uWarm);
+}
+vec3 albumSkyCol() { return mix(vec3(.26, .33, .52), vec3(.46, .58, .78), albumDay()) * .62; }   // night keeps a moonlit blue
+// a thing on the land: its colour as seen on screen, its normal (east, north, up), how open it is to the sky (0..1.5)
+vec3 albumLit(vec3 seen, vec3 n, float open) {
+  return pow(seen, vec3(2.2)) * (albumSunCol() * max(dot(normalize(n), uSun), 0.) * 1.25 + albumSkyCol() * open);
+}
+// the air between the eye and a point of the world: how much of it there is (0..1), its colour, and both applied
+float albumHaze(vec3 wpos) {
+  vec3 up = normalize(wpos + vec3(0., RKM, 0.)), Vw = normalize(cameraPosition - wpos);
+  float dist = length(cameraPosition - wpos), camAlt = length(cameraPosition + vec3(0., RKM, 0.)) - RKM;
+  return 1. - exp(-(uHaze * dist / (camAlt * 2.2 + 25.) + .012 / max(dot(Vw, up), .03)));
+}
+vec3 albumHazeCol() {
+  if (uStyle == 6) return vec3(.05, .07, .11);
+  if (uStyle == 3) return vec3(.84, .86, .86);
+  return mix(vec3(.55, .70, .92), vec3(1., .78, .55), (1. - smoothstep(.05, .5, uSun.z)) * .6) * (.12 + .88 * albumDay());
+}
+vec3 albumAir(vec3 col, vec3 wpos) { return mix(col, albumHazeCol(), albumHaze(wpos)); }
+// exposure, tone curve, saturation, display gamma: the last step of every pixel
+vec3 albumFinish(vec3 col) {
+  col *= uExposure;
+  if (uStyle != 3 && uStyle != 2) col = (col * (2.51 * col + .03)) / (col * (2.43 * col + .59) + .14);
+  col = mix(vec3(dot(col, vec3(.2126, .7152, .0722))), col, uSat);
+  return pow(clamp(col, 0., 1.), vec3(1. / 2.2));
+}
+`;
+// the uniforms of LIGHT, to spread into a material: ...lightUniforms(album.terrain.u)
+export const lightUniforms = T => ({ uSun: T.uSun, uHaze: T.uHaze, uExposure: T.uExposure, uSat: T.uSat, uWarm: T.uWarm, uStyle: T.uStyle });

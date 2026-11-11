@@ -1,6 +1,7 @@
 // Every knob of the album in one place: its Russian label, range and what it drives. Pages (pages.js) are just sets
 // of these values; the UI builds its sliders from the same list; URL keys p.<name>=<value> override them.
 import { Vector3 } from 'three';
+import { ASPECT_PARAMS } from './aspects/index.js';
 
 export const LOOKS = {
   natural: { title: 'Натуральная', u: { uStyle: 0, uSat: 1.12, uWarm: 0, uSnow: 0, uSeason: 0, uExposure: 1.05 } },
@@ -13,16 +14,11 @@ export const LOOKS = {
 };
 
 // group: land | scale | light | layers | modes | system
-export const DEFS = [
+const BASE = [
   { key: 'look', label: 'Вид земли', group: 'land', type: 'select', options: Object.entries(LOOKS).map(([id, l]) => [id, l.title]), value: 'natural' },
   { key: 'exag', label: 'Высота рельефа', group: 'scale', min: 1, max: 4, step: .1, value: 1.6, unit: '×', uniform: 'uExag' },
   { key: 'shade', label: 'Сила теней рельефа', group: 'land', min: .5, max: 3, step: .1, value: 1.6, unit: '×', uniform: 'uShade' },
-  { key: 'forest', label: 'Густота леса', group: 'scale', min: 0, max: 1.6, step: .05, value: 1, unit: '×', uniform: 'uForestK' },
-  { key: 'trees', label: 'Размер деревьев', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
-  { key: 'houses', label: 'Размер домов', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
   { key: 'roads', label: 'Ширина дорог', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
-  { key: 'rivers', label: 'Ширина рек', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
-  { key: 'growth', label: 'Рост городов', group: 'scale', min: .1, max: 3, step: .05, value: 1, unit: '×' },
   { key: 'hour', label: 'Время суток', group: 'light', min: 4, max: 22, step: .25, value: 0, unit: ' ч', zero: 'свет как на карте' },
   { key: 'fx', label: 'Эффекты движка', group: 'light', type: 'toggle', value: 1 },
   { key: 'ao', label: 'Затенение у объектов', group: 'light', min: 0, max: 1.5, step: .05, value: .8, unit: '×' },
@@ -30,19 +26,26 @@ export const DEFS = [
   { key: 'haze', label: 'Дымка воздуха', group: 'light', min: .02, max: .3, step: .01, value: .09, uniform: 'uHaze' },
   { key: 'sat', label: 'Насыщенность', group: 'land', min: .5, max: 1.7, step: .02, value: 0, zero: 'как в виде' },
   { key: 'snow', label: 'Снеговая линия', group: 'land', min: -2500, max: 600, step: 50, value: 0, unit: ' м', zero: 'как в виде' },
-  { key: 'forest3d', label: 'Объёмные деревья', group: 'layers', type: 'toggle', value: 1 },
-  { key: 'towns', label: 'Поселения', group: 'layers', type: 'toggle', value: 1 },
   { key: 'roadsOn', label: 'Дороги', group: 'layers', type: 'toggle', value: 1 },
-  { key: 'riversOn', label: 'Реки', group: 'layers', type: 'toggle', value: 1 },
   { key: 'labels', label: 'Подписи', group: 'layers', type: 'toggle', value: 1 },
-  { key: 'showcase', label: 'Витрина моделей', group: 'layers', type: 'toggle', value: 0 },
-  { key: 'grid', label: 'Территории 10 км', group: 'modes', type: 'toggle', value: 0, uniform: 'uGrid' },
-  { key: 'division', label: 'Деление', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'Районы'], [2, 'Провинции'], [3, 'Регионы']], value: 0, uniform: 'uDivision' },
+  { key: 'grid', label: 'Сетка чанков 10 км', group: 'modes', type: 'toggle', value: 0, uniform: 'uGrid' },
+  { key: 'chunkInfo', label: 'Чанк под курсором', group: 'modes', type: 'toggle', value: 0 },
+  { key: 'chunkData', label: 'Показать по чанкам', group: 'modes', type: 'select', value: '', options: [['', 'нет'], ['forest', 'Сколько леса стоит'], ['conifer', 'Доля хвойных'],
+    ['swamp', 'Болота'], ['fields', 'Поля'], ['built', 'Застройка'], ['ice', 'Лёд'], ['snow', 'Снег'], ['land', 'Доля суши'], ['height', 'Высота']] },
+  { key: 'brush', label: 'Кисть: щелчок по карте', group: 'modes', type: 'select', value: '', options: [['', 'выключена'], ['forest-', 'Рубить лес'], ['forest+', 'Растить лес'],
+    ['fields+', 'Распахать поля'], ['fields-', 'Забросить поля'], ['built+', 'Застроить'], ['built-', 'Снести'], ['swamp+', 'Заболотить'], ['swamp-', 'Осушить'],
+    ['ice+', 'Заморозить воду'], ['ice-', 'Растопить лёд'], ['snow+', 'Насыпать снег'], ['snow-', 'Убрать снег']] },
+  { key: 'brushSize', label: 'Размер кисти', group: 'modes', min: 1, max: 5, step: 1, value: 2, unit: ' чанка' },
+  { key: 'demoCut', label: 'Показ: вырубка у поселений', group: 'modes', min: 0, max: 1, step: .02, value: 0 },
+  { key: 'demoIce', label: 'Показ: лёд на море', group: 'modes', min: 0, max: 1, step: .02, value: 0 },
+  { key: 'demoSnow', label: 'Показ: снег', group: 'modes', min: 0, max: 1, step: .02, value: 0 },
   { key: 'data', label: 'Данные', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'Температура'], [2, 'Высоты']], value: 0, uniform: 'uData' },
   { key: 'hazard', label: 'Бедствие', group: 'modes', type: 'select', options: [['', 'нет'], ['fire', 'Пожар'], ['quake', 'Землетрясение']], value: '' },
   { key: 'play', label: 'Ход времени', group: 'system', min: 0, max: 8, step: .25, value: 1, unit: '×' },
   { key: 'renderScale', label: 'Чёткость картинки', group: 'system', min: .5, max: 1, step: .05, value: 1, unit: '×' },
 ];
+// the aspects bring their own knobs (aspects/*.js)
+export const DEFS = [...BASE, ...ASPECT_PARAMS];
 
 // sun direction as (east, north, up). hour 0 = the cartographer's light from the north-west.
 export function sunAt(hour) {

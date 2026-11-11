@@ -6,7 +6,7 @@
 // stand-ins: the game has no peoples yet.
 import { InstancedBufferGeometry, InstancedBufferAttribute, BoxGeometry, Mesh, ShaderMaterial, Box3, Vector3, SRGBColorSpace, NearestFilter } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { COMMON } from '../glsl.js';
+import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { distKm } from '../geo.js';
 
 const rng = seed => { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; };
@@ -45,7 +45,7 @@ export function planTown(pl, index) {
 const VERT = (uv) => `${COMMON}
   attribute vec2 aLL; attribute vec4 aOff; attribute vec3 aSize; attribute float aTint; ${uv ? 'varying vec2 vUv;' : ''}
   uniform float uUnit, uGrowth, uSite;
-  varying vec3 vN; varying float vT, vY;
+  varying vec3 vN, vW; varying float vT, vY;
   void main() {
     float show = uSite > .5 ? step(uGrowth, aOff.w) * step(aOff.w, uGrowth + .07) : step(aOff.w, uGrowth);
     float cr = cos(aOff.z), sr = sin(aOff.z), cl = cos(radians(aLL.x));
@@ -59,16 +59,18 @@ const VERT = (uv) => `${COMMON}
     vec3 east = normalize(vec3(cos(dl), -sin(dl) * C0, -sin(dl) * S0)), north = cross(up, east);
     vec2 nxz = vec2(normal.x * cr + normal.z * sr, -normal.x * sr + normal.z * cr);
     vN = vec3(nxz.x, -nxz.y, normal.y); vT = aTint; vY = position.y; ${uv ? 'vUv = uv;' : ''}
-    gl_Position = projectionMatrix * viewMatrix * vec4(worldOf(ll, max(h0, 0.) * uExag / 1000.) + east * xz.x - north * xz.y + up * p.y, 1.);
+    vW = worldOf(ll, max(h0, 0.) * uExag / 1000.) + east * xz.x - north * xz.y + up * p.y;
+    gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.);
   }`;
-const LIGHT = `float day = smoothstep(-.08, .12, uSun.z), nl = max(dot(normalize(vN), uSun), 0.);
-    c = pow(c, vec3(2.2)) * (vec3(1.22, 1.15, 1.02) * nl * 1.25 * day + mix(vec3(.26, .33, .52), vec3(.46, .58, .78), day) * .62 * (.5 + .5 * clamp(vY * 1.4, 0., 1.)));`;
-const TONE = `c = (c * (2.51 * c + .03)) / (c * (2.43 * c + .59) + .14); gl_FragColor = vec4(pow(clamp(c, 0., 1.), vec3(1. / 2.2)), 1.);`;
+// the light, air and finish every thing on the land shares (LIGHT in glsl.js)
+const HEAD = `${COMMON}\n${LIGHT}\nvarying vec3 vW;`;
+const LIT = `float day = albumDay(); c = albumLit(c, vN, .5 + .5 * clamp(vY * 1.4, 0., 1.));`;
+const TONE = `gl_FragColor = vec4(albumFinish(albumAir(c, vW)), 1.);`;
 
 export default async function init(album) {
   const T = album.terrain.u, p = album.params, places = album.data.vectors.places;
   const plans = places.map((pl, i) => planTown(pl, i));
-  const shared = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uSun: T.uSun, uUnit: { value: .05 }, uGrowth: { value: 1 }, uPaper: { value: 0 } };
+  const shared = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T), uUnit: { value: .05 }, uGrowth: { value: 1 }, uPaper: { value: 0 } };
   const instanced = (src, cap) => {
     const g = new InstancedBufferGeometry(); g.index = src.index;
     for (const k of ['position', 'normal', 'uv']) if (src.getAttribute(k)) g.setAttribute(k, src.getAttribute(k));
@@ -88,12 +90,12 @@ export default async function init(album) {
   places.forEach((pl, i) => { const R = rng(i + 5); for (const it of plans[i]) { const t = TYPES[it.type]; rowsFar.push([pl.lat, pl.lon, it.x, it.y, it.rot, it.rank, t[1], t[3], t[2], t[4] + R() * .9]); } });
   const boxGeo = instanced(boxSrc, rowsFar.length); fill(boxGeo, rowsFar);
   const boxMat = new ShaderMaterial({ uniforms: { ...shared, uSite: { value: 0 } }, vertexShader: VERT(false),
-    fragmentShader: `uniform vec3 uSun; uniform float uPaper; varying vec3 vN; varying float vT, vY;
+    fragmentShader: `${HEAD} uniform float uPaper; varying vec3 vN; varying float vT, vY;
       void main() { float kind = floor(vT), r = fract(vT), roof = step(.5, vN.z);
         vec3 wall = kind < .5 ? mix(vec3(.84, .78, .66), vec3(.74, .68, .58), r) : kind < 1.5 ? vec3(.62, .52, .38) : kind < 2.5 ? mix(vec3(.72, .70, .66), vec3(.60, .58, .55), r) : mix(vec3(.74, .68, .30), vec3(.62, .64, .28), r);
         vec3 top = kind < .5 ? mix(vec3(.66, .32, .20), vec3(.58, .28, .18), r) : kind < 1.5 ? vec3(.60, .50, .36) : kind < 2.5 ? vec3(.50, .30, .22) : wall;
         vec3 c = mix(wall, top, roof); c = mix(c, vec3(.36, .28, .22), uPaper);
-        ${LIGHT}
+        ${LIT}
         c += vec3(1., .62, .25) * (1. - day) * (1. - roof) * step(.7, r) * step(kind, .5) * .9;
         ${TONE} }` });
   const boxes = new Mesh(boxGeo, boxMat); boxes.frustumCulled = false; album.scene.add(boxes);
@@ -101,9 +103,9 @@ export default async function init(album) {
   // ---- near: real models
   const models = {}, meshes = {}, shows = {}; let tex = null, ready = false;
   const modelMat = site => new ShaderMaterial({ uniforms: { ...shared, uSite: { value: site ? 1 : 0 }, uMap: { value: tex } }, vertexShader: VERT(true),
-    fragmentShader: `uniform vec3 uSun; uniform float uPaper; uniform sampler2D uMap; varying vec3 vN; varying float vT, vY; varying vec2 vUv;
+    fragmentShader: `${HEAD} uniform float uPaper; uniform sampler2D uMap; varying vec3 vN; varying float vT, vY; varying vec2 vUv;
       void main() { vec3 c = texture(uMap, vUv).rgb; c = pow(c, vec3(1. / 2.2)); c = mix(c, vec3(dot(c, vec3(.33))) * vec3(.9, .8, .7), uPaper * .7);
-        ${LIGHT}
+        ${LIT}
         c += vec3(1., .6, .25) * (1. - day) * .05;
         ${TONE} }` });
   (async () => {

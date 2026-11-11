@@ -1,7 +1,7 @@
 // Lines laid on the ground (rivers, roads) as ribbons whose width never falls under a few pixels: the higher the
 // camera, the wider they are drawn relative to the land — the album's "scale system" for linear things.
 import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Color, DoubleSide } from 'three';
-import { COMMON } from '../glsl.js';
+import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG } from '../geo.js';
 
 const D = Math.PI / 180;
@@ -46,27 +46,30 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   geo.setAttribute('aSide', new BufferAttribute(side, 1)); geo.setAttribute('aW', new BufferAttribute(wk, 2)); geo.setIndex(idx);
   const T = album.terrain.u;
   const mat = new ShaderMaterial({
-    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uSun: T.uSun,
+    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T),
       uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: minPx }, uColour: { value: new Color(colour) }, uDash: { value: dash }, uLift: { value: lift }, uAlpha: { value: 1 } },
     transparent: true, depthWrite: false, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -12,
     vertexShader: `${COMMON}
-      attribute vec2 aLL, aDir, aW; attribute float aSide; uniform float uPx, uK, uMinPx, uLift; varying float vSide, vDist, vW;
+      attribute vec2 aLL, aDir, aW; attribute float aSide; uniform float uPx, uK, uMinPx, uLift; varying float vSide, vDist, vW; varying vec3 vWorld;
       void main() {
         float w = max(aW.x, uMinPx * uPx) * uK;
         vec2 off = vec2(-aDir.y, aDir.x) * aSide * w * .5;
         vec2 ll = aLL + vec2(off.y / KM, off.x / (KM * cos(radians(aLL.x))));
         float h = max(heightLod(aLL, 0.), 0.) * uExag / 1000. + uLift + w * .01;
         vSide = aSide; vDist = aW.y; vW = w / max(uPx, 1e-4);
-        gl_Position = projectionMatrix * viewMatrix * vec4(worldOf(ll, h), 1.);
+        vWorld = worldOf(ll, h);
+        gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.);
       }`,
-    fragmentShader: `uniform vec3 uColour, uSun; uniform float uDash, uAlpha; varying float vSide, vDist, vW;
+    fragmentShader: `${COMMON}
+      ${LIGHT}
+      uniform vec3 uColour; uniform float uDash, uAlpha; varying float vSide, vDist, vW; varying vec3 vWorld;
       void main() {
         float edge = 1. - smoothstep(1. - 1.6 / max(vW, 1.6), 1., abs(vSide));
         float a = edge * uAlpha;
         if (uDash > 0.) a *= step(fract(vDist / uDash), .62);
         float day = smoothstep(-.08, .15, uSun.z);
         vec3 c = uColour * (.35 + .65 * day) * (1.08 - .62 * smoothstep(.4, .95, abs(vSide)));
-        gl_FragColor = vec4(pow(c, vec3(1. / 2.2)), a);
+        gl_FragColor = vec4(mix(pow(c, vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld)), a);   // the same air as over the land
       }`,
   });
   const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = 5;

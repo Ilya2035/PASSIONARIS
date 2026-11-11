@@ -2,7 +2,8 @@
 // around the camera target, placed entirely in the vertex shader from the same forest rules as the ground shader, so a
 // tree stands exactly where the ground is painted as forest. The lattice is anchored to the world, not to the camera.
 import { InstancedBufferGeometry, InstancedBufferAttribute, IcosahedronGeometry, Mesh, ShaderMaterial, Vector2 } from 'three';
-import { COMMON } from '../glsl.js';
+import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
+import { FOREST_RULES } from '../aspects/forest.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 
 const G = 200;
@@ -14,11 +15,14 @@ export default async function init(album) {
   geo.setAttribute('aCell', new InstancedBufferAttribute(cells, 2)); geo.instanceCount = G * G;
   const T = album.terrain.u;
   const mat = new ShaderMaterial({
-    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uSun: T.uSun, uForestK: T.uForestK,
-      uSnow: T.uSnow, uSeason: T.uSeason, uSat: T.uSat, uCellBase: { value: new Vector2() }, uS: { value: .25 }, uK: { value: 1 }, uFade: { value: 1 }, uLod: { value: 0 } },
+    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uForestK: T.uForestK,
+      uSnow: T.uSnow, uSeason: T.uSeason, ...lightUniforms(T), ...album.chunks.uniforms,
+      uCellBase: { value: new Vector2() }, uS: { value: .25 }, uK: { value: 1 }, uFade: { value: 1 }, uLod: { value: 0 } },
     vertexShader: `${COMMON}
+      ${CHUNK_GLSL}
+      ${FOREST_RULES}
       attribute vec2 aCell; uniform vec2 uCellBase; uniform float uS, uK, uFade, uForestK, uLod, uSnow;
-      varying vec3 vN; varying vec3 vCol; varying float vY;
+      varying vec3 vN; varying vec3 vCol; varying float vY; varying vec3 vW;
       void main() {
         vec2 ci = aCell + uCellBase, jit = hash22(ci + 13.7), pk = (ci + .12 + .76 * jit) * uS;
         vec2 ll = vec2(pk.y / KM, pk.x / (KM * COSREF));
@@ -26,10 +30,12 @@ export default async function init(album) {
         float h = heightLod(ll, uLod), hE = heightLod(ll + vec2(0., e / (KM * cl)), uLod), hN = heightLod(ll + vec2(e / KM, 0.), uLod);
         float slope = length(vec2(hE - h, hN - h)) / (e * 1000.), hl = max(h, 0.);
         float n1 = fbm(pk / 38.), n2 = fbm(pk / 7.3 + 5.), n3 = vnoise(pk / 1.1), r = hash21(ci + 3.1);
-        float wet = albumWet(ll, hl, n1), cover = albumCover(albumForestShare(wet, hl, slope, n1), uForestK, n2, n3);
+        vec2 cuv = chunkUV(pk); vec4 cA = texture(tChunkA, cuv), cC = texture(tChunkC, cuv);     // the state of the chunk the tree stands in
+        float wet = albumWet(ll, hl, n1), cover = albumChunkCover(albumForestShare(wet, hl, slope, n1), uForestK, n2, n3, cA.r);
         float snowline = 2980. - (ll.x - 37.) * 55. + uSnow;
         float edge = max(abs(aCell.x), abs(aCell.y)) / ${(G / 2).toFixed(1)};
         float alive = step(.5, cover) * step(1.5, h) * step(hl, snowline - 150.) * smoothstep(1., .82, edge) * uFade * step(r, .35 + .65 * cover);
+        alive *= step(max(max(cC.g * 1.15, cC.r * 1.6), cA.a * .65), hash21(ci + 17.3));         // no trees on fields and under houses, few in a swamp
         float conifer = step(.5, smoothstep(1000., 1700., hl) * .8 + (wet < .52 ? .45 : 0.) + (hash21(ci + 9.4) - .5) * .6);
         float size = uS * uK * (.62 + .5 * r) * alive;
         vec3 p = position;
@@ -45,17 +51,16 @@ export default async function init(album) {
         broad = mix(broad, vec3(.42, .50, .17), smoothstep(.58, .8, stand) * .55); broad = mix(broad, vec3(.10, .26, .17), smoothstep(.42, .2, stand) * .5);
         broad = mix(broad, vec3(.56, .48, .17), step(.93, hash21(ci + 21.3)) * .6);
         vCol = mix(broad, vec3(.11, .27, .17), conifer) * (.8 + .45 * hash21(ci + 5.5));
-        vY = position.y + .5;
+        vY = position.y + .5; vW = w;
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
       }`,
-    fragmentShader: `uniform vec3 uSun; uniform float uSeason, uSat; varying vec3 vN; varying vec3 vCol; varying float vY;
+    fragmentShader: `${COMMON}
+      ${LIGHT}
+      uniform float uSeason; varying vec3 vN; varying vec3 vCol; varying float vY; varying vec3 vW;
       void main() {
-        float day = smoothstep(-.08, .12, uSun.z), nl = max(dot(normalize(vN), uSun), 0.);
         vec3 c = mix(vCol, vec3(.50, .30, .09) * (.7 + .6 * vCol.g * 3.), uSeason * .7);
-        c = pow(c, vec3(2.2)) * (vec3(1.22, 1.15, 1.02) * nl * 1.25 * day + mix(vec3(.10, .13, .22), vec3(.46, .58, .78), day) * .9 * (.3 + .7 * vY));
-        c = (c * (2.51 * c + .03)) / (c * (2.43 * c + .59) + .14);
-        c = mix(vec3(dot(c, vec3(.2126, .7152, .0722))), c, uSat);
-        gl_FragColor = vec4(pow(clamp(c, 0., 1.), vec3(1. / 2.2)), 1.);
+        c = albumLit(c, vN, 1.45 * (.3 + .7 * vY));                // the light every thing on the land shares
+        gl_FragColor = vec4(albumFinish(albumAir(c, vW)), 1.);
       }`,
   });
   const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; album.scene.add(mesh);
