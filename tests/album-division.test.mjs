@@ -1,228 +1,192 @@
 // The division of the album (docs/album/division.md): chunks → districts → provinces → regions, on land, in lakes and
-// at sea. On a small made-up world, and on the album's real data when public/album-data/ is there (it is not in git:
-// scripts/album/fetch-data.mjs; the worktree setup copies it).
+// at sea, on the graph of natural chunks and their borders (ch.links). On a small made-up world, and on the album's
+// real data when public/album-data/ is there (it is not in git: scripts/album/fetch-data.mjs; the worktree setup
+// copies it).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Chunks, CN, CI0, CJ0, CHUNK_KM, kmOf, llOf } from '../src/album/chunks.js';
-import { buildDivision, districtSummary, districtNames, riverCrossings, smoothRivers, levelSizes, LAND, SEA, LAKE } from '../src/album/division/build.js';
-import { fineGrids, pick, G, FLAG } from '../src/album/division/fine.js';
+import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
+import { buildDivision, districtSummary, districtNames, levelSizes, LAND, SEA, LAKE } from '../src/album/division/build.js';
+import { packDivision } from '../src/album/division/gpu.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division from '../src/album/aspects/division.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS } from '../src/album/params.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const N = CN * CN;
-const nbs = k => { const x = k % CN, y = (k / CN) | 0, o = []; if (x > 0) o.push(k - 1); if (x < CN - 1) o.push(k + 1); if (y > 0) o.push(k - CN); if (y < CN - 1) o.push(k + CN); return o; };
 
-// every chunk in exactly one district, every district side-connected and of one kind
-function checkWhole(div) {
-  assert.equal(div.district.length, N);
+// every chunk in exactly one district; every district connected over chunk borders and of one kind
+function checkWhole(ch, div) {
+  assert.equal(div.district.length, ch.count);
   const seen = new Int32Array(div.count);
-  for (let k = 0; k < N; k++) { const d = div.district[k]; assert.ok(d >= 0 && d < div.count, `chunk ${k} has a district`); seen[d]++; }
+  for (let k = 0; k < ch.count; k++) { const d = div.district[k]; assert.ok(d >= 0 && d < div.count, `chunk ${k} has a district`); seen[d]++; }
   for (let d = 0; d < div.count; d++) {
     assert.ok(seen[d] > 0, `district ${d} has chunks`);
-    assert.equal(div.chunks[d].length, seen[d]);
     const list = div.chunks[d], inD = new Set(list), q = [list[0]], got = new Set(q);
-    for (let h = 0; h < q.length; h++) for (const m of nbs(q[h])) if (inD.has(m) && !got.has(m)) { got.add(m); q.push(m); }
-    assert.equal(got.size, list.length, `district ${d} is connected`);
+    for (let h = 0; h < q.length; h++) for (const l of ch.links[q[h]]) if (inD.has(l.k) && !got.has(l.k)) { got.add(l.k); q.push(l.k); }
+    assert.equal(got.size, list.length, `district ${d} hangs together over chunk borders`);
     const kd = div.kinds[d];
-    for (const k of list) assert.equal(div.kind[k] === SEA ? SEA : div.kind[k] === LAKE ? LAKE : LAND, kd, `district ${d} is all one kind`);
+    for (const k of list) assert.equal(div.kind[k], kd, `district ${d} is all one kind`);
+    assert.ok(Math.abs(list.reduce((s, k) => s + ch.area[k], 0) - div.area[d]) < 1e-6, 'the area of a district is the sum of its chunks');
   }
 }
-// sizes within the limits, except pieces that cannot be bigger (an island, a lake)
-function checkSizes(div, kind, lo, hi) {
-  const T = (div.sizes.district / CHUNK_KM) ** 2 * (kind === SEA ? 1 : 1);
-  // connected pieces of the same kind: a district may be smaller only when its whole piece is small
-  const piece = new Int32Array(N).fill(-1), pieceSize = [];
-  for (let s = 0; s < N; s++) {
+// district areas within limits, except pieces that cannot be bigger (an island, a lake)
+function checkSizes(ch, div, kind, lo, hi) {
+  const T = div.sizes.district ** 2;
+  const piece = new Int32Array(ch.count).fill(-1), pieceArea = [];
+  for (let s = 0; s < ch.count; s++) {
     if (piece[s] >= 0 || div.kind[s] !== kind) continue;
-    const q = [s]; piece[s] = pieceSize.length;
-    for (let h = 0; h < q.length; h++) for (const m of nbs(q[h])) if (piece[m] < 0 && div.kind[m] === kind) { piece[m] = pieceSize.length; q.push(m); }
-    pieceSize.push(q.length);
+    const q = [s]; piece[s] = pieceArea.length; let a = 0;
+    for (let h = 0; h < q.length; h++) { a += ch.area[q[h]]; for (const l of ch.links[q[h]]) if (piece[l.k] < 0 && div.kind[l.k] === kind) { piece[l.k] = pieceArea.length; q.push(l.k); } }
+    pieceArea.push(a);
   }
   let small = 0, n = 0;
   for (let d = 0; d < div.count; d++) {
     if (div.kinds[d] !== kind) continue;
     n++;
-    const size = div.chunks[d].length, whole = pieceSize[piece[div.chunks[d][0]]];
-    assert.ok(size <= hi * T, `district ${d}: ${size} chunks is too big (target ${T})`);
-    if (size < lo * T && whole >= lo * T) small++;
+    assert.ok(div.area[d] <= hi * T, `district ${d}: ${Math.round(div.area[d])} km² is too big (target ${T})`);
+    if (div.area[d] < lo * T && pieceArea[piece[div.chunks[d][0]]] >= lo * T) small++;
   }
   return { n, small };
 }
-
-// ---- a small made-up world: an island 60 × 40 chunks with a river across, a ridge, a lake, the sea around
-function madeUp() {
-  const land = new Float32Array(N), height = new Float32Array(N);
-  for (let k = 0; k < N; k++) {
-    const x = k % CN, y = (k / CN) | 0;
-    if (x >= 30 && x < 90 && y >= 40 && y < 80) { land[k] = 1; height[k] = 200 + (x > 70 ? 900 : 0); }
-    if (x >= 52 && x < 54 && y >= 62 && y < 64) land[k] = 0;                 // a small lake inside
-    if (x >= 34 && x < 44 && y >= 66 && y < 76) land[k] = 0;                 // a big one
-  }
-  const at = (lat, lon) => { const [x, y] = kmOf(lat, lon), i = Math.floor(x / CHUNK_KM) - CI0, j = Math.floor(y / CHUNK_KM) - CJ0; if (i < 0 || j < 0 || i >= CN || j >= CN) return -100; const k = j * CN + i; return land[k] ? height[k] + (Math.abs(i - 70.5) < .6 ? 800 : 0) : -100; };
-  // a river from west to east along chunk row 55.5 (between centres of rows 55 and 56 it never runs: it wanders)
-  const pts = []; for (let i = 28; i <= 92; i++) { const p = llOf((CI0 + i) * CHUNK_KM, (CJ0 + 55.6 + Math.sin(i / 4) * .25) * CHUNK_KM); pts.push([p.lon, p.lat]); }
-  return { land, height, heightAt: at, rivers: [{ name: 'Река', rank: 5, pts }], lakes: [] };
+// river borders of chunks (most of the border on a river) that are also district borders
+function riverBorders(ch, div, rank) {
+  let n = 0, b = 0;
+  for (let a = 0; a < ch.count; a++) for (const l of ch.links[a]) if (l.k > a && l.river === rank && l.wet / l.km > .5 && div.kind[a] === LAND && div.kind[l.k] === LAND) { n++; if (div.district[a] !== div.district[l.k]) b++; }
+  return { n, b };
 }
 
-test('division: a made-up world — whole chunks, connected districts, sizes, kinds, reproducible', () => {
-  const w = madeUp(), div = buildDivision({ ...w, size: 30 });
-  checkWhole(div);
-  const { n, small } = checkSizes(div, LAND, .3, 2.3);
-  assert.ok(n > 10, `the island has many districts (${n})`);
+// ---- a small made-up world: an island with a great river across it, a mountain block, a lake, the sea around
+const [IX0, IY0] = kmOf(39, -6), [IX1, IY1] = kmOf(42, -1);
+const riverY = (IY0 + IY1) / 2;
+function madeUpHeight(lat, lon) {
+  const [x, y] = kmOf(lat, lon);
+  if (x < IX0 || x > IX1 || y < IY0 || y > IY1) return -100;
+  if (Math.hypot(x - (IX0 + 60), y - (IY1 - 60)) < 14) return -5;                 // a lake inside, smaller than a district
+  return 200 + (x > IX1 - 120 ? 900 : 0);
+}
+const madeUpRiver = { name: 'Река', rank: 5, pts: Array.from({ length: 60 }, (_, i) => { const x = IX0 - 5 + (IX1 - IX0 + 10) * i / 59, p = llOf(x, riverY + Math.sin(i / 3) * 6); return [p.lon, p.lat]; }) };
+const made = (() => { const ch = new Chunks(madeUpHeight, [madeUpRiver]); return { ch, opts: { heightAt: madeUpHeight, lakes: [] } }; })();
+
+test('division: a made-up world — whole chunks, connected districts, areas, kinds, rivers, reproducible', () => {
+  const { ch, opts } = made, div = buildDivision(ch, { ...opts, size: 30 });
+  checkWhole(ch, div);
+  const { n, small } = checkSizes(ch, div, LAND, .3, 2.3);
+  assert.ok(n > 60, `the island has many districts (${n})`);
   assert.ok(small <= n * .05, `few small districts (${small} of ${n})`);
-  assert.ok(div.kinds.includes(LAKE), 'the inner water is a lake district');
   assert.ok(div.kinds.includes(SEA));
-  const lakeOf = k => div.district[k];
-  assert.equal(new Set([62 * CN + 52, 62 * CN + 53, 63 * CN + 52, 63 * CN + 53].map(lakeOf)).size, 1, 'a small lake is one district');
-  const big = new Set(); for (let y = 66; y < 76; y++) for (let x = 34; x < 44; x++) big.add(lakeOf(y * CN + x));
-  assert.ok(big.size >= 5 && [...big].every(d => div.kinds[d] === LAKE), `a big lake is cut into several lake districts (${big.size})`);
-  // the river: chunks on its two sides belong to different districts
-  const rr = riverCrossings(smoothRivers(w.rivers));
-  let crossed = 0, border = 0;
-  for (let e = 0; e < rr.length; e++) if (rr[e] < 99) { const k = e >> 1, m = e & 1 ? k + CN : k + 1; if (div.kind[k] !== LAND || div.kind[m] !== LAND) continue; crossed++; if (div.district[k] !== div.district[m]) border++; }
-  assert.ok(crossed > 40 && border / crossed > .9, `the river runs along borders (${border} of ${crossed})`);
-  const again = buildDivision({ ...w, size: 30 });
-  assert.deepEqual(again.district, div.district, 'the same data give the same division');
+  const lake = new Set(); for (let k = 0; k < ch.count; k++) if (div.kind[k] === LAKE) lake.add(div.district[k]);
+  assert.equal(lake.size, 1, 'the inner water is one lake district');
+  const r = riverBorders(ch, div, 2);
+  assert.ok(r.n > 20 && r.b / r.n > .9, `the river runs along district borders (${r.b} of ${r.n})`);
+  const again = buildDivision(ch, { ...opts, size: 30 });
+  assert.deepEqual(again.district, div.district, 'the same chunks give the same division');
   assert.deepEqual(again.province, div.province); assert.deepEqual(again.region, div.region);
 });
 
 test('division: provinces and regions group neighbouring districts of one kind', () => {
-  const w = madeUp(), div = buildDivision({ ...w, size: 30 });
-  assert.equal(div.province.length, div.count);
+  const { ch, opts } = made, div = buildDivision(ch, { ...opts, size: 30 });
   for (let d = 0; d < div.count; d++) { assert.ok(div.province[d] >= 0 && div.province[d] < div.provinceCount); assert.ok(div.region[div.province[d]] >= 0 && div.region[div.province[d]] < div.regionCount); }
   assert.ok(div.provinceCount < div.count && div.regionCount <= div.provinceCount && div.regionCount >= 2);
-  // a province never mixes the sea with land
   const cls = new Map();
   for (let d = 0; d < div.count; d++) { const c = div.kinds[d] === SEA ? 1 : 0, p = div.province[d]; if (cls.has(p)) assert.equal(cls.get(p), c, `province ${p} is all land or all sea`); cls.set(p, c); }
-  // neighbours never share a colour
-  for (let d = 0; d < div.count; d++) for (const e of div.neighbours[d]) assert.notEqual(div.colour.district[d], div.colour.district[e]);
+  for (let d = 0; d < div.count; d++) for (const e of div.neighbours[d]) assert.notEqual(div.colour.district[d], div.colour.district[e], 'neighbours never share a colour');
   const s = levelSizes(30); assert.equal(s.province, 100); assert.equal(s.region, 340);
   assert.ok(levelSizes(100).province > 100, 'provinces grow with large districts');
 });
 
-test('division: what a district holds — shares of the chunk state and sums of the layers', () => {
-  const w = madeUp(), div = buildDivision({ ...w, size: 30 }), ch = new Chunks();
-  ch.land.set(w.land);
-  const d = div.district[60 * CN + 40], list = div.chunks[d];
+test('division: what a district holds — area, shares of the chunk state, sums of the layers; the texture', () => {
+  const { ch, opts } = made, div = buildDivision(ch, { ...opts, size: 30 });
+  const k0 = ch.at(40, -4), d = div.district[k0], list = div.chunks[d];
   const iron = ch.layer('iron', { title: 'Железо', unit: 'т', sum: true }), quiet = ch.layer('note', { sum: false });
   for (const k of list) { iron.data[k] = 2; quiet.data[k] = 9; ch.set('forest', k, .5); }
-  ch.set('fields', list[0], 1);
   const s = districtSummary(div, d, ch);
-  assert.equal(s.chunks, list.length); assert.equal(s.area, list.length * 100); assert.equal(s.kind, 'land');
+  assert.equal(s.chunks, list.length); assert.equal(s.kind, 'land');
+  assert.ok(Math.abs(s.area - list.reduce((a, k) => a + ch.area[k], 0)) < 1e-6, 'area: the sum of the chunks');
   assert.ok(Math.abs(s.share.forest - .5) < .01);
-  assert.ok(Math.abs(s.share.fields - 1 / list.length) < .01);
   assert.deepEqual(s.sums.map(x => [x.name, x.value]), [['iron', 2 * list.length]], 'only layers with sum: true are summed');
+  ch.reset();
+  // one texel per chunk: district, province, region, kind
+  const a = packDivision(ch, div);
+  assert.equal(a.length, ch.palW * ch.palW * 4);
+  for (const k of [0, k0, ch.count - 1]) {
+    const dd = div.district[k], p = div.province[dd];
+    assert.equal(a[k * 4] & 65535, dd); assert.equal(a[k * 4] >>> 16, p); assert.equal(a[k * 4 + 1] & 65535, div.region[p]);
+    assert.equal((a[k * 4 + 1] >>> 16 >> 9) & 3, div.kinds[dd]);
+  }
 });
 
-test('division: the drawing grid keeps every chunk middle in its own district (away from rivers) and follows the river', () => {
-  const w = madeUp(), div = buildDivision({ ...w, size: 30 }), fine = fineGrids(div, { rivers: w.rivers });
-  for (let d = 0; d < div.count; d++) {
-    if (div.kinds[d] !== LAND) continue;
-    for (const k of div.chunks[d]) {
-      const c = { x: (k % CN + CI0 + .5) * CHUNK_KM, y: (((k / CN) | 0) + CJ0 + .5) * CHUNK_KM };
-      const u = Math.floor((c.x - CI0 * CHUNK_KM) / (CHUNK_KM / 8)), v = Math.floor((c.y - CJ0 * CHUNK_KM) / (CHUNK_KM / 8));
-      if (Math.abs(fine.river[v * G + u]) < 4000) continue;            // by a river the drawing follows the river
-      const near = []; for (let b = -2; b <= 1; b++) for (let a = -2; a <= 1; a++) near.push(fine.rawLand[(v + b) * G + u + a]);
-      assert.ok(near.includes(d), `the middle of chunk ${k} shows its district ${d}`);
-    }
-  }
-  for (let t = 0; t < G * G; t += 997) assert.equal(fine.land[t] & (FLAG - 1), fine.rawLand[t]);
-  // 1.5 km to either side of the river the drawn districts differ
-  const pts = smoothRivers(w.rivers)[0].pts.map(([lon, lat]) => kmOf(lat, lon));
-  let n = 0, diff = 0;
-  for (let i = 4; i + 1 < pts.length - 4; i += 3) {
-    const [ax, ay] = pts[i], [bx, by] = pts[i + 1], L = Math.hypot(bx - ax, by - ay); if (!L) continue;
-    const nx = -(by - ay) / L, ny = (bx - ax) / L, mx = (ax + bx) / 2, my = (ay + by) / 2;
-    const a = pick(fine.land, mx + nx * 1.5, my + ny * 1.5, fine.river), b = pick(fine.land, mx - nx * 1.5, my - ny * 1.5, fine.river);
-    n++; if (a !== b) diff++;
-  }
-  assert.ok(n > 20 && diff / n > .9, `drawn border on the river (${diff} of ${n})`);
-});
-
-test('division: the aspect — contract functions, knobs, pages', () => {
+test('division: the aspect — contract functions, one texture, knobs, pages', () => {
   assert.match(division.glsl, /void aspDivision\(Px p, inout vec3 col, float landA\)/);
   assert.match(division.glsl, /vec3 districtAt\(vec2 pk\)/);
-  for (const k of ['division', 'divSize', 'divChunks', 'divPick']) assert.ok(DEFS.find(d => d.key === k), `knob ${k}`);
+  const samplers = Object.values(division.uniforms).filter(u => u.value?.isTexture);
+  assert.equal(samplers.length, 1, 'the aspect brings exactly one texture to the ground shader');
+  assert.equal((division.glsl.match(/sampler2D/g) || []).length, 1);
+  for (const k of ['division', 'divSize', 'divPick']) assert.ok(DEFS.find(d => d.key === k), `knob ${k}`);
   assert.deepEqual(DEFS.find(d => d.key === 'divSize').options.map(o => o[0]), [30, 50, 100]);
   const page = id => PAGES.find(p => p.id === id);
   for (const id of ['mode-districts', 'mode-provinces', 'mode-regions']) assert.equal(page(id).group, 'Режимы карты');
   assert.equal(page('mode-districts').p.division, 1); assert.equal(page('mode-provinces').p.division, 2); assert.equal(page('mode-regions').p.division, 3);
-  assert.ok(page('division-chunks').p.grid && page('division-chunks').p.divChunks, 'a page shows the chunks of districts');
+  assert.ok(page('division-chunks').p.grid, 'a page shows the chunks of the districts');
   assert.ok(Array.isArray(page('division-info').divAt), 'a page opens with a district chosen');
-  for (const k of ['tDivF', 'tDivC', 'tDivT', 'uDivision', 'uDivHover', 'uDivSel', 'uDivOn']) assert.ok(division.uniforms[k], `uniform ${k}`);
 });
 
 // ---- the album's real data
 const data = loadAlbumData(ROOT);
-const real = data ? (() => { const ch = new Chunks(data.base.at); return { ch, input: { land: ch.land, height: ch.height, heightAt: data.base.at, rivers: data.vectors.rivers, lakes: data.vectors.lakes } }; })() : null;
+const real = data ? { ch: new Chunks(data.base.at, data.vectors.rivers), opts: { heightAt: data.base.at, lakes: data.vectors.lakes } } : null;
+const skip = !real && 'public/album-data/ is not there';
 
-test('division of the album: every chunk in one connected district, sizes in their limits', { skip: !real && 'public/album-data/ is not there' }, () => {
+test('division of the album: every chunk in one connected district, areas in their limits, every coast faces the sea', { skip }, () => {
+  const { ch, opts } = real;
   for (const size of [30, 50, 100]) {
-    const div = buildDivision({ ...real.input, size });
-    checkWhole(div);
-    const l = checkSizes(div, LAND, .35, 2.3), s = checkSizes(div, SEA, .25, 9);
-    const T = (size / CHUNK_KM) ** 2, landChunks = div.kind.reduce((n, k) => n + (k === LAND), 0);
-    assert.ok(Math.abs(l.n - landChunks / T) < landChunks / T * .35, `${size} km: ${l.n} land districts for ${landChunks} land chunks`);
+    const div = buildDivision(ch, { ...opts, size });
+    checkWhole(ch, div);
+    const l = checkSizes(ch, div, LAND, .35, 2.3), s = checkSizes(ch, div, SEA, .25, 9);
+    let landArea = 0; for (let k = 0; k < ch.count; k++) if (div.kind[k] === LAND) landArea += ch.area[k];
+    const want = landArea / size ** 2;
+    assert.ok(Math.abs(l.n - want) < want * .35, `${size} km: ${l.n} land districts for ${Math.round(landArea)} km² of land`);
     assert.ok(l.small <= Math.max(2, l.n * .04), `${size} km: few too small land districts (${l.small})`);
     assert.ok(s.n > 0 && div.provinceCount > 5 && div.regionCount >= 4, `${size} km: sea districts, provinces, regions`);
-    // every coastal land district faces at least one sea district
     for (let d = 0; d < div.count; d++) {
       if (div.kinds[d] !== LAND) continue;
-      const coastal = div.chunks[d].some(k => nbs(k).some(m => div.kind[m] === SEA));
+      const coastal = div.chunks[d].some(k => ch.links[k].some(x => div.kind[x.k] === SEA));
       if (coastal) assert.ok(div.neighbours[d].some(e => div.kinds[e] === SEA), `${size} km: coastal district ${d} touches the sea`);
     }
   }
 });
 
-test('division of the album: the Ebro, the Tagus and the Douro run along borders, not through districts', { skip: !real && 'public/album-data/ is not there' }, () => {
-  const div = buildDivision({ ...real.input, size: 30 }), fine = fineGrids(div, { rivers: real.input.rivers });
+test('division of the album: rivers run along district borders, the Ebro, the Tagus and the Douro too', { skip }, () => {
+  const { ch, opts } = real, div = buildDivision(ch, { ...opts, size: 30 });
+  const great = riverBorders(ch, div, 2), lesser = riverBorders(ch, div, 1);
+  assert.ok(great.n > 200 && great.b / great.n >= .9, `great rivers on chunk borders are district borders (${great.b} of ${great.n})`);
+  assert.ok(lesser.n > 100 && lesser.b / lesser.n >= .8, `lesser rivers (${lesser.b} of ${lesser.n})`);
+  // 2 km to either side of the river the districts differ, nearly wherever the chunks themselves differ
   for (const name of ['Эбро', 'Тахо', 'Дуэро']) {
-    const rv = smoothRivers(real.input.rivers.filter(r => r.name === name)), rr = riverCrossings(rv);
-    assert.ok(rv.length, name);
-    let n = 0, border = 0;
-    for (let e = 0; e < rr.length; e++) if (rr[e] < 99) { const k = e >> 1, m = e & 1 ? k + CN : k + 1; if (div.kind[k] !== LAND || div.kind[m] !== LAND) continue; n++; if (div.district[k] !== div.district[m]) border++; }
-    assert.ok(n > 30 && border / n >= .85, `${name}: ${border} of ${n} chunk pairs across the river are in different districts`);
-    // and on the map: 1.5 km to either side of the river the districts differ
-    let pn = 0, pd = 0;
-    for (const r of rv) for (let i = 0; i + 1 < r.pts.length; i += 2) {
-      const [ax, ay] = kmOf(r.pts[i][1], r.pts[i][0]), [bx, by] = kmOf(r.pts[i + 1][1], r.pts[i + 1][0]), L = Math.hypot(bx - ax, by - ay); if (!L) continue;
-      const nx = -(by - ay) / L, ny = (bx - ax) / L, mx = (ax + bx) / 2, my = (ay + by) / 2, p = llOf(mx + nx * 1.5, my + ny * 1.5), q = llOf(mx - nx * 1.5, my - ny * 1.5);
-      if (data.base.at(p.lat, p.lon) <= 0 || data.base.at(q.lat, q.lon) <= 0) continue;
-      pn++; if (pick(fine.land, mx + nx * 1.5, my + ny * 1.5, fine.river) !== pick(fine.land, mx - nx * 1.5, my - ny * 1.5, fine.river)) pd++;
+    let n = 0, dc = 0, dd = 0;
+    for (const r of data.vectors.rivers.filter(x => x.name === name)) for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, ay] = kmOf(r.pts[i][1], r.pts[i][0]), [bx, by] = kmOf(r.pts[i + 1][1], r.pts[i + 1][0]), L = Math.hypot(bx - ax, by - ay); if (L < .5) continue;
+      const nx = -(by - ay) / L, ny = (bx - ax) / L, mx = (ax + bx) / 2, my = (ay + by) / 2, p = llOf(mx + nx * 2, my + ny * 2), q = llOf(mx - nx * 2, my - ny * 2);
+      const k1 = ch.at(p.lat, p.lon), k2 = ch.at(q.lat, q.lon); if (k1 < 0 || k2 < 0 || !ch.kind[k1] || !ch.kind[k2]) continue;
+      n++; if (k1 !== k2) dc++; if (div.district[k1] !== div.district[k2]) dd++;
     }
-    assert.ok(pn > 100 && pd / pn >= .85, `${name}: the drawn border lies on the river at ${pd} of ${pn} points`);
+    assert.ok(n > 150, name);
+    assert.ok(dd / n >= .8 && dd >= dc * .9, `${name}: districts differ across the river at ${dd} of ${n} points (chunks at ${dc})`);
   }
 });
 
-test('division of the album: reproducible, lakes and the sea apart, islands linked, names', { skip: !real && 'public/album-data/ is not there' }, () => {
-  let open;
-  const a = buildDivision({ ...real.input, size: 30 }), b = buildDivision({ ...real.input, size: 30 });
+test('division of the album: reproducible, lakes and the sea apart, islands linked, names', { skip }, () => {
+  const { ch, opts } = real, a = buildDivision(ch, { ...opts, size: 30 }), b = buildDivision(ch, { ...opts, size: 30 });
   assert.deepEqual(a.district, b.district); assert.deepEqual(a.province, b.province); assert.deepEqual(a.region, b.region);
-  const fa = fineGrids(a, { rivers: real.input.rivers }), fb = fineGrids(b, { rivers: real.input.rivers });
-  assert.deepEqual(fa.land, fb.land); assert.deepEqual(fa.water, fb.water);
-  // Mallorca is land of its own; its province reaches over the water to other land
-  const k = real.ch.at(39.6, 2.95), d = a.district[k];
+  const d = a.district[ch.at(39.6, 2.95)];
   assert.equal(a.kinds[d], LAND, 'Mallorca is land');
-  const p = a.province[d], members = [...a.province.keys()].filter(e => a.province[e] === p);
+  const members = [...a.province.keys()].filter(e => a.province[e] === a.province[d]);
   assert.ok(members.length >= 2, 'the Balearic province has several districts');
-  // names: the largest settlement of a land district, a number for the rest
-  const names = districtNames(a, data.vectors.places);
+  const open = a.district[ch.at(40.5, -9.7)];
+  assert.equal(a.kinds[open], SEA); assert.ok(a.area[open] >= 900, `an open sea piece of ${Math.round(a.area[open])} km²`);
+  const names = districtNames(ch, a, data.vectors.places);
   assert.equal(names.length, a.count);
-  // (until the division is rebuilt on the chunks' real outlines it numbers chunks by lattice square: look the square up)
-  const [mx, my] = kmOf(40.40, -3.69);
-  assert.equal(names[a.district[real.ch.k(Math.floor(mx / 10), Math.floor(my / 10))]], 'Мадрид');
-  // as drawn: the district the player sees around the town has its name
-  const drawnAt = (lat, lon) => { const [x, y] = kmOf(lat, lon); return pick(fa.land, x, y, fa.river); };
-  const drawn = districtNames(a, data.vectors.places, drawnAt);
-  for (const pl of data.vectors.places.filter(q => ['Мадрид', 'Сарагоса', 'Севилья', 'Барселона'].includes(q.name))) assert.equal(drawn[drawnAt(pl.lat, pl.lon)], pl.name);
-  assert.match(names[a.district[real.ch.at(40.5, -11.5 + 1.8)]], /^Морской район № \d+$/);
+  for (const pl of data.vectors.places.filter(q => ['Мадрид', 'Сарагоса', 'Севилья', 'Барселона'].includes(q.name))) assert.equal(names[a.district[ch.at(pl.lat, pl.lon)]], pl.name);
+  assert.match(names[open], /^Морской район № \d+$/);
   assert.equal(new Set(names).size, names.length, 'no two districts share a name');
-  // a sea district at the open Atlantic is bigger than a coastal one
-  open = a.district[real.ch.at(40.5, -11.5 + 1.8)]; const size = a.chunks[open].length;
-  assert.equal(a.kinds[open], SEA); assert.ok(size >= 9, `open sea piece of ${size} chunks`);
 });

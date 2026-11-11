@@ -1,55 +1,53 @@
 // The division at work on the album page: works it out from the chunks (build.js), hands it to the shader (gpu.js),
 // answers the cursor (hover lights a district up, a click opens what it holds) and serves the other aspects:
-//   album.division = { districtOf(k), chunksOf(d), provinceOf(d), regionOf(p), neighbours(d), kind(d), … }
+//   album.division = { districtOf(k), chunksOf(d), provinceOf(d), regionOf(p), neighbours(d), kind(d), name(d), … }
 //   album.districts = { count, of(k), name(i) } — the same, in the form the resources work asked for
-import { buildDivision, districtSummary, districtNames, KIND_ID, levelSizes } from './build.js';
-import { fineGrids, pick } from './fine.js';
-import { fineTexture, chunkTexture, tableTexture } from './gpu.js';
+import { buildDivision, districtSummary, districtNames, KIND_ID, LAND, levelSizes } from './build.js';
+import { divisionTexture } from './gpu.js';
 import { createPanel } from './panel.js';
 import { pickGround } from '../pick.js';
-import { kmOf, CHUNK_KM, CN, CI0, CJ0 } from '../chunks.js';
+import { FN, FKM, kmOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
 
 const inside = (lat, lon) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
 
 export function startDivision(album, U) {
   const ch = album.chunks, p = album.params, data = album.data, dom = album.renderer.domElement;
-  const input = { land: ch.land, height: ch.height, heightAt: data.base.at, rivers: data.vectors.rivers || [], lakes: data.vectors.lakes || [] };
-  const cache = new Map();                              // size → { div, fine, tex }: switching the size back costs nothing
+  const opts = { heightAt: data.base.at, lakes: data.vectors.lakes || [] };
+  const cache = new Map();                              // size → { div, tex }: switching the size back costs nothing
   const listeners = [];
   let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0;
 
-  const want = () => p.get('division') > 0 || !!p.get('divPick') || p.get('hazard') === 'quake';
   const active = () => p.get('division') > 0 || !!p.get('divPick');
   function use(size) {
-    if (!cache.has(size)) { const div = buildDivision({ ...input, size }); div.names = districtNames(div, data.vectors.places || []); cache.set(size, { div, fine: null, tex: null }); }
+    if (!cache.has(size)) {
+      const div = buildDivision(ch, { ...opts, size });
+      div.names = districtNames(ch, div, data.vectors.places || []);
+      cache.set(size, { div, tex: divisionTexture(ch, div) });
+    }
     const next = cache.get(size);
     if (next === cur) return;
     cur = next; hover = -1; select(-1); api.version++;
-    U.uDivOn.value = 0;
-    if (want()) draw();
+    U.tDiv.value = cur.tex;
+    const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
+    U.uDivOn.value = 1;
     console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions (${cur.div.ms.toFixed(0)} ms)`);
     for (const f of listeners) f(api);
   }
-  // the drawing data are worked out the first time something shows the division
-  function draw() {
-    if (!cur.fine) {
-      cur.fine = fineGrids(cur.div, { rivers: input.rivers });
-      cur.tex = { F: fineTexture(cur.fine), C: chunkTexture(cur.div), T: tableTexture(cur.div) };
-      const f = cur.fine;
-      cur.div.names = districtNames(cur.div, data.vectors.places || [], (lat, lon) => { const [x, y] = kmOf(lat, lon); return pick(f.land, x, y, f.river); });
-    }
-    U.tDivF.value = cur.tex.F; U.tDivC.value = cur.tex.C; U.tDivT.value = cur.tex.T;
-    const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
-    U.uDivOn.value = 1;
-  }
-  // the district at a point of the ground, as the shader draws it
+  // the district at a point of the ground, as the shader draws it: the district of the chunk there; a point of land in
+  // a chunk of water (or the other way round, at the shore) takes the nearest chunk of its own kind
   function districtAt(lat, lon) {
-    const [x, y] = kmOf(lat, lon), i = Math.floor(x / CHUNK_KM) - CI0, j = Math.floor(y / CHUNK_KM) - CJ0;
-    if (i < 0 || j < 0 || i >= CN || j >= CN || !inside(lat, lon)) return -1;
-    if (p.get('divChunks') || !cur.fine) return cur.div.district[j * CN + i];
-    const land = inside(lat, lon) && data.base.at(lat, lon) > 0;
-    return land ? pick(cur.fine.land, x, y, cur.fine.river) : pick(cur.fine.water, x, y);
+    if (!inside(lat, lon)) return -1;
+    const k = ch.at(lat, lon); if (k < 0) return -1;
+    const land = data.base.at(lat, lon) > 0, dv = cur.div;
+    if ((dv.kinds[dv.district[k]] === LAND) === land) return dv.district[k];
+    const [x, y] = kmOf(lat, lon), tx = Math.floor((x + 880) / FKM), ty = Math.floor((y - 3880) / FKM);
+    for (let r = 1; r <= 2; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const u = tx + dx, v = ty + dy; if (u < 0 || v < 0 || u >= FN || v >= FN) continue;
+      const d = dv.district[ch.cell[v * FN + u]];
+      if ((dv.kinds[d] === LAND) === land) return d;
+    }
+    return dv.district[k];
   }
   const atScreen = (x, y) => { const ll = pickGround(album, x, y); return ll ? districtAt(ll.lat, ll.lon) : -1; };
 
@@ -74,7 +72,6 @@ export function startDivision(album, U) {
   // a page may open with one district chosen: page.divAt = [lat, lon]
   p.on(key => {
     if (key == null || key === 'divSize') use(+p.get('divSize') || 30);
-    if (want() && !U.uDivOn.value) draw();
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
   });
@@ -99,7 +96,6 @@ export function startDivision(album, U) {
     get data() { return cur.div; },
   };
   album.division = api;
-  // the short form the resources work reads (src/album/aspects/resources.js): { count, of(k), name(i) }
   album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => cur.div.names[i], onChange: api.onChange };
   use(+p.get('divSize') || 30);
 
