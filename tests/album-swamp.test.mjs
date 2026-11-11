@@ -72,26 +72,42 @@ test('natural swamp: level ground at the sea and in the wet takes it; hills, the
   assert.ok(at(44.2, -6.5) === 0 && at(40, -6) < .25, 'a dry level plain keeps little');
   for (let k = 0; k < ch.count; k++) {
     assert.ok(nat[k] >= 0 && nat[k] <= .95);
-    if (ch.land[k] === 0) assert.equal(nat[k], 0);
+    if (ch.kind[k] === 0) assert.equal(nat[k], 0, 'a chunk of water holds no swamp');
     const c = ch.centre(k); if (c.lat > 44.9 || c.lat < 35.1) assert.equal(nat[k], 0, 'nothing outside the region of the album');
   }
 });
 
-test('natural swamp: a wetland of the list lays its area over the rule; a river floods its plain', () => {
+test('natural swamp: a wetland of the list lays its area over the chunks it covers', () => {
   const ch = new Chunks(world), base = naturalSwamp(ch, world, {});
-  const big = { name: 'big', lat: 40, lon: -5.5, km2: 600 }, small = { name: 'small', lat: 41.5, lon: -6, km2: 2 }, hill = { name: 'hill', lat: 38, lon: -2, km2: 300 };
+  const big = { name: 'big', lat: 40, lon: -5.5, km2: 600 }, small = { name: 'small', lat: 41.5, lon: -6, km2: 2 }, hill = { name: 'hill', lat: 38, lon: -2, km2: 600 };
   const poly = { name: 'poly', lat: 37, lon: -5.5, share: .4, poly: [[36.6, -6.2], [36.6, -4.8], [37.4, -4.8], [37.4, -6.2]] };
-  const nat = naturalSwamp(ch, world, { wetlands: [big, small, hill, poly] });
-  let area = 0; for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); if (Math.hypot((c.lon + 5.5) * 85, (c.lat - 40) * 111) < 40) area += (nat[k] - base[k]) * 100; }
-  assert.ok(area > 600 * .6 && area < 600 * 1.4, `the area of the wetland is kept: ${area.toFixed(0)} of 600 km²`);
+  const lagoon = { name: 'lagoon', lat: 42, lon: -8.03, km2: 3 };
+  const nat = naturalSwamp(ch, world, { wetlands: [big, small, hill, poly, lagoon] });
+  const laid = (lat, lon) => { let a = 0; for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); if (Math.hypot((c.lon - lon) * 85.2, (c.lat - lat) * 111.2) < 45) a += (nat[k] - base[k]) * ch.area[k]; } return a; };
+  const plain = laid(40, -5.5), steep = laid(38, -2);
+  assert.ok(plain > 600 * .8 && plain < 600 * 1.2, `on level ground the area of the wetland is kept: ${plain.toFixed(0)} of 600 km²`);
+  assert.ok(steep > 600 * .4 && steep < plain * .95, `steep ground holds less of it: ${steep.toFixed(0)} against ${plain.toFixed(0)} km²`);
   assert.ok(nat[ch.at(40, -5.5)] > .8, 'full in the middle');
-  assert.ok(nat[ch.at(41.5, -6)] >= .05 && nat[ch.at(41.5, -6)] < .12, 'a small wetland still shows in its own chunk');
-  const onHill = nat[ch.at(38, -2)], around = nat[ch.at(38.1, -1.9)];
-  assert.ok(onHill > .5 && around < .5, `steep ground holds less of a listed wetland: ${onHill} ${around}`);
+  const own = nat[ch.at(41.5, -6)];
+  assert.ok(own >= .05 && own < .12, `a small wetland still shows in its own chunk: ${own}`);
   assert.ok(Math.abs(nat[ch.at(37, -5.5)] - .4) < .02 && nat[ch.at(37.8, -5.5)] === base[ch.at(37.8, -5.5)], 'an outline gives its share inside and nothing outside');
-  const river = { rank: 5, pts: [[-4.5, 39], [-7.95, 39]] }, flooded = naturalSwamp(ch, world, { rivers: [river] });
-  assert.ok(flooded[ch.at(39, -5.5)] > base[ch.at(39, -5.5)] && flooded[ch.at(39, -5.5)] >= .1, 'the flood plain of a large river');
-  assert.ok(flooded[ch.at(39, -7.9)] > base[ch.at(39, -7.9)], 'more at the mouth');
+  const kw = ch.at(42, -8.03); assert.equal(ch.kind[kw], 0, 'the middle of the lagoon is water');
+  assert.equal(nat[kw], 0); assert.ok(ch.links[kw].some(l => ch.kind[l.k] === 1 && nat[l.k] >= .05), 'a wetland in a lagoon goes to its shore');
+});
+
+test('natural swamp: a river along the border of a chunk floods its plain, most of all at the mouth', () => {
+  const river = { rank: 5, pts: [[-4.5, 39.02], [-7.97, 39.02]] }, ch = new Chunks(world, [river]), nat = naturalSwamp(ch, world, {});
+  const onRiver = [], away = [], mouth = [], coast = [];
+  for (let k = 0; k < ch.count; k++) {
+    if (ch.kind[k] !== 1) continue;
+    const c = ch.centre(k), river2 = ch.links[k].some(l => l.river === 2 && l.wet >= 5), sea = ch.links[k].some(l => ch.kind[l.k] === 0);
+    if (c.lon > -6.8 && c.lon < -4.6 && c.lat > 37 && c.lat < 42) (river2 ? onRiver : away).push(nat[k]);
+    if (c.lon < -7.3 && sea && c.lat > 37 && c.lat < 42) (river2 ? mouth : Math.abs(c.lat - 39.02) > .6 ? coast : []).push(nat[k]);
+  }
+  const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+  assert.ok(onRiver.length >= 20 && away.length > 200 && mouth.length >= 1 && coast.length > 10, `${onRiver.length} ${away.length} ${mouth.length} ${coast.length}`);
+  assert.ok(mean(onRiver) > .15 && mean(away) < .02, `the flood plain: ${mean(onRiver).toFixed(2)} on the river, ${mean(away).toFixed(2)} away from it`);
+  assert.ok(mean(mouth) > mean(coast) + .05, `more at the mouth: ${mean(mouth).toFixed(2)} against ${mean(coast).toFixed(2)} on the rest of the coast`);
 });
 
 test('bog iron: fresh mires of a humid climate hold it; salt marsh, dry fens and thin swamps do not', () => {
@@ -155,14 +171,14 @@ test('natural swamp on the real heights: the known swamps are where they should 
     return ((raw[k] * (1 - fx) + raw[k + 1] * fx) * (1 - fy) + (raw[k + b.w] * (1 - fx) + raw[k + b.w + 1] * fx) * fy) / 4 - 8192;
   };
   const rivers = JSON.parse(fs.readFileSync(new URL('../public/album-data/vectors.json', import.meta.url), 'utf8')).rivers;
-  const ch = new Chunks(at), nat = naturalSwamp(ch, at, { rivers, wetlands: LIST });
+  const ch = new Chunks(at, rivers), nat = naturalSwamp(ch, at, { wetlands: LIST });
   const near = (lat, lon) => { const k = ch.at(lat, lon); return Math.max(nat[k], ...ch.neighbours(k).map(m => nat[m])); };
   for (const [name, lat, lon, min] of [['Guadalquivir', 37, -6.25, .7], ['Daimiel', 39.14, -3.7, .6], ['Ebro delta', 40.7, .75, .5], ['Albufera', 39.33, -.35, .5], ['Landes', 44.2, -.7, .3], ['Xistral', 43.47, -7.6, .25],
     ['Antela', 42.08, -7.75, .25], ['Tagus', 38.92, -8.92, .5], ['La Janda', 36.25, -5.85, .4], ['Aveiro', 40.68, -8.67, .4]]) assert.ok(near(lat, lon) >= min, `${name}: ${near(lat, lon).toFixed(2)}`);
   let land = 0, wet = 0, area = 0, iron = 0;
   for (let k = 0; k < ch.count; k++) {
-    if (!(ch.land[k] > 0)) { assert.equal(nat[k], 0); continue; }
-    land++; if (nat[k] > 0) { wet++; area += nat[k] * ch.land[k] * 100; const c = ch.centre(k); if (swampIron(nat[k], c.lat, c.lon, ch.height[k]) > 0) iron++; }
+    if (ch.kind[k] !== 1) { assert.equal(nat[k], 0); continue; }
+    land++; if (nat[k] > 0) { wet++; area += nat[k] * ch.area[k]; const c = ch.centre(k); if (swampIron(nat[k], c.lat, c.lon, ch.height[k]) > 0) iron++; }
   }
   assert.ok(wet / land > .03 && wet / land < .09, `swamp in ${(100 * wet / land).toFixed(1)} % of the land chunks`);
   assert.ok(area > 5000 && area < 14000, `${area.toFixed(0)} km² of swamp`);

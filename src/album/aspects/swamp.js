@@ -4,9 +4,11 @@
 // The state comes from the chunks: p.cA.a = share of the chunk's land under swamp, p.cB = (ice, snow, flood, spare).
 // Which swamp grows at a place is not stored: it follows from the height, the wetness and the sea (swampKind).
 
+import { FKM, FN, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+
 // ---- rules on the CPU: the same numbers as in the GLSL below, for the natural state, the resources, the tests
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), CELL = 10;
+const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM;   // flat km, as in chunks.js
 // the CPU twin of albumWet() in glsl.js, without its noise: 0 dry steppe .. 1 Atlantic forest
 export function wetAt(lat, lon, h) {
   const g = (la, lo, s) => Math.exp(-((lat - la) ** 2 + (lon - lo) ** 2) / s);
@@ -47,84 +49,91 @@ const inside = (poly, lat, lon) => {
 };
 
 // The natural share of swamp of every chunk (the world before drainage): a rule of relief and water, and over it the
-// wetlands known by name. ch: Chunks; heightAt(lat, lon) → metres; rivers: [{ rank, pts: [[lon, lat] …] }];
-// wetlands: public/assets/album/swamp/wetlands.json. Returns Float32Array, 0..0.95 per chunk.
-export function naturalSwamp(ch, heightAt, { rivers = [], wetlands = [] } = {}) {
-  const n = ch.count, N = 8, out = new Float32Array(n), hs = new Float32Array(N * N);
-  // how much of the chunk is flat ground (water stands on it) and gentle ground (a blanket of peat holds on it)
-  const flat = new Float32Array(n), gentle = new Float32Array(n);
-  for (let k = 0; k < n; k++) {
-    if (!(ch.land[k] > 0)) continue;
-    const { i, j } = ch.ij(k);
-    for (let b = 0; b < N; b++) for (let a = 0; a < N; a++) hs[b * N + a] = heightAt((j + (b + .5) / N) * CELL / KMD, (i + (a + .5) / N) * CELL / (KMD * COS));
-    let pairs = 0, fl = 0, ge = 0;
-    for (let b = 0; b < N; b++) for (let a = 0; a < N; a++) {
-      const h = hs[b * N + a]; if (h <= 0) continue;
-      for (const [da, db] of [[1, 0], [0, 1]]) {
-        if (a + da >= N || b + db >= N) continue;
-        const g = hs[(b + db) * N + a + da]; if (g <= 0) continue;
-        const dh = Math.abs(g - h); pairs++;
-        if (dh < 1e-6 && h > 8) continue;            // a dead-level surface inland is a reservoir in the height data, not land
-        if (dh < 9) fl++; if (dh < 55) ge++;
-      }
+// wetlands known by name. A chunk is a natural cell (chunks.js): its outline follows the rivers, the foot of the slopes
+// and the coast, so a flood plain or a hollow is a chunk of its own, and everything here is counted over the real
+// outlines and the real neighbours of the chunks.
+//   ch: Chunks, built with the rivers (its links say where a river runs along a border)
+//   heightAt(lat, lon) → metres;  wetlands: public/assets/album/swamp/wetlands.json
+// Returns Float32Array, 0..0.95 per chunk; water chunks stay 0.
+export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
+  const n = ch.count, cell = ch.cell, out = new Float32Array(n), isLand = k => ch.kind[k] === 1;
+  // heights on the fine raster the outlines live on (1.25 km), land chunks only
+  const hgt = new Float32Array(FN * FN).fill(-1);
+  for (let ty = 0, t = 0; ty < FN; ty++) {
+    const lat = (Y0 + (ty + .5) * FKM) / KMD;
+    for (let tx = 0; tx < FN; tx++, t++) if (isLand(cell[t])) hgt[t] = heightAt(lat, (X0 + (tx + .5) * FKM) / (KMD * COS));
+  }
+  // how much of the chunk is flat ground (water stands on it) and gentle ground (a blanket of peat holds on it):
+  // the share of neighbouring points inside the chunk that differ by less than 9 m, and by less than 55 m
+  const tex = new Uint32Array(n), pairs = new Uint32Array(n), fl = new Uint32Array(n), ge = new Uint32Array(n);
+  for (let ty = 0, t = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++, t++) {
+    const k = cell[t], h = hgt[t]; tex[k]++;
+    if (h <= 0) continue;
+    for (let d = 0; d < 2; d++) {
+      if (d ? ty >= FN - 1 : tx >= FN - 1) continue;
+      const m = t + (d ? FN : 1); if (cell[m] !== k) continue;
+      const g = hgt[m]; if (g <= 0) continue;
+      const dh = Math.abs(g - h); pairs[k]++;
+      if (dh < 1e-6 && h > 8) continue;              // a dead-level surface inland is a reservoir in the height data, not land
+      if (dh < 9) fl[k]++; if (dh < 55) ge[k]++;
     }
-    if (pairs) { flat[k] = fl / pairs; gentle[k] = ge / pairs; }
   }
-  // how much lower the chunk lies than the land around it (water gathers in the low ground)
-  const tpi = new Float32Array(n);
-  for (let k = 0; k < n; k++) {
-    if (!(ch.land[k] > 0)) continue;
-    const { i, j } = ch.ij(k); let s = 0, c = 0;
-    for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const m = ch.k(i + di, j + dj); if (m >= 0 && ch.land[m] > 0) { s += ch.height[m] * ch.land[m]; c += ch.land[m]; } }
-    tpi[k] = ch.height[k] - s / c;
-  }
-  // rivers: their flood plains, and the mouths where they meet the sea
+  const flat = k => pairs[k] ? fl[k] / pairs[k] : 0, gentle = k => pairs[k] ? ge[k] / pairs[k] : 0;
+  // a river along the border of the chunk floods its plain; where the sea is a neighbour too, that is a river mouth
   const riv = new Float32Array(n), mouth = new Float32Array(n);
-  for (const r of rivers) {
-    const w = r.rank <= 6 ? 1 : r.rank <= 8 ? .75 : .5, pts = r.pts;
-    for (let q = 1; q < pts.length; q++) {
-      const [lo0, la0] = pts[q - 1], [lo1, la1] = pts[q], steps = Math.max(1, Math.ceil(Math.hypot((lo1 - lo0) * KMD * COS, (la1 - la0) * KMD) / 3));
-      for (let t = 0; t <= steps; t++) { const k = ch.at(la0 + (la1 - la0) * t / steps, lo0 + (lo1 - lo0) * t / steps); if (k >= 0) riv[k] = Math.max(riv[k], w); }
-    }
-    const end = pts[pts.length - 1], k = ch.at(end[1], end[0]); if (k < 0) continue;
-    const { i, j } = ch.ij(k); let sea = false;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const m = ch.k(i + di, j + dj); if (m >= 0 && ch.land[m] < .5) sea = true; }
-    if (sea) for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const m = ch.k(i + di, j + dj); if (m >= 0) mouth[m] = Math.max(mouth[m], w * (1 - Math.hypot(di, dj) / 3)); }
+  for (let k = 0; k < n; k++) {
+    if (!isLand(k)) continue;
+    let r = 0, sea = false;
+    for (const l of ch.links[k]) { if (l.river) r = Math.max(r, (l.river === 2 ? 1 : .65) * Math.min(1, l.wet / 5)); if (!isLand(l.k)) sea = true; }
+    riv[k] = r;
+    if (r > 0 && sea) for (const [m, steps] of ch.ring(k, 2)) mouth[m] = Math.max(mouth[m], r * (1 - steps / 3));
   }
   for (let k = 0; k < n; k++) {
-    if (!(ch.land[k] > 0)) continue;
+    if (!isLand(k)) continue;
     const c = ch.centre(k), h = ch.height[k], wet = wetAt(c.lat, c.lon, h);
-    let plain = riv[k]; for (const m of ch.neighbours(k)) plain = Math.max(plain, riv[m] * .5);
-    const level = ss(.55, .95, flat[k]), basin = ss(10, -30, tpi[k]);
+    let s = 0, a = 0;                                 // how much lower the chunk lies than the land within two chunks of it
+    for (const [m] of ch.ring(k, 2)) if (isLand(m)) { s += ch.height[m] * ch.area[m]; a += ch.area[m]; }
+    const low = h - s / a, level = ss(.55, .95, flat(k)), basin = ss(10, -30, low);
     const coast = ss(9, 2, h) * level;                                               // level ground at the height of the sea
-    const flood = plain * level * ss(20, -5, tpi[k]);                               // the flood plain of a large river
+    const flood = riv[k] * level * ss(20, -5, low);                                 // the flood plain of a river
     const humid = ss(.56, .74, wet) * level * (.45 + .55 * basin);                  // level, badly drained ground in a wet climate
-    const mire = ss(.72, .92, wet) * ss(9.5, 7, tempAt(c.lat, h)) * ss(.5, .9, gentle[k]);      // cold wet uplands
-    const v = Math.max(coast * .5, flood * .2, humid * .22, mire * .09) + mouth[k] * .12 * level;
+    const mire = ss(.72, .92, wet) * ss(9.5, 7, tempAt(c.lat, h)) * ss(.5, .9, gentle(k));      // cold wet uplands
+    const v = Math.max(coast * .5, flood * .25, humid * .22, mire * .09) + mouth[k] * .12 * level;
     out[k] = v < .04 ? 0 : Math.min(.95, v);
   }
-  // the wetlands known by name: a disc of their area, or an outline
-  const PEAK = .85;
+  // the wetlands known by name: a disc of their area (or an outline) laid over the chunks it covers, land only. Steep
+  // ground holds half of it; what it does not hold lies on the level chunks beside it, so the area is kept.
+  const PEAK = .85, TKM2 = FKM * FKM;
+  const fit = k => { const c = ch.centre(k); return .5 + .5 * Math.max(ss(.3, .8, flat(k)), ss(11.5, 9, tempAt(c.lat, ch.height[k])) * ss(.4, .8, gentle(k))); };
+  const clampT = v => Math.max(0, Math.min(FN - 1, Math.floor(v)));
   for (const w of wetlands) {
-    const k0 = ch.at(w.lat, w.lon), R = w.poly ? 0 : Math.sqrt(w.km2 / (Math.PI * PEAK));
-    const lats = w.poly ? w.poly.map(q => q[0]) : [w.lat - (R * 1.3 + CELL) / KMD, w.lat + (R * 1.3 + CELL) / KMD];
-    const lons = w.poly ? w.poly.map(q => q[1]) : [w.lon - (R * 1.3 + CELL) / (KMD * COS), w.lon + (R * 1.3 + CELL) / (KMD * COS)];
-    const a = ch.ij(Math.max(0, ch.at(Math.max(35.21, Math.min(...lats)), Math.max(-9.99, Math.min(...lons))))), b = ch.ij(Math.max(0, ch.at(Math.min(44.79, Math.max(...lats)), Math.min(4.49, Math.max(...lons)))));
-    for (let j = a.j; j <= b.j; j++) for (let i = a.i; i <= b.i; i++) {
-      const k = ch.k(i, j); if (k < 0 || !(ch.land[k] > 0)) continue;
-      let v = 0;
-      for (let sb = 0; sb < 4; sb++) for (let sa = 0; sa < 4; sa++) {
-        const y = (j + (sb + .5) / 4) * CELL, x = (i + (sa + .5) / 4) * CELL, lat = y / KMD, lon = x / (KMD * COS);
-        v += w.poly ? (inside(w.poly, lat, lon) ? w.share : 0) : PEAK * (1 - ss(.7 * R, 1.3 * R, Math.hypot(x - w.lon * KMD * COS, y - w.lat * KMD)));
-      }
-      const c = ch.centre(k), cold = ss(11.5, 9, tempAt(c.lat, ch.height[k]));
-      v = v / 16 * (.5 + .5 * Math.max(ss(.3, .8, flat[k]), cold * ss(.4, .8, gentle[k])));     // less of it where the ground is not level
-      if (k === k0 && !w.poly) v = Math.max(v, Math.min(PEAK, Math.max(.05, w.km2 / 100)));     // a small wetland still shows in its own chunk
-      if (v >= .04) out[k] = Math.min(.95, Math.max(out[k], v));
+    const acc = new Map(), R = w.poly ? 0 : Math.sqrt(w.km2 / (Math.PI * PEAK)), wx = w.lon * KMD * COS, wy = w.lat * KMD;
+    const xs = w.poly ? w.poly.map(q => q[1] * KMD * COS) : [wx - R * 1.3, wx + R * 1.3], ys = w.poly ? w.poly.map(q => q[0] * KMD) : [wy - R * 1.3, wy + R * 1.3];
+    const tx0 = clampT((Math.min(...xs) - X0) / FKM), tx1 = clampT((Math.max(...xs) - X0) / FKM), ty0 = clampT((Math.min(...ys) - Y0) / FKM), ty1 = clampT((Math.max(...ys) - Y0) / FKM);
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      const k = cell[ty * FN + tx]; if (!isLand(k)) continue;
+      const x = X0 + (tx + .5) * FKM, y = Y0 + (ty + .5) * FKM;
+      const v = w.poly ? (inside(w.poly, y / KMD, x / (KMD * COS)) ? 1 : 0) : 1 - ss(.7 * R, 1.3 * R, Math.hypot(x - wx, y - wy));
+      if (v > 0) acc.set(k, (acc.get(k) || 0) + v);
     }
+    const share = new Map();
+    if (w.poly) for (const [k, s] of acc) share.set(k, w.share * s / tex[k] * fit(k));
+    else {
+      let scale = 1;
+      for (let pass = 0; pass < 3; pass++) {
+        let area = 0; for (const [k, s] of acc) area += Math.min(.95, PEAK * s / tex[k] * fit(k) * scale) * tex[k] * TKM2;
+        if (area > 0) scale = Math.min(1.6, scale * w.km2 / area);
+      }
+      for (const [k, s] of acc) share.set(k, PEAK * s / tex[k] * fit(k) * scale);
+      // a small wetland still shows in its own chunk; one that lies in a lagoon goes to the shore with the longest border
+      let k0 = ch.at(w.lat, w.lon);
+      if (k0 >= 0 && !isLand(k0)) k0 = ch.links[k0].filter(l => isLand(l.k)).sort((p, q) => q.km - p.km)[0]?.k ?? -1;
+      if (k0 >= 0) share.set(k0, Math.max(share.get(k0) || 0, Math.min(PEAK, Math.max(.05, w.km2 / ch.area[k0]))));
+    }
+    for (const [k, v] of share) if (v >= .04) out[k] = Math.min(.95, Math.max(out[k], v));
   }
   // nothing outside the region of the album: the land shader ends there
-  for (let k = 0; k < n; k++) { const c = ch.centre(k); if (c.lat < 35.15 || c.lat > 44.85 || c.lon < -10.05 || c.lon > 4.55) out[k] = 0; }
+  for (let k = 0; k < n; k++) { if (!out[k]) continue; const c = ch.centre(k); if (c.lat < 35.15 || c.lat > 44.85 || c.lon < -10.05 || c.lon > 4.55) out[k] = 0; }
   return out;
 }
 
@@ -304,7 +313,7 @@ export default {
     const ch = album.chunks, p = album.params;
     let wetlands = [];
     try { wetlands = (await (await fetch('assets/album/swamp/wetlands.json')).json()).wetlands; } catch (e) { console.warn('[album] swamp: no list of wetlands,', e.message); }
-    const natural = naturalSwamp(ch, album.data.base.at, { rivers: album.data.vectors.rivers, wetlands });
+    const natural = naturalSwamp(ch, album.data.base.at, { wetlands });
     for (let k = 0; k < ch.count; k++) ch.setNatural('swamp', k, natural[k]);
     const centres = Array.from({ length: ch.count }, (_, k) => ch.centre(k));
     const kindOf = k => swampKind(centres[k].lat, centres[k].lon, ch.height[k]), ironOf = k => swampIron(ch.get('swamp', k), centres[k].lat, centres[k].lon, ch.height[k]);
@@ -314,7 +323,7 @@ export default {
     ch.onReset(c => {
       const f = p.get('swampFrost'); if (!f) return;
       for (let k = 0; k < c.count; k++) {
-        if (!(c.land[k] > 0)) continue;
+        if (c.kind[k] !== 1) continue;
         const s = c.get('swamp', k);
         if (s > 0) c.set('ice', k, Math.max(c.get('ice', k), f));
         c.set('snow', k, Math.max(c.get('snow', k), f * (.24 + .2 * s)));
@@ -326,7 +335,7 @@ export default {
       const id = p.get('swampMap'); if (!id) return false;
       for (let k = 0; k < ch.count; k++) {
         const s = ch.get('swamp', k);
-        if (!(s > 0) || !(ch.land[k] > 0)) { v[k] = 0; continue; }
+        if (!(s > 0) || ch.kind[k] !== 1) { v[k] = 0; continue; }
         if (id === 'kind') { const kd = kindOf(k); let best = 0; for (let i = 1; i < 4; i++) if (kd[KINDS[i]] > kd[KINDS[best]]) best = i; v[k] = (best + .6 + .38 * s) / 4; }
         else v[k] = id === 'iron' ? ironOf(k) : s;
       }
