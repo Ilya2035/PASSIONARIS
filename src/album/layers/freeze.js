@@ -44,8 +44,8 @@ export function makeFreeze(ch, heightAt) {
     }
     depth[k] = cnt ? sum / cnt : 0;
     if (!water[k]) { off[k] = 0; queue.push(k); }
-    // a chunk of water that stands above the sea is a lake (none yet: the lakes lie inside chunks of land)
-    lake[k] = water[k] && heightAt && heightAt(centres[k].lat, centres[k].lon) > 1 ? Math.max(1, heightAt(centres[k].lat, centres[k].lon)) : 0;
+    // a lake is a chunk of water of its own (ch.lake: the number of its lake); lake[k] = how high it stands, metres
+    if (water[k] && ch.lake && ch.lake[k] >= 0) lake[k] = Math.max(1, ch.lakes?.[ch.lake[k]]?.level ?? (heightAt ? heightAt(centres[k].lat, centres[k].lon) : 1));
   }
   for (let q = 0; q < queue.length; q++) for (const m of ch.neighbours(queue[q])) if (off[m] > off[queue[q]] + 1) { off[m] = off[queue[q]] + 1; queue.push(m); }
 
