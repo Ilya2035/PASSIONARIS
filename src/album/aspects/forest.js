@@ -6,6 +6,7 @@
 // The state comes from the chunks: p.cA = (forest 0 felled .. 1 natural, share of conifers, age 0 young .. 1 old, swamp).
 // The same rules place the 3D trees (layers/forest.js), and a small model here lets a felled chunk grow over again.
 import { Vector4, DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
+import { kmOf, llOf } from '../chunks.js';
 
 // ---- the natural state: the world of 5000 BC, before anyone felled anything
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -44,8 +45,12 @@ export class Regrowth {
     this.ch = ch; this.speed = speed; this.natAge = natAge;
     this.F = new Float32Array(ch.count); this.A = new Float32Array(ch.count);
     this.F0 = new Float32Array(ch.count); this.A0 = new Float32Array(ch.count);
-    this.nb = Array.from({ length: ch.count }, (_, k) => ch.neighbours(k));
-    this.live = []; for (let k = 0; k < ch.count; k++) if (ch.land[k] > 0) this.live.push(k);
+    // the land chunks a chunk borders, each with its share of the common border: seeds come across the border
+    this.nb = Array.from({ length: ch.count }, (_, k) => {
+      const land = ch.links[k].filter(l => ch.kind[l.k] === 1), km = land.reduce((s, l) => s + l.km, 0);
+      return land.map(l => [l.k, l.km / km]);
+    });
+    this.live = []; for (let k = 0; k < ch.count; k++) if (ch.kind[k] === 1) this.live.push(k);
     this.years = 0; this.fresh = true;
   }
   // after chunks.reset(): forget everything, the next sync() takes the state as it is
@@ -78,8 +83,8 @@ export class Regrowth {
       const f = F[k]; let a = A[k];
       const cap = Math.max(0, 1 - ch.get('fields', k) - ch.get('built', k));   // farmed and built land stays open
       if (f < cap - 1e-4) {
-        let near = 0; for (const m of nb[k]) near += F[m];
-        const seed = .02 + .12 * near / 4;                           // seeds come from the forest around: the edge closes first
+        let near = 0; for (const [m, share] of nb[k]) near += F[m] * share;
+        const seed = .02 + .12 * near;                               // seeds come from the forest around: the edge closes first
         const df = Math.min(cap - f, CLOSE_RATE * speed[k] * (f + seed) * (1 - f / cap) * dt);
         a *= f / (f + df); F[k] = f + df;                            // what has just come up is young
       }
@@ -97,19 +102,23 @@ export const DEMOS = {
   kinds: 'Виды: лиственный, смешанный, хвойный', density: 'Густота: от редколесья до сомкнутого', age: 'Возраст: от вырубки до старого леса',
   clearing: 'Большая вырубка', mosaic: 'Пёстрые соседние чанки',
 };
+// A chunk takes the state of the band, the ring or the lot its middle falls in, so every edge runs along the natural
+// outlines of the chunks. Distances below are in tens of km from the showcase point.
 export function applyDemo(ch, id) {
   if (!DEMOS[id]) return;
-  const c = ch.ij(ch.at(DEMO.lat, DEMO.lon)), put = (k, forest, conifer, age) => {
+  const [ox, oy] = kmOf(DEMO.lat, DEMO.lon), put = (k, forest, conifer, age) => {
     if (forest != null) ch.set('forest', k, forest); if (conifer != null) ch.set('conifer', k, conifer); if (age != null) ch.set('age', k, age);
   };
-  const band = (di, n) => Math.floor((di + n * 1.5) / 3);            // n bands of three chunks, west to east
-  for (let dj = -9; dj <= 9; dj++) for (let di = -9; di <= 9; di++) {
-    const k = ch.k(c.i + di, c.j + dj); if (k < 0) continue;
-    if (id === 'kinds') { const b = band(di, 3); if (b >= 0 && b < 3) put(k, 1, [0, .5, 1][b], .85); }
-    else if (id === 'density') { const b = band(di, 4); if (b >= 0 && b < 4) put(k, [.2, .45, .7, 1][b], .15, .85); }
-    else if (id === 'age') { const b = band(di, 5); if (b >= 0 && b < 5) put(k, [0, .3, 1, 1, 1][b], .15, [0, .04, .3, .65, 1][b]); }
-    else if (id === 'clearing') { const d = Math.hypot(di, dj); if (d < 4) put(k, ss(2.3, 3.6, d), null, null); }
-    else if (id === 'mosaic' && Math.abs(di) <= 7 && Math.abs(dj) <= 7) {
+  const band = (dx, n) => Math.floor((dx + n * 1.5) / 3);            // n bands 30 km wide, west to east
+  for (let k = 0; k < ch.count; k++) {
+    if (!ch.kind[k]) continue;
+    const c = ch.centre(k), dx = (c.x - ox) / 10, dy = (c.y - oy) / 10;
+    if (Math.abs(dx) > 9.5 || Math.abs(dy) > 9.5) continue;
+    if (id === 'kinds') { const b = band(dx, 3); if (b >= 0 && b < 3) put(k, 1, [0, .5, 1][b], .85); }
+    else if (id === 'density') { const b = band(dx, 4); if (b >= 0 && b < 4) put(k, [.2, .45, .7, 1][b], .15, .85); }
+    else if (id === 'age') { const b = band(dx, 5); if (b >= 0 && b < 5) put(k, [0, .3, 1, 1, 1][b], .15, [0, .04, .3, .65, 1][b]); }
+    else if (id === 'clearing') { const d = Math.hypot(dx, dy); if (d < 4) put(k, ss(2.3, 3.6, d), null, null); }
+    else if (id === 'mosaic' && Math.abs(dx) <= 7.5 && Math.abs(dy) <= 7.5) {
       const a = hashK(k), b = hashK(k + 7919), f = hashK(k + 104729);
       put(k, f < .22 ? .3 : f < .4 ? .65 : 1, [0, .5, 1][Math.floor(a * 3)], .2 + .8 * b);
     }
@@ -202,7 +211,7 @@ const GLSL = /* glsl */`
 ${FOREST_RULES}
 ${TREE_DARK}
 uniform vec4 uTreeZone;   // where the 3D trees stand: centre x, y and radius in km, and the strength of the darkening among them (albumTreeGain)
-uniform sampler2D tForestRise;   // mean height of the land of every chunk, / 4096 m: the country around a place
+uniform sampler2D tForestRise;   // mean height of the land in squares of 10 km, / 4096 m: the country around a place
 // crowns: a jittered lattice of points like worleyV() — xy = vector to the nearest point, z = distance to it, w = its
 // random number. The number is taken from the hash that places the point, which stays good far from the origin.
 // (A cheaper lattice of four cells with less jitter was tried: its regular rows show from above.)
@@ -331,8 +340,8 @@ export default {
     { id: 'forest-regrow', group: 'Лес', title: 'Зарастание: свежая вырубка', note: 'Лес сведён на 60 км в поперечнике. Время идёт (ползунок «Ход времени», раздел «Система»): вырубка зарастает от краёв к середине. Ползунок «Зарастание: прошло лет» сразу показывает нужный год.', p: { forestDemo: 'clearing', play: 6, ...PLAIN }, cam: demoCam(100, 42) },
     { id: 'forest-regrow-40', group: 'Лес', title: 'Зарастание: через 40 лет', note: 'Та же вырубка. Края сомкнулись молодняком, в середине кусты и первые рощи.', p: { forestDemo: 'clearing', regrow: 40, play: 0, ...PLAIN }, cam: demoCam(100, 42) },
     { id: 'forest-regrow-150', group: 'Лес', title: 'Зарастание: через 150 лет', note: 'Лес вернулся и почти сравнялся со старым вокруг; середина ещё моложе и светлее.', p: { forestDemo: 'clearing', regrow: 150, play: 0, ...PLAIN }, cam: demoCam(100, 42) },
-    { id: 'forest-seam', group: 'Лес', title: 'Стык чанков: соседи с разным лесом', note: 'У каждого чанка своё случайное состояние: вид леса, возраст, сколько стоит. Сетки на картинке нет: границы идут неровно, как в природе.', p: { forestDemo: 'mosaic', ...PLAIN }, cam: demoCam(120, 30) },
-    { id: 'forest-seam-grid', group: 'Лес', title: 'Тот же стык с сеткой чанков', note: 'Те же чанки с сеткой 10 км. Наведите курсор на чанк: внизу видно его состояние.', p: { forestDemo: 'mosaic', grid: 1, chunkInfo: 1, ...PLAIN }, cam: demoCam(120, 30) },
+    { id: 'forest-seam', group: 'Лес', title: 'Стык чанков: соседи с разным лесом', note: 'У каждого чанка своё случайное состояние: вид леса, возраст, сколько стоит. Очертаний чанков на картинке не видно: лес меняется куртинами, как в природе.', p: { forestDemo: 'mosaic', ...PLAIN }, cam: demoCam(120, 30) },
+    { id: 'forest-seam-grid', group: 'Лес', title: 'Тот же стык с границами чанков', note: 'Те же чанки с их настоящими очертаниями. Наведите курсор на чанк: внизу видно его состояние. Перемена леса идёт не по линиям границ, а куртинами.', p: { forestDemo: 'mosaic', grid: 1, chunkInfo: 1, ...PLAIN }, cam: demoCam(120, 30) },
     { id: 'forest-3d', group: 'Лес', title: 'Лес с 20 км: объёмные кроны', note: 'Природный лес Пикос-де-Эуропа. Поверх краски стоят мелкие деревья: лиственные круглые, хвойные острые, молодые меньше старых.', p: { forest3d: 1 }, cam: { ...NEAR, h: 22, tilt: 55, heading: 150 } },
     { id: 'forest-paint', group: 'Лес', title: 'Лес с 20 км только краской', note: 'Тот же вид без объёмных деревьев: лес показан цветом и рисунком крон на земле.', p: { forest3d: 0 }, cam: { ...NEAR, h: 22, tilt: 55, heading: 150 } },
     { id: 'forest-moss', group: 'Лес', title: 'Лес как мох с 200 км', note: 'Обычная игровая высота. Лес — мягкий ворс из пучков трёх размеров; хвойные пояса гор темнее и ровнее лиственных долин.', p: {}, cam: { ...NEAR, h: 200, tilt: 40, heading: 170 } },
@@ -347,9 +356,15 @@ export default {
       ch.setNatural('conifer', k, n.conifer); ch.setNatural('age', k, n.age);
       speed[k] = n.speed; natAge[k] = ch.getNatural('age', k);
     }
-    // the country around a place, for the conifers that take the higher ground: mean land height of every chunk
-    const rise = new Uint8Array(ch.count); for (let k = 0; k < ch.count; k++) rise[k] = Math.max(0, Math.min(255, Math.round(ch.height[k] / 4096 * 255)));
-    const riseTex = new DataTexture(rise, ch.n, ch.n, RedFormat, UnsignedByteType);
+    // the country around a place, for the conifers that take the higher ground: mean height of the land in squares of
+    // 10 km over the mapped square of the chunks (uChunkRect)
+    const RN = 128, rect = ch.uniforms.uChunkRect.value, step = 1 / rect.z / RN, at = album.data.base.at, rise = new Uint8Array(RN * RN);
+    for (let j = 0, o = 0; j < RN; j++) for (let i = 0; i < RN; i++, o++) {
+      let sum = 0, n = 0;
+      for (let b = 0; b < 3; b++) for (let a = 0; a < 3; a++) { const q = llOf(rect.x + (i + (a + .5) / 3) * step, rect.y + (j + (b + .5) / 3) * step), h = at(q.lat, q.lon); if (h > 0) { sum += h; n++; } }
+      rise[o] = n ? Math.min(255, Math.round(sum / n / 4096 * 255)) : 0;
+    }
+    const riseTex = new DataTexture(rise, RN, RN, RedFormat, UnsignedByteType);
     riseTex.magFilter = riseTex.minFilter = LinearFilter; riseTex.wrapS = riseTex.wrapT = ClampToEdgeWrapping; riseTex.needsUpdate = true;
     this.uniforms.tForestRise.value = riseTex;
     const model = album.forest = new Regrowth(ch, speed, natAge);
@@ -363,7 +378,7 @@ export default {
     lay();
     const time = { id: 'forestTime', update(dt) {
       if (pending) { pending = false; acc = 0; model.restart(); model.sync(); model.step(+p.get('regrow') || 0); return; }
-      acc += dt; if (acc < .1) return;
+      acc += dt; if (acc < .25) return;                              // four times a second is enough for a forest
       const years = album.shot ? 0 : acc * p.get('play') * YEARS_PER_SECOND; acc = 0;
       model.sync(); model.step(years);
     } };

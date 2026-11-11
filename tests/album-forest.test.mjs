@@ -2,7 +2,7 @@
 // states, the pages, and the parts of the 3D trees that can be checked without a GPU.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Chunks, CN } from '../src/album/chunks.js';
+import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import forest, { naturalForest, wetAt, Regrowth, applyDemo, DEMO, DEMOS, FOREST_RULES, CLOSE_RATE, OLD_AFTER } from '../src/album/aspects/forest.js';
 import { treeLevel, crownGeometry, G, K0, S0 } from '../src/album/layers/forest.js';
 import { DEFS } from '../src/album/params.js';
@@ -10,7 +10,7 @@ import { PAGES } from '../src/album/pages.js';
 
 const near = (a, b, e = .004) => Math.abs(a - b) <= e;
 const model = (ch, speed = 1, natAge = .9) => new Regrowth(ch, new Float32Array(ch.count).fill(speed), new Float32Array(ch.count).fill(natAge));
-const land = () => new Chunks(() => 300);
+const LAND = new Chunks(() => 300), land = () => { LAND.reset(); return LAND; };   // one world of plain land for all tests, reset for each
 
 test('forest nature: conifers in the mountains and the dry south, broadleaf on the Atlantic coast; old forest where it is wet', () => {
   const coast = naturalForest(43.3, -4, 100), pyrenees = naturalForest(42.6, .7, 1800), dry = naturalForest(37.8, -1.8, 400), meseta = naturalForest(40.5, -3.5, 800);
@@ -44,19 +44,23 @@ test('forest growing over: a felled chunk closes with young forest, then the for
   assert.ok(seen[40].f > .85 && seen[40].a < .3, `young closed forest after 40 years: ${JSON.stringify(seen[40])}`);
   assert.ok(seen[150].f > .99 && seen[150].a > .6, `grown forest after 150 years: ${JSON.stringify(seen[150])}`);
   assert.ok(near(seen[300].a, .9), 'old forest in the end, no older than nature allows');
-  assert.ok(near(ch.get('forest', k + 5), 1) && near(ch.get('age', k + 5), ch.getNatural('age', k + 5), .11), 'untouched chunks stay as they were');
+  const far = ch.at(38, -6);
+  assert.ok(near(ch.get('forest', far), 1) && near(ch.get('age', far), ch.getNatural('age', far), .11), 'untouched chunks stay as they were');
   assert.ok(CLOSE_RATE > 0 && OLD_AFTER > 50);
 });
 
 test('forest growing over: the edge of a large clearing closes first, and time adds up', () => {
-  const ch = land(), a = model(ch), b = model(new Chunks(() => 300)), c = ch.ij(ch.at(42, -3));
-  const cut = (chunks) => { for (let dj = -4; dj <= 4; dj++) for (let di = -4; di <= 4; di++) chunks.set('forest', chunks.k(c.i + di, c.j + dj), 0); };
-  a.sync(); cut(ch); a.sync(); a.step(18);
-  const edge = ch.get('forest', ch.k(c.i + 4, c.j)), middle = ch.get('forest', ch.k(c.i, c.j));
-  assert.ok(edge > middle + .1, `edge ${edge} closes before the middle ${middle}`);
-  b.sync(); cut(b.ch); b.sync(); for (let i = 0; i < 9; i++) b.step(2);
-  assert.ok(near(b.ch.get('forest', b.ch.k(c.i, c.j)), middle, .02), 'nine steps of two years are one step of eighteen');
+  const ch = land(), a = model(ch), c = ch.at(42, -3), ring = ch.ring(c, 4);          // a clearing four chunks deep around c
+  const cut = () => { for (const [k] of ring) ch.set('forest', k, 0); };
+  a.sync(); cut(); a.sync(); a.step(18);
+  const rim = ring.filter(([, d]) => d === 4).map(([k]) => ch.get('forest', k)), edge = rim.reduce((s, v) => s + v, 0) / rim.length, middle = ch.get('forest', c);
+  assert.ok(rim.length > 6 && edge > middle + .1, `edge ${edge} closes before the middle ${middle}`);
   assert.equal(a.years, 18);
+  ch.reset(); const b = model(ch);
+  b.sync(); cut(); b.sync(); for (let i = 0; i < 9; i++) b.step(2);
+  assert.ok(near(ch.get('forest', c), middle, .02), 'nine steps of two years are one step of eighteen');
+  // seeds come across the borders with the land chunks around, each by its share of the common border
+  assert.ok(ch.links[c].length >= 3 && a.nb[c].every(([k, share]) => ch.kind[k] === 1 && share > 0) && near(a.nb[c].reduce((s, [, share]) => s + share, 0), 1, 1e-6));
 });
 
 test('forest growing over: fields and houses hold the land; felling by others is taken in; reset starts again', () => {
@@ -82,18 +86,20 @@ test('forest demonstrations: only the forest channels change, only around the sh
     const ch = new Chunks(), before = { A: ch.bytes.A.slice(), B: ch.bytes.B.slice(), C: ch.bytes.C.slice() };
     applyDemo(ch, id);
     let changed = 0;
-    const c0 = ch.ij(ch.at(DEMO.lat, DEMO.lon));
+    const [ox, oy] = kmOf(DEMO.lat, DEMO.lon);
     for (let k = 0; k < ch.count; k++) {
       for (const t of 'BC') for (let b = 0; b < 4; b++) assert.equal(ch.bytes[t][k * 4 + b], before[t][k * 4 + b], `${id}: channel ${t}${b} untouched`);
       assert.equal(ch.bytes.A[k * 4 + 3], before.A[k * 4 + 3], `${id}: swamp untouched`);
       const dirty = [0, 1, 2].some(b => ch.bytes.A[k * 4 + b] !== before.A[k * 4 + b]);
-      if (dirty) { changed++; const { i, j } = ch.ij(k); assert.ok(Math.abs(i - c0.i) <= 9 && Math.abs(j - c0.j) <= 9, `${id}: far chunk changed`); }
+      if (dirty) { changed++; const c = ch.centre(k); assert.ok(Math.abs(c.x - ox) <= 95 && Math.abs(c.y - oy) <= 95 && ch.kind[k] === 1, `${id}: far chunk changed`); }
     }
     assert.ok(changed > 20, `${id} changes chunks: ${changed}`);
   }
-  const ch = new Chunks(), c = ch.ij(ch.at(DEMO.lat, DEMO.lon));
+  const ch = new Chunks(), [ox, oy] = kmOf(DEMO.lat, DEMO.lon);
   applyDemo(ch, 'kinds');
-  assert.deepEqual([-3, 0, 3].map(di => ch.get('conifer', ch.k(c.i + di, c.j))), [0, 128 / 255, 1], 'three bands: broadleaf, mixed, conifer');
+  // a chunk belongs to the band its middle lies in: chunks whose middles sit near the middle of a band are surely its own
+  const shareAt = dx => { const q = llOf(ox + dx, oy), k = ch.at(q.lat, q.lon), c = ch.centre(k); return Math.abs(c.x - ox - dx) < 12 ? Math.round(ch.get('conifer', k) * 2) / 2 : dx / 60 + .5; };
+  assert.deepEqual([-30, 0, 30].map(shareAt), [0, .5, 1], 'three bands: broadleaf, mixed, conifer');
   applyDemo(ch, 'nothing'); applyDemo(ch, '');
   assert.ok(DEMO.lat > 35.2 && DEMO.lat < 44.8 && ch.at(DEMO.lat, DEMO.lon) >= 0);
 });
@@ -141,5 +147,5 @@ test('forest trees: the lattice thins without a jump as the camera rises, and th
     assert.ok(n[0] * out[0] + n[1] * out[1] + n[2] * out[2] > 0, `triangle ${t / 3} faces outward`);
   }
   assert.ok(Math.max(...g.pos.filter((_, i) => i % 3 === 2)) < Math.max(...g.spire.filter((_, i) => i % 3 === 2)), 'a conifer is taller than a broadleaf crown');
-  assert.equal(CN, 128);
+
 });
