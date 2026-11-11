@@ -1,4 +1,5 @@
-// ASPECT «Деление»: districts, provinces and regions over the map, built from whole chunks. This file and
+// ASPECT «Деление»: the historical lands over the map — regions, provinces (public/assets/album/division/lands.json)
+// and districts (valleys, comarcas), all built from whole chunks; states of history assembled from them. This file and
 // src/album/division/ belong to the division work; the contract with the rest of the album is in
 // docs/ALBUM-CHUNKS.md, the algorithm in docs/album/division.md.
 //   aspDivision(p, col, landA) → tints the finished colour by district, province or region and draws the borders
@@ -140,7 +141,7 @@ void aspDivision(Px p, inout vec3 col, float landA) {
   col = mix(col, mix(cw, cl, landA), inR);
 }`;
 
-const ZARAGOZA = [41.65, -0.88];
+const ZARAGOZA = [41.65, -0.89];                    // the town of the album data (vectors.places)
 const PAPER = { look: 'paper', forest3d: 0, roadsOn: 0 };      // no roads on these pages: their dark lines read as borders
 const NATURAL = { look: 'natural', roadsOn: 0 };
 // the states of history the knob offers: ids of lands.json "states"
