@@ -13,14 +13,13 @@
 import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial, Vector2, WebGLRenderTarget, NearestFilter,
   Scene, OrthographicCamera, PlaneGeometry, NoBlending } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
-import { FOREST_RULES } from '../aspects/forest.js';
+import { FOREST_RULES, TREE_DARK } from '../aspects/forest.js';
 import { kmOf } from '../chunks.js';
 
 export const G = 384;            // the lattice is G × G cells around the camera target
 export const K0 = .0045;         // spacing of the trees, km per km of camera height
 export const S0 = K0 * 20;       // cell of the finest lattice, km: the spacing at the lowest camera
 export const CROWN = .62;        // width of a full-grown crown as a share of the spacing
-const ZONE_DARK = [.08, .29];   // share of the light the finishing pass takes from a forest with 3D trees: seen from above, and more per (1 − cos tilt). Measured at «Затенение у объектов» 0.8 (docs/album/forest.md)   // lift of the canopy painted under the trees and of the crowns themselves per unit of «Затенение у объектов» (measured: docs/album/forest.md)
 
 // which lattice the camera height asks for: cell size S, how far the thinning toward the next lattice has gone
 // (phase 0..1) and the size of the trees that are on their way out (thin 1..0)
@@ -132,6 +131,7 @@ export default async function init(album) {
     vertexShader: `${COMMON}
       ${LIGHT}
       ${TREE_GLSL}
+      ${TREE_DARK}
       attribute vec2 aCell; attribute vec3 aSpire, aSpireN;
       uniform highp sampler2D tTreeA, tTreeB;
       uniform vec2 uCellBase, uEye; uniform float uLevel, uThin, uSize, uRad, uFade, uGain;
@@ -143,7 +143,7 @@ export default async function init(album) {
         if (A.b < .004) return;                                      // nothing stands in this cell
         vec2 c0; float surv; treeCell(aCell + uCellBase, uLevel, c0, surv);
         vec2 pk = treeSpot(c0);
-        float edge = smoothstep(1., .78, length(pk - uEye) / uRad), size = A.b * 1.5 * uSize * mix(uThin, 1., surv) * edge * uFade;
+        float edge = smoothstep(1., .66, length(pk - uEye) / uRad), size = A.b * 1.5 * uSize * mix(uThin, 1., surv) * edge * uFade;
         if (size < 1e-5) return;
         vec4 B = texelFetch(tTreeB, tc, 0);
         vec2 ll = vec2(pk.y / KM, pk.x / (KM * COSREF)), r = hash22(c0 + 3.1);
@@ -156,7 +156,7 @@ export default async function init(album) {
         float dl = radians(ll.y - LON0);
         vec3 east = normalize(vec3(cos(dl), -sin(dl) * C0, -sin(dl) * S0)), north = cross(up, east);
         vec3 w = base + (east * q.x + north * q.y + up * (q.z - .03)) * size;
-        vN = n; vCol = B.rgb; vGain = 1. + uGain * edge * edge * (1. + .04 * kind); vOpen = 1.45 * (.45 + .55 * mix(position.z / .8, aSpire.z / 1.5, kind)); vHaze = albumHaze(w);
+        vN = n; vCol = B.rgb; vGain = albumTreeGain(uGain * edge * edge * (1. + .04 * kind), dot(normalize(cameraPosition - w), up)); vOpen = 1.45 * (.45 + .55 * mix(position.z / .8, aSpire.z / 1.5, kind)); vHaze = albumHaze(w);
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
       }`,
     fragmentShader: `${COMMON}
@@ -178,12 +178,10 @@ export default async function init(album) {
     uCellBase.value.set(Math.round(ex / lv.S), Math.round(ey / lv.S)); uLevel.value = lv.n;
     u.uEye.value.set(ex, ey); u.uThin.value = lv.thin; u.uSize.value = lv.x * CROWN * size; u.uRad.value = rad; u.uFade.value = fade;
     geo.instanceCount = within(rad / lv.S + 1.5);
-    // the finishing pass (post.js) darkens the ground between trees; the canopy painted under them is lifted by as much,
-    // so the forest with trees is as light as the forest painted beyond them and the edge of the lattice does not show
+    // strength of the darkening the finishing pass lays among the trees; the ground under them and the crowns are
+    // shown lighter by as much (TREE_DARK in aspects/forest.js)
     const ao = p.get('fx') ? p.get('ao') : 0;
-    // how much of the light that pass takes away, measured: more when the camera looks along the ground
-    const dark = Math.min(.45, ao / .8 * (ZONE_DARK[0] + ZONE_DARK[1] * (1 - Math.cos(cam.s.tilt * Math.PI / 180))) * Math.min(1.5, size * size) * fade * fade);
-    T.uTreeZone.value.set(ex, ey, rad, 1 / (1 - dark) - 1); u.uGain.value = T.uTreeZone.value.w;
+    T.uTreeZone.value.set(ex, ey, rad, ao / .8 * Math.min(1.5, size * size) * fade * fade); u.uGain.value = T.uTreeZone.value.w;
     // heights as the ground mesh under the camera takes them (terrain.js), so the trees stand on it
     const c0 = 2 ** Math.round(Math.log2(Math.max(.03, Math.min(6, h * .0042))));
     v.uLod.value = Math.max(0, Math.log2(c0 / .234)); v.uEps.value = Math.max(c0 * .5, .12);

@@ -189,9 +189,19 @@ vec3 albumForestTint(float con, float age, float wet, float hl, float lat, float
 }
 `;
 
+// The finishing pass of the picture (post.js: «Затенение у объектов») darkens a forest that has 3D trees in it: the
+// ground between the trees and their lower halves. Measured share of the light it takes: 8 % seen from straight
+// above, 29 % more per (1 − cosine of the angle between the view and the vertical); strength is 1 at the usual setting
+// of that knob and full-size trees. The ground under the trees and the crowns are shown lighter by exactly as much,
+// so a forest with trees is as light as the forest painted beyond them and the edge of the lattice does not show.
+export const TREE_DARK = /* glsl */`
+float albumTreeGain(float strength, float up) { return 1. / (1. - min(.45, strength * (.08 + .29 * (1. - up)))); }
+`;
+
 const GLSL = /* glsl */`
 ${FOREST_RULES}
-uniform vec4 uTreeZone;   // where the 3D trees stand: centre x, y and radius in km, and how much lighter the canopy under them must come out on screen
+${TREE_DARK}
+uniform vec4 uTreeZone;   // where the 3D trees stand: centre x, y and radius in km, and the strength of the darkening among them (albumTreeGain)
 uniform sampler2D tForestRise;   // mean height of the land of every chunk, / 4096 m: the country around a place
 // crowns: a jittered lattice of points like worleyV() — xy = vector to the nearest point, z = distance to it, w = its
 // random number. The number is taken from the hash that places the point, which stays good far from the origin.
@@ -294,8 +304,8 @@ void aspForest(Px p, inout Land L) {
   float ta = mix(.2, .46, ya) * (1. + .25 * oa);                     // how much one crown differs from the next
   vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day) * (dens > .01 ? mix(vec3(1.), texDetail(tForest, pk, px, p.pdx, p.pdy), .35) : vec3(1.));
   // the finishing pass (post.js) darkens the ground between 3D trees: under them the canopy is painted lighter by as much
-  float zone = smoothstep(1., .78, length(pk - uTreeZone.xy) / uTreeZone.z); zone *= zone * uTreeZone.w * (1. + .04 * kind);
-  if (zone > .002) canopy = forestLift(canopy, p.sunCol * max(dot(p.n, uSun), 0.) * p.sh * 1.25 + p.skyCol * (.4 + .6 * p.n.z) * p.ao, 1. + zone, albumHaze(worldOf(p.ll, p.hl * uExag / 1000.)));
+  float zone = smoothstep(1., .66, length(pk - uTreeZone.xy) / uTreeZone.z); zone *= zone * uTreeZone.w * (1. + .04 * kind);
+  if (zone > .002) canopy = forestLift(canopy, p.sunCol * max(dot(p.n, uSun), 0.) * p.sh * 1.25 + p.skyCol * (.4 + .6 * p.n.z) * p.ao, albumTreeGain(zone, p.V.z), albumHaze(worldOf(p.ll, p.hl * uExag / 1000.)));
   // rim and shade grow with the height of the stand; the ground between the crowns of an open stand is mostly in the sun
   float tall = .3 + .7 * ya, rim = clamp(mask - coverS, 0., 1.) * tall, castS = clamp(coverS - mask, 0., 1.) * coverS * tall;
   L.col = mix(L.col * (1. - .5 * castS * p.day), canopy * (1. + .35 * rim * p.day), mask);
