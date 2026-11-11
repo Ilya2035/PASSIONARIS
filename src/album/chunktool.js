@@ -2,7 +2,7 @@
 // demonstrations (people clearing forest around their settlements, the sea freezing, snow falling), a brush that
 // changes chunks by a click, the read-out of the chunk under the cursor and a view of any chunk number as flat
 // squares. The demonstrations are stand-ins: the real rules of forest, ice and settlements are the aspects' work.
-import { CHANNELS, RAMPS, CN } from './chunks.js';
+import { CHANNELS, RAMPS } from './chunks.js';
 import { pickGround } from './pick.js';
 
 const D = Math.PI / 180;
@@ -73,11 +73,9 @@ export default async function init(album) {
     const b = p.get('brush'); if (!b) return;
     const ll = pickGround(album, e.clientX, e.clientY); if (!ll) return;
     const k = ch.at(ll.lat, ll.lon); if (k < 0) return;
-    const name = b.slice(0, -1), sign = b.endsWith('+') ? 1 : -1, r = Math.round(p.get('brushSize')) - 1, x0 = k % CN, y0 = (k / CN) | 0;
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-      const x = x0 + dx, y = y0 + dy, d = Math.hypot(dx, dy); if (x < 0 || y < 0 || x >= CN || y >= CN || d > r + .3) continue;
-      ch.add(name, y * CN + x, sign * .5 * (1 - .5 * d / (r + 1)));
-    }
+    const name = b.slice(0, -1), sign = b.endsWith('+') ? 1 : -1, r = Math.round(p.get('brushSize')) - 1;
+    const water = name === 'ice';         // the brush stays on its own element: forest and fields on land, ice on water
+    for (const [m, d] of ch.ring(k, r)) if (name === 'snow' || (ch.kind[m] === 0) === water) ch.add(name, m, sign * .5 * (1 - .5 * d / (r + 1)));
   }
   let down = null, last = null;
   dom.addEventListener('pointerdown', e => { down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; });
@@ -94,11 +92,12 @@ export default async function init(album) {
   return { id: 'chunktool', update() {
     if (p.get('chunkData') && shown !== ch.version) { showData(); shown = ch.version; }
     if (tick++ % 3) return;
-    const on = !!p.get('chunkInfo') || !!p.get('brush'), hv = ch.uniforms.uChunkHover.value;
+    const on = !!p.get('chunkInfo') || !!p.get('brush');
     const ll = on && last ? pickGround(album, last.clientX, last.clientY) : null, k = ll ? ch.at(ll.lat, ll.lon) : -1;
-    if (k < 0) { hv.z = 0; info.style.display = 'none'; return; }
-    const { i, j } = ch.ij(k); hv.set(i, j, 1);
-    const parts = [`Чанк ${i} : ${j}`, `суша ${pct(ch.land[k])}`];
+    ch.uniforms.uChunkHoverId.value = k;
+    if (k < 0) { info.style.display = 'none'; return; }
+    const parts = [`Чанк № ${k}`, ch.kind[k] ? 'суша' : 'вода', `${Math.round(ch.area[k])} км²`, `соседей ${ch.links[k].length}`];
+    if (ch.kind[k] && ch.links[k].some(l => l.river)) parts.push('граница по реке');
     for (const name of ['forest', 'conifer', 'swamp', 'fields', 'built', 'ice', 'snow']) { const v = ch.get(name, k); if (v > .004 || name === 'forest') parts.push(`${CHANNELS[name][2]} ${pct(v)}`); }
     for (const l of ch.layers.values()) if (l.data[k]) parts.push(`${l.title} ${Math.round(l.data[k] * 10) / 10}${l.unit ? ' ' + l.unit : ''}`);
     info.textContent = parts.join(' · '); info.style.display = album.shot ? 'none' : 'block';

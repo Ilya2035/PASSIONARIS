@@ -7,11 +7,12 @@
 // overlays, air. The living and changing things — swamp, fields, forest, water, borders — are aspects
 // (src/album/aspects/*.js), each one file with its own owner; they read the state of the chunks (chunks.js) and are
 // all lit by the same light (LIGHT in glsl.js). The contract is docs/ALBUM-CHUNKS.md.
-import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Vector2, Vector3, Vector4, SphereGeometry, BackSide, Color } from 'three';
+import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Vector2, Vector3, Vector4, SphereGeometry, BackSide, Color, DataArrayTexture, RGBAFormat,
+  UnsignedByteType, SRGBColorSpace, RepeatWrapping, LinearMipmapLinearFilter, LinearFilter } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT } from './glsl.js';
 import { ASPECT_GLSL, ASPECT_UNIFORMS } from './aspects/index.js';
 import { R, KM_PER_DEG, COS_REF } from './geo.js';
-import { CHUNK_KM } from './chunks.js';
+import { FKM } from './chunks.js';
 
 const M = 160, LEVELS = 9;
 
@@ -38,9 +39,17 @@ ${CHUNK_GLSL}
 ${LIGHT}
 uniform float uTime, uShade, uSnow, uForestK, uSeason;
 uniform int uGrid, uData;
-uniform sampler2D tGrass, tDry, tRock, tSand, tSnow, tForest;
+// The six ground photos are layers of one texture: a pixel shader may read only 16 textures, and the aspects need
+// some of them. Their names stay, as layer numbers for texDetail().
+uniform highp sampler2DArray tGround;
+#define tGrass 0
+#define tDry 1
+#define tRock 2
+#define tSand 3
+#define tSnow 4
+#define tForest 5
 uniform sampler2D uFire; uniform vec4 uFireRect; uniform float uFireOn; uniform vec4 uQuake;
-uniform sampler2D tChunkD; uniform float uChunkShow; uniform vec3 uChunkHover;
+uniform sampler2D tChunkPal; uniform float uChunkShow, uChunkHoverId;
 varying vec2 vLL; varying vec3 vPos;
 
 // ---- what every aspect is told about the pixel
@@ -75,10 +84,11 @@ float heightPix(vec2 ll) {
 }
 // a ground photo as detail around 1: keeps our palette, adds real grain. The tile grows with the pixel size, so a
 // tile is always tens of pixels wide and its repetition never shows.
-vec3 texDetail(sampler2D t, vec2 pk, float px, vec2 dx, vec2 dy) {
-  float L = clamp(log(max(px, 1e-4) * 380. / 1.9) / 1.65, 0., 2.999), i = floor(L), f = L - i, s0 = 1.9 * pow(5.2, i), s1 = s0 * 5.2;
-  vec3 a = textureGrad(t, pk / s0 + i * .37, dx / s0, dy / s0).rgb, b = textureGrad(t, pk.yx / s1 + i * .61 + .5, dx.yx / s1, dy.yx / s1).rgb;
-  vec3 r = mix(a, b, f) / max(textureLod(t, vec2(.5), 10.).rgb, vec3(.04));
+// t is one of tGrass, tDry, tRock, tSand, tSnow, tForest: a layer of the ground-photo texture.
+vec3 texDetail(int t, vec2 pk, float px, vec2 dx, vec2 dy) {
+  float L = clamp(log(max(px, 1e-4) * 380. / 1.9) / 1.65, 0., 2.999), i = floor(L), f = L - i, s0 = 1.9 * pow(5.2, i), s1 = s0 * 5.2, z = float(t);
+  vec3 a = textureGrad(tGround, vec3(pk / s0 + i * .37, z), dx / s0, dy / s0).rgb, b = textureGrad(tGround, vec3(pk.yx / s1 + i * .61 + .5, z), dx.yx / s1, dy.yx / s1).rgb;
+  vec3 r = mix(a, b, f) / max(textureLod(tGround, vec3(.5, .5, z), 10.).rgb, vec3(.04));
   return clamp(mix(vec3(dot(r, vec3(.333))), r, .4), .55, 1.6);
 }
 vec3 hypso(float h) {
@@ -208,23 +218,18 @@ void main() {
 
   // ---- map modes drawn on the ground
   aspDivision(p, col, landA);
-  if (uGrid > 0) {                                                  // the chunks, 10 by 10 km
-    vec2 t = abs(fract(pk / ${CHUNK_KM}. + .5) - .5) * ${CHUNK_KM}.;
-    col = mix(col, vec3(1., .95, .8), (1. - smoothstep(px * .5, px * 1.3, min(t.x, t.y))) * (.14 + .14 * landA) * smoothstep(1.6, .3, px));
-  }
   if (uData > 0 && landA > .5) {
     float temp = 17.5 - (lat - 38.) * .75 - hl * .0062, v = uData == 1 ? clamp((temp + 4.) / 24., 0., 1.) : clamp(hl / 3000., 0., 1.);
     vec3 ramp = uData == 1 ? mix(mix(vec3(.25, .40, .80), vec3(.95, .93, .70), smoothstep(0., .55, v)), vec3(.82, .25, .15), smoothstep(.55, 1., v)) : hypso(hl);
     ramp *= .92 + .08 * step(.5, fract(v * 12.));
     col = ramp * (.62 + .45 * nl * sh);
   }
-  if (uChunkShow > 0.) {                                            // one number per chunk as flat squares (chunks.show)
-    vec4 dc = texture(tChunkD, (pk - uChunkRect.xy) * uChunkRect.zw);
-    col = mix(col, pow(dc.rgb, vec3(2.2)) * (.5 + .9 * dot(col, vec3(.33))), dc.a * uChunkShow);
-  }
-  if (uChunkHover.z > .5) {                                         // the chunk under the cursor
-    vec2 q = pk / ${CHUNK_KM}. - uChunkHover.xy, b = min(q, 1. - q) * ${CHUNK_KM}.;
-    if (q.x > 0. && q.y > 0. && q.x < 1. && q.y < 1.) col = mix(col, vec3(1.6, 1.3, .5), .18 + .7 * (1. - smoothstep(px * 1.2, px * 2.6, min(b.x, b.y))));
+  // the chunks themselves: a number of theirs as colour (chunks.show), their outlines, the one under the cursor
+  if (uGrid > 0 || uChunkShow > 0. || uChunkHoverId >= 0.) {
+    vec2 cc = chunkCell(pk); float edge = cc.y * ${(FKM / 2).toFixed(4)};          // km from the border of the chunk
+    if (uChunkShow > 0.) { vec4 dc = texelFetch(tChunkPal, chunkTexel(cc.x), 0); col = mix(col, pow(dc.rgb, vec3(2.2)) * (.5 + .9 * dot(col, vec3(.33))), dc.a * uChunkShow); }
+    if (uGrid > 0) col = mix(col, vec3(1., .95, .8), (1. - smoothstep(px * .5, px * 1.5, edge)) * (.22 + .2 * landA) * smoothstep(1.6, .3, px));
+    if (cc.x == uChunkHoverId) col = mix(col, vec3(1.6, 1.3, .5), .18 + .6 * (1. - smoothstep(px * 1.2, px * 2.8, edge)));
   }
   if (uQuake.z > 0. && landA > .5) {                               // what each district felt, and the rupture
     vec3 cc = districtAt(pk);
@@ -251,6 +256,22 @@ void main() {
   gl_FragColor = vec4(albumFinish(albumAir(col, vPos)), 1.);
 }`;
 
+// The ground photos as layers of one texture, 1024 px a side. They are only seen much reduced (a tile is never
+// under about 2 km across), so nothing is lost against the 2048 px originals and they take a quarter of the memory.
+function groundArray(photos) {
+  const S = 1024, layer = S * S * 4, data = new Uint8Array(layer * photos.length), cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  photos.forEach((t, i) => {
+    if (!t?.image) { data.fill(128, i * layer, (i + 1) * layer); return; }
+    ctx.drawImage(t.image, 0, 0, S, S); data.set(ctx.getImageData(0, 0, S, S).data, i * layer);
+  });
+  const a = new DataArrayTexture(data, S, S, photos.length);
+  a.format = RGBAFormat; a.type = UnsignedByteType; a.colorSpace = SRGBColorSpace; a.wrapS = a.wrapT = RepeatWrapping;
+  a.minFilter = LinearMipmapLinearFilter; a.magFilter = LinearFilter; a.generateMipmaps = true; a.anisotropy = 8; a.needsUpdate = true;
+  return a;
+}
+
 export class Terrain {
   constructor(data, scene, chunks) {
     const n = M + 1, grid = new Float32Array(n * n * 2), pos = new Float32Array(n * n * 3), idx = new Uint32Array(M * M * 6);
@@ -266,9 +287,9 @@ export class Terrain {
       uSat: { value: 1.12 }, uSnow: { value: 0 }, uForestK: { value: 1 }, uHaze: { value: .09 }, uExposure: { value: 1.05 }, uWarm: { value: 0 }, uSeason: { value: 0 },
       uStyle: { value: 0 }, uGrid: { value: 0 }, uData: { value: 0 },
       uFire: { value: null }, uFireRect: { value: new Vector4(0, 0, 1, 1) }, uFireOn: { value: 0 }, uQuake: { value: new Vector4(0, 0, 0, 0) },
-      tGrass: { value: pick('aerial_grass_rock_diff') }, tDry: { value: pick('aerial_ground_rock_diff', 'dry_ground_01_diff') },
-      tRock: { value: pick('aerial_rocks_02_diff', 'aerial_rocks_04_diff') }, tSand: { value: pick('aerial_beach_01_diff', 'aerial_sand_diff') },
-      tSnow: { value: pick('snow_field_aerial_diff', 'snow_02_diff') }, tForest: { value: pick('forest_floor_diff', 'forrest_ground_01_diff') },
+      // layers in the order of the names in the shader: grass, dry ground, rock, sand, snow, forest floor
+      tGround: { value: groundArray([pick('aerial_grass_rock_diff'), pick('aerial_ground_rock_diff', 'dry_ground_01_diff'), pick('aerial_rocks_02_diff', 'aerial_rocks_04_diff'),
+        pick('aerial_beach_01_diff', 'aerial_sand_diff'), pick('snow_field_aerial_diff', 'snow_02_diff'), pick('forest_floor_diff', 'forrest_ground_01_diff')]) },
       ...chunks.uniforms, ...ASPECT_UNIFORMS,
     };
     this.levels = [];

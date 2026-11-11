@@ -28,7 +28,7 @@ const BASE = [
   { key: 'snow', label: 'Снеговая линия', group: 'land', min: -2500, max: 600, step: 50, value: 0, unit: ' м', zero: 'как в виде' },
   { key: 'roadsOn', label: 'Дороги', group: 'layers', type: 'toggle', value: 1 },
   { key: 'labels', label: 'Подписи', group: 'layers', type: 'toggle', value: 1 },
-  { key: 'grid', label: 'Сетка чанков 10 км', group: 'modes', type: 'toggle', value: 0, uniform: 'uGrid' },
+  { key: 'grid', label: 'Границы чанков', group: 'modes', type: 'toggle', value: 0, uniform: 'uGrid' },
   { key: 'chunkInfo', label: 'Чанк под курсором', group: 'modes', type: 'toggle', value: 0 },
   { key: 'chunkData', label: 'Показать по чанкам', group: 'modes', type: 'select', value: '', options: [['', 'нет'], ['forest', 'Сколько леса стоит'], ['conifer', 'Доля хвойных'],
     ['swamp', 'Болота'], ['fields', 'Поля'], ['built', 'Застройка'], ['ice', 'Лёд'], ['snow', 'Снег'], ['land', 'Доля суши'], ['height', 'Высота']] },

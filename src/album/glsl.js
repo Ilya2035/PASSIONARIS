@@ -1,6 +1,6 @@
 // Shared GLSL of the album: geometry of the sphere patch, height sampling, noise.
 import { R, CENTRE, KM_PER_DEG, COS_REF } from './geo.js';
-import { CN } from './chunks.js';
+import { FN, FKM } from './chunks.js';
 
 const f = n => Number(n).toFixed(8);
 const D = Math.PI / 180;
@@ -77,22 +77,40 @@ float albumWet(vec2 ll, float hl, float n1) {
 }
 `;
 
-// ---- chunks: the state of the 10 km cells (chunks.js), read the same way by the ground, the trees, the houses
+// ---- chunks: the state of the natural cells of the world (chunks.js), read the same way by the ground, the trees,
+// the houses
 export const CHUNK_GLSL = /* glsl */`
-uniform sampler2D tChunkA, tChunkB, tChunkC; uniform vec4 uChunkRect;
-// Where a point of the flat km plane falls in the chunk textures. Two things make neighbouring chunks join without a
-// seam. The point is pushed around by a slow noise, so the edge between two chunks is never a straight line: it
-// wanders by a few km like a natural boundary. And inside a chunk its value holds; it changes over toward the
-// neighbour only across the outer part of the chunk.
+uniform sampler2D tChunkA, tChunkB, tChunkC, tChunkId; uniform vec4 uChunkRect;
+// Where a point of the flat km plane falls in the state rasters. The rasters already hold every chunk in its own
+// outline with the step to its neighbours softened; a slight wobble of the point hides the raster itself, so the
+// change from one chunk to the next runs along a natural, uneven line.
 vec2 chunkUV(vec2 pk) {
-  float wc = vnoise(pk / 2.9 + 7.1) - .5;
-  vec2 w = vec2(vnoise(pk / 8.3 + 3.7) + wc * .45, vnoise(pk / 8.3 + 41.3) - wc * .45) - .5;
-  vec2 t = (pk + w * 13. - uChunkRect.xy) * uChunkRect.zw * ${CN}. - .5, i = floor(t);
-  return (i + smoothstep(.18, .82, t - i) + .5) / ${CN}.;
+  vec2 w = vec2(vnoise(pk / 3.1 + 3.7), vnoise(pk / 3.1 + 41.3)) - .5;
+  return (pk + w * 3.2 - uChunkRect.xy) * uChunkRect.zw;
 }
 vec4 chunkA(vec2 pk) { return texture(tChunkA, chunkUV(pk)); }   // forest, conifer share, forest age, swamp
 vec4 chunkB(vec2 pk) { return texture(tChunkB, chunkUV(pk)); }   // ice, snow, flood, spare
 vec4 chunkC(vec2 pk) { return texture(tChunkC, chunkUV(pk)); }   // built, fields, building manner, burnt
+// Which chunk a point lies in: x = the number of the chunk, y = 0 on its border .. 1 deep inside. The outline is
+// smoothed inside the fine raster (the chunk that holds most of the four texels around the point wins), so borders
+// run as slanting, rounded lines, not as steps. One km of distance from a border is 1.6 of y.
+float chunkIdTexel(ivec2 i) { vec2 v = texelFetch(tChunkId, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).rg; return floor(v.r * 255. + .5) + floor(v.g * 255. + .5) * 256.; }
+vec2 chunkCell(vec2 pk) {
+  vec2 q = pk + (vec2(vnoise(pk / 1.7 + 5.3), vnoise(pk / 1.7 + 17.9)) - .5) * .5;
+  vec2 t = (q - uChunkRect.xy) / ${FKM.toFixed(4)} - .5, f = fract(t); ivec2 i = ivec2(floor(t));
+  float a = chunkIdTexel(i), b = chunkIdTexel(i + ivec2(1, 0)), c = chunkIdTexel(i + ivec2(0, 1)), d = chunkIdTexel(i + ivec2(1, 1));
+  float wa = (1. - f.x) * (1. - f.y), wb = f.x * (1. - f.y), wc = (1. - f.x) * f.y, wd = f.x * f.y;
+  float sa = wa + (b == a ? wb : 0.) + (c == a ? wc : 0.) + (d == a ? wd : 0.), sb = wb + (a == b ? wa : 0.) + (c == b ? wc : 0.) + (d == b ? wd : 0.);
+  float sc = wc + (a == c ? wa : 0.) + (b == c ? wb : 0.) + (d == c ? wd : 0.), sd = wd + (a == d ? wa : 0.) + (b == d ? wb : 0.) + (c == d ? wc : 0.);
+  float best = a, w1 = sa;
+  if (sb > w1) { best = b; w1 = sb; } if (sc > w1) { best = c; w1 = sc; } if (sd > w1) { best = d; w1 = sd; }
+  float w2 = 0.;
+  if (a != best) w2 = max(w2, sa); if (b != best) w2 = max(w2, sb); if (c != best) w2 = max(w2, sc); if (d != best) w2 = max(w2, sd);
+  return vec2(best, w1 - w2);
+}
+// the texel of a square per-chunk texture (uChunkPalW a side) that belongs to a chunk: for texelFetch
+uniform float uChunkPalW;
+ivec2 chunkTexel(float id) { float row = floor(id / uChunkPalW); return ivec2(int(id - row * uChunkPalW), int(row)); }
 `;
 
 // ---- one light for everything: the ground and anything that stands on it use the same sun, sky, air and finish

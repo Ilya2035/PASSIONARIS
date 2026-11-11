@@ -22,7 +22,8 @@ const album = window.__album = { ready: false, shot: SHOT, renderer, scene, fps:
 async function start() {
   const data = album.data = await loadData(step);
   step('сцена');
-  const chunks = album.chunks = new Chunks(data.base.at);
+  step('чанки'); const tChunks = performance.now();
+  const chunks = album.chunks = new Chunks(data.base.at, data.vectors.rivers); album.chunkMs = Math.round(performance.now() - tChunks);
   const terrain = album.terrain = new Terrain(data, scene, chunks);
   const cam = album.cam = new AlbumCamera(canvas, data.base.at);
   const params = album.params = createParams(album);
@@ -87,6 +88,6 @@ async function start() {
   requestAnimationFrame(frame);
   document.getElementById('loading').classList.add('done');
   // captures wait for this flag: a few frames after everything is on screen
-  setTimeout(() => { album.ready = true; console.log(`[album] ready fps=${album.fps.toFixed(1)}`); }, SHOT ? 1500 : 600);
+  setTimeout(() => { album.ready = true; console.log(`[album] ready fps=${album.fps.toFixed(1)} chunks=${chunks.count} built in ${album.chunkMs} ms`); }, SHOT ? 1500 : 600);
 }
 start().catch(e => { console.error('[album] failed', e); step('Ошибка: ' + e.message); });
