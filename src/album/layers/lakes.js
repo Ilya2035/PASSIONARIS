@@ -86,10 +86,14 @@ export default async function init(album) {
           // specks. It comes on gently, over a couple of km, away from the mainland and from the outline, and has no
           // step anywhere: the finishing pass would shade a step in depth as if it were relief.
           float hs = textureLod(uBase, (m - uBaseRect.xy) * uBaseRect.zw, 3.2).r;
-          float pull = smoothstep(.2, 2.6, vLake.x - hs) * smoothstep(1., 5., vSd);
-          if (cover < .004 && pull < .004) discard;
+          float pull = smoothstep(.2, 2.6, vLake.x - hs) * smoothstep(.5, 3., vSd);
+          if (cover < .004) {                                        // nothing to paint: the depth alone
+            if (pull < .004) discard;
+            gl_FragColor = vec4(0.); gl_FragDepth = mix(gl_FragCoord.z, clamp(vZW.x / vZW.y * .5 + .5, 0., 1.), pull);
+            return;
+          }
           w.kind = 0; w.depth = max(-hb, 1.5);
-          sheetOut(cover > .004 ? waterLit(w) : vec3(0.), cover, pull);
+          sheetOut(waterLit(w), cover, pull);
           return;
         }
         float grow = clamp(w.px * .9 - .012, 0., ${GROW.toFixed(2)});                       // a small lake stays a few pixels wide from any height

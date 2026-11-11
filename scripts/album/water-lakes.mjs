@@ -32,7 +32,7 @@ export const LAKES = [
   // as a shoal, but the fine heights around the delta fill the flat with noise, land and water in specks. Inside this
   // outline the sea is drawn wherever the coarse heights say sea (layers/lakes.js), so the shoal is one clean sheet.
   { id: 'ebro-shoal', name: 'Отмели дельты Эбро', lat: 40.7, lon: .76, level: .6, depth: 2, shoal: 1, note: 'не озеро: море поверх шума в подробных высотах дельты',
-    outline: [[.60, 40.87], [.80, 40.91], [1.02, 40.77], [.99, 40.60], [.79, 40.49], [.61, 40.49], [.49, 40.60], [.49, 40.75]] },
+    outline: [[.62, 40.85], [.80, 40.88], [.97, 40.76], [.95, 40.60], [.79, 40.51], [.63, 40.51], [.54, 40.60], [.54, 40.76]] },
   { id: 'biscarrosse', name: 'Озеро Бискаррос и Парантис', lat: 44.345, lon: -1.175, level: null, rise: 1.2, r: 9, depth: 20, since: -1000, note: 'подпружено дюнами Ландов; моложе 5000 г. до н. э.' },
 ];
 

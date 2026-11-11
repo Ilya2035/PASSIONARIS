@@ -5,12 +5,23 @@
 // The state comes from the chunks, p.cB:
 //   r  ice         0 open water .. 1 solid ice with pressure ridges
 //   g  snow        snow lying on the ice (on the land the ground shader draws it)
-//   b  flood       on a water chunk: melt water on the ice, 0 frozen hard .. 1 rotten ice full of thaw holes
+//   b  flood       not the water's: water over the land, read by the swamps
 //   a  spareB      the state of the sea: 0 calm .. 1 storm with whitecaps
+// Melt water on the ice (0 frozen hard .. 1 rotten ice full of thaw holes) has no channel of its own in the chunks,
+// so the water keeps it in a texture of its own, one byte per chunk, read at the same point as the chunks.
 // One water for everything: WATER_CORE is the same code in the ground shader (the sea), in the lakes and in the rivers.
+import { DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
 import { lightUniforms } from '../glsl.js';
+import { CN } from '../chunks.js';
+
+export const MELT_BYTES = new Uint8Array(CN * CN);                  // written by the freeze model (layers/freeze.js)
+const meltTex = new DataTexture(MELT_BYTES, CN, CN, RedFormat, UnsignedByteType);
+meltTex.magFilter = meltTex.minFilter = LinearFilter; meltTex.wrapS = meltTex.wrapT = ClampToEdgeWrapping; meltTex.needsUpdate = true;
+// uWaterThaw: 1 while any chunk holds melt water; without it the shader never looks at the texture
+export const WATER_UNIFORMS = { tWaterMelt: { value: meltTex }, uWaterThaw: { value: 0 } };
 
 export const WATER_CORE = /* glsl */`
+uniform sampler2D tWaterMelt; uniform float uWaterThaw;
 const vec2 W_WIND = vec2(.83, -.558), W_WINX = vec2(.558, .83);    // the wind blows toward the east-south-east; W_WINX lies across it
 
 // what the water is told about a pixel
@@ -21,7 +32,7 @@ struct Wtr {
   vec3 V;                  // direction to the eye (east, north, up)
   float day, sh;           // 0 night .. 1 day; 0 in the shadow of relief .. 1 lit
   vec3 sunCol, skyCol;     // light of the sun and of the sky
-  vec4 cB;                 // the chunk: ice, snow, melt water on the ice, state of the sea
+  vec4 cB;                 // the chunk: ice, snow, (flood: not the water's), state of the sea
   int kind;                // 0 sea, 1 lake, 2 river
 };
 
@@ -65,7 +76,7 @@ vec3 waterBody(float depth, int kind) {
     c = mix(c, vec3(.025, .12, .25), smoothstep(40., 1800., depth));
     c = mix(vec3(.47, .61, .50), c, smoothstep(0., 4.5, depth));
   } else {                                                          // fresh water: greener, darker, the bottom shows only at the edge
-    if (kind == 1) c = mix(vec3(.14, .44, .44), vec3(.045, .25, .36), smoothstep(0., 16., depth));
+    if (kind == 1) c = mix(vec3(.13, .42, .42), vec3(.04, .215, .31), smoothstep(0., 16., depth));
     else c = mix(vec3(.19, .45, .40), vec3(.06, .27, .32), smoothstep(0., 5., depth));       // a river carries silt: greener than a lake
     c = mix(vec3(.50, .58, .44), c, smoothstep(0., kind == 1 ? 3.5 : 1.8, depth));
   }
@@ -74,7 +85,8 @@ vec3 waterBody(float depth, int kind) {
 
 vec3 waterLit(Wtr w) {
   vec2 pk = w.pk; float px = w.px, t = uTime;
-  float ice = w.cB.r, melt = w.cB.b * smoothstep(.04, .3, w.cB.r);
+  float ice = w.cB.r, melt = 0.;
+  if (uWaterThaw > 0. && ice > .004) melt = texture(tWaterMelt, chunkUV(pk)).r * smoothstep(.04, .3, ice);
   vec2 wq = vec2(dot(pk, W_WIND), dot(pk, W_WINX));                 // km along and across the wind
   float sunUp = max(uSun.z, 0.);
 
@@ -96,7 +108,7 @@ vec3 waterLit(Wtr w) {
   // ---- the water itself, the sky in it, the sun on it
   // the sea charts are coarse: a little unevenness turns their steps into the patchy sandbanks of a real shoal
   float dC = w.depth;
-  if (w.kind == 0 && dC < 30. && px < 1.5) dC = max(dC + ((wNoise(pk / 1.7 + 3.3) - .5) * 4.5 + (wNoise(pk / .45 + 8.1) - .5) * 1.6) * smoothstep(0., 3., dC) * smoothstep(30., 12., dC) * smoothstep(1.5, .5, px), 0.);
+  if (w.kind == 0 && dC < 30. && px < 1.5) dC = max(dC + (wNoise(pk / 1.3 + 3.3) - .5) * 5. * smoothstep(0., 3., dC) * smoothstep(30., 12., dC) * smoothstep(1.5, .5, px), 0.);
   vec3 body = pow(waterBody(dC, w.kind), vec3(2.2)) * 1.6;
   body = mix(body, body * vec3(.74, .92, .9) + vec3(.004, .012, .012), smoothstep(.45, 1., st) * .6);   // a storm sea is duller and greener
   float fres = .02 + .98 * pow(1. - max(dot(nW, w.V), 0.), 5.), sp = max(dot(Rv, uSun), 0.);
@@ -261,7 +273,7 @@ void sheetOut(vec3 col, float alpha, float pull) {
 }`;
 export const sheetUniforms = album => {
   const T = album.terrain.u;
-  return { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uTime: T.uTime, ...lightUniforms(T), ...album.chunks.uniforms, uPull: { value: .05 } };
+  return { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uTime: T.uTime, ...lightUniforms(T), ...album.chunks.uniforms, ...WATER_UNIFORMS, uPull: { value: .05 } };
 };
 // how far toward the eye a sheet writes its depth: over the crowns of the trees the forest layer draws at this height
 export function sheetPull(album, cam) {
@@ -281,12 +293,17 @@ vec3 aspWater(Px p) {
     // Surf breaks only where the bottom, smoothed over half a kilometre, really rises to a shore, and only in a
     // narrow band at the waterline. On a flat floor that the height data fills with noise (the shoals of a delta)
     // the sea stays calm and clean.
-    float lod = log2(max(w.px, .234) / .234) + 1.6, e = .5, cl = cos(radians(p.ll.x));
-    float hC = heightLod(p.ll, lod), hE = heightLod(p.ll + vec2(0., e / (KM * cl)), lod), hN = heightLod(p.ll + vec2(e / KM, 0.), lod);
+    // (the coarse heights of the region alone: three plain look-ups half a km apart, in Mercator both steps are equal)
+    float lod = log2(max(w.px, .234) / .234) + 1.6, e = .5;
+    vec2 m = merc(p.ll), ub = (m - uBaseRect.xy) * uBaseRect.zw, du = e / (KM * cos(radians(p.ll.x)) * 360.) * uBaseRect.zw;
+    float hC = textureLod(uBase, ub, lod).r, hE = textureLod(uBase, ub + vec2(du.x, 0.), lod).r, hN = textureLod(uBase, ub - vec2(0., du.y), lod).r;
     float gs = length(vec2(hE - hC, hN - hC)) / (e * 1000.);          // rise over run of the smoothed bottom
     w.surf = w.depth / (1000. * max(gs, 1e-4)) + 4. * (1. - smoothstep(.0012, .004, gs));
     // the sea charts step from one depth to the next along jagged lines; the smoothed bottom rounds those steps off
-    w.depth = mix(w.depth, max(-hC, 0.), .65 * smoothstep(14., 6., w.depth) * smoothstep(0., 1.2, w.depth));
+    // (where there are fine heights, their smoothed bottom: the same rule as heightLod())
+    float hS = hC, wD = detailWeight(m);
+    if (wD > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, lod + 3.).r; hS = mix(hC, hd > .6 ? hd : min(hC, -1.5), wD); }
+    w.depth = mix(w.depth, max(-hS, 0.), .65 * smoothstep(14., 6., w.depth) * smoothstep(0., 1.2, w.depth));
   }
   return waterLit(w);
 }`;
@@ -296,7 +313,7 @@ const G = 'Вода и свет';
 const bay = (lon, h, tilt = 0) => ({ lat: 44.1, lon, h, tilt, heading: 0 });
 
 export default {
-  id: 'water', title: 'Вода', glsl: GLSL, uniforms: {},
+  id: 'water', title: 'Вода', glsl: GLSL, uniforms: WATER_UNIFORMS,
   params: [
     { key: 'rivers', label: 'Ширина рек', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
     { key: 'cold', label: 'Холод: лёд на воде', group: 'land', min: 0, max: 1, step: .02, value: 0, zero: 'льда нет' },

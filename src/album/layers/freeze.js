@@ -1,15 +1,18 @@
-// The state of the water of every chunk and how it changes (docs/album/water.md). Four numbers of a chunk are the
-// water's own: ice, snow (on chunks that are mostly water), flood (on a chunk with sea in it: melt water on the ice)
-// and spareB (the state of the sea, 0 calm .. 1 storm). This file sets their natural values and runs the freeze model: ice grows from the
-// shore and from the north, later over deep water, spreads from chunk to chunk, and melts back the same way.
+// The state of the water of every chunk and how it changes (docs/album/water.md). Three numbers of a chunk are the
+// water's own: ice, snow (on chunks that are mostly water) and spareB (the state of the sea, 0 calm .. 1 storm). A
+// fourth, the melt water standing on the ice, has no channel in the chunks (flood is water over the land and belongs
+// to the swamps): the model keeps it and hands it to the water's own texture. This file sets the natural values and
+// runs the freeze model: ice grows from the shore and from the north, later over deep water, spreads from chunk to
+// chunk, and melts back the same way.
 import { CN } from '../chunks.js';
+import { MELT_BYTES, WATER_UNIFORMS } from '../aspects/water.js';
 
 const sat = x => Math.max(0, Math.min(1, x));
 const ss = (a, b, x) => { const t = sat((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 const hash = k => { let x = Math.imul(k + 1, 2654435761) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return (x >>> 0) / 4294967296; };
 
 export const SPAN = .14;          // how much colder than its threshold a chunk must be to freeze solid
-export const SEA_CHANNEL = 'spareB', MELT_CHANNEL = 'flood';
+export const SEA_CHANNEL = 'spareB';
 // rows of states laid side by side for the album pages ("Показ воды"): each band is two chunks wide
 export const SHOWS = {
   sea: { title: 'Состояния моря', bands: [0, .22, .45, .7, 1], width: 3 },
@@ -18,12 +21,14 @@ export const SHOWS = {
   melt: { title: 'Тающий лёд', bands: [0, .3, .55, .8, 1], width: 2 },
 };
 
-// ch: the chunks; heightAt(lat, lon) → metres. Everything here is plain numbers, so the tests run it without a GPU.
-export function makeFreeze(ch, heightAt) {
+// ch: the chunks; heightAt(lat, lon) → metres; meltBytes: one byte per chunk the melt water is copied to (the water's
+// texture), or nothing. Everything here is plain numbers, so the tests run it without a GPU.
+export function makeFreeze(ch, heightAt, meltBytes) {
   const n = ch.count;
   const depth = new Float32Array(n), off = new Float32Array(n).fill(1e9), res = new Float32Array(n), seaNat = new Float32Array(n), water = new Uint8Array(n);
   const ice = new Float32Array(n), melt = new Float32Array(n), snow = new Float32Array(n), sea = new Float32Array(n);
-  const seen = { ice: new Int16Array(n).fill(-1), [MELT_CHANNEL]: new Int16Array(n).fill(-1), snow: new Int16Array(n).fill(-1), [SEA_CHANNEL]: new Int16Array(n).fill(-1) };
+  const seen = { ice: new Int16Array(n).fill(-1), snow: new Int16Array(n).fill(-1), [SEA_CHANNEL]: new Int16Array(n).fill(-1) };
+  const state = { thaw: false, meltDirty: false };                    // is there melt water anywhere; has it changed since it was last looked at
   const centres = Array.from({ length: n }, (_, k) => ch.centre(k));
 
   // mean depth of the water of each chunk, and how far it lies from the land (in chunks)
@@ -68,22 +73,30 @@ export function makeFreeze(ch, heightAt) {
   }
   // lays the model's numbers into the chunks (only where they changed)
   function write(o = {}) {
+    let any = false;
     for (let k = 0; k < n; k++) {
-      if (!o.keepIce) { put('ice', k, ice[k]); if (ch.land[k] < .97) put(MELT_CHANNEL, k, melt[k]); }   // on a chunk of land alone, flood stays what it is: water over the land
+      if (!o.keepIce) put('ice', k, ice[k]);
       if (!o.keepSnow && water[k]) put('snow', k, snow[k]);
       put(SEA_CHANNEL, k, sea[k]);
+      const b = Math.round(sat(melt[k]) * 255); if (b) any = true;
+      if (meltBytes && meltBytes[k] !== b) { meltBytes[k] = b; state.meltDirty = true; }
     }
+    state.thaw = any;
   }
   function put(name, k, v) { ch.set(name, k, v); seen[name][k] = Math.round(ch.get(name, k) * 255); }
-  // someone else changed a chunk (the brush, a reset): take the chunk's number as the truth
+  // Someone else changed a chunk (the brush of the album, a demonstration): the model takes the chunk's number as the
+  // truth and leaves that chunk alone from then on (pin: 1 its ice, 2 its snow) until the state is laid anew. Ice
+  // frozen by hand stays; it can still pass its cold on to the neighbours if the weather lets them freeze.
+  const pin = new Uint8Array(n);
   function adopt() {
     for (let k = 0; k < n; k++) {
-      let b = Math.round(ch.get('ice', k) * 255); if (b !== seen.ice[k]) { ice[k] = b / 255; seen.ice[k] = b; }
-      b = Math.round(ch.get('snow', k) * 255); if (water[k] && b !== seen.snow[k]) { snow[k] = b / 255; seen.snow[k] = b; }
+      let b = Math.round(ch.get('ice', k) * 255); if (b !== seen.ice[k]) { ice[k] = b / 255; seen.ice[k] = b; pin[k] |= 1; }
+      b = Math.round(ch.get('snow', k) * 255); if (water[k] && b !== seen.snow[k]) { snow[k] = b / 255; seen.snow[k] = b; pin[k] |= 2; }
     }
   }
   // everything at once to where it is headed: a page opens with its picture ready
   function settle(o) {
+    pin.fill(0);
     for (let k = 0; k < n; k++) { const t = aim(k, o); ice[k] = t.ice; melt[k] = t.melt; if (t.snow >= 0) snow[k] = t.snow; sea[k] = t.sea; }
     write(o);
   }
@@ -93,7 +106,7 @@ export function makeFreeze(ch, heightAt) {
     const next = new Float32Array(ice);
     for (let k = 0; k < n; k++) {
       const cur = ice[k], t = aim(k, o, cur);
-      if (!o.keepIce) {
+      if (!o.keepIce && !(pin[k] & 1)) {
         if (t.ice > cur) {
           // ice comes from the shore and from a frozen neighbour, never out of the open sea
           let hold = off[k] <= 1 || cur > .2;
@@ -104,9 +117,9 @@ export function makeFreeze(ch, heightAt) {
           for (const m of ch.neighbours(k)) if (ice[m] < cur - .15) { edge = true; break; }
           next[k] = Math.max(t.ice, cur - dt * (edge ? .22 : .07));
         }
-        melt[k] += Math.max(-dt * 1.2, Math.min(dt * .8, t.melt - melt[k]));
       }
-      if (t.snow >= 0 && !o.keepSnow) snow[k] += Math.max(-dt * .5, Math.min(dt * .12, t.snow - snow[k]));
+      melt[k] += Math.max(-dt * 1.2, Math.min(dt * .8, (cur > .02 ? t.melt : 0) - melt[k]));
+      if (t.snow >= 0 && !o.keepSnow && !(pin[k] & 2)) snow[k] += Math.max(-dt * .5, Math.min(dt * .12, t.snow - snow[k]));
       sea[k] += Math.max(-dt * .25, Math.min(dt * .25, t.sea - sea[k]));
     }
     ice.set(next);
@@ -115,8 +128,8 @@ export function makeFreeze(ch, heightAt) {
   // the natural state: an open sea with its own weather, no ice
   function natural() { for (let k = 0; k < n; k++) { ch.setNatural(SEA_CHANNEL, k, seaNat[k]); sea[k] = seaNat[k]; seen[SEA_CHANNEL][k] = Math.round(ch.get(SEA_CHANNEL, k) * 255); } }
   // after chunks.reset(): the natural state is back in the chunks, lay the model's own over it again
-  function relay(o) { for (const a of Object.values(seen)) a.fill(-1); write(o); }
-  return { ice, melt, snow, sea, res, depth, off, water, seaNat, target, aim, settle, step, write, natural, relay };
+  function relay(o) { pin.fill(0); for (const a of Object.values(seen)) a.fill(-1); write(o); }
+  return { ice, melt, snow, sea, res, depth, off, water, seaNat, state, target, aim, settle, step, write, natural, relay };
 }
 
 // the winter that comes and goes ("Зима идёт по кругу"): 0 → 1 → 0 share of the page's cold over one round
@@ -126,7 +139,8 @@ export function winterPhase(t) {
 }
 
 export default async function init(album) {
-  const ch = album.chunks, p = album.params, model = album.water = makeFreeze(ch, album.data.base.at);
+  const ch = album.chunks, p = album.params, model = album.water = makeFreeze(ch, album.data.base.at, MELT_BYTES);
+  const upload = () => { if (model.state.meltDirty) { WATER_UNIFORMS.tWaterMelt.value.needsUpdate = true; model.state.meltDirty = false; } WATER_UNIFORMS.uWaterThaw.value = model.state.thaw ? 1 : 0; };
   model.natural();
   let settle = true, clock = 0;
   const knobs = () => {
@@ -135,12 +149,12 @@ export default async function init(album) {
       keepIce: p.get('demoIce') > 0, keepSnow: p.get('demoSnow') > 0 };          // the stand-in demonstrations of chunktool.js keep their say while they are on
   };
   p.on(key => { if (key == null || album.shot || !album.ready || key === 'waterShow' || key === 'winterCycle') { settle = true; if (key == null || key === 'winterCycle') clock = 0; } });
-  ch.onReset(() => model.relay(knobs()));
+  ch.onReset(() => { model.relay(knobs()); upload(); });
   let acc = 0;
   return { id: 'freeze', update(dt) {
-    if (settle) { settle = false; acc = 0; const o = knobs(); model.settle(p.get('winterCycle') && !album.shot ? { ...o, cold: 0 } : o); return; }
+    if (settle) { settle = false; acc = 0; const o = knobs(); model.settle(p.get('winterCycle') && !album.shot ? { ...o, cold: 0 } : o); upload(); return; }
     acc += dt * p.get('play');
     if (acc < .1) return;                                             // ten steps a second are plenty for chunks
-    clock += acc; model.step(acc, knobs()); acc = 0;
+    clock += acc; model.step(acc, knobs()); acc = 0; upload();
   } };
 }

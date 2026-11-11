@@ -4,8 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Chunks, CHANNELS, CN } from '../src/album/chunks.js';
-import water, { WATER_CORE, SHEET_FRAG, sheetPull } from '../src/album/aspects/water.js';
-import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL, MELT_CHANNEL } from '../src/album/layers/freeze.js';
+import water, { WATER_CORE, SHEET_FRAG, sheetPull, MELT_BYTES, WATER_UNIFORMS } from '../src/album/aspects/water.js';
+import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
 import { riverLines, riverWidth } from '../src/album/layers/rivers.js';
 import { PAGES } from '../src/album/pages.js';
@@ -17,8 +17,11 @@ const heightAt = (lat, lon) => (lon < -2.75 ? 400 : -Math.min(2500, 15 + (lon + 
 const world = () => { const ch = new Chunks(heightAt); return { ch, m: makeFreeze(ch, heightAt) }; };
 
 test('water: the channels of the chunk are the ones the docs name, and the aspect keeps its contract', () => {
-  assert.equal(SEA_CHANNEL, 'spareB'); assert.equal(MELT_CHANNEL, 'flood');
-  for (const name of ['ice', 'snow', MELT_CHANNEL, SEA_CHANNEL]) assert.equal(CHANNELS[name][0], 'B', `${name} is read as p.cB`);
+  assert.equal(SEA_CHANNEL, 'spareB');
+  for (const name of ['ice', 'snow', SEA_CHANNEL]) assert.equal(CHANNELS[name][0], 'B', `${name} is read as p.cB`);
+  assert.equal(MELT_BYTES.length, CN * CN); assert.equal(water.uniforms, WATER_UNIFORMS);
+  assert.ok(WATER_UNIFORMS.tWaterMelt.value.image.data === MELT_BYTES && WATER_UNIFORMS.uWaterThaw.value === 0, 'melt water has a texture of its own, off until something thaws');
+  assert.ok(!WATER_CORE.includes('cB.b'), 'flood is water over the land: the water never reads it');
   assert.match(water.glsl, /vec3 aspWater\(Px p\)/);
   assert.ok(SHEET_FRAG.includes(WATER_CORE), 'lakes and rivers run the same water code as the sea');
   assert.ok(!/\b(vnoise|fbm|hash21)\(/.test(WATER_CORE), 'the water uses its own precision-safe noise');
@@ -29,7 +32,8 @@ test('water: no ice without cold; the natural sea has its own weather, rougher o
   const { ch, m } = world();
   m.natural(); m.settle({ cold: 0 });
   const sea = ch.at(43.5, 1), shore = ch.at(43.5, -2.6), inland = ch.at(41, -6);
-  for (const k of [sea, shore, inland]) { assert.equal(ch.get('ice', k), 0); assert.equal(ch.get(MELT_CHANNEL, k), 0); }
+  for (const k of [sea, shore, inland]) { assert.equal(ch.get('ice', k), 0); assert.equal(m.melt[k], 0); }
+  assert.equal(m.state.thaw, false);
   assert.equal(ch.get(SEA_CHANNEL, inland), 0, 'no sea state where there is no water');
   assert.ok(ch.get(SEA_CHANNEL, sea) > .1 && ch.get(SEA_CHANNEL, sea) < .7, 'the open sea is neither dead calm nor a storm');
   assert.equal(ch.getNatural(SEA_CHANNEL, sea), ch.get(SEA_CHANNEL, sea), 'the weather of the sea is its natural state: reset() keeps it');
@@ -65,9 +69,10 @@ test('water: in time the ice spreads chunk by chunk from the shore, then melts b
   assert.ok(Math.abs(ch.get('ice', far) - m.target(far, o)) < .01, 'in the end every chunk reaches its target');
   // warmer: the ice goes, and while it goes it carries melt water
   m.step(.5, { cold: 0 }); m.step(.5, { cold: 0 });
-  assert.ok(ch.get(MELT_CHANNEL, near) > .3 && ch.get('ice', near) < 1 && ch.get('ice', near) > 0);
+  assert.ok(m.melt[near] > .3 && ch.get('ice', near) < 1 && ch.get('ice', near) > 0); assert.equal(m.state.thaw, true);
   for (let i = 0; i < 400; i++) m.step(.2, { cold: 0 });
-  assert.equal(ch.get('ice', near), 0); assert.equal(ch.get('ice', far), 0); assert.equal(ch.get(MELT_CHANNEL, near), 0);
+  assert.equal(ch.get('ice', near), 0); assert.equal(ch.get('ice', far), 0); assert.equal(m.melt[near], 0); assert.equal(m.state.thaw, false);
+  for (let k = 0; k < ch.count; k += 37) assert.equal(ch.get('flood', k), 0, 'the water never writes the flood of a chunk');
 });
 
 test('water: snow lies only on ice that can bear it; a thaw wets the ice and takes the snow', () => {
@@ -77,11 +82,15 @@ test('water: snow lies only on ice that can bear it; a thaw wets the ice and tak
   assert.equal(ch.get('snow', land), 0, 'snow on the land is not the water\'s to set');
   const before = ch.get('ice', near);
   m.settle({ cold: .45, snow: .8, thaw: .6 });
-  assert.ok(ch.get(MELT_CHANNEL, near) > .3 && ch.get('snow', near) < .2 && ch.get('ice', near) < before && ch.get('ice', near) > 0);
-  assert.equal(ch.get(MELT_CHANNEL, land), 0, 'on a chunk of land alone flood is left for water over the land');
+  assert.ok(m.melt[near] > .3 && ch.get('snow', near) < .2 && ch.get('ice', near) < before && ch.get('ice', near) > 0);
+  // the melt water goes to the water's own bytes when the model is given them
+  const bytes = new Uint8Array(ch.count), m2 = makeFreeze(ch, heightAt, bytes);
+  m2.settle({ cold: .45, thaw: .6 });
+  assert.ok(bytes[near] > 80 && m2.state.meltDirty && m2.state.thaw); assert.equal(bytes[far], 0, 'no melt water where there is no ice');
+  m2.settle({ cold: .45 }); assert.equal(bytes[near], 0); assert.equal(m2.state.thaw, false);
 });
 
-test('water: a reset of the chunks is followed by the model laying its state again; the brush is taken as the truth', () => {
+test('water: a reset of the chunks is followed by the model laying its state again; a chunk changed by hand is left alone', () => {
   const { ch, m } = world(), near = ch.at(44, -2.6), far = ch.at(44, 2), o = { cold: .45 };
   ch.onReset(() => m.relay(o));
   m.natural(); m.settle(o); ch.reset();
@@ -89,7 +98,9 @@ test('water: a reset of the chunks is followed by the model laying its state aga
   ch.set('ice', far, .9);                                             // someone froze a chunk of open sea by hand
   m.step(.1, o); assert.ok(m.ice[far] > .85, 'the model takes it over');
   for (let i = 0; i < 300; i++) m.step(.2, o);
-  assert.equal(ch.get('ice', far), 0, 'and it melts back to where the cold allows');
+  assert.ok(ch.get('ice', far) > .85, 'and leaves it alone: ice frozen by hand stays');
+  assert.equal(ch.get('ice', near), 1, 'the rest of the sea goes on as before');
+  m.settle(o); assert.equal(ch.get('ice', far), 0, 'until the state is laid anew');
   // while a stand-in demonstration of chunktool.js is on, the model leaves ice alone
   ch.set('ice', far, .5); m.step(1, { ...o, keepIce: true }); m.settle({ ...o, keepIce: true });
   assert.ok(Math.abs(ch.get('ice', far) - .5) < .01);
@@ -101,9 +112,9 @@ test('water: the rows of states for the album pages cover every stage in order',
     assert.ok(s.title && s.bands.length >= 5 && s.bands.every((v, i) => !i || v > s.bands[i - 1]), `${id}: rising bands`);
     assert.ok(water.params.find(p => p.key === 'waterShow').options.some(o => o[0] === id));
     m.settle({ show: id });
-    const name = id === 'sea' ? SEA_CHANNEL : id === 'ice' ? 'ice' : id === 'snow' ? 'snow' : MELT_CHANNEL;
+    const name = id === 'sea' ? SEA_CHANNEL : id === 'ice' ? 'ice' : id === 'snow' ? 'snow' : null;
     const period = s.width * s.bands.length, sea = period * Math.ceil(70 / period);      // the first whole row of bands that lies in the sea of this world
-    for (let b = 0; b < s.bands.length; b++) assert.ok(Math.abs(ch.get(name, row + sea + b * s.width) - s.bands[b]) < .01, `${id} band ${b}`);
+    for (let b = 0; b < s.bands.length; b++) assert.ok(Math.abs((name ? ch.get(name, row + sea + b * s.width) : m.melt[row + sea + b * s.width]) - s.bands[b]) < .01, `${id} band ${b}`);
   }
   m.settle({ show: 'sea' }); assert.equal(ch.get('ice', row + 100), 0);
   assert.equal(winterPhase(0), 0); assert.equal(winterPhase(50), 1); assert.ok(winterPhase(20) > 0 && winterPhase(20) < 1 && winterPhase(105) === 0);
