@@ -13,6 +13,7 @@
 // One water for everything: WATER_CORE is the same code in the ground shader (the sea), in the lakes and in the rivers.
 import { Vector2 } from 'three';
 import { lightUniforms } from '../glsl.js';
+import { treeTop } from '../layers/forest.js';
 
 // Ice in retreat stands in melt water once it is no longer whole: none at MELT_TOP of ice and more, all of it MELT_SPAN
 // lower. The freeze model and the shader use the same two numbers.
@@ -306,11 +307,13 @@ export const sheetUniforms = album => {
   const T = album.terrain.u;
   return { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uTime: T.uTime, ...lightUniforms(T), ...album.chunks.uniforms, ...WATER_UNIFORMS, uPull: { value: .05 } };
 };
-// how far toward the eye a sheet writes its depth: over the crowns of the trees the forest layer draws at this height
+// How far toward the eye a sheet writes its depth, km: over the tallest crown the forest draws at this height. The
+// forest says how high that is — its layer while it runs (top: 0 when it draws no trees), its rule treeTop() before.
+// No more than needed: a sheet pulled too far would show through a ridge that stands in front of it.
 export function sheetPull(album, cam) {
-  const p = album.params, h = cam.s.h;
-  const crowns = p.get('forest3d') && h < 170 ? 2 ** Math.round(Math.log2(Math.max(.05, h * .0046))) * (p.get('trees') || 0) * .66 * 1.3 : 0;
-  return Math.max(.02 + h * .0005, crowns);
+  const p = album.params, h = cam.s.h, forest = album.layers?.forest;
+  const crown = typeof forest?.top === 'number' ? forest.top : (p.get('forest3d') ? treeTop(h, p.get('trees') || 0) : 0);
+  return Math.max(.02 + h * .0005, crown * 1.08 + .004);
 }
 
 const GLSL = /* glsl */`
