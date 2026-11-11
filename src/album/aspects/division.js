@@ -27,53 +27,68 @@ uvec4 divT(int d, int part) { return texelFetch(tDivT, ivec2((d & 63) * 2 + part
 vec4 divB(float t) { float s = 1. - t, t2 = t * t, t3 = t2 * t; return vec4(s * s * s, 3. * t3 - 6. * t2 + 4., -3. * t3 + 3. * t2 + 3. * t + 1., t3) / 6.; }
 vec4 divBd(float t) { float s = 1. - t; return vec4(-3. * s * s, 9. * t * t - 12. * t, -9. * t * t + 6. * t + 3., 3. * t * t) / 6.; }
 
-// The districts around a point, joined smoothly: up to four, each with its weight (x) and the weight's change per km
-// (yz), and on which side of a river its cells lie (side: + left of the river's course). sd: the signed distance to
-// the nearest river, km, read smoothly (1e4 far from rivers). Most points lie well inside one district: one read
-// tells so.
-int divNear(vec2 pk, bool water, out int id[4], out vec3 w[4], out float side[4], out float sd) {
+// Up to four districts (or provinces, regions) with their weight (x) and its change per km (yz), and on which side of
+// a river their cells lie (side: + left of the river's course). No arrays: on some GPUs an array read at a varying
+// place goes through slow memory.
+struct DivN { ivec4 id; vec3 w0, w1, w2, w3; vec4 side; };
+DivN divNone() { return DivN(ivec4(-1), vec3(0.), vec3(0.), vec3(0.), vec3(0.), vec4(0.)); }
+void divAdd(inout DivN m, int d, vec3 ww, float sg) {
+  if (d == m.id.x) { m.w0 += ww; m.side.x += ww.x * sg; }
+  else if (d == m.id.y) { m.w1 += ww; m.side.y += ww.x * sg; }
+  else if (d == m.id.z) { m.w2 += ww; m.side.z += ww.x * sg; }
+  else if (d == m.id.w) { m.w3 += ww; m.side.w += ww.x * sg; }
+  else if (m.id.x < 0) { m.id.x = d; m.w0 = ww; m.side.x = ww.x * sg; }
+  else if (m.id.y < 0) { m.id.y = d; m.w1 = ww; m.side.y = ww.x * sg; }
+  else if (m.id.z < 0) { m.id.z = d; m.w2 = ww; m.side.z = ww.x * sg; }
+  else if (m.id.w < 0) { m.id.w = d; m.w3 = ww; m.side.w = ww.x * sg; }
+}
+// The districts around a point, joined smoothly. sd: the signed distance to the nearest river, km, read smoothly
+// (1e4 far from rivers). Most points lie well inside one district: one read tells so.
+DivN divNear(vec2 pk, float px, bool water, out float sd) {
   vec2 q = (pk - vec2(${X0.toFixed(1)}, ${Y0.toFixed(1)})) / ${CELL_KM.toFixed(4)} - .5, f = floor(q), t = q - f;
   ivec2 i0 = ivec2(f), hi = ivec2(${G - 1});
-  for (int i = 0; i < 4; i++) { id[i] = -1; w[i] = vec3(0.); side[i] = 0.; }
+  DivN m = divNone();
   sd = 1e4;
   uvec2 c = texelFetch(tDivF, clamp(i0, ivec2(0), hi), 0).rg;
   uint v = water ? c.y : c.x;
-  if (v >= 32768u) { id[0] = int(v - 32768u); w[0] = vec3(1., 0., 0.); return 1; }
-  vec4 bx = divB(t.x), by = divB(t.y), dx = divBd(t.x) / ${CELL_KM.toFixed(4)}, dy = divBd(t.y) / ${CELL_KM.toFixed(4)};
-  int n = 0; float sdA = 0., sdN = 0.;
-  for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
-    uvec3 cc = texelFetch(tDivF, clamp(i0 + ivec2(x - 1, y - 1), ivec2(0), hi), 0).rgb;
-    int d = int((water ? cc.y : cc.x) & 32767u);
-    vec3 ww = vec3(bx[x] * by[y], dx[x] * by[y], bx[x] * dy[y]);
-    float r = cc.z == 65535u || water ? 0. : (float(cc.z) - 32768.) / 1000.;
-    if (x > 0 && x < 3 && y > 0 && y < 3) { float bw = (x == 1 ? 1. - t.x : t.x) * (y == 1 ? 1. - t.y : t.y); sdA += r * bw; sdN += r != 0. ? bw : 0.; }
-    int j = 0;
-    while (j < n && id[j] != d) j++;
-    if (j >= n && n < 4) { id[n] = d; w[n] = vec3(0.); n++; }
-    if (j < 4) { w[j] += ww; side[j] += ww.x * sign(r); }
+  if (v >= 32768u) { m.id.x = int(v - 32768u); m.w0 = vec3(1., 0., 0.); return m; }
+  float sdA = 0., sdN = 0.;
+  if (px > ${(CELL_KM * .3).toFixed(3)}) {
+    // seen from high up a cell is a few pixels: the 2 × 2 cells around, joined linearly, are enough
+    vec2 bx = vec2(1. - t.x, t.x), by = vec2(1. - t.y, t.y), dd = vec2(-1., 1.) / ${CELL_KM.toFixed(4)};
+    for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) {
+      uvec3 cc = texelFetch(tDivF, clamp(i0 + ivec2(x, y), ivec2(0), hi), 0).rgb;
+      float r = cc.z == 65535u || water ? 0. : (float(cc.z) - 32768.) / 1000., bw = bx[x] * by[y];
+      sdA += r * bw; sdN += r != 0. ? bw : 0.;
+      divAdd(m, int((water ? cc.y : cc.x) & 32767u), vec3(bw, dd[x] * by[y], bx[x] * dd[y]), sign(r));
+    }
+  } else {
+    vec4 bx = divB(t.x), by = divB(t.y), dx = divBd(t.x) / ${CELL_KM.toFixed(4)}, dy = divBd(t.y) / ${CELL_KM.toFixed(4)};
+    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
+      uvec3 cc = texelFetch(tDivF, clamp(i0 + ivec2(x - 1, y - 1), ivec2(0), hi), 0).rgb;
+      float r = cc.z == 65535u || water ? 0. : (float(cc.z) - 32768.) / 1000.;
+      if (x > 0 && x < 3 && y > 0 && y < 3) { float bw = (x == 1 ? 1. - t.x : t.x) * (y == 1 ? 1. - t.y : t.y); sdA += r * bw; sdN += r != 0. ? bw : 0.; }
+      divAdd(m, int((water ? cc.y : cc.x) & 32767u), vec3(bx[x] * by[y], dx[x] * by[y], bx[x] * dy[y]), sign(r));
+    }
   }
   if (sdN > .999) sd = sdA;
-  return n;
+  return m;
 }
-// The heaviest of the keyed weights (districts, or the provinces or regions they belong to), the runner-up, and how
-// far the border between them is, km (weight difference over its slope)
-float divEdge(int n, int key[4], vec3 w[4], out int win, out int other) {
-  int k2[4]; vec3 w2[4]; int m = 0;
-  for (int i = 0; i < 4; i++) { k2[i] = -1; w2[i] = vec3(0.); }
-  for (int i = 0; i < 4; i++) {
-    if (i >= n) break;
-    int j = 0;
-    while (j < m && k2[j] != key[i]) j++;
-    if (j < m) w2[j] += w[i]; else { k2[m] = key[i]; w2[m] = w[i]; m++; }
-  }
-  int a = 0;
-  for (int i = 1; i < 4; i++) if (i < m && w2[i].x > w2[a].x) a = i;
-  win = k2[a]; other = -1;
-  if (m < 2) return 1e4;
-  int b = a == 0 ? 1 : 0;
-  for (int i = 0; i < 4; i++) if (i < m && i != a && w2[i].x > w2[b].x) b = i;
-  other = k2[b];
-  vec3 d = w2[a] - w2[b];
+// The heaviest of the four (summed by key: the districts themselves, or their provinces or regions), the runner-up,
+// and how far the border between them is, km (weight difference over its slope)
+float divEdge(DivN n, ivec4 key, out int win, out int other) {
+  DivN m = divNone();
+  if (n.id.x >= 0) divAdd(m, key.x, n.w0, 0.);
+  if (n.id.y >= 0) divAdd(m, key.y, n.w1, 0.);
+  if (n.id.z >= 0) divAdd(m, key.z, n.w2, 0.);
+  if (n.id.w >= 0) divAdd(m, key.w, n.w3, 0.);
+  vec3 a = m.w0, b = vec3(-1.); int ia = m.id.x, ib = -1;
+  if (m.id.y >= 0) { if (m.w1.x > a.x) { b = a; ib = ia; a = m.w1; ia = m.id.y; } else { b = m.w1; ib = m.id.y; } }
+  if (m.id.z >= 0) { if (m.w2.x > a.x) { b = a; ib = ia; a = m.w2; ia = m.id.z; } else if (m.w2.x > b.x) { b = m.w2; ib = m.id.z; } }
+  if (m.id.w >= 0) { if (m.w3.x > a.x) { b = a; ib = ia; a = m.w3; ia = m.id.w; } else if (m.w3.x > b.x) { b = m.w3; ib = m.id.w; } }
+  win = ia; other = ib;
+  if (ib < 0) return 1e4;
+  vec3 d = a - b;
   return d.x / max(length(d.yz), 1e-4);
 }
 // one layer (land or water) at a point: the district and distances (km) to the borders of the three levels
@@ -97,17 +112,23 @@ DivAt divAt(vec2 pk, float px, bool water) {
     }
     return r;
   }
-  int id[4], kp[4], kr[4]; vec3 w[4]; float side[4], sd = 1e4;
-  int n = divNear(pk, water, id, w, side, sd);
-  for (int i = 0; i < 4; i++) { kp[i] = -1; kr[i] = -1; if (i < n) { uvec4 t = divT(id[i], 0); kp[i] = int(t.x); kr[i] = int(t.y); } }
+  float sd = 1e4;
+  DivN n = divNear(pk, px, water, sd);
+  ivec4 kp = ivec4(-1), kr = ivec4(-1);
+  uvec4 t = uvec4(0u);
+  t = divT(n.id.x, 0); kp.x = int(t.x); kr.x = int(t.y);
+  if (n.id.y >= 0) { t = divT(n.id.y, 0); kp.y = int(t.x); kr.y = int(t.y); }
+  if (n.id.z >= 0) { t = divT(n.id.z, 0); kp.z = int(t.x); kr.z = int(t.y); }
+  if (n.id.w >= 0) { t = divT(n.id.w, 0); kp.w = int(t.x); kr.w = int(t.y); }
   int o = 0;
-  r.eD = divEdge(n, id, w, r.d, r.d2);
-  r.eP = divEdge(n, kp, w, r.pv, o);
-  r.eR = divEdge(n, kr, w, r.rg, o);
+  r.eD = divEdge(n, n.id, r.d, r.d2);
+  r.eP = divEdge(n, kp, r.pv, o);
+  r.eR = divEdge(n, kr, r.rg, o);
   // two districts on the two sides of a river: the border is the river itself
   if (r.d2 >= 0 && abs(sd) < 3.5) {
     float sa = 0., sb = 0.;
-    for (int i = 0; i < 4; i++) { if (id[i] == r.d) sa = side[i]; if (id[i] == r.d2) sb = side[i]; }
+    sa = r.d == n.id.x ? n.side.x : r.d == n.id.y ? n.side.y : r.d == n.id.z ? n.side.z : n.side.w;
+    sb = r.d2 == n.id.x ? n.side.x : r.d2 == n.id.y ? n.side.y : r.d2 == n.id.z ? n.side.z : n.side.w;
     if (sa * sb < 0.) {
       int win = (sd > 0.) == (sa > 0.) ? r.d : r.d2, oth = win == r.d ? r.d2 : r.d;
       uvec4 tw = divT(win, 0), to = divT(oth, 0);
