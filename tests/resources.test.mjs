@@ -7,7 +7,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import {
   RESOURCES, RES_INDEX, ALBUM_GRID, chunkOf, chunkI, chunkJ, chunkLat, chunkLon, gridForBox, openTable,
-  hash32, strHash, scatterZone, withZones, sumCells, spreadToChunks, zonesToChunks, index100, fmtAmount, SPREAD,
+  hash32, strHash, scatterZone, withZones, sumCells, spreadToChunks, zonesToChunks, index100, fmtAmount, SPREAD, poolStocks,
 } from '../scripts/resources/lib.mjs';
 import { BONUS, SIZE, KNOWN } from '../scripts/resources/reference.mjs';
 import { CN, CI0, CJ0, CHUNK_KM, kmOf, Chunks, FN, FKM } from '../src/album/chunks.js';
@@ -305,4 +305,22 @@ test('natural chunks of the album: totals kept, wood on land, fish in water, kno
     assert.ok(z.cells.every(k => k >= 0 && k < n), z.id);
     if (!['oil', 'gas', 'helium'].includes(z.res)) assert.ok(z.cells.every(k => ch.kind[k] === 1), z.id);
   }
+});
+
+test('living stocks: fish and marine mammals sum by sea, game by province; unknown pools are left out', () => {
+  const n = 4, amount = new Float64Array(RESOURCES.length * n);
+  const put = (res, k, v) => { amount[RES_INDEX[res] * n + k] = v; };
+  put('fish', 0, 100); put('fish', 1, 50); put('fish', 2, 7); put('seamammals', 1, 3);
+  put('game', 2, 20); put('game', 3, 5); put('copper', 0, 999);
+  const sea = [0, 0, 1, -1], province = [-1, -1, 4, 4];
+  const poolOf = (r, k) => { const id = r.pool === 'sea' ? sea[k] : province[k]; return id < 0 ? null : `${r.pool}:${id}`; };
+  const pools = poolStocks(amount, n, poolOf);
+  assert.deepEqual(Object.fromEntries(pools), {
+    'sea:0': { fish: 150, seamammals: 3 },
+    'sea:1': { fish: 7 },
+    'province:4': { game: 25 },
+  });
+  assert.ok(![...pools.values()].some(p => 'copper' in p), 'only living stocks are pooled');
+  // before the division work gives seas and provinces nothing is pooled
+  assert.equal(poolStocks(amount, n, () => null).size, 0);
 });

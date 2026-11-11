@@ -13,7 +13,7 @@
 import { toWorld } from '../geo.js';
 import { FN, FKM, CHUNK_KM } from '../chunks.js';
 import { pickGround } from '../pick.js';
-import { RESOURCES, RES_INDEX, DEPTH_NAMES, openTable, withZones, spreadToChunks, zonesToChunks, index100, fmtAmount } from '../../../scripts/resources/lib.mjs';
+import { RESOURCES, RES_INDEX, DEPTH_NAMES, openTable, withZones, spreadToChunks, zonesToChunks, index100, fmtAmount, poolStocks } from '../../../scripts/resources/lib.mjs';
 
 const BASE = 'assets/resources/';
 const RES_OPTIONS = [['', 'нет'], ...RESOURCES.map(r => [r.id, r.name])];
@@ -87,6 +87,17 @@ export default {
       RESOURCES.forEach((r, k) => layers[k].data.set(state.amount.subarray(k * n, (k + 1) * n)));
     }
     const districts = () => (album.districts?.count && album.districts.of) ? album.districts : null;
+    // Living stocks belong to a sea (fish, marine mammals) or a province (game). The division work will give
+    // album.division.seaOfChunk(k), provinceOfChunk(k) and name(level, id); until then the pool is unknown (null)
+    // and the stocks stay by chunk. Nothing else changes when they arrive.
+    const poolOf = (r, k) => {
+      const div = album.division;
+      const id = r.pool === 'sea' ? div?.seaOfChunk?.(k) : r.pool === 'province' ? div?.provinceOfChunk?.(k) : null;
+      return id == null || id < 0 ? null : `${r.pool}:${id}`;
+    };
+    let pools = null, poolsAt = -1;
+    const poolTotals = () => { if (poolsAt !== seed) { pools = poolStocks(state.amount, n, poolOf); poolsAt = seed; } return pools; };
+    album.districts?.onChange?.(() => { poolsAt = -1; });
     const known = () => +p.get('resKnown');
     const amountAt = (r, k) => state.depth[r * n + k] <= known() ? state.amount[r * n + k] : 0;
 
@@ -183,6 +194,14 @@ export default {
       const lines = [`<b>${res.name}</b> в этом чанке: ${here > 0 ? `${index100(here, info[id].ref100, ch.area[k])} из 100 · ${fmtAmount(here, u)}` : 'нет'} <span style="opacity:.7">· ${era(res.era)}</span>`];
       for (const q of deposits) if (q.chunk === k && q.res === id && q.depth <= known()) lines.push(`${esc(q.name)}: ${fmtAmount(q.amount, u)}, ${DEPTH_NAMES[q.depth]} <span style="opacity:.6">(${esc(q.src)})</span>`);
       for (const q of state.placed) if (q.cell === k && q.res === id && q.depth <= known()) lines.push(`Место известно неточно: ${fmtAmount(q.amount, u)}, ${DEPTH_NAMES[q.depth]}`);
+      if (res.kind === 'living') {
+        const key = poolOf(res, k), total = key ? poolTotals().get(key)?.[id] : null;
+        if (key && total) {
+          const [lvl, num] = key.split(':'), sea = lvl === 'sea';
+          const name = album.division?.name?.(lvl, +num) ?? `${sea ? 'Море' : 'Провинция'} ${+num + 1}`;
+          lines.push(`Всего в ${sea ? 'море' : 'провинции'} «${esc(name)}»: ${fmtAmount(total, u)} — живой запас ходит по всему ${sea ? 'морю' : 'краю'}`);
+        } else lines.push('<span style="opacity:.7">Живой запас; суммы по морям и провинциям появятся, когда их даст «Деление»</span>');
+      }
       if (d >= 0) lines.push(`<span style="opacity:.7">${esc(D.name?.(d) ?? `Район ${d + 1}`)} — всё сырьё района по щелчку</span>`);
       readBox.innerHTML = lines.join('<br>');
       readBox.style.display = 'block';

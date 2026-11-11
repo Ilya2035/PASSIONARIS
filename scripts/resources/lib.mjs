@@ -287,6 +287,27 @@ export function zonesToChunks(zones, meta, g) {
   return out;
 }
 
+// Living stocks (fish, marine mammals, game) move and breed: they belong to a sea or a province, not to a chunk
+// (docs/RESOURCES.md). The chunks keep where they live; this sums them into their pools.
+//   poolOf(resource, k) → a pool key ('sea:3', 'province:12') or null while the chunk has no sea or province yet
+// Returns Map(key → { res: tonnes }). The day the division work gives seas and provinces, only poolOf changes.
+export function poolStocks(amount, n, poolOf, resources = RESOURCES) {
+  const pools = new Map();
+  resources.forEach((r, i) => {
+    if (r.kind !== 'living') return;
+    for (let k = 0; k < n; k++) {
+      const v = amount[i * n + k];
+      if (!v) continue;
+      const key = poolOf(r, k);
+      if (key == null) continue;
+      let p = pools.get(key);
+      if (!p) pools.set(key, p = {});
+      p[r.id] = (p[r.id] ?? 0) + v;
+    }
+  });
+  return pools;
+}
+
 // Sum of every resource over a set of cells (a district). Returns { res: units }.
 export function sumCells(amount, N, cells, resources = RESOURCES) {
   const out = {};
