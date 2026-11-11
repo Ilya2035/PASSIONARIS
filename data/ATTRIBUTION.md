@@ -38,6 +38,22 @@
 | 3D-модели домов, строек, стен, деревьев и скал (41 штука) | [KayKit : Medieval Hexagon Pack 1.0](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0), Kay Lousberg (www.kaylousberg.com) | CC0 1.0 |
 | Текстуры земли, 16 штук (`aerial_*`, `forest_floor`, `snow_*` и другие) | [Poly Haven](https://polyhaven.com/textures) | CC0 1.0 |
 
+## Ресурсы
+
+Таблица ресурсов `public/assets/resources/` собрана из открытых данных скриптами `scripts/resources/download.mjs` и
+`bake.mjs`; подробности, отвергнутые наборы и правила — `data/sources/resources.md` и `docs/RESOURCES.md`.
+
+| Данные | Источник | Лицензия |
+|---|---|---|
+| Месторождения и рудопроявления мира | U.S. Geological Survey, 2005, [Mineral Resources Data System](https://mrdata.usgs.gov/mrds/) (MRDS) | Общественное достояние (USGS) |
+| Крупнейшие месторождения | Schulz, K. J., Briskey, J. A. (ред.), 2005–2009, [Major mineral deposits of the world](https://mrdata.usgs.gov/major-deposits/), USGS OFR 2005-1294 A–E | Общественное достояние (USGS) |
+| Колчеданные месторождения с тоннажом | Mosier, D. L., Berger, V. I., Singer, D. A., 2009, [Volcanogenic massive sulfide deposits of the world](https://mrdata.usgs.gov/vms/), USGS OFR 2009-1034 | Общественное достояние (USGS) |
+| Калийные и каменные соли | Orris, G. J. и др., 2014, Evaporite-related potash resources worldwide, USGS SIR 2010-5090-S | Общественное достояние (USGS) |
+| Шахты, карьеры, нефтяные, газовые и угольные месторождения, солеварни | [Викиданные](https://www.wikidata.org) | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| Горные породы (сетка 0,5°) | Hartmann, J., Moosdorf, N., 2012, Global Lithological Map Database v1.0 (gridded to 0.5° spatial resolution), PANGAEA, [doi:10.1594/PANGAEA.788537](https://doi.org/10.1594/PANGAEA.788537); статья: *Geochem. Geophys. Geosyst.* 13, Q12004, [doi:10.1029/2012GC004370](https://doi.org/10.1029/2012GC004370) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Продуктивность моря (хлорофилл-а, 2019) | NOAA CoastWatch, S-NPP VIIRS Science Quality Level 3, 4 км, месячные (NOAA/STAR Ocean Color Team; NASA) | Свободное использование и распространение ([политика данных NASA](https://science.nasa.gov/earth-science/earth-science-data/data-information-policy/)) |
+| Климат, природные зоны, высоты, реки | см. разделы выше: CHELSA V2.1 и ETOPO 2022 (CC0), AWS Terrain Tiles, Natural Earth | см. выше |
+
 ## Код
 
 - Масштабирование картинки (`src/game/post.js`): перенос AMD FidelityFX Super Resolution 1.0 (EASU + RCAS),
