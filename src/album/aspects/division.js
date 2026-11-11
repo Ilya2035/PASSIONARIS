@@ -7,8 +7,8 @@
 //   districtAt(pk)             → the district of a point: xy = its middle in flat km, z = a random number of its own
 //                                (the earthquake asks it to show what every district felt)
 // Every chunk belongs to one district (division/build.js), so a district's border is a chunk's border. The shader
-// reads the chunks around a point the way chunkCell() of glsl.js does (four cells of the chunk raster, joined
-// linearly, after the same small shift), turns each chunk into its district, province and region through the one
+// reads the chunks around a point the way chunkCell() of glsl.js does (nine cells of the chunk raster, each with a
+// smooth bell), turns each chunk into its district, province and region through the one
 // texture of this aspect (division/gpu.js) and draws the line where two of them weigh the same — exactly on the
 // outline of the chunks.
 import { Vector3 } from 'three';
@@ -26,55 +26,61 @@ const vec3 DIV_LAND[8] = vec3[8](vec3(.93, .80, .62), vec3(.72, .86, .62), vec3(
 const vec3 DIV_WATER[8] = vec3[8](vec3(.55, .70, .90), vec3(.45, .62, .86), vec3(.62, .78, .92), vec3(.50, .74, .86), vec3(.42, .56, .82), vec3(.58, .66, .90), vec3(.66, .80, .94), vec3(.48, .68, .80));
 
 uvec4 divOf(float chunk) { return texelFetch(tDiv, chunkTexel(chunk), 0); }
-// the weighted vote of four samples by a key (district, province or region). Only the samples of the pixel's own
-// kind (own: land or water) may win, and the others never make a border, so no line runs along the coast. → the
-// margin of the winner over the runner-up as a share of the weight (1e4 when there is no runner-up)
-float divVote(ivec4 key, vec4 w, vec4 own, out int win, out int other, out int at) {
-  vec4 kw = w * own;
-  vec4 s = vec4(dot(kw, vec4(equal(key, ivec4(key.x)))), dot(kw, vec4(equal(key, ivec4(key.y)))),
-                dot(kw, vec4(equal(key, ivec4(key.z)))), dot(kw, vec4(equal(key, ivec4(key.w)))));
-  s = mix(vec4(-1.), s, own);
-  at = 0; float best = s.x; win = key.x;
-  if (s.y > best) { best = s.y; win = key.y; at = 1; }
-  if (s.z > best) { best = s.z; win = key.z; at = 2; }
-  if (s.w > best) { best = s.w; win = key.w; at = 3; }
-  vec4 rest = mix(vec4(-1.), s, vec4(notEqual(key, ivec4(win))) * own);
+// A vote among the chunks around a point, the way chunkCell() of glsl.js weighs them: the nine cells of the chunk
+// raster around the point, each with a smooth bell (a quadratic B-spline). Up to four keys (districts, provinces or
+// regions) with their weights; no arrays (on some GPUs an array read at a varying place goes through slow memory).
+struct DivAcc { ivec4 k; vec4 w; };
+DivAcc divNone() { return DivAcc(ivec4(-1), vec4(0.)); }
+void divAdd(inout DivAcc a, int key, float w) {
+  if (key == a.k.x) a.w.x += w; else if (key == a.k.y) a.w.y += w; else if (key == a.k.z) a.w.z += w; else if (key == a.k.w) a.w.w += w;
+  else if (a.k.x < 0) { a.k.x = key; a.w.x = w; } else if (a.k.y < 0) { a.k.y = key; a.w.y = w; }
+  else if (a.k.z < 0) { a.k.z = key; a.w.z = w; } else if (a.k.w < 0) { a.k.w = key; a.w.w = w; }
+}
+// the winner, the runner-up and the margin between them; the weight of samples of the other kind (foreign) goes to
+// the winner, so they never make a border (no line along the coast). 1e4 when there is no runner-up
+float divWin(DivAcc a, float foreign, out int win, out int other) {
+  float best = a.w.x; win = a.k.x;
+  if (a.k.y >= 0 && a.w.y > best) { best = a.w.y; win = a.k.y; }
+  if (a.k.z >= 0 && a.w.z > best) { best = a.w.z; win = a.k.z; }
+  if (a.k.w >= 0 && a.w.w > best) { best = a.w.w; win = a.k.w; }
+  vec4 rest = mix(vec4(-1.), a.w, vec4(notEqual(a.k, ivec4(win))) * vec4(greaterThanEqual(a.k, ivec4(0))));
   float sec = max(max(rest.x, rest.y), max(rest.z, rest.w));
-  other = sec < 0. ? -1 : rest.x == sec ? key.x : rest.y == sec ? key.y : rest.z == sec ? key.z : key.w;
-  return sec < 0. ? 1e4 : best + dot(w, 1. - own) - sec;
+  other = sec < 0. ? -1 : rest.x == sec ? a.k.x : rest.y == sec ? a.k.y : rest.z == sec ? a.k.z : a.k.w;
+  return sec < 0. ? 1e4 : best + foreign - sec;
 }
 // one layer (land or water) at a point: the district, province, region, the look bits and the texel of the district,
-// and how far the borders of the three levels are, km
+// and how far the borders of the three levels and of the state are, km (the margin grows by 1.6 per km)
 struct DivAt { int d, d2, pv, rg, look, st; uvec4 u; float eD, eP, eR, eS; };
 DivAt divAt(vec2 pk, float px, bool water) {
   DivAt r = DivAt(0, -1, 0, 0, 0, 0, uvec4(0u), 1e4, 1e4, 1e4, 1e4);
-  vec2 q = pk + (vec2(vnoise(pk / 1.7 + 5.3), vnoise(pk / 1.7 + 17.9)) - .5) * .5;    // the shift of chunkCell (glsl.js)
-  // the four samples are one raster cell apart; seen from high up they spread to a few pixels, so lines keep their width
-  float s = max(${FKM.toFixed(3)}, 4. * px), sc = s / ${FKM.toFixed(3)};
-  vec2 t = (q - uChunkRect.xy) / s - .5, f = fract(t), c0 = (floor(t) + .5) * sc;
-  float a = chunkIdTexel(ivec2(floor(c0))), b = chunkIdTexel(ivec2(floor(c0 + vec2(sc, 0.)))),
-        c = chunkIdTexel(ivec2(floor(c0 + vec2(0., sc)))), d = chunkIdTexel(ivec2(floor(c0 + vec2(sc))));
-  if (a == b && a == c && a == d) {               // inside one chunk: no border near
-    uvec4 u = divOf(a);
-    r.d = int(u.x & 65535u); r.pv = int(u.x >> 16u); r.rg = int(u.y & 65535u); r.look = int(u.y >> 16u); r.st = int(u.w >> 16u); r.u = u;
-    return r;
+  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t); ivec2 c = ivec2(floor(t));
+  vec3 wx = vec3(.5 * (1. - f.x) * (1. - f.x), .75 - (f.x - .5) * (f.x - .5), .5 * f.x * f.x);
+  vec3 wy = vec3(.5 * (1. - f.y) * (1. - f.y), .75 - (f.y - .5) * (f.y - .5), .5 * f.y * f.y);
+  DivAcc ad = divNone(), ap = divNone(), ar = divNone();
+  float foreign = 0., stw = 0., last = -1., first = -1.; bool one = true;
+  uvec4 u = uvec4(0u), u0 = uvec4(0u), u1 = uvec4(0u), u2 = uvec4(0u), u3 = uvec4(0u);
+  for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) {
+    float id = chunkIdTexel(c + ivec2(i - 1, j - 1)), w = wx[i] * wy[j];
+    if (first < 0.) first = id; else if (id != first) one = false;
+    if (id != last) { u = divOf(id); last = id; }
+    stw += float((u.w >> 16u) & 1u) * w;
+    int kind = int((u.y >> 25u) & 3u);
+    if (water ? kind == 0 : kind != 0) { foreign += w; continue; }
+    int d = int(u.x & 65535u);
+    if (d != ad.k.x && d != ad.k.y && d != ad.k.z && d != ad.k.w) { if (ad.k.x < 0) u0 = u; else if (ad.k.y < 0) u1 = u; else if (ad.k.z < 0) u2 = u; else if (ad.k.w < 0) u3 = u; }
+    divAdd(ad, d, w); divAdd(ap, int(u.x >> 16u), w); divAdd(ar, int(u.y & 65535u), w);
   }
-  uvec4 ua = divOf(a), ub = divOf(b), uc = divOf(c), ud = divOf(d);
-  ivec4 kd = ivec4(uvec4(ua.x, ub.x, uc.x, ud.x) & 65535u), kp = ivec4(uvec4(ua.x, ub.x, uc.x, ud.x) >> 16u);
-  ivec4 kr = ivec4(uvec4(ua.y, ub.y, uc.y, ud.y) & 65535u), lk = ivec4(uvec4(ua.y, ub.y, uc.y, ud.y) >> 16u);
-  ivec4 kind = (lk >> 9) & 3;
-  vec4 w = vec4((1. - f.x) * (1. - f.y), f.x * (1. - f.y), (1. - f.x) * f.y, f.x * f.y);
-  vec4 own = water ? vec4(notEqual(kind, ivec4(0))) : vec4(equal(kind, ivec4(0)));
-  if (dot(own, vec4(1.)) < .5) own = vec4(1.);
-  int at = 0, o = 0, o2 = 0, o3 = 0;
-  float km = s * .5;                              // the margin grows by 2 / s per km across a border
-  r.eD = divVote(kd, w, own, r.d, r.d2, at) * km;
-  r.u = at == 0 ? ua : at == 1 ? ub : at == 2 ? uc : ud;
+  if (ad.k.x < 0) { ad.k.x = int(u.x & 65535u); ad.w.x = 1.; u0 = u; foreign = 0.; ap = DivAcc(ivec4(int(u.x >> 16u), -1, -1, -1), vec4(1., 0., 0., 0.)); ar = DivAcc(ivec4(int(u.y & 65535u), -1, -1, -1), vec4(1., 0., 0., 0.)); }
+  int o = 0;
+  float km = 1. / 1.6;
+  r.eD = one ? 1e4 : divWin(ad, foreign, r.d, r.d2) * km;
+  if (one) r.d = ad.k.x;
+  r.u = r.d == ad.k.x ? u0 : r.d == ad.k.y ? u1 : r.d == ad.k.z ? u2 : u3;
   r.look = int(r.u.y >> 16u);
-  r.eP = divVote(kp, w, own, r.pv, o, o2) * km;
-  r.eR = divVote(kr, w, own, r.rg, o, o2) * km;
-  r.st = int(r.u.w >> 16u);
-  if (uDivState == 1) r.eS = divVote(ivec4(uvec4(ua.w, ub.w, uc.w, ud.w) >> 16u), w, vec4(1.), o, o2, o3) * km;
+  r.eP = one ? 1e4 : divWin(ap, foreign, r.pv, o) * km; if (one) r.pv = ap.k.x;
+  r.eR = one ? 1e4 : divWin(ar, foreign, r.rg, o) * km; if (one) r.rg = ar.k.x;
+  r.st = stw > .5 ? 1 : 0;
+  if (uDivState == 1) r.eS = abs(2. * stw - 1.) * km;
   return r;
 }
 // the look of one layer over the colour col
