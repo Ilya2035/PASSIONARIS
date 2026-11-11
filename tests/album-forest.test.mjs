@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import forest, { naturalForest, wetAt, Regrowth, applyDemo, DEMO, DEMOS, FOREST_RULES, CLOSE_RATE, OLD_AFTER } from '../src/album/aspects/forest.js';
-import { treeLevel, crownGeometry, G, K0, S0 } from '../src/album/layers/forest.js';
+import { treeLevel, crownGeometry, G, K0, S0, CROWN, treeTop, shoreDistance, lakeTiles, lakeEdge, LAKE_T, LAKE_PAD } from '../src/album/layers/forest.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 
@@ -148,4 +148,26 @@ test('forest trees: the lattice thins without a jump as the camera rises, and th
   }
   assert.ok(Math.max(...g.pos.filter((_, i) => i % 3 === 2)) < Math.max(...g.spire.filter((_, i) => i % 3 === 2)), 'a conifer is taller than a broadleaf crown');
 
+});
+
+test('forest trees and water: no tree stands in a lake, and the height of the tallest crown is published for the sheets of water', () => {
+  // the tallest crown: an old conifer of the largest size; it follows the camera, the size knob and the fade-out
+  const spire = crownGeometry().spire, tip = Math.max(...spire.filter((_, i) => i % 3 === 2));
+  assert.ok(near(treeTop(40), K0 * 40 * CROWN * 1.12 * 1.08 * tip * 1.25, 1e-9), 'spacing × crown × largest size × oldest × tallest spire');
+  assert.ok(near(treeTop(40, 2), 2 * treeTop(40), 1e-9) && treeTop(100) > treeTop(40) && treeTop(170) === 0 && treeTop(400) === 0);
+  assert.ok(treeTop(165) < treeTop(120) && treeTop(20) > .1 && treeTop(20) < .16, `near the ground the tallest tree is 100–160 m: ${treeTop(20)}`);
+  // the shore: signed distance to the true outline
+  const sq = [[0, 0], [4, 0], [4, 4], [0, 4]];
+  assert.ok(near(shoreDistance(sq, 2, 2), 2, 1e-9) && near(shoreDistance(sq, 1, 2), 1, 1e-9) && near(shoreDistance(sq, -3, 2), -3, 1e-9) && near(shoreDistance(sq, 7, 8), -5, 1e-9));
+  // a lake of about 4 by 4 km: its tile holds the distance to the shore, cut off at LAKE_PAD km
+  const c = llOf(-100, 4700), d = llOf(-96, 4704), lake = { ring: [[c.lon, c.lat], [d.lon, c.lat], [d.lon, d.lat], [c.lon, d.lat]] };
+  const { data, rects } = lakeTiles([lake]), at = (x, y) => {                      // what the shader reads at a point, km
+    const u = (x - rects[0][0]) * rects[0][2], v = (y - rects[0][1]) * rects[0][3];
+    return (data[Math.round(v * (LAKE_T - 1)) * LAKE_T + Math.round(u * (LAKE_T - 1))] / 255 * 2 - 1) * LAKE_PAD;
+  };
+  assert.equal(data.length, LAKE_T * LAKE_T); assert.ok(near(rects[0][0], -100 - LAKE_PAD, 1e-6) && near(1 / rects[0][2], 4 + 2 * LAKE_PAD, 1e-6));
+  assert.equal(at(-98, 4702), LAKE_PAD, 'deep in the lake'); assert.ok(near(at(-100, 4702), 0, .06), 'on the shore'); assert.ok(near(at(-100.5, 4702), -.5, .06), 'half a km outside');
+  assert.ok(near(at(-99.7, 4702), .3, .06) && at(-100.95, 4700) < -.9);
+  assert.equal(lakeTiles([]).rects.length, 0);
+  assert.ok(lakeEdge(20) >= .06 && lakeEdge(20) < .12 && lakeEdge(160) > lakeEdge(20) && lakeEdge(160) < .3, 'trees keep off the beach, further from high above');
 });
