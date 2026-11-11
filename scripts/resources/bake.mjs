@@ -210,11 +210,13 @@ function albumGrid() {
     const { Chunks } = await import('../../src/album/chunks.js');
     const { naturalSwamp, swampIron } = await import('../../src/album/aspects/swamp.js');
     const wetlands = JSON.parse(fs.readFileSync(P('public', 'assets', 'album', 'swamp', 'wetlands.json'), 'utf8')).wetlands;
-    const ch = new Chunks(baseAt);
-    if (ch.count !== g.W * g.H) throw new Error('album chunk grid changed: ' + ch.count);
+    const ch = new Chunks(baseAt, vec.rivers);                              // as src/album/main.js builds them
     const natural = naturalSwamp(ch, baseAt, { rivers: vec.rivers, wetlands });
-    const out = new Float32Array(ch.count);
-    for (let k = 0; k < ch.count; k++) {
+    // Chunks have natural outlines now (docs/ALBUM-CHUNKS.md); the table keeps the 10 km squares, so a chunk's iron
+    // goes to the square of its seed (chunks 0 … 16383 are numbered by that square). The album itself takes the
+    // iron chunk by chunk from album.swamp.ironOf(k); this square copy is for the table and for the tests.
+    const out = new Float32Array(g.W * g.H);
+    for (let k = 0; k < Math.min(ch.count, out.length); k++) {
       ch.setNatural('swamp', k, natural[k]);
       const c = ch.centre(k);
       out[k] = swampIron(ch.get('swamp', k), c.lat, c.lon, ch.height[k]);   // album.swamp.ironOf(k)

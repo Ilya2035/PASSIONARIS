@@ -5,9 +5,11 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import {
   RESOURCES, RES_INDEX, ALBUM_GRID, chunkOf, chunkI, chunkJ, chunkLat, chunkLon, gridForBox, openTable,
-  hash32, strHash, scatterZone, withZones, sumCells,
+  hash32, strHash, scatterZone, withZones, sumCells, spreadToChunks, zonesToChunks,
 } from '../scripts/resources/lib.mjs';
-import { CN, CI0, CJ0, CHUNK_KM, kmOf } from '../src/album/chunks.js';
+import { CN, CI0, CJ0, CHUNK_KM, kmOf, Chunks, FN, FKM } from '../src/album/chunks.js';
+import { loadAlbumData } from '../src/album/division/nodedata.js';
+import { fileURLToPath } from 'node:url';
 
 const DIR = new URL('../public/assets/resources/', import.meta.url);
 const load = name => {
@@ -16,6 +18,7 @@ const load = name => {
 };
 const ALBUM_BOX = { lon0: -10, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
 const { meta, table } = load('album');
+const albumData = loadAlbumData(fileURLToPath(new URL('..', import.meta.url)));
 
 // the largest amount of a resource within r chunks of a point
 function near(res, lat, lon, r = 1, amount = table.amount) {
@@ -222,4 +225,74 @@ test('bog iron: the rule of the swamp aspect — every iron-bearing mire holds s
   const at = z.cells.map(c => ({ lat: chunkLat(meta.grid.j0 + Math.floor(c / meta.grid.W)), lon: chunkLon(meta.grid.i0 + c % meta.grid.W) }));
   assert.ok(at.filter(p => p.lat > 43.5 && p.lon > -1.6 && p.lon < 0.5).length > z.cells.length / 3, 'mostly the Landes');
   assert.equal(at.filter(p => p.lat < 39.5 && p.lon > -4).length, 0, 'none in the dry south-east');
+});
+
+test('natural chunks: squares spread over the chunks of their texels — fish to water, wood to land, totals kept', () => {
+  // 2 × 2 squares of 8 × 8 texels. Chunk 0: land, square 0. Chunk 1: water, square 1. Square 2: its west half is
+  // land chunk 2, its east half water chunk 3; square 3 is water chunk 3 too.
+  const FN = 16, sub = 8, cell = new Uint16Array(FN * FN);
+  for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+    cell[ty * FN + tx] = ty < 8 ? (tx < 8 ? 0 : 1) : (tx < 4 ? 2 : 3);
+  }
+  const g = { count: 4, kind: Uint8Array.from([1, 0, 1, 0]), cell, FN, sub, at: () => 2 };
+  const R = RESOURCES.length, N = 4, amount = new Uint16Array(R * N), depth = new Uint8Array(R * N).fill(255);
+  const put = (res, s, v, d = 0) => { amount[RES_INDEX[res] * N + s] = v; depth[RES_INDEX[res] * N + s] = d; };
+  put('fish', 0, 64);        // inland square: river fish → its land chunk
+  put('fish', 2, 64);        // square with water: all of it to the water texels
+  put('wood', 2, 32);        // to the land texels of square 2 only
+  put('wood', 1, 16);        // a square without land: to its water chunk
+  put('copper', 0, 30, 1);   // a known deposit: goes where its coordinates are (at() → chunk 2)
+  const table = { amount, depth, N, R, index: RES_INDEX };
+  const meta = { grid: { W: 2, H: 2 }, resources: RESOURCES, deposits: [{ res: 'copper', cell: 0, amount: 30, depth: 1, lat: 0, lon: 0 }] };
+  const out = spreadToChunks(table, meta, g);
+  const get = (res, k) => out.amount[RES_INDEX[res] * 4 + k];
+  assert.deepEqual([0, 1, 2, 3].map(k => get('fish', k)), [64, 0, 0, 64]);
+  assert.deepEqual([0, 1, 2, 3].map(k => get('wood', k)), [0, 16, 32, 0]);
+  assert.deepEqual([0, 1, 2, 3].map(k => get('copper', k)), [0, 0, 30, 0]);
+  assert.equal(out.depth[RES_INDEX.copper * 4 + 2], 1);
+  assert.equal(out.depth[RES_INDEX.copper * 4 + 0], 255);
+  assert.deepEqual(out.depositChunk, [2]);
+  // zones: land resources take land chunks only, oil may lie under water
+  const zs = zonesToChunks([
+    { id: 'z:gold', res: 'gold', kind: 'zone', pieces: 1, amount: 10, depth: 1, cells: [2], weights: [200] },
+    { id: 'z:oil', res: 'oil', kind: 'zone', pieces: 1, amount: 10, depth: 2, cells: [2, 3], weights: [100, 50] },
+    { id: 'z:none', res: 'gold', kind: 'zone', pieces: 1, amount: 10, depth: 1, cells: [1], weights: [255] },
+  ], meta, g);
+  assert.deepEqual(zs.map(z => [z.id, z.cells, z.weights]), [['z:gold', [2], [200]], ['z:oil', [2, 3], [100, 100]]]);
+  // withZones keeps the fractions of a spread table (Float32), not whole numbers
+  const half = { amount: Float32Array.from([0.5, 0.25]), depth: Uint8Array.from([0, 0]), index: { fish: 0 }, N: 2 };
+  assert.ok(withZones(half, [], 1).amount instanceof Float32Array);
+  assert.equal(withZones(half, [], 1).amount[0], 0.5);
+});
+
+// ---- the album's real natural chunks (needs public/album-data/, not in git: scripts/album/fetch-data.mjs)
+test('natural chunks of the album: totals kept, wood on land, fish in water, known places in their chunks', { skip: !albumData && 'public/album-data/ is not there' }, () => {
+  const ch = new Chunks(albumData.base.at, albumData.vectors.rivers);
+  const g = { count: ch.count, kind: ch.kind, cell: ch.cell, FN, sub: CHUNK_KM / FKM, at: (lat, lon) => ch.at(lat, lon) };
+  const out = spreadToChunks(table, meta, g), n = ch.count;
+  const total = (arr, N, res, filter = () => true) => { let s = 0; for (let k = 0; k < N; k++) if (filter(k)) s += arr[RES_INDEX[res] * N + k]; return s; };
+  for (const res of ['fish', 'wood', 'stone', 'clay', 'copper', 'silver']) {
+    const a = total(table.amount, table.N, res), b = total(out.amount, n, res);
+    assert.ok(Math.abs(a - b) <= a * .005 + 1, `${res}: ${a} in squares, ${b} in chunks`);
+  }
+  // inside the album's region (outside it the album has no heights and draws no land)
+  const inside = k => { const c = ch.centre(k); return c.lat >= ALBUM_BOX.lat0 && c.lat <= ALBUM_BOX.lat1 && c.lon >= ALBUM_BOX.lon0 && c.lon <= ALBUM_BOX.lon1; };
+  for (const res of ['wood', 'stone', 'clay']) assert.ok(total(out.amount, n, res, k => inside(k) && !ch.kind[k]) < total(out.amount, n, res, inside) * .005, `${res} on land chunks`);
+  assert.ok(total(out.amount, n, 'fish', k => inside(k) && !ch.kind[k]) > total(out.amount, n, 'fish', inside) * .6, 'most fish in water chunks');
+  const near = (res, lat, lon, r = 1) => {
+    let best = 0;
+    for (const [k] of ch.ring(ch.at(lat, lon), r)) best = Math.max(best, out.amount[RES_INDEX[res] * n + k]);
+    return best;
+  };
+  assert.ok(near('copper', 37.70, -6.60) >= 100, 'copper of Rio Tinto');
+  assert.ok(near('mercury', 38.78, -4.84) >= 50, 'mercury of Almadén');
+  assert.ok(near('coal', 43.25, -5.75, 2) >= 10, 'coal of central Asturias');
+  assert.ok(near('salt', 41.92, 1.68) >= 30, 'salt of Cardona');
+  // every known deposit inside the raster lands in the chunk under its own coordinates
+  meta.deposits.forEach((d, q) => assert.equal(out.depositChunk[q], ch.at(d.lat, d.lon), d.name));
+  // the zones move to chunks: candidates are chunks, land resources on land
+  for (const z of zonesToChunks(meta.zones, meta, g)) {
+    assert.ok(z.cells.every(k => k >= 0 && k < n), z.id);
+    if (!['oil', 'gas'].includes(z.res)) assert.ok(z.cells.every(k => ch.kind[k] === 1), z.id);
+  }
 });

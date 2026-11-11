@@ -130,18 +130,83 @@ export function scatterZone(zone, seed) {
 
 // Table amounts plus every zone placed with this seed. Returns a new Uint16Array [R][N] and the placed list.
 export function withZones(table, zones, seed) {
-  const amount = new Uint16Array(table.amount), depth = new Uint8Array(table.depth), placed = [];
+  // the same kind of array as the table: Uint16 for the baked table, Float32 for the amounts spread over chunks
+  const amount = new table.amount.constructor(table.amount), depth = new Uint8Array(table.depth), placed = [];
+  const cap = amount instanceof Uint16Array ? 65535 : Infinity;
   for (const z of zones) {
     const r = table.index[z.res];
     if (r === undefined) continue;
     for (const p of scatterZone(z, seed)) {
       const k = r * table.N + p.cell;
-      amount[k] = Math.min(65535, amount[k] + p.amount);
+      amount[k] = Math.min(cap, amount[k] + p.amount);
       depth[k] = Math.min(depth[k], z.depth);
       placed.push({ zone: z.id, res: z.res, cell: p.cell, amount: p.amount, depth: z.depth });
     }
   }
   return { amount, depth, placed };
+}
+
+// ------------------------------------------------------------------ natural chunks of the album
+// The table is baked on the 10 km squares of the album grid; the album's chunks have natural outlines
+// (src/album/chunks.js, docs/ALBUM-CHUNKS.md «Форма чанков»). g describes them:
+//   { count, kind: 1 land / 0 water per chunk, cell: chunk of every texel of the fine raster (row 0 = south),
+//     FN: texels per side, sub: texels per square side, at(lat, lon) → chunk or −1 }
+// What a square holds besides its known deposits (fish, wood, stone, clay, salt pans) goes to the chunks of its
+// texels, split evenly among them: fish among its texels in water chunks (in land chunks when the square has no water —
+// river fish), everything else among its texels in land chunks (in water chunks when it has no land). Known deposits go
+// to the chunk under their coordinates. Totals are kept. Returns a table-like object for withZones().
+export function spreadToChunks(table, meta, g) {
+  const R = table.R ?? meta.resources.length, N = table.N, SW = meta.grid.W, n = g.count;
+  const area = Float32Array.from(table.amount);
+  for (const d of meta.deposits) { const k = table.index[d.res] * N + d.cell; area[k] = Math.max(0, area[k] - d.amount); }
+  const nL = new Uint16Array(N), nW = new Uint16Array(N), sq = new Int32Array(g.FN * g.FN);
+  for (let ty = 0, t = 0; ty < g.FN; ty++) for (let tx = 0; tx < g.FN; tx++, t++) {
+    const s = Math.floor(ty / g.sub) * SW + Math.floor(tx / g.sub);
+    sq[t] = s;
+    if (g.kind[g.cell[t]]) nL[s]++; else nW[s]++;
+  }
+  const fish = table.index.fish;
+  const amount = new Float32Array(R * n), depth = new Uint8Array(R * n).fill(255);
+  for (let t = 0; t < sq.length; t++) {
+    const s = sq[t], k = g.cell[t], land = !!g.kind[k];
+    for (let r = 0; r < R; r++) {
+      const v = area[r * N + s];
+      if (!v) continue;
+      const water = r === fish ? nW[s] > 0 : nL[s] === 0;   // which texels of the square take it
+      if (land === water) continue;
+      amount[r * n + k] += v / (water ? nW[s] : nL[s]);
+      depth[r * n + k] = 0;
+    }
+  }
+  const at = [];
+  for (const d of meta.deposits) {
+    const k = g.at(d.lat, d.lon), r = table.index[d.res];
+    at.push(k);
+    if (k < 0) continue;
+    amount[r * n + k] += d.amount;
+    depth[r * n + k] = Math.min(depth[r * n + k], d.depth);
+  }
+  return { amount, depth, index: table.index, N: n, R, depositChunk: at };
+}
+
+// Zones from squares to chunks: a chunk is a candidate when any texel of it lies in a candidate square, with the
+// largest weight of those squares. Land resources take land chunks only; oil and gas may lie under the sea.
+export function zonesToChunks(zones, meta, g) {
+  const SW = meta.grid.W, out = [];
+  for (const z of zones) {
+    const sea = z.res === 'oil' || z.res === 'gas' || z.res === 'fish', w = new Map();
+    z.cells.forEach((s, q) => {
+      const x0 = (s % SW) * g.sub, y0 = Math.floor(s / SW) * g.sub;
+      for (let y = y0; y < y0 + g.sub; y++) for (let x = x0; x < x0 + g.sub; x++) {
+        const k = g.cell[y * g.FN + x];
+        if (!sea && !g.kind[k]) continue;
+        if ((w.get(k) ?? 0) < z.weights[q]) w.set(k, z.weights[q]);
+      }
+    });
+    const cells = [...w.keys()].sort((a, b) => a - b);
+    if (cells.length) out.push({ ...z, cells, weights: cells.map(k => w.get(k)) });
+  }
+  return out;
 }
 
 // Sum of every resource over a set of cells (a district). Returns { res: units }.
