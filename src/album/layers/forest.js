@@ -20,7 +20,7 @@ export const G = 384;            // the lattice is G × G cells around the camer
 export const K0 = .0045;         // spacing of the trees, km per km of camera height
 export const S0 = K0 * 20;       // cell of the finest lattice, km: the spacing at the lowest camera
 export const CROWN = .62;        // width of a full-grown crown as a share of the spacing
-const ZONE_LIFT = 1, TREE_LIFT = .22;   // lift of the canopy painted under the trees and of the crowns themselves per unit of «Затенение у объектов» (measured: docs/album/forest.md)
+const ZONE_DARK = [.08, .29];   // share of the light the finishing pass takes from a forest with 3D trees: seen from above, and more per (1 − cos tilt). Measured at «Затенение у объектов» 0.8 (docs/album/forest.md)   // lift of the canopy painted under the trees and of the crowns themselves per unit of «Затенение у объектов» (measured: docs/album/forest.md)
 
 // which lattice the camera height asks for: cell size S, how far the thinning toward the next lattice has gone
 // (phase 0..1) and the size of the trees that are on their way out (thin 1..0)
@@ -88,13 +88,13 @@ export default async function init(album) {
   const pre = new ShaderMaterial({
     depthTest: false, depthWrite: false, blending: NoBlending,
     uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uForestK: T.uForestK, uSnow: T.uSnow, uSeason: T.uSeason,
-      ...ch.uniforms, uCellBase, uLevel, uLod: { value: 0 }, uEps: { value: .12 } },
+      ...ch.uniforms, tForestRise: T.tForestRise, uCellBase, uLevel, uLod: { value: 0 }, uEps: { value: .12 } },
     vertexShader: 'void main() { gl_Position = vec4(position.xy, 0., 1.); }',
     fragmentShader: `${COMMON}
       ${CHUNK_GLSL}
       ${FOREST_RULES}
       ${TREE_GLSL}
-      uniform vec2 uCellBase; uniform float uLevel, uForestK, uSnow, uSeason, uLod, uEps;
+      uniform vec2 uCellBase; uniform float uLevel, uForestK, uSnow, uSeason, uLod, uEps; uniform sampler2D tForestRise;
       layout(location = 1) out highp vec4 oTint;
       void main() {
         vec2 c0; float surv; treeCell(floor(gl_FragCoord.xy) - ${H.toFixed(1)} + uCellBase, uLevel, c0, surv);
@@ -113,14 +113,14 @@ export default async function init(album) {
         // a tree for every share of canopy: all of them in closed forest, one here and there in a thinned stand; brush has none
         float alive = step(r.y, stand.x) * step(.1, stand.x) * step(.06, age) * step(1.5, h) * step(hl, snowline - 150.);
         alive *= step(max(max(cC.g * 1.15, cC.r * 1.6), cA.a * .65), q.x);                           // no trees on fields and under houses, few in a swamp
-        float rel = (hl - max(heightLod(ll, 5.), 0.)) / 300.;
+        float rel = (hl - textureLod(tForestRise, (pk - uChunkRect.xy) * uChunkRect.zw, 0.).r * 4096.) / 300.;
         float con = albumConifer(cA.g, st, n2, rel, g.y / max(slope, 1e-4) * smoothstep(.05, .3, slope), slope);
         float kind = step(q.y, con);
         vec3 tint = albumForestTint(kind, age, wet, hl, ll.x, st * .6 + n2 * .4, uSeason * (.55 + .45 * n3));
         float size = (.62 + .5 * r.x) * mix(.36, 1.08, age) * alive;                                 // young trees are small
         float hh = floor(clamp(hl / 4096., 0., 1.) * 65535. + .5), hi = floor(hh / 256.);
         gl_FragColor = vec4(hi / 255., (hh - hi * 256.) / 255., size / 1.5, kind);
-        oTint = vec4(clamp(tint * vec3(1.58, 1.45, 1.6) * (.8 + .45 * v.x), 0., 1.), age);    // lighter than the paint: a crown is lit on one side only
+        oTint = vec4(clamp(tint * vec3(1.42, 1.32, 1.44) * (.85 + .3 * v.x), 0., 1.), age);    // lighter than the paint: a crown is lit on one side only
       }`,
   });
   const preScene = new Scene(), preCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -128,22 +128,22 @@ export default async function init(album) {
 
   const mat = new ShaderMaterial({
     uniforms: { uExag: T.uExag, ...lightUniforms(T), tTreeA: { value: rt.textures[0] }, tTreeB: { value: rt.textures[1] }, uCellBase, uLevel,
-      uEye: { value: new Vector2() }, uThin: { value: 1 }, uSize: { value: .05 }, uRad: { value: 10 }, uFade: { value: 1 }, uLift: { value: 0 } },
+      uEye: { value: new Vector2() }, uThin: { value: 1 }, uSize: { value: .05 }, uRad: { value: 10 }, uFade: { value: 1 }, uGain: { value: 0 } },
     vertexShader: `${COMMON}
       ${LIGHT}
       ${TREE_GLSL}
       attribute vec2 aCell; attribute vec3 aSpire, aSpireN;
       uniform highp sampler2D tTreeA, tTreeB;
-      uniform vec2 uCellBase, uEye; uniform float uLevel, uThin, uSize, uRad, uFade, uLift;
-      varying vec3 vN, vCol; varying float vOpen, vHaze;
+      uniform vec2 uCellBase, uEye; uniform float uLevel, uThin, uSize, uRad, uFade, uGain;
+      varying vec3 vN, vCol; varying float vOpen, vHaze, vGain;
       void main() {
-        gl_Position = vec4(2., 2., 2., 1.); vN = vec3(0., 0., 1.); vCol = vec3(0.); vOpen = 0.; vHaze = 0.;
+        gl_Position = vec4(2., 2., 2., 1.); vN = vec3(0., 0., 1.); vCol = vec3(0.); vOpen = 0.; vHaze = 0.; vGain = 1.;
         ivec2 tc = ivec2(aCell) + ${H};
         vec4 A = texelFetch(tTreeA, tc, 0);
         if (A.b < .004) return;                                      // nothing stands in this cell
         vec2 c0; float surv; treeCell(aCell + uCellBase, uLevel, c0, surv);
         vec2 pk = treeSpot(c0);
-        float size = A.b * 1.5 * uSize * mix(uThin, 1., surv) * smoothstep(1., .78, length(pk - uEye) / uRad) * uFade;
+        float edge = smoothstep(1., .78, length(pk - uEye) / uRad), size = A.b * 1.5 * uSize * mix(uThin, 1., surv) * edge * uFade;
         if (size < 1e-5) return;
         vec4 B = texelFetch(tTreeB, tc, 0);
         vec2 ll = vec2(pk.y / KM, pk.x / (KM * COSREF)), r = hash22(c0 + 3.1);
@@ -156,15 +156,15 @@ export default async function init(album) {
         float dl = radians(ll.y - LON0);
         vec3 east = normalize(vec3(cos(dl), -sin(dl) * C0, -sin(dl) * S0)), north = cross(up, east);
         vec3 w = base + (east * q.x + north * q.y + up * (q.z - .03)) * size;
-        vN = n; vCol = B.rgb * (1. + uLift); vOpen = 1.45 * (.45 + .55 * mix(position.z / .8, aSpire.z / 1.5, kind)); vHaze = albumHaze(w);
+        vN = n; vCol = B.rgb; vGain = 1. + uGain * edge * edge * (1. + .04 * kind); vOpen = 1.45 * (.45 + .55 * mix(position.z / .8, aSpire.z / 1.5, kind)); vHaze = albumHaze(w);
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
       }`,
     fragmentShader: `${COMMON}
       ${LIGHT}
-      varying vec3 vN, vCol; varying float vOpen, vHaze;
+      varying vec3 vN, vCol; varying float vOpen, vHaze, vGain;
       void main() {
         vec3 c = albumLit(vCol, vN, vOpen);                          // the light, the air and the finish every thing on the land shares
-        gl_FragColor = vec4(albumFinish(mix(c, albumHazeCol(), vHaze)), 1.);
+        gl_FragColor = vec4(albumFinish(mix(c, albumHazeCol(), vHaze)) * vGain, 1.);   // lighter by what the finishing pass takes away among trees
       }`,
   });
   const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
@@ -180,8 +180,10 @@ export default async function init(album) {
     geo.instanceCount = within(rad / lv.S + 1.5);
     // the finishing pass (post.js) darkens the ground between trees; the canopy painted under them is lifted by as much,
     // so the forest with trees is as light as the forest painted beyond them and the edge of the lattice does not show
-    const ao = p.get("fx") ? p.get("ao") : 0;
-    T.uTreeZone.value.set(ex, ey, rad, ZONE_LIFT * ao * Math.min(1.5, size * size) * fade * fade); u.uLift.value = TREE_LIFT * ao;
+    const ao = p.get('fx') ? p.get('ao') : 0;
+    // how much of the light that pass takes away, measured: more when the camera looks along the ground
+    const dark = Math.min(.45, ao / .8 * (ZONE_DARK[0] + ZONE_DARK[1] * (1 - Math.cos(cam.s.tilt * Math.PI / 180))) * Math.min(1.5, size * size) * fade * fade);
+    T.uTreeZone.value.set(ex, ey, rad, 1 / (1 - dark) - 1); u.uGain.value = T.uTreeZone.value.w;
     // heights as the ground mesh under the camera takes them (terrain.js), so the trees stand on it
     const c0 = 2 ** Math.round(Math.log2(Math.max(.03, Math.min(6, h * .0042))));
     v.uLod.value = Math.max(0, Math.log2(c0 / .234)); v.uEps.value = Math.max(c0 * .5, .12);

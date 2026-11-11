@@ -5,7 +5,7 @@
 //   aspForest(p, L)  → paints the canopy over the ground colour L.col
 // The state comes from the chunks: p.cA = (forest 0 felled .. 1 natural, share of conifers, age 0 young .. 1 old, swamp).
 // The same rules place the 3D trees (layers/forest.js), and a small model here lets a felled chunk grow over again.
-import { Vector4 } from 'three';
+import { Vector4, DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
 
 // ---- the natural state: the world of 5000 BC, before anyone felled anything
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -191,9 +191,11 @@ vec3 albumForestTint(float con, float age, float wet, float hl, float lat, float
 
 const GLSL = /* glsl */`
 ${FOREST_RULES}
-uniform vec4 uTreeZone;   // where the 3D trees stand: centre x, y and radius in km, and how much the canopy under them is lifted
+uniform vec4 uTreeZone;   // where the 3D trees stand: centre x, y and radius in km, and how much lighter the canopy under them must come out on screen
+uniform sampler2D tForestRise;   // mean height of the land of every chunk, / 4096 m: the country around a place
 // crowns: a jittered lattice of points like worleyV() — xy = vector to the nearest point, z = distance to it, w = its
 // random number. The number is taken from the hash that places the point, which stays good far from the origin.
+// (A cheaper lattice of four cells with less jitter was tried: its regular rows show from above.)
 vec4 crowns(vec2 p) {
   vec2 i = floor(p), u = fract(p), best = vec2(0.); float d = 9., id = 0.;
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
@@ -207,6 +209,17 @@ float crownMask(vec4 w, float g) { return 1. - smoothstep(g * 1.14 - .14, g * 1.
 // what forestCover() worked out about the pixel, kept for aspForest(): share of trees by nature, the patch noise
 // (roughened where an edge of the natural forest is near), how far the noises of felling have faded, the stand
 float fFc, fPat, fFade; vec2 fStand;
+// The colour that comes out gain times lighter on the screen than seen would, under this light and behind this much
+// air: the end of the ground shader (light, air, albumFinish in glsl.js) run forward, lifted, and run back — gamma,
+// saturation, tone curve, exposure, air, light.
+vec3 forestLift(vec3 seen, vec3 light, float gain, float haze) {
+  vec3 air = albumHazeCol() * haze;
+  vec3 c = pow(min(albumFinish(pow(seen, vec3(2.2)) * light * (1. - haze) + air) * gain, vec3(.97)), vec3(2.2));
+  float l = dot(c, vec3(.2126, .7152, .0722)); c = max(l + (c - l) / uSat, 0.);
+  vec3 a = 2.51 - 2.43 * c, b = .03 - .59 * c;
+  c = (-b + sqrt(b * b + .56 * a * c)) / (2. * a) / uExposure;
+  return pow(max(c - air, 0.) / ((1. - haze) * max(light, vec3(.02))), vec3(1. / 2.2));
+}
 float forestCover(Px p) {
   float have = p.cA.r, order = 0.;
   fFc = albumForestShare(p.wet, p.hl, p.slope, p.n1); fPat = albumPatch(p.n2, p.n3); fFade = smoothstep(1.2, .5, p.px);
@@ -248,7 +261,7 @@ void aspForest(Px p, inout Land L) {
   // ---- what stands here: kind and age of the forest at this place, from the state of the chunk
   float st = px < 2.5 ? mix(.5, vnoise(pk / 2.6 + 11.), smoothstep(2.5, 1., px)) : .5, tree = st * .6 + p.n2 * .4;
   vec2 nh = p.n.xy / max(length(p.n.xy), 1e-4);
-  float rel = (p.hl - max(heightLod(p.ll, 5.), 0.)) / 300.;
+  float rel = (p.hl - textureLod(tForestRise, (pk - uChunkRect.xy) * uChunkRect.zw, 0.).r * 4096.) / 300.;
   float con = albumConifer(p.cA.g, st, p.n2, rel, -nh.y * smoothstep(.05, .3, p.slope), p.slope);
   float age = albumAge(p.cA.b, fStand.y, st), ya = smoothstep(.1, .5, age), oa = smoothstep(.55, 1., age);
 
@@ -280,7 +293,9 @@ void aspForest(Px p, inout Land L) {
   tint = mix(tint, vec3(.50, .44, .16), smoothstep(.93, .99, tone) * .4 * (1. - kind) * ya);       // a crown gone yellow here and there
   float ta = mix(.2, .46, ya) * (1. + .25 * oa);                     // how much one crown differs from the next
   vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day) * (dens > .01 ? mix(vec3(1.), texDetail(tForest, pk, px, p.pdx, p.pdy), .35) : vec3(1.));
-  canopy *= 1. + uTreeZone.w * vec3(.125, .04, .37) * smoothstep(1., .78, length(pk - uTreeZone.xy) / uTreeZone.z);   // the finishing pass darkens the ground between 3D trees
+  // the finishing pass (post.js) darkens the ground between 3D trees: under them the canopy is painted lighter by as much
+  float zone = smoothstep(1., .78, length(pk - uTreeZone.xy) / uTreeZone.z); zone *= zone * uTreeZone.w * (1. + .04 * kind);
+  if (zone > .002) canopy = forestLift(canopy, p.sunCol * max(dot(p.n, uSun), 0.) * p.sh * 1.25 + p.skyCol * (.4 + .6 * p.n.z) * p.ao, 1. + zone, albumHaze(worldOf(p.ll, p.hl * uExag / 1000.)));
   // rim and shade grow with the height of the stand; the ground between the crowns of an open stand is mostly in the sun
   float tall = .3 + .7 * ya, rim = clamp(mask - coverS, 0., 1.) * tall, castS = clamp(coverS - mask, 0., 1.) * coverS * tall;
   L.col = mix(L.col * (1. - .5 * castS * p.day), canopy * (1. + .35 * rim * p.day), mask);
@@ -291,7 +306,7 @@ const NEAR = { lat: 43.2, lon: -4.85 };   // Picos de Europa: broadleaf valleys,
 const demoCam = (h, tilt = 45, heading = 0, dLat = 0, dLon = 0) => ({ lat: DEMO.lat + dLat, lon: DEMO.lon + dLon, h, tilt, heading });
 const PLAIN = { towns: 0, labels: 0, roadsOn: 0 };
 export default {
-  id: 'forest', title: 'Лес', glsl: GLSL, uniforms: { uTreeZone: { value: new Vector4(0, 0, 1, 0) } },
+  id: 'forest', title: 'Лес', glsl: GLSL, uniforms: { uTreeZone: { value: new Vector4(0, 0, 1, 0) }, tForestRise: { value: null } },
   params: [
     { key: 'forest', label: 'Густота леса', group: 'scale', min: 0, max: 1.6, step: .05, value: 1, unit: '×', uniform: 'uForestK' },
     { key: 'trees', label: 'Размер деревьев', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
@@ -322,6 +337,11 @@ export default {
       ch.setNatural('conifer', k, n.conifer); ch.setNatural('age', k, n.age);
       speed[k] = n.speed; natAge[k] = ch.getNatural('age', k);
     }
+    // the country around a place, for the conifers that take the higher ground: mean land height of every chunk
+    const rise = new Uint8Array(ch.count); for (let k = 0; k < ch.count; k++) rise[k] = Math.max(0, Math.min(255, Math.round(ch.height[k] / 4096 * 255)));
+    const riseTex = new DataTexture(rise, ch.n, ch.n, RedFormat, UnsignedByteType);
+    riseTex.magFilter = riseTex.minFilter = LinearFilter; riseTex.wrapS = riseTex.wrapT = ClampToEdgeWrapping; riseTex.needsUpdate = true;
+    this.uniforms.tForestRise.value = riseTex;
     const model = album.forest = new Regrowth(ch, speed, natAge);
     let pending = true, acc = 0;
     const lay = () => { applyDemo(ch, p.get('forestDemo')); pending = true; };
