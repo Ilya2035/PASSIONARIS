@@ -25,7 +25,7 @@ export function createPanel(onClose) {
       if (!box.isConnected) host().appendChild(box);
       cap.textContent = 'Район';
       title.textContent = s.name;
-      sub.textContent = `${KIND_TITLE[KIND_ID.indexOf(s.kind)]} · район № ${s.id + 1} · провинция № ${s.province + 1} · регион № ${s.region + 1} · соседей ${s.neighbours}`;
+      sub.textContent = `${s.provinceName} · ${s.regionName} · ${KIND_TITLE[KIND_ID.indexOf(s.kind)]}, район № ${s.id + 1}, соседей ${s.neighbours}`;
       rows.textContent = '';
       row('Площадь', `${num(s.area)} км²`);
       if (s.kind === 'land') row('из них суша', `${num(s.landArea)} км²`);

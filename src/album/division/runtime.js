@@ -1,21 +1,25 @@
-// The division at work on the album page: works it out from the chunks (build.js), hands it to the shader (gpu.js),
-// answers the cursor (hover lights a district up, a click opens what it holds) and serves the other aspects:
+// The division at work on the album page: works it out from the chunks and the list of historical lands (build.js,
+// public/assets/album/division/), hands it to the shader (gpu.js), writes the names of the lands (labels.js), answers
+// the cursor (hover lights a district up, a click opens what it holds) and serves the other aspects:
 //   album.division = { districtOf(k), chunksOf(d), provinceOf(d), regionOf(p), neighbours(d), kind(d), name(d), … }
 //   album.districts = { count, of(k), name(i) } — the same, in the form the resources work asked for
-import { buildDivision, districtSummary, districtNames, KIND_ID, LAND, levelSizes } from './build.js';
+import { buildDivision, districtSummary, districtNames, stateMask, KIND_ID, LAND, levelSizes } from './build.js';
 import { divisionTexture } from './gpu.js';
 import { createPanel } from './panel.js';
+import { createLabels } from './labels.js';
 import { pickGround } from '../pick.js';
 import { FN, FKM, kmOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
 
 const inside = (lat, lon) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
+const load = async name => (await fetch(`assets/album/division/${name}`)).json();
 
-export function startDivision(album, U) {
+export async function startDivision(album, U) {
   const ch = album.chunks, p = album.params, data = album.data, dom = album.renderer.domElement;
-  const opts = { heightAt: data.base.at, lakes: data.vectors.lakes || [] };
-  const cache = new Map();                              // size → { div, tex }: switching the size back costs nothing
-  const listeners = [];
+  const [lands, admin] = await Promise.all([load('lands.json'), load('admin.json')]);
+  const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [] };
+  const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
+  const listeners = [], labels = createLabels(album);
   let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0;
 
   const active = () => p.get('division') > 0 || !!p.get('divPick');
@@ -23,16 +27,23 @@ export function startDivision(album, U) {
     if (!cache.has(size)) {
       const div = buildDivision(ch, { ...opts, size });
       div.names = districtNames(ch, div, data.vectors.places || []);
-      cache.set(size, { div, tex: divisionTexture(ch, div) });
+      cache.set(size, { div, tex: null, state: null });
     }
     const next = cache.get(size);
     if (next === cur) return;
     cur = next; hover = -1; select(-1); api.version++;
-    U.tDiv.value = cur.tex;
     const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
-    U.uDivOn.value = 1;
-    console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions (${cur.div.ms.toFixed(0)} ms)`);
+    paintState(true);
+    console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions, ${cur.div.moved.length} slopes moved to their valleys (${cur.div.ms.toFixed(0)} ms)`);
     for (const f of listeners) f(api);
+  }
+  // the state of history shown (knob «Деление: государство»): one bit per chunk in the texture
+  function paintState(force) {
+    const id = p.get('divState') || '';
+    if (!force && cur.state === id) return;
+    cur.tex?.dispose();
+    cur.tex = divisionTexture(ch, cur.div, id ? stateMask(cur.div, lands, id) : null); cur.state = id;
+    U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
   }
   // the district at a point of the ground, as the shader draws it: the district of the chunk there; a point of land in
   // a chunk of water (or the other way round, at the shore) takes the nearest chunk of its own kind
@@ -57,6 +68,20 @@ export function startDivision(album, U) {
     panel.show(d >= 0 ? districtSummary(cur.div, d, ch) : null);
     shownVersion = ch.version;
   }
+  // which names the map carries: regions in the regions mode, provinces otherwise, the state when one is shown
+  function syncLabels() {
+    const mode = p.get('division'), st = p.get('divState');
+    if (!mode || !p.get('divLabels')) return labels.hide();
+    const L = cur.div.labels, list = [];
+    if (mode === 3) L.region.forEach((u, i) => u && list.push({ ...u, level: 'region', sea: cur.div.regions[i].kind !== LAND }));
+    else L.province.forEach((u, i) => u && cur.div.provinces[i].kind === LAND && list.push({ ...u, level: 'province' }));
+    if (st) {
+      const s = lands.states.find(x => x.id === st), mask = stateMask(cur.div, lands, st);
+      let sx = 0, sy = 0, sa = 0; for (let k = 0; k < ch.count; k++) if (mask[k]) { sx += ch.cx[k] * ch.area[k]; sy += ch.cy[k] * ch.area[k]; sa += ch.area[k]; }
+      if (s && sa) { let best = -1, bd = Infinity; for (let k = 0; k < ch.count; k++) if (mask[k]) { const dd = (ch.cx[k] - sx / sa) ** 2 + (ch.cy[k] - sy / sa) ** 2; if (dd < bd) { bd = dd; best = k; } } list.push({ name: s.name, level: 'state', area: sa * 4, ...ch.centre(best) }); }
+    }
+    labels.set(list, `${cur.div.size}|${mode}|${st}|${list.length}`);
+  }
 
   // a click without moving the mouse picks a district; a drag moves the camera (camera.js); with the brush on, the
   // click belongs to the brush (chunktool.js)
@@ -72,8 +97,10 @@ export function startDivision(album, U) {
   // a page may open with one district chosen: page.divAt = [lat, lon]
   p.on(key => {
     if (key == null || key === 'divSize') use(+p.get('divSize') || 30);
+    if (key == null || key === 'divState') paintState(false);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
+    syncLabels();
   });
 
   const api = {
@@ -86,6 +113,8 @@ export function startDivision(album, U) {
     chunksOf: d => cur.div.chunks[d] || [],
     provinceOf: d => cur.div.province[d] ?? -1,
     regionOf: pv => cur.div.region[pv] ?? -1,
+    provinceName: pv => cur.div.provinces[pv]?.name ?? '',
+    regionName: r => cur.div.regions[r]?.name ?? '',
     neighbours: d => cur.div.neighbours[d] || [],
     kind: d => KIND_ID[cur.div.kinds[d]],
     name: d => cur.div.names[d],
@@ -94,12 +123,14 @@ export function startDivision(album, U) {
     select, get selected() { return sel; },
     onChange: fn => listeners.push(fn),
     get data() { return cur.div; },
+    lands,
   };
   album.division = api;
   album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => cur.div.names[i], onChange: api.onChange };
   use(+p.get('divSize') || 30);
 
-  return { id: 'division', update() {
+  return { id: 'division', update(dt, t, cam) {
+    if (p.get('division') && p.get('divLabels')) labels.update(cam, p.get('look'));
     if (tick++ % 3) return;
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : -1;
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; }
