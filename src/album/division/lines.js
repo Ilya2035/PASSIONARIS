@@ -35,7 +35,9 @@ export function borderLines(ch, div, state = null) {
       add(level * 2 + wet[t], a, b);
     }
   }
-  for (const [key, segs] of groups) out[key] = chain(segs).map(line => thin(smooth(line.map(v => [X0 + (v % V) * FKM, Y0 + Math.floor(v / V) * FKM])), .1));
+  // the higher the level, the farther it is seen from and the more its line is evened out: regions as neat as provinces
+  const reach = { 0: 2, 1: 2, 2: 3, 3: 3, 4: 4, 5: 4, 6: 4 };
+  for (const [key, segs] of groups) out[key] = chain(segs).map(line => thin(smooth(line.map(v => [X0 + (v % V) * FKM, Y0 + Math.floor(v / V) * FKM]), reach[key]), .1));
   return out;
 }
 
@@ -57,14 +59,15 @@ function chain(segs) {
   for (const [v, nb] of [...adj].sort((p, q) => p[0] - q[0])) for (const w of nb) if (!used.has(key(v, w))) lines.push(walk(v, w));
   return lines;
 }
-// a running mean over ±2 corners, twice, then Chaikin corner cutting; the ends stay (they meet other lines)
-function smooth(p) {
+// a running mean over ±r corners (1.25 km apart), twice, then Chaikin corner cutting; the ends stay (they meet other
+// lines)
+function smooth(p, r = 2) {
   const ring = p.length > 3 && p[0][0] === p[p.length - 1][0] && p[0][1] === p[p.length - 1][1], n = p.length;
   for (let it = 0; it < 2 && n > 4; it++) {
     const q = p.map(v => v.slice());
     for (let i = ring ? 0 : 1; i < (ring ? n - 1 : n - 1); i++) {
       let sx = 0, sy = 0, c = 0;
-      for (let j = -2; j <= 2; j++) {
+      for (let j = -r; j <= r; j++) {
         let m = i + j;
         if (ring) m = ((m % (n - 1)) + (n - 1)) % (n - 1); else if (m < 0 || m >= n) continue;
         sx += p[m][0]; sy += p[m][1]; c++;
