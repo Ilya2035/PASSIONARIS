@@ -7,6 +7,7 @@ import { Terrain } from './terrain.js';
 import { AlbumCamera } from './camera.js';
 import { distKm } from './geo.js';
 import { createParams } from './params.js';
+import { Post } from './post.js';
 
 const q = new URLSearchParams(location.search);
 const SHOT = q.get('shot') === '1';
@@ -50,6 +51,7 @@ async function start() {
   if (q.get('place')) { const p = data.places.find(x => x.id === q.get('place')); if (p) cam.set({ lat: p.lat, lon: p.lon }, true); }
   for (const [k, v] of q) if (k.startsWith('p.')) params.set(k.slice(2), Number.isNaN(+v) ? v : +v);
 
+  const post = new Post(renderer);
   const clock = new Clock();
   let frames = 0, tAcc = 0, t = 0, auto = 1, slow = 0, fast = 0;
   function size() {
@@ -64,7 +66,8 @@ async function start() {
     cam.update(SHOT ? 1 : dt, size());
     terrain.u.uTime.value = t + (SHOT ? 40 : 0);
     for (const l of Object.values(album.layers)) l.update?.(dt, t, cam);
-    renderer.render(scene, cam.cam);
+    post.setSamples(auto <= .7 ? 0 : 4);
+    if (params.get('fx')) post.render(scene, cam.cam, cam.s.h, params.get('ao'), params.get('sharp')); else renderer.render(scene, cam.cam);
     if (!SHOT) { // step the picture scale down when frames run late, back up when there is room
       if (dt > .024) { slow++; fast = 0; } else if (dt < .012) { fast++; slow = 0; } else { slow = fast = 0; }
       if (slow > 12 && auto > .5) { auto = Math.max(.5, auto - .1); slow = 0; } else if (fast > 90 && auto < 1) { auto = Math.min(1, auto + .1); fast = 0; }

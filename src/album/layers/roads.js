@@ -46,18 +46,19 @@ export default async function init(album) {
   for (const { a, b, kind } of edges.values()) {
     if (distKm(a, b) > 520) continue;
     const path = route(grid, W, H, a.n, b.n); if (!path || path.length < 2) continue;
-    const pts = smoothLine(path.map(i => [lonOf(i % W), latOf((i / W) | 0)]), 1.5, 3);
-    (kind ? minor : main).push({ pts, width: kind ? .05 : .09 });
+    const pts = smoothLine(path.map(i => [lonOf(i % W), latOf((i / W) | 0)]), 1.0, 4);
+    (kind ? minor : main).push({ pts, width: kind ? .03 : .06 });
   }
-  const r1 = makeRibbons(album, main, { colour: 0xe8cf9a, minPx: 2.4, lift: .006 });
-  const r2 = makeRibbons(album, minor, { colour: 0xd9c08c, minPx: 1.5, dash: 3.2, lift: .005 });
+  const r1 = makeRibbons(album, main, { colour: 0xe6cc98, minPx: 2.8, lift: .006 });
+  const r2 = makeRibbons(album, minor, { colour: 0xd9bf8a, minPx: 1.9, lift: .005 });
+  r2.u.uAlpha.value = .8;
   album.roadNet = { main: main.length, minor: minor.length };
   const p = album.params;
   const sync = () => {
     const on = !!p.get('roadsOn') && p.get('roads') > 0, dark = p.get('look') === 'paper' || p.get('look') === 'atlas';
     r1.mesh.visible = r2.mesh.visible = on; r1.u.uK.value = r2.u.uK.value = p.get('roads');
-    r1.u.uColour.value.set(dark ? 0x6b4a2a : 0xe8cf9a); r2.u.uColour.value.set(dark ? 0x7a5a38 : 0xd9c08c);
+    r1.u.uColour.value.set(dark ? 0x6b4a2a : 0xe6cc98); r2.u.uColour.value.set(dark ? 0x7a5a38 : 0xd9bf8a);
   };
   p.on(sync); sync();
-  return { id: 'roads', update(dt, t, cam) { const dom = album.renderer.domElement; r1.setPx(cam, dom); r2.setPx(cam, dom); r2.u.uDash.value = Math.max(1.2, cam.s.h * .035); } };
+  return { id: 'roads', update(dt, t, cam) { const dom = album.renderer.domElement; r1.setPx(cam, dom); r2.setPx(cam, dom); } };
 }

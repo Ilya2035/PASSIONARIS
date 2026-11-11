@@ -35,6 +35,7 @@
 |---|---|---|
 | Высоты Пиренейского полуострова и юга Франции (уровни 9 и 12) | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), формат terrarium; собраны Mapzen из SRTM, GMTED, ETOPO1 и других открытых наборов | Открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
 | Реки, озёра, поселения | Natural Earth 10m | Общественное достояние |
+| 3D-модели домов, строек, стен, деревьев и скал (41 штука) | [KayKit : Medieval Hexagon Pack 1.0](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0), Kay Lousberg (www.kaylousberg.com) | CC0 1.0 |
 | Текстуры земли, 16 штук (`aerial_*`, `forest_floor`, `snow_*` и другие) | [Poly Haven](https://polyhaven.com/textures) | CC0 1.0 |
 
 ## Код

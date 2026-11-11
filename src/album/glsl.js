@@ -54,6 +54,15 @@ vec2 worley(vec2 p) {
   }
   return vec2(sqrt(d), id);
 }
+// like worley(), but also where the nearest point lies: xy = vector to it, z = distance, w = its random value
+vec4 worleyV(vec2 p) {
+  vec2 i = floor(p), u = fract(p), best = vec2(0.); float d = 9., id = 0.;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y)), r = g + hash22(i + g) - u; float dd = dot(r, r);
+    if (dd < d) { d = dd; best = r; id = hash21(i + g + 7.7); }
+  }
+  return vec4(best, sqrt(d), id);
+}
 // ---- the living cover of the land, shared by the ground shader and the 3D trees
 // how wet a place is, 0 dry steppe .. 1 Atlantic forest (a stand-in for the climate data of the game)
 float albumWet(vec2 ll, float hl, float n1) {

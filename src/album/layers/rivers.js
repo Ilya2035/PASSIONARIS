@@ -1,10 +1,10 @@
 // Rivers of the region (Natural Earth centre lines) as water ribbons with a width by rank.
 import { makeRibbons, smoothLine } from './ribbon.js';
 
-const COLOURS = { natural: 0x4a93bd, vivid: 0x3fa0d6, autumn: 0x4f93b6, winter: 0x6f9cbd, atlas: 0x3d78b8, paper: 0x5f8fb5, night: 0x6f8fb0 };
+const COLOURS = { natural: 0x4f8fb0, vivid: 0x4a9ccc, autumn: 0x558fab, winter: 0x7399b6, atlas: 0x3d78b8, paper: 0x5f8fb5, night: 0x6f8fb0 };
 export default async function init(album) {
-  const lines = album.data.vectors.rivers.filter(r => r.pts.length > 2).map(r => ({ pts: smoothLine(r.pts, 1.2, 2), width: r.rank <= 6 ? .32 : r.rank <= 8 ? .2 : .12, name: r.name }));
-  const rib = makeRibbons(album, lines, { colour: COLOURS.natural, minPx: 2.6, lift: .003 });
+  const lines = album.data.vectors.rivers.filter(r => r.pts.length > 2).map(r => ({ pts: smoothLine(r.pts, 1.2, 2), width: r.rank <= 6 ? .2 : r.rank <= 8 ? .12 : .07, name: r.name }));
+  const rib = makeRibbons(album, lines, { colour: COLOURS.natural, minPx: 2.2, lift: .003 });
   const p = album.params;
   const sync = () => {
     rib.mesh.visible = !!p.get('riversOn') && p.get('rivers') > 0;

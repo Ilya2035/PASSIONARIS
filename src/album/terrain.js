@@ -133,18 +133,36 @@ void main() {
     vec3 ground = mix(mix(vec3(.66, .56, .37), vec3(.58, .50, .30), n2), grassCol, smoothstep(.22, .5, wet));
     ground = mix(ground, vec3(.40, .44, .24), smoothstep(treeline - 100., treeline + 150., hl));
     float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(2350., 2800., hl) * .8 + ridge * .25 * smoothstep(1200., 2000., hl), 0., 1.);
+    ground = mix(ground, vec3(.62, .42, .28), (1. - smoothstep(.2, .42, wet)) * smoothstep(.55, .8, vnoise(pk / 6. + 21.)) * .5);          // red earth of the dry south
+    ground = mix(ground, vec3(.47, .38, .40), smoothstep(treeline - 500., treeline, hl) * smoothstep(.5, .8, vnoise(pk / 1.9 + 2.)) * .35);   // heath
+    ground = mix(ground, vec3(.64, .61, .27), smoothstep(.45, .7, wet) * smoothstep(.6, .85, vnoise(pk / .8 + 31.)) * smoothstep(.5, .15, px) * .3); // meadows in flower
     float wg = smoothstep(.25, .55, wet);
     if (cover < .995) { vec3 dd = wg < .999 ? texDetail(tDry, pk, px, pdx, pdy) : vec3(1.), dg = wg > .001 ? texDetail(tGrass, pk, px, pdx, pdy) : vec3(1.); ground *= mix(dd, dg, wg); }
-    if (rockW > .004) ground = mix(ground, mix(vec3(.43, .40, .37), vec3(.60, .57, .52), n2) * texDetail(tRock, pk, px, pdx, pdy), rockW);
+    if (rockW > .004) {
+      float rk = vnoise(pk / 2.3 + 3.), rk2 = vnoise(pk / 9. + 17.);
+      vec3 rockCol = mix(vec3(.43, .40, .37), vec3(.60, .57, .52), n2);
+      rockCol = mix(rockCol, vec3(.66, .53, .37), smoothstep(.55, .8, rk2) * .7);                                  // ochre limestone
+      rockCol = mix(rockCol, vec3(.55, .34, .26), smoothstep(.62, .9, rk) * smoothstep(.3, .6, rk2) * .65);          // red sandstone
+      rockCol = mix(rockCol, vec3(.27, .28, .32), smoothstep(.35, .1, rk2) * .6);                                   // dark slate
+      rockCol *= .86 + .24 * (.5 + .5 * sin(hl / 38. + vnoise(pk / 1.7) * 5.)) * smoothstep(.3, .06, px);            // beds of rock
+      rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .28 * smoothstep(.3, .6, wet));          // lichen and moss
+      ground = mix(ground, rockCol * texDetail(tRock, pk, px, pdx, pdy), rockW);
+    }
     float sandW = (1. - smoothstep(2., 9., hl)) * (1. - smoothstep(.015, .06, slope));
     if (sandW > .004) ground = mix(ground, mix(vec3(.80, .72, .53), vec3(.27, .37, .20), smoothstep(.45, .62, wet)) * texDetail(tSand, pk, px, pdx, pdy), sandW);
 
-    float crownVis = smoothstep(.09, .02, px);
-    vec2 w1 = vec2(.5), w2 = vec2(.5);
-    if (crownVis > 0. && cover > .01) { w1 = worley(pk / .075); w2 = worley(pk / .23 + 3.1); }
-    float crown = mix(.5, (1. - w1.x) * .6 + (1. - w2.x) * .4, crownVis);
-    vec3 canopy = forestCol * (.72 + .56 * crown) * (.85 + .3 * mix(.5, w2.y, crownVis)) * (cover > .01 ? mix(vec3(1.), texDetail(tForest, pk, px, pdx, pdy), .35) : vec3(1.));
-    canopy *= .82 + .36 * n2;                                       // stands differ in age and kind
+    // the forest reads as moss: tufts of three sizes, each lit on its sunny side; they fade out one by one with distance
+    float f1 = smoothstep(.06, .015, px), f2 = smoothstep(.2, .05, px), f3 = smoothstep(.9, .25, px), tuft = 0., tone = .5, litc = 0.;
+    if (cover > .01) {
+      if (f1 > 0.) { vec4 w = worleyV(pk / .045); tuft += f1 * .45 * (1. - w.z); litc += f1 * .55 * (dot(normalize(vec3(-w.xy * 2.4, 1.)), uSun) - uSun.z); tone = mix(tone, w.w, f1 * .6); }
+      if (f2 > 0.) { vec4 w = worleyV(pk / .14 + 3.1); tuft += f2 * .35 * (1. - w.z); litc += f2 * .4 * (dot(normalize(vec3(-w.xy * 2., 1.)), uSun) - uSun.z); tone = mix(tone, w.w, f2 * .5); }
+      if (f3 > 0.) { vec4 w = worleyV(pk / .62 + 7.7); tuft += f3 * .3 * (1. - w.z); litc += f3 * .32 * (dot(normalize(vec3(-w.xy * 1.6, 1.)), uSun) - uSun.z); tone = mix(tone, w.w, f3 * .5); }
+    }
+    float stand = vnoise(pk / 2.6 + 11.) * .6 + n2 * .4;             // stands of different trees
+    forestCol = mix(forestCol, vec3(.36, .44, .14), smoothstep(.58, .8, stand) * .55);
+    forestCol = mix(forestCol, vec3(.07, .20, .14), smoothstep(.42, .2, stand) * .5);
+    forestCol = mix(forestCol, vec3(.50, .44, .16), smoothstep(.93, .99, tone) * .5);
+    vec3 canopy = forestCol * (.78 + .5 * tone) * (.86 + .5 * tuft + .9 * litc * day) * (cover > .01 ? mix(vec3(1.), texDetail(tForest, pk, px, pdx, pdy), .35) : vec3(1.));
     float rim = clamp(cover - coverS, 0., 1.), castS = clamp(coverS - cover, 0., 1.);
     land = mix(ground * (1. - .5 * castS * day), canopy * (1. + .35 * rim * day), cover);
 
@@ -175,19 +193,20 @@ void main() {
     wc = pow(wc, vec3(2.2)) * 1.6;
     vec2 wn = vec2(0.);
     for (int i = 0; i < 3; i++) {
-      float s = i == 0 ? .9 : (i == 1 ? 4.3 : 19.), f = 1. - smoothstep(s * .18, s * .42, px);
+      float s = i == 0 ? .22 : (i == 1 ? 1.3 : 7.), f = 1. - smoothstep(s * .18, s * .42, px);
       vec2 q = pk / s + uTime * vec2(.035, .021) * (1.5 - float(i) * .4);
       float a = vnoise(q); wn += f * vec2(vnoise(q + vec2(.3, 0.)) - a, vnoise(q + vec2(0., .3)) - a);
     }
-    vec3 nW = normalize(vec3(-wn * .55, 1.)), Rv = reflect(-V, nW);
+    vec3 nW = normalize(vec3(-wn * .26, 1.)), Rv = reflect(-V, nW);
     float fres = .02 + .98 * pow(1. - max(dot(nW, V), 0.), 5.), sp = max(dot(Rv, uSun), 0.);
     vec3 skyRef = mix(vec3(.58, .72, .90), vec3(.22, .40, .70), clamp(Rv.z, 0., 1.)) * (.25 + .75 * day);
     sea = wc * (skyCol * 1.5 + sunCol * max(dot(nW, uSun), 0.) * .75);
     float glint = smoothstep(.22, .04, px);                          // sparkle only when waves are resolved
-    sea = mix(sea, skyRef, fres * .7) + sunCol * (pow(sp, 420.) * 1.6 * glint + pow(sp, 22.) * .10 * smoothstep(1.2, .3, px)) * sh;
+    sea = mix(sea, skyRef, fres * .7) + sunCol * (pow(sp, 420.) * .9 * glint + pow(sp, 22.) * .02 * smoothstep(1.2, .3, px)) * sh;
     float near = smoothstep(.35, .06, px);
-    float foam = smoothstep(2.4, 0., depth) * (.5 + .5 * vnoise(pk / .045 + uTime * .25)) * (.35 + .65 * near);
-    foam += smoothstep(12., 2., depth) * smoothstep(.6, .97, sin(depth * 1.1 - uTime * 1.3 + vnoise(pk / .6) * 6.)) * .3 * smoothstep(.1, .03, px);
+    float shore = smoothstep(.0012, .006, slope);                   // surf only where the bottom rises to a shore, not on flats
+    float foam = smoothstep(2.4, 0., depth) * (.5 + .5 * vnoise(pk / .045 + uTime * .25)) * (.35 + .65 * near) * shore;
+    foam += smoothstep(12., 2., depth) * smoothstep(.6, .97, sin(depth * 1.1 - uTime * 1.3 + vnoise(pk / .6) * 6.)) * .3 * smoothstep(.1, .03, px) * shore;
     sea = mix(sea, vec3(.94, .97, 1.) * (skyCol + sunCol * .8), clamp(foam, 0., 1.) * .75);
     if (uStyle == 2) sea = mix(vec3(.72, .84, .90), vec3(.50, .68, .82), smoothstep(0., 2500., depth));
     else if (uStyle == 3) sea = mix(vec3(.70, .77, .80), vec3(.60, .69, .74), smoothstep(0., 1500., depth));

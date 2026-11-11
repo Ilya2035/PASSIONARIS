@@ -37,7 +37,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #02040a; col
 .pn > .in { position: absolute; inset: 6px; z-index: 1; background: linear-gradient(180deg, rgba(21,28,45,.96) 0%, rgba(12,16,25,.97) 100%); display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; overflow: hidden; }
 #ui.hidden > * { display: none; }
 .left { left: 20px; top: 20px; bottom: 20px; width: 304px; }
-.top { left: 344px; top: 20px; width: 560px; height: 272px; }
+.top { left: 344px; top: 20px; width: 560px; height: 304px; }
 .right { right: 20px; top: 20px; bottom: 132px; width: 318px; }
 .cam { left: 344px; bottom: 20px; width: 352px; height: 222px; }
 .hd2 { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid rgba(210,173,102,.45); }

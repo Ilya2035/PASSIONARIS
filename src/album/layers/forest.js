@@ -5,7 +5,7 @@ import { InstancedBufferGeometry, InstancedBufferAttribute, IcosahedronGeometry,
 import { COMMON } from '../glsl.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 
-const G = 150;
+const G = 200;
 export default async function init(album) {
   const base = new IcosahedronGeometry(.5, 0), geo = new InstancedBufferGeometry();
   geo.index = base.index; geo.setAttribute('position', base.getAttribute('position')); geo.setAttribute('normal', base.getAttribute('normal'));
@@ -41,6 +41,9 @@ export default async function init(album) {
         vec3 w = worldOf(ll, hl * uExag / 1000.) + (east * xz.x + north * xz.y + up * (p.y + .42)) * size;
         vN = normalize(vec3(normal.x * cos(a) - normal.z * sin(a), normal.x * sin(a) + normal.z * cos(a), normal.y * (conifer > .5 ? .6 : 1.)));
         vec3 broad = mix(vec3(.33, .41, .15), vec3(.18, .38, .13), smoothstep(.5, .75, wet));
+        float stand = vnoise(pk / 2.6 + 11.) * .6 + n2 * .4;
+        broad = mix(broad, vec3(.42, .50, .17), smoothstep(.58, .8, stand) * .55); broad = mix(broad, vec3(.10, .26, .17), smoothstep(.42, .2, stand) * .5);
+        broad = mix(broad, vec3(.56, .48, .17), step(.93, hash21(ci + 21.3)) * .6);
         vCol = mix(broad, vec3(.11, .27, .17), conifer) * (.8 + .45 * hash21(ci + 5.5));
         vY = position.y + .5;
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
@@ -60,8 +63,8 @@ export default async function init(album) {
   return { id: 'forest', update(dt, t, cam) {
     const h = cam.s.h, on = !!p.get('forest3d') && p.get('trees') > 0 && h < 170 && !['paper', 'atlas', 'night'].includes(p.get('look'));
     mesh.visible = on; if (!on) return;
-    const S = 2 ** Math.round(Math.log2(Math.max(.1, h * .0085)));
-    const u = mat.uniforms; u.uS.value = S; u.uK.value = p.get('trees') * .74; u.uFade.value = Math.min(1, (170 - h) / 50);
+    const S = 2 ** Math.round(Math.log2(Math.max(.05, h * .0046)));
+    const u = mat.uniforms; u.uS.value = S; u.uK.value = p.get('trees') * .66; u.uFade.value = Math.min(1, (170 - h) / 50);
     u.uLod.value = Math.max(0, Math.log2(S / .234));
     u.uCellBase.value.set(Math.round(cam.s.lon * KM_PER_DEG * COS_REF / S), Math.round(cam.s.lat * KM_PER_DEG / S));
   } };

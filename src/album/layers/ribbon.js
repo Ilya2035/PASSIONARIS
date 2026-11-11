@@ -65,8 +65,8 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float a = edge * uAlpha;
         if (uDash > 0.) a *= step(fract(vDist / uDash), .62);
         float day = smoothstep(-.08, .15, uSun.z);
-        vec3 c = uColour * (.35 + .65 * day) * (1.12 - .34 * smoothstep(.2, 1., abs(vSide)));
-        gl_FragColor = vec4(c, a);
+        vec3 c = uColour * (.35 + .65 * day) * (1.08 - .62 * smoothstep(.4, .95, abs(vSide)));
+        gl_FragColor = vec4(pow(c, vec3(1. / 2.2)), a);
       }`,
   });
   const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = 5;
