@@ -5,25 +5,26 @@
 // ------------------------------------------------------------------ resources
 // depth: 0 — на поверхности, видно сразу; 1 — неглубоко, находится простой разведкой; 2 — глубоко, нужна разведка
 // с техникой. era: с какой эпохи ресурс можно добывать (годы; отрицательные — до н. э.).
+// color: цвет режима карты — средней яркости, чтобы читался и на светлой «бумаге», и на натуральной земле.
 export const RESOURCES = [
-  { id: 'fish',     name: 'Рыба',                 kind: 'renewable', depth: 0, era: -5000, color: '#4f8fb8' },
-  { id: 'wood',     name: 'Лес',                  kind: 'renewable', depth: 0, era: -5000, color: '#3f7a3a' },
-  { id: 'stone',    name: 'Камень',               kind: 'common',    depth: 0, era: -5000, color: '#9a948a' },
-  { id: 'rarestone', name: 'Редкий камень',       kind: 'deposit',   depth: 0, era: -5000, color: '#c9b8a6' },
-  { id: 'gems',     name: 'Драгоценные камни',    kind: 'deposit',   depth: 1, era: -5000, color: '#b05a9a' },
-  { id: 'clay',     name: 'Глина',                kind: 'common',    depth: 0, era: -5000, color: '#b8774a' },
-  { id: 'salt',     name: 'Соль',                 kind: 'deposit',   depth: 0, era: -5000, color: '#e8e4dc' },
-  { id: 'coal',     name: 'Уголь',                kind: 'deposit',   depth: 2, era: 1200,  color: '#3a3a3a' },
-  { id: 'bogiron',  name: 'Болотное железо',      kind: 'deposit',   depth: 0, era: -1200, color: '#8a5a3a' },
-  { id: 'iron',     name: 'Железная руда',        kind: 'deposit',   depth: 1, era: -1000, color: '#7a4a3a' },
-  { id: 'copper',   name: 'Медь',                 kind: 'deposit',   depth: 1, era: -5000, color: '#c0703a' },
-  { id: 'tin',      name: 'Олово',                kind: 'deposit',   depth: 1, era: -3000, color: '#a8b0b8' },
-  { id: 'lead',     name: 'Свинец',               kind: 'deposit',   depth: 1, era: -3500, color: '#6a7080' },
-  { id: 'silver',   name: 'Серебро',              kind: 'deposit',   depth: 1, era: -3000, color: '#d0d4dc' },
-  { id: 'gold',     name: 'Золото',               kind: 'deposit',   depth: 1, era: -5000, color: '#d8b040' },
-  { id: 'mercury',  name: 'Ртуть',                kind: 'deposit',   depth: 1, era: -5000, color: '#b03030' },
-  { id: 'oil',      name: 'Нефть',                kind: 'deposit',   depth: 2, era: 1850,  color: '#202028' },
-  { id: 'gas',      name: 'Газ',                  kind: 'deposit',   depth: 2, era: 1900,  color: '#7aa0c8' },
+  { id: 'fish',     name: 'Рыба',                 kind: 'renewable', depth: 0, era: -5000, color: '#2f78b0' },
+  { id: 'wood',     name: 'Лес',                  kind: 'renewable', depth: 0, era: -5000, color: '#2e7a34' },
+  { id: 'stone',    name: 'Камень',               kind: 'common',    depth: 0, era: -5000, color: '#6c665c' },
+  { id: 'rarestone', name: 'Редкий камень',       kind: 'deposit',   depth: 0, era: -5000, color: '#7a5c8c' },
+  { id: 'gems',     name: 'Драгоценные камни',    kind: 'deposit',   depth: 1, era: -5000, color: '#b0307e' },
+  { id: 'clay',     name: 'Глина',                kind: 'common',    depth: 0, era: -5000, color: '#b0602e' },
+  { id: 'salt',     name: 'Соль',                 kind: 'deposit',   depth: 0, era: -5000, color: '#2e9a96' },
+  { id: 'coal',     name: 'Уголь',                kind: 'deposit',   depth: 2, era: 1200,  color: '#2c2c30' },
+  { id: 'bogiron',  name: 'Болотное железо',      kind: 'deposit',   depth: 0, era: -1200, color: '#8a5a22' },
+  { id: 'iron',     name: 'Железная руда',        kind: 'deposit',   depth: 1, era: -1000, color: '#8a3626' },
+  { id: 'copper',   name: 'Медь',                 kind: 'deposit',   depth: 1, era: -5000, color: '#c0602a' },
+  { id: 'tin',      name: 'Олово',                kind: 'deposit',   depth: 1, era: -3000, color: '#4e7484' },
+  { id: 'lead',     name: 'Свинец',               kind: 'deposit',   depth: 1, era: -3500, color: '#4a4e72' },
+  { id: 'silver',   name: 'Серебро',              kind: 'deposit',   depth: 1, era: -3000, color: '#5a82aa' },
+  { id: 'gold',     name: 'Золото',               kind: 'deposit',   depth: 1, era: -5000, color: '#c8961a' },
+  { id: 'mercury',  name: 'Ртуть',                kind: 'deposit',   depth: 1, era: -5000, color: '#b02828' },
+  { id: 'oil',      name: 'Нефть',                kind: 'deposit',   depth: 2, era: 1850,  color: '#1c1c26' },
+  { id: 'gas',      name: 'Газ',                  kind: 'deposit',   depth: 2, era: 1900,  color: '#2a6ab0' },
 ];
 export const RES_INDEX = Object.fromEntries(RESOURCES.map((r, k) => [r.id, k]));
 export const DEPTH_NAMES = ['на поверхности', 'неглубоко', 'глубоко'];
@@ -39,6 +40,9 @@ export const chunkOf = (lat, lon) => ({ i: chunkI(lon), j: chunkJ(lat) });
 // centre (or any point with fx, fy ∈ [0, 1) inside) of chunk (i, j)
 export const chunkLon = (i, fx = 0.5) => (i + fx) * CHUNK_KM / (KM_PER_DEG * COS_REF);
 export const chunkLat = (j, fy = 0.5) => (j + fy) * CHUNK_KM / KM_PER_DEG;
+// The album's chunk grid — the same as CN, CI0, CJ0 in src/album/chunks.js (docs/ALBUM-CHUNKS.md):
+// 128 × 128 chunks from chunk (−88, 388); chunk number k = (j − 388) · 128 + (i + 88).
+export const ALBUM_GRID = { kind: 'chunks', i0: -88, j0: 388, W: 128, H: 128, chunkKm: CHUNK_KM };
 // the grid that covers a lon/lat box
 export function gridForBox(b) {
   const i0 = chunkI(b.lon0), i1 = chunkI(b.lon1), j0 = chunkJ(b.lat0), j1 = chunkJ(b.lat1);

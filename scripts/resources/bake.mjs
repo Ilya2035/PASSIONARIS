@@ -9,7 +9,7 @@
 // Output: public/assets/resources/<grid>.json (meta, deposits, zones) + <grid>.bin.gz (amounts and depths).
 import fs from 'node:fs';
 import path from 'node:path';
-import { RESOURCES, RES_INDEX, gridForBox, chunkI, chunkJ, chunkLat, chunkLon, strHash } from './lib.mjs';
+import { RESOURCES, RES_INDEX, ALBUM_GRID, chunkI, chunkJ, chunkLat, chunkLon, strHash } from './lib.mjs';
 import { csvObjects, gzip, gunzip } from './lib-node.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -160,29 +160,45 @@ function loadChl(prefix) {
 // =================================================================== grids
 // Every grid gives: W, H, N, cellOf(lat, lon) → index or −1, sample(c, fx, fy) → { lat, lon }, areaKm2(c),
 // meta (written to the .json), height(lat, lon) in metres (sea negative), lake(lat, lon) → bool.
+// world height and lakes, 8192 × 4096 (the game's map bake)
+let worldMap = null;
+function loadWorldMap() {
+  if (worldMap) return worldMap;
+  const MW = 8192, MH = 4096;
+  const hb = readGz(must(P('public', 'assets', 'map', 'height.delta.bin.gz'), 'npm run data:bake'));
+  const h = new Int16Array(hb.buffer, hb.byteOffset, MW * MH);
+  for (let y = 0; y < MH; y++) for (let x = 1; x < MW; x++) h[y * MW + x] += h[y * MW + x - 1];
+  const cb = readGz(P('public', 'assets', 'map', 'cells.bin.gz'));
+  const cells = new Uint32Array(cb.buffer, cb.byteOffset, MW * MH);
+  const px = (lat, lon) => clamp(Math.floor((90 - lat) / 180 * MH), 0, MH - 1) * MW + ((Math.floor((lon + 180) / 360 * MW) % MW) + MW) % MW;
+  return (worldMap = { height: (lat, lon) => h[px(lat, lon)], lake: (lat, lon) => cells[px(lat, lon)] === 1 });
+}
+
 function albumGrid() {
   const meta = JSON.parse(fs.readFileSync(must(P('public', 'album-data', 'meta.json'),
     'run scripts/album/fetch-data.mjs'), 'utf8'));
   const b = meta.bbox;
-  const g = gridForBox(b);
+  const g = ALBUM_GRID;
   const hb = meta.base, hbuf = readGz(P('public', 'album-data', hb.file));
   const hpx = new Uint16Array(hbuf.buffer, hbuf.byteOffset, hb.w * hb.h);
   const n = 256 * 2 ** hb.z;
+  const world = loadWorldMap();
+  // album heights (~230 m) where they exist, the world map (~5 km) around them (the grid is larger than the region)
   const height = (lat, lon) => {
     const x = (lon + 180) / 360 * n - hb.x0 * 256;
     const s = Math.sin(lat * D);
     const y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n - hb.y0 * 256;
-    const xi = clamp(Math.round(x), 0, hb.w - 1), yi = clamp(Math.round(y), 0, hb.h - 1);
-    return hpx[yi * hb.w + xi] / 4 - 8192;
+    if (x < 0 || y < 0 || x > hb.w - 1 || y > hb.h - 1) return world.height(lat, lon);
+    return hpx[Math.round(y) * hb.w + Math.round(x)] / 4 - 8192;
   };
   const vec = JSON.parse(fs.readFileSync(P('public', 'album-data', 'vectors.json'), 'utf8'));
   const lakes = (vec.lakes ?? []).map(l => l.ring);
-  const lake = (lat, lon) => lakes.some(r => inRing(r, lon, lat));
+  const lake = (lat, lon) => lakes.some(r => inRing(r, lon, lat)) || (!(lon >= b.lon0 && lon <= b.lon1 && lat >= b.lat0 && lat <= b.lat1) && world.lake(lat, lon));
   return {
     name: 'album', W: g.W, H: g.H, N: g.W * g.H,
-    meta: { ...g, bbox: b, cell: '(j − j0) · W + (i − i0); row 0 = southmost',
+    meta: { ...g, bbox: b, cell: '(j − j0) · W + (i − i0); row 0 = southmost — the same numbering as src/album/chunks.js',
       note: 'x = lon · 111.195 · cos 40°, y = lat · 111.195 (km); chunk (i, j) = (floor(x / 10), floor(y / 10))' },
-    inBox: (lat, lon) => lon >= b.lon0 && lon <= b.lon1 && lat >= b.lat0 && lat <= b.lat1,
+    inBox: () => true,
     cellOf(lat, lon) {
       const i = chunkI(lon) - g.i0, j = chunkJ(lat) - g.j0;
       return i < 0 || j < 0 || i >= g.W || j >= g.H ? -1 : j * g.W + i;
@@ -193,13 +209,8 @@ function albumGrid() {
   };
 }
 function worldGrid() {
-  const W = 720, H = 360, MW = 8192, MH = 4096;
-  const hb = readGz(must(P('public', 'assets', 'map', 'height.delta.bin.gz'), 'npm run data:bake'));
-  const h = new Int16Array(hb.buffer, hb.byteOffset, MW * MH);
-  for (let y = 0; y < MH; y++) for (let x = 1; x < MW; x++) h[y * MW + x] += h[y * MW + x - 1];
-  const cb = readGz(P('public', 'assets', 'map', 'cells.bin.gz'));
-  const cells = new Uint32Array(cb.buffer, cb.byteOffset, MW * MH);
-  const px = (lat, lon) => clamp(Math.floor((90 - lat) / 180 * MH), 0, MH - 1) * MW + ((Math.floor((lon + 180) / 360 * MW) % MW) + MW) % MW;
+  const W = 720, H = 360;
+  const world = loadWorldMap();
   return {
     name: 'world', W, H, N: W * H,
     meta: { kind: 'latlon', W, H, resolutionDeg: 0.5, cell: 'row · 720 + col; row 0 = 90°N … 89.5°N, col 0 = 180°W',
@@ -211,8 +222,7 @@ function worldGrid() {
     },
     sample(c, fx, fy) { return { lat: 90 - (Math.floor(c / W) + fy) * 0.5, lon: -180 + (c % W + fx) * 0.5 }; },
     areaKm2(c) { const lat = 90 - (Math.floor(c / W) + 0.5) * 0.5; return (0.5 * 111.195) ** 2 * Math.cos(lat * D); },
-    height: (lat, lon) => h[px(lat, lon)],
-    lake: (lat, lon) => cells[px(lat, lon)] === 1,
+    height: world.height, lake: world.lake,
     S: 10, nearKm: 60,
   };
 }
@@ -315,7 +325,7 @@ function features(grid, inp) {
 function fishOf(f, c) {
   const chl = isNaN(f.chl[c]) ? 0.3 : f.chl[c];
   const prod = clamp(Math.log10(chl / 0.08) / Math.log10(4 / 0.08), 0.05, 1); // 0.08 mg/m³ desert sea … 4 upwelling
-  const sea = f.sea[c] * (f.shelf[c] + 0.2 * (1 - f.shelf[c])) * prod * 100;
+  const sea = f.sea[c] * (f.shelf[c] + 0.12 * (1 - f.shelf[c])) * prod * 100;
   const fresh = Math.min(50, f.river[c] * 3) * (f.clim[c].tAnn > -8 ? 1 : 0.3) + f.lake[c] * 50;
   return Math.min(100, sea + fresh);
 }
@@ -672,7 +682,7 @@ function bake(grid, inp, deposits) {
   // world: zones are counted in as expected values, so the coarse table already shows them
   if (grid.name === 'world') {
     for (const z of zones) {
-      const each = z.amount * z.pieces / z.cells.length;
+      const each = z.amount / z.cells.length; // a zone's amount is its whole amount, split among its pieces
       for (const c of z.cells) put(z.res, c, each, z.depth);
     }
   }

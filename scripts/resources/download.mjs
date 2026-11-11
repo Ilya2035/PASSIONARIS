@@ -98,12 +98,18 @@ const WD_ROOTS = {
 };
 async function sparql(query) {
   const body = new URLSearchParams({ query, format: 'json' });
-  const buf = await fetchBuf('https://query.wikidata.org/sparql', {
-    body, timeoutMs: 120000, headers: { Accept: 'application/sparql-results+json' } });
-  // some labels carry raw control characters (tabs and the like) that strict JSON refuses
-  const txt = buf.toString('utf8').replace(/[\u0000-\u0009\u000b\u000c\u000e-\u001f]/g, ' ');
-  if (!txt.startsWith('{')) throw new Error('wikidata: ' + txt.slice(0, 200));
-  return JSON.parse(txt).results.bindings;
+  let lastErr;
+  for (let i = 0; i < 4; i++) {
+    const buf = await fetchBuf('https://query.wikidata.org/sparql', {
+      body, timeoutMs: 120000, headers: { Accept: 'application/sparql-results+json' } });
+    // some labels carry raw control characters (tabs, line breaks) that strict JSON refuses inside a string; between
+    // tokens they are only whitespace, so a space is right everywhere
+    const txt = buf.toString('utf8').replace(/[\u0000-\u001f]/g, ' ');
+    // the server cuts an answer that takes too long: the JSON then ends in the middle — ask again
+    try { return JSON.parse(txt).results.bindings; } catch (e) { lastErr = new Error('wikidata: ' + (txt.startsWith('{') ? e.message : txt.slice(0, 200))); }
+    await sleep(5000 * (i + 1));
+  }
+  throw lastErr;
 }
 const qid = uri => uri.slice(uri.lastIndexOf('/') + 1);
 async function wikidata() {
@@ -116,31 +122,25 @@ async function wikidata() {
     for (const r of rows) if (!classes.has(qid(r.c.value))) classes.set(qid(r.c.value), { label: r.cLabel?.value, root: name });
   }
   log('wikidata', classes.size, 'classes');
-  // One class at a time, in pages: the label service and big batches make the server cut the answer.
+  // One class per query, without labels and without sorting (the label service, big batches and ORDER BY make the
+  // server cut the answer); the largest class, «mine», is ≈ 50 000 places and comes in a few seconds.
   const LANGS = ['en', 'es', 'fr', 'pt', 'de', 'it', 'ca', 'ru'];
   const items = new Map(), productIds = new Set();
-  const PAGE = 10000;
   for (const c of classes.keys()) {
-    for (let offset = 0; ; offset += PAGE) {
-      const rows = await sparql(`SELECT ?item ?coord ?p WHERE {
-        { SELECT DISTINCT ?item WHERE { ?item wdt:P31 wd:${c} ; wdt:P625 [] . } ORDER BY ?item LIMIT ${PAGE} OFFSET ${offset} }
-        ?item wdt:P625 ?coord .
-        OPTIONAL { ?item wdt:P1056 ?p } }`);
-      const seen = new Set();
-      for (const r of rows) {
-        const id = qid(r.item.value);
-        seen.add(id);
-        const m = /Point\(([-\d.eE]+) ([-\d.eE]+)\)/.exec(r.coord.value);
-        if (!m || r.coord.value.includes('<')) continue; // coordinates on another globe (Moon, Mars)
-        const it = items.get(id) ?? { id, name: id, lon: +m[1], lat: +m[2], classes: [], products: [] };
-        if (!it.classes.includes(c)) it.classes.push(c);
-        if (r.p) { const p = qid(r.p.value); productIds.add(p); if (!it.products.includes(p)) it.products.push(p); }
-        items.set(id, it);
-      }
-      if (seen.size) log('wikidata', c, classes.get(c).label, offset + seen.size);
-      if (seen.size < PAGE) break;
-      await sleep(500);
+    const rows = await sparql(`SELECT ?item ?coord ?p WHERE { ?item wdt:P31 wd:${c} ; wdt:P625 ?coord .
+      OPTIONAL { ?item wdt:P1056 ?p } }`);
+    const seen = new Set();
+    for (const r of rows) {
+      const id = qid(r.item.value);
+      seen.add(id);
+      const m = /Point\(([-\d.eE]+) ([-\d.eE]+)\)/.exec(r.coord.value);
+      if (!m || r.coord.value.includes('<')) continue; // coordinates on another globe (Moon, Mars)
+      const it = items.get(id) ?? { id, name: id, lon: +m[1], lat: +m[2], classes: [], products: [] };
+      if (!it.classes.includes(c)) it.classes.push(c);
+      if (r.p) { const p = qid(r.p.value); productIds.add(p); if (!it.products.includes(p)) it.products.push(p); }
+      items.set(id, it);
     }
+    if (seen.size > 100) log('wikidata', c, classes.get(c).label, seen.size);
     await sleep(150);
   }
   // names: the first language of LANGS that has a label

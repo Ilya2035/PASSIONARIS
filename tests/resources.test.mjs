@@ -4,9 +4,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import {
-  RESOURCES, RES_INDEX, chunkOf, chunkI, chunkJ, chunkLat, chunkLon, gridForBox, openTable,
+  RESOURCES, RES_INDEX, ALBUM_GRID, chunkOf, chunkI, chunkJ, chunkLat, chunkLon, gridForBox, openTable,
   hash32, strHash, scatterZone, withZones, sumCells,
 } from '../scripts/resources/lib.mjs';
+import { CN, CI0, CJ0, CHUNK_KM, kmOf } from '../src/album/chunks.js';
 
 const DIR = new URL('../public/assets/resources/', import.meta.url);
 const load = name => {
@@ -47,8 +48,16 @@ test('chunk grid: the formula of the brief, and chunk centres map back to their 
     assert.deepEqual(chunkOf(chunkLat(j), chunkLon(i)), { i, j });
     assert.ok(Math.abs(chunkLat(j, 0) - chunkLat(j, 1) + 10 / 111.195) < 1e-9, 'a chunk is 10 km tall');
   }
+  // the table uses the album's own chunk grid and numbering (src/album/chunks.js)
+  assert.deepEqual([ALBUM_GRID.i0, ALBUM_GRID.j0, ALBUM_GRID.W, ALBUM_GRID.H, ALBUM_GRID.chunkKm], [CI0, CJ0, CN, CN, CHUNK_KM]);
+  assert.deepEqual([meta.grid.i0, meta.grid.j0, meta.grid.W, meta.grid.H], [CI0, CJ0, CN, CN]);
+  for (const [lat, lon] of [[40.4, -3.7], [43.3, -2.9]]) {
+    const [x, y] = kmOf(lat, lon), { i, j } = chunkOf(lat, lon);
+    assert.deepEqual([Math.floor(x / CHUNK_KM), Math.floor(y / CHUNK_KM)], [i, j]);
+  }
+  // the whole album region is inside the grid
   const g = gridForBox(ALBUM_BOX);
-  assert.deepEqual([g.i0, g.j0, g.W, g.H], [meta.grid.i0, meta.grid.j0, meta.grid.W, meta.grid.H]);
+  assert.ok(g.i0 >= CI0 && g.j0 >= CJ0 && g.i0 + g.W <= CI0 + CN && g.j0 + g.H <= CJ0 + CN);
 });
 
 test('album table: format, sizes, depths only where something lies, amounts in their ranges', () => {
@@ -153,4 +162,43 @@ test('rules: rich Atlantic shelf fish, forests in the wet north, little wood in 
   const wood = (lat, lon) => table.get('wood', chunkI(lon), chunkJ(lat));
   assert.ok(wood(43.2, -5.0) > wood(37.0, -2.4), 'Asturias is greener than Almería');
   assert.ok(near('stone', 42.7, 0.6, 0) > near('stone', 39.0, -3.0, 0), 'the Pyrenees are rockier than La Mancha');
+});
+
+test('album aspect «Ресурсы»: its knobs, its pages inside the region, every resource selectable', async () => {
+  const { default: aspect } = await import('../src/album/aspects/resources.js');
+  const { DEFS } = await import('../src/album/params.js');
+  assert.equal(aspect.id, 'resources');
+  const keys = new Set(DEFS.map(d => d.key));
+  for (const d of aspect.params) assert.ok(keys.has(d.key) && d.group === 'modes', d.key);
+  const res = aspect.params.find(d => d.key === 'res');
+  assert.deepEqual(res.options.slice(1).map(o => o[0]), RESOURCES.map(r => r.id));
+  assert.ok(aspect.pages.length >= 5);
+  for (const pg of aspect.pages) {
+    assert.equal(pg.group, 'Ресурсы', pg.id);
+    for (const k of Object.keys(pg.p)) assert.ok(keys.has(k), `${pg.id}: unknown knob ${k}`);
+    assert.ok(pg.p.res in RES_INDEX, pg.id);
+    const c = pg.cam;
+    assert.ok(c.lat >= ALBUM_BOX.lat0 && c.lat <= ALBUM_BOX.lat1 && c.lon >= ALBUM_BOX.lon0 && c.lon <= ALBUM_BOX.lon1 && c.h >= 20, pg.id);
+  }
+});
+
+test('world table (0.5°): format, and a few places of the whole globe', () => {
+  const { meta: wm, table: wt } = load('world');
+  assert.equal(wm.grid.W, 720); assert.equal(wm.grid.H, 360);
+  assert.deepEqual(wm.resources.map(r => r.id), RESOURCES.map(r => r.id));
+  const at = (res, lat, lon, r = 1) => {
+    let best = 0;
+    const y0 = Math.floor((90 - lat) / .5), x0 = Math.floor((lon + 180) / .5);
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const y = y0 + dy, x = (x0 + dx + 720) % 720;
+      if (y >= 0 && y < 360) best = Math.max(best, wt.amount[RES_INDEX[res] * wt.N + y * 720 + x]);
+    }
+    return best;
+  };
+  assert.ok(at('fish', -12, -78, 0) > at('fish', 28, -60, 0), 'the Peru upwelling beats the Sargasso Sea');
+  assert.ok(at('wood', 60, 90, 0) > at('wood', 23, 10, 0), 'the Siberian taiga beats the Sahara');
+  assert.equal(at('clay', -80, 0, 0), 0, 'no clay under the Antarctic ice');
+  assert.ok(at('oil', 26, 50, 2) > 0, 'oil around the Persian Gulf');
+  assert.ok(at('copper', -22.3, -68.9, 1) >= 100, 'copper of Chuquicamata');
+  assert.ok(at('copper', 37.7, -6.6, 0) >= 100, 'Rio Tinto on the world grid too');
 });
