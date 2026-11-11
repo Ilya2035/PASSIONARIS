@@ -25,7 +25,7 @@ export const CHANNELS = {
   ice: ['B', 0, 'лёд'],               // ice on the water of the chunk: 0 open water .. 1 solid
   snow: ['B', 1, 'снег'],             // snow lying on the chunk, on land and on ice
   flood: ['B', 2, 'разлив'],          // extra water over the land: 0 none .. 1 flooded
-  spareB: ['B', 3, 'запас'],
+  spareB: ['B', 3, 'волнение моря'],  // the water aspect keeps the roughness of the sea here: 0 calm .. 1 storm
   built: ['C', 0, 'застройка'],       // share of the chunk under houses
   fields: ['C', 1, 'поля'],           // share under fields and pasture
   culture: ['C', 2, 'манера строить'], // building manner, index / 255
@@ -65,9 +65,11 @@ function line(x0, y0, x1, y1, mark) {
 // On land the growth is a flood rising from the low ground, so in broken country a chunk is a piece of a valley with
 // its slopes and its border is the crest; on level ground chunks are rounded cells, and a river is a border. Land and
 // water never share a chunk, so the coast is always a border. The seeds stand in staggered rows with some scatter.
-//   heightAt(lat, lon) → metres (missing = all land); rivers: [{ pts: [[lon, lat], …], rank }]
-export function buildCells(heightAt, rivers = []) {
-  const n = FN * FN, land = new Uint8Array(n), hgt = new Float32Array(n), riv = new Uint8Array(n), pace = new Float32Array(n);
+// A lake is cut out of the land along its own outline and is always a chunk of its own, however small.
+//   heightAt(lat, lon) → metres (missing = all land); rivers: [{ pts: [[lon, lat], …], rank }];
+//   lakes: [{ ring: [[lon, lat], …] }]
+export function buildCells(heightAt, rivers = [], lakes = []) {
+  const n = FN * FN, land = new Uint8Array(n), hgt = new Float32Array(n), riv = new Uint8Array(n), pace = new Float32Array(n), lakeAt = new Uint16Array(n);
   for (let ty = 0, t = 0; ty < FN; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG, inLat = lat > BBOX.lat0 && lat < BBOX.lat1;
     for (let tx = 0; tx < FN; tx++, t++) {
@@ -77,6 +79,17 @@ export function buildCells(heightAt, rivers = []) {
       pace[t] = .82 + .5 * vnoise(tx / 7.1, ty / 7.1, 5);            // an even pace with slow swells: neat rounded cells, none alike
     }
   }
+  // lakes: every texel whose middle lies inside the outline (at least one texel, for a lake smaller than a texel)
+  lakes.forEach((lk, i) => {
+    if (!lk.ring || lk.ring.length < 3) return;
+    const pts = lk.ring.map(p => [(p[0] * KM_PER_DEG * COS_REF - X0) / FKM, (p[1] * KM_PER_DEG - Y0) / FKM]);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, sx = 0, sy = 0, any = false;
+    for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); sx += p[0]; sy += p[1]; }
+    const inside = (x, y) => { let c = false; for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) { const p = pts[a], q = pts[b]; if ((p[1] > y) !== (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) c = !c; } return c; };
+    const put = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FN && ty < FN) { land[ty * FN + tx] = 0; lakeAt[ty * FN + tx] = i + 1; any = true; } };
+    for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++) for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) if (inside(tx + .5, ty + .5)) put(tx, ty);
+    if (!any) put(Math.floor(sx / pts.length), Math.floor(sy / pts.length));
+  });
   // The lie of the land for the flood: heights with the small bumps ironed out (the mean within 2.5 km). A furrow or
   // a hillock on a plain then does not bend a border, while a real valley and a real crest still do.
   const lie = new Float32Array(n);
@@ -106,10 +119,11 @@ export function buildCells(heightAt, rivers = []) {
     // On land the seed goes down into the low ground of its square: the valley floor, the plain.
     let best = -1, bd = 1e9;
     for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) {
-      const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] !== isLand) continue;
+      const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] !== isLand || lakeAt[t]) continue;
       const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0) + (isLand ? Math.min(90, (lie[t] - low) * .09) : 0);
       if (d < bd) { bd = d; best = t; }
     }
+    if (best < 0) for (let b = 0; b < Q && best < 0; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] === isLand) { best = t; break; } }   // a square that is all lake
     kind.push(isLand); cell[best] = yj * CN + xi; seedAt[yj * CN + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(lie[best])) : 0; put(best, dist[best]);
   }
   // The flood. Every land seed is a spring: its water rises and spreads, level by level, and takes the ground it
@@ -126,11 +140,11 @@ export function buildCells(heightAt, rivers = []) {
       const tx = t % FN, ty = (t / FN) | 0, id = cell[t], lt = land[t], rt = riv[t], lvl = dist[t];
       for (let d = 0; d < 16; d++) {
         const dx = DX[d], dy = DY[d], x = tx + dx, y = ty + dy; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
-        const m = y * FN + x; if (land[m] !== lt) continue;
+        const m = y * FN + x; if (land[m] !== lt || lakeAt[m] !== lakeAt[t]) continue;
         let way = (d < 4 ? FKM : d < 8 ? FKM * 1.414 : FKM * 2.236) * LAM * pace[m], top = lt ? lie[m] : 0, tolls = riv[m] !== rt ? 1 : 0;
         if (d >= 8) {                     // a knight's move passes over two texels: it may not jump the coast, a crest or a river
           const a = t + (dx === 2 || dx === -2 ? dx / 2 : dy / 2 * FN), b = a + (dx === 2 || dx === -2 ? dy * FN : dx);
-          if (land[a] !== lt || land[b] !== lt) continue;
+          if (land[a] !== lt || land[b] !== lt || lakeAt[a] !== lakeAt[t] || lakeAt[b] !== lakeAt[t]) continue;
           if (lt) { top = Math.max(top, lie[a], lie[b]); if (!tolls && (riv[a] !== rt || riv[b] !== rt)) tolls = 2; }
         }
         if (lt && tolls) way += tolls * (Math.max(riv[m], rt, 1) === 2 ? 80 : 50);  // a river is paid for on entering and on leaving
@@ -142,7 +156,7 @@ export function buildCells(heightAt, rivers = []) {
   }
   // what no seed reached — an island in a square of open sea, a lagoon behind a bar: a chunk of its own if it is big
   // enough, otherwise part of the chunk it lies in
-  const stack = [];
+  const stack = [], lakeChunk = new Map();
   for (let s = 0; s < n; s++) {
     if (cell[s] !== NONE) continue;
     const lt = land[s], comp = [s]; let host = NONE; cell[s] = NONE - 1; stack.push(s);
@@ -151,11 +165,13 @@ export function buildCells(heightAt, rivers = []) {
       for (let d = 0; d < 4; d++) {
         const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
         const m = y * FN + x;
-        if (cell[m] === NONE && land[m] === lt) { cell[m] = NONE - 1; comp.push(m); stack.push(m); } else if (cell[m] < NONE - 1 && host === NONE) host = cell[m];
+        if (cell[m] === NONE && land[m] === lt && lakeAt[m] === lakeAt[s]) { cell[m] = NONE - 1; comp.push(m); stack.push(m); } else if (cell[m] < NONE - 1 && host === NONE) host = cell[m];
       }
     }
     let id = host;
-    if (comp.length >= 8 || host === NONE) { id = kind.length; kind.push(lt); }
+    if (lakeAt[s]) {                      // a lake is one chunk whatever its size, even if its texels do not touch
+      id = lakeChunk.get(lakeAt[s]); if (id === undefined) { id = kind.length; kind.push(lt); lakeChunk.set(lakeAt[s], id); }
+    } else if (comp.length >= 8 || host === NONE) { id = kind.length; kind.push(lt); }
     for (const t of comp) cell[t] = id;
   }
   // Round the outlines off. Every texel near a border looks at the texels within 2.5 km, each weighted by a bell
@@ -167,12 +183,12 @@ export function buildCells(heightAt, rivers = []) {
     const prev = cell.slice(), ids = new Uint16Array(49), ws = new Float32Array(49);
     for (let ty = 3; ty < FN - 3; ty++) for (let tx = 3; tx < FN - 3; tx++) {
       const t = ty * FN + tx, id = prev[t];
-      if (seed[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FN] || riv[t + FN]) continue;
+      if (seed[t] || lakeAt[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FN] || riv[t + FN]) continue;
       if (prev[t - 3] === id && prev[t + 3] === id && prev[t - 3 * FN] === id && prev[t + 3 * FN] === id
         && prev[t - 2 * FN - 2] === id && prev[t + 2 * FN + 2] === id && prev[t - 2 * FN + 2] === id && prev[t + 2 * FN - 2] === id) continue;   // deep inside its chunk
       let nIds = 0;
       for (let b = 0; b < BELL.length; b += 2) {
-        const m = t + BELL[b], v = prev[m]; if (land[m] !== land[t] || kind[v] !== kind[id]) continue;
+        const m = t + BELL[b], v = prev[m]; if (land[m] !== land[t] || lakeAt[m] || kind[v] !== kind[id]) continue;
         let j = 0; while (j < nIds && ids[j] !== v) j++;
         if (j === nIds) { ids[nIds] = v; ws[nIds++] = 0; }
         ws[j] += BELL[b + 1];
@@ -200,18 +216,22 @@ export function buildCells(heightAt, rivers = []) {
       for (let d = 0; d < 4 && size[k] < 20; d++) {
         const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
         const m = y * FN + x, o = cell[m];
-        if (o !== k && kind[o] === kind[k] && land[m] === land[t] && size[o] > 26 && !seed[m]) { cell[m] = k; size[k]++; size[o]--; list.push(m); }
+        if (o !== k && kind[o] === kind[k] && land[m] === land[t] && lakeAt[m] === lakeAt[t] && size[o] > 26 && !seed[m]) { cell[m] = k; size[k]++; size[o]--; list.push(m); }
       }
     }
   }
-  return { cell, count: kind.length, kind: Uint8Array.from(kind), land, hgt, riv, seedAt };
+  const lakeOf = new Int16Array(kind.length).fill(-1);
+  for (let t = 0; t < n; t++) if (lakeAt[t]) lakeOf[cell[t]] = lakeAt[t] - 1;
+  return { cell, count: kind.length, kind: Uint8Array.from(kind), land, hgt, riv, seedAt, lakeOf };
 }
 
 export class Chunks {
-  constructor(heightAt, rivers) {
-    const g = buildCells(heightAt, rivers), n = g.count, cell = g.cell;
+  constructor(heightAt, rivers, lakes = []) {
+    const g = buildCells(heightAt, rivers, lakes), n = g.count, cell = g.cell;
     this.n = CN; this.count = n; this.cell = cell;
-    this.kind = g.kind;                  // 1 a chunk of land, 0 a chunk of water
+    this.kind = g.kind;                  // 1 a chunk of land, 0 a chunk of water (sea or lake)
+    this.lake = g.lakeOf;                // for a lake chunk the number of its lake in this.lakes, otherwise −1
+    this.lakes = lakes;
     this.area = new Float32Array(n);     // km²
     this.land = new Float32Array(n);     // share of the chunk that is land, 0..1 (a water chunk may hold a rock)
     this.height = new Float32Array(n);   // mean height of its land, metres

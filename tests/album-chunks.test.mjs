@@ -116,3 +116,16 @@ test('aspects: each has an id and the functions the ground shader calls; knobs a
   const groups = PAGES.map(p => p.group), firstSeen = [...new Set(groups)];
   assert.deepEqual(groups, firstSeen.flatMap(g => groups.filter(x => x === g)), 'pages of one group stand together');
 });
+
+test('chunks: a lake is cut out of the land as a chunk of its own, however small', () => {
+  const big = { name: 'Большое', ring: [[-5.1, 40], [-5.025, 40.05], [-4.95, 40], [-5.025, 39.95]] };        // a diamond about 13 by 11 km
+  const tiny = { name: 'Малое', ring: [[-6.001, 41], [-6, 41.001], [-5.999, 41], [-6, 40.999]] };            // far smaller than a texel
+  const w = new Chunks(() => 400, [], [big, tiny]);
+  const k = w.at(40, -5.025), t = w.at(41, -6), beside = w.at(40, -5.3);
+  assert.equal(w.kind[k], 0); assert.equal(w.lake[k], 0); assert.equal(w.land[k], 0); assert.ok(k >= CN * CN, 'a chunk added for the lake');
+  assert.ok(w.area[k] > 40 && w.area[k] < 100, `the lake keeps its own size: ${w.area[k]} km²`);
+  assert.ok(w.links[k].length >= 2 && w.links[k].every(l => w.kind[l.k] === 1), 'land all around it');
+  assert.equal(w.lake[t], 1); assert.ok(w.area[t] > 0 && w.area[t] < 2, 'even the smallest lake has a chunk');
+  assert.equal(w.kind[beside], 1); assert.equal(w.lake[beside], -1);
+  assert.equal(w.lakes[w.lake[k]].name, 'Большое');
+});

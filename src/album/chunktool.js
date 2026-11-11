@@ -1,7 +1,8 @@
-// Tools for looking at the chunk system (chunks.js) at work: the natural state of every chunk, three plain
-// demonstrations (people clearing forest around their settlements, the sea freezing, snow falling), a brush that
-// changes chunks by a click, the read-out of the chunk under the cursor and a view of any chunk number as flat
-// squares. The demonstrations are stand-ins: the real rules of forest, ice and settlements are the aspects' work.
+// Tools for looking at the chunk system (chunks.js) at work: the natural state of every chunk, two plain
+// demonstrations (people clearing forest around their settlements, snow falling on the land), a brush that changes
+// chunks by a click, the read-out of the chunk under the cursor and a view of any chunk number, chunk by chunk.
+// The demonstrations are stand-ins: the real rules of forest and settlements are the aspects' work. Ice on the water
+// already is: the water aspect's own model (knob «Холод»).
 import { CHANNELS, RAMPS } from './chunks.js';
 import { pickGround } from './pick.js';
 
@@ -22,10 +23,6 @@ export default async function init(album) {
   const ch = album.chunks, p = album.params, dom = album.renderer.domElement, places = album.data.vectors.places;
   const centres = Array.from({ length: ch.count }, (_, k) => ch.centre(k));
   const hash = k => { let x = Math.imul(k + 1, 2654435761) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return (x >>> 0) / 4294967296; };
-  // distance from the shore, in chunks, for every water chunk
-  const off = new Float32Array(ch.count).fill(1e9), queue = [];
-  for (let k = 0; k < ch.count; k++) if (ch.land[k] > .3) { off[k] = 0; queue.push(k); }
-  for (let q = 0; q < queue.length; q++) for (const m of ch.neighbours(queue[q])) if (off[m] > off[queue[q]] + 1) { off[m] = off[queue[q]] + 1; queue.push(m); }
   const town = places.map(pl => ({ x: pl.lon * 111.195 * Math.cos(40 * D), y: pl.lat * 111.195, r: 2.2 * Math.max(1, pl.pop) ** .24, big: Math.min(1, .25 + pl.pop / 8e5) }));
 
   const s = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -34,11 +31,11 @@ export default async function init(album) {
 
   // every chunk back to its natural state, then the demonstrations on top
   function applyState() {
-    const cut = p.get('demoCut'), ice = p.get('demoIce'), snow = p.get('demoSnow');
+    const cut = p.get('demoCut'), snow = p.get('demoSnow');
     ch.reset();
-    if (!cut && !ice && !snow) return;
+    if (!cut && !snow) return;
     for (let k = 0; k < ch.count; k++) {
-      const c = centres[k], land = ch.land[k], h = ch.height[k], north = (c.lat - 35.2) / 9.6, jit = hash(k) - .5;
+      const c = centres[k], land = ch.land[k], h = ch.height[k], jit = hash(k) - .5;
       if (cut > 0 && land > 0) {
         let forest = 1, fields = 0, built = 0;
         for (const t of town) {
@@ -48,11 +45,9 @@ export default async function init(album) {
         }
         ch.set('forest', k, Math.min(ch.get('forest', k), forest)); ch.set('fields', k, Math.max(ch.get('fields', k), fields)); ch.set('built', k, Math.max(ch.get('built', k), built));
       }
-      const iceV = ice > 0 && land < .6 ? s(0, .25, ice * 1.6 - (1 - north) * .8 - off[k] * .035 + jit * .12) : 0;
-      if (iceV > 0) ch.set('ice', k, Math.max(ch.get('ice', k), iceV));
+      // snow on the land only: ice on the water and the snow on it belong to the water aspect (its knob «Холод»)
       const line = 2600 * (1 - snow * 1.6) - (c.lat - 40) * 90;     // the snow line comes down as the knob goes up
-      const snowLand = snow > 0 ? s(line - 250, line + 150, h + jit * 120) : 0;
-      const snowV = land > .5 ? snowLand : iceV * Math.max(snowLand, snow * .8);
+      const snowV = snow > 0 && land > .5 ? s(line - 250, line + 150, h + jit * 120) : 0;
       if (snowV > 0) ch.set('snow', k, Math.max(ch.get('snow', k), snowV));
     }
   }
@@ -96,9 +91,9 @@ export default async function init(album) {
     const ll = on && last ? pickGround(album, last.clientX, last.clientY) : null, k = ll ? ch.at(ll.lat, ll.lon) : -1;
     ch.uniforms.uChunkHoverId.value = k;
     if (k < 0) { info.style.display = 'none'; return; }
-    const parts = [`Чанк № ${k}`, ch.kind[k] ? 'суша' : 'вода', `${Math.round(ch.area[k])} км²`, `соседей ${ch.links[k].length}`];
+    const parts = [`Чанк № ${k}`, ch.kind[k] ? 'суша' : ch.lake[k] >= 0 ? (ch.lakes[ch.lake[k]].name || 'озеро') : 'море', `${Math.round(ch.area[k])} км²`, `соседей ${ch.links[k].length}`];
     if (ch.kind[k] && ch.links[k].some(l => l.river)) parts.push('граница по реке');
-    for (const name of ['forest', 'conifer', 'swamp', 'fields', 'built', 'ice', 'snow']) { const v = ch.get(name, k); if (v > .004 || name === 'forest') parts.push(`${CHANNELS[name][2]} ${pct(v)}`); }
+    for (const name of ['forest', 'conifer', 'swamp', 'fields', 'built', 'ice', 'snow']) { const v = ch.get(name, k); if (v > .004 || (name === 'forest' && ch.kind[k])) parts.push(`${CHANNELS[name][2]} ${pct(v)}`); }
     for (const l of ch.layers.values()) if (l.data[k]) parts.push(`${l.title} ${Math.round(l.data[k] * 10) / 10}${l.unit ? ' ' + l.unit : ''}`);
     info.textContent = parts.join(' · '); info.style.display = album.shot ? 'none' : 'block';
   } };

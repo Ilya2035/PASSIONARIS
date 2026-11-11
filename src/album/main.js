@@ -23,7 +23,9 @@ async function start() {
   const data = album.data = await loadData(step);
   step('сцена');
   step('чанки'); const tChunks = performance.now();
-  const chunks = album.chunks = new Chunks(data.base.at, data.vectors.rivers); album.chunkMs = Math.round(performance.now() - tChunks);
+  // the lakes of the water aspect are cut out of the land as chunks of their own (the shoals in the list are not lakes)
+  const lakes = await fetch('assets/album/water/lakes.json').then(r => r.json()).then(j => (j.lakes || []).filter(l => !l.shoal && l.ring)).catch(() => []);
+  const chunks = album.chunks = new Chunks(data.base.at, data.vectors.rivers, lakes); album.chunkMs = Math.round(performance.now() - tChunks);
   const terrain = album.terrain = new Terrain(data, scene, chunks);
   const cam = album.cam = new AlbumCamera(canvas, data.base.at);
   const params = album.params = createParams(album);

@@ -37,7 +37,6 @@ const BASE = [
     ['ice+', 'Заморозить воду'], ['ice-', 'Растопить лёд'], ['snow+', 'Насыпать снег'], ['snow-', 'Убрать снег']] },
   { key: 'brushSize', label: 'Размер кисти', group: 'modes', min: 1, max: 5, step: 1, value: 2, unit: ' чанка' },
   { key: 'demoCut', label: 'Показ: вырубка у поселений', group: 'modes', min: 0, max: 1, step: .02, value: 0 },
-  { key: 'demoIce', label: 'Показ: лёд на море', group: 'modes', min: 0, max: 1, step: .02, value: 0 },
   { key: 'demoSnow', label: 'Показ: снег', group: 'modes', min: 0, max: 1, step: .02, value: 0 },
   { key: 'data', label: 'Данные', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'Температура'], [2, 'Высоты']], value: 0, uniform: 'uData' },
   { key: 'hazard', label: 'Бедствие', group: 'modes', type: 'select', options: [['', 'нет'], ['fire', 'Пожар'], ['quake', 'Землетрясение']], value: '' },
