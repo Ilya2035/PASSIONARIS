@@ -442,7 +442,7 @@ function mrdsDeposits() {
     if (!twins) {
       const names = preciseNames.get(d.country);
       if (names && names.size < 30000) {
-        for (const n of names) if (n.length >= 4 && (n.includes(d.norm) || d.norm.includes(n))) { twins = byName.get(d.country + '|' + n) ?? []; break; }
+        for (const n of names) if (n.length >= 4 && sameName(n, d.norm)) { twins = byName.get(d.country + '|' + n) ?? []; break; }
       }
     }
     if (!twins) return true;
@@ -515,7 +515,7 @@ function wikidataDeposits() {
     const pan = roots.has('saltworks') || roots.has('salt evaporation pond');
     const quarry = roots.has('quarry');
     for (const r of res) {
-      out.push({ src: 'Wikidata', id: 'wd:' + it.id, name: it.name, lat: it.lat, lon: it.lon, res: r,
+      out.push({ src: 'Wikidata', id: 'wd:' + it.id, name: /^Q\d+$/.test(it.name) ? `без названия (${it.id})` : it.name, lat: it.lat, lon: it.lon, res: r,
         amount: quarry ? 10 : r === 'oil' || r === 'gas' ? 60 : 30,
         depth: r === 'salt' && pan ? 0 : RESOURCES[RES_INDEX[r]].depth, precise: true });
     }
@@ -629,7 +629,7 @@ function bake(grid, inp, deposits) {
     if (grid.name === 'album') {
       const cells = [], weights = [];
       for (let c = 0; c < N; c++) if (w[c] > 0.02) { cells.push(c); weights.push(Math.max(1, Math.round(clamp(w[c]) * 255))); }
-      zones.push({ ...fd, kind: 'field', cells, weights });
+      if (cells.length) zones.push({ ...fd, kind: 'field', cells, weights });
     } else {
       for (let c = 0; c < N; c++) put(fd.res, c, w[c] * fd.chance * fd.amount * grid.areaKm2(c) / 100, fd.depth);
     }
@@ -714,8 +714,8 @@ function bake(grid, inp, deposits) {
   };
   if (grid.name === 'album') { meta.deposits = list; meta.zones = zones; }
   else {
-    meta.deposits = list.filter(d => d.amount >= 30);
-    meta.depositsNote = 'only deposits of 30 units and more';
+    meta.deposits = list.filter(d => d.amount >= 100);
+    meta.depositsNote = 'only deposits of 100 units and more (large and giant)';
   }
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, `${grid.name}.bin.gz`), gzip(bytes));
