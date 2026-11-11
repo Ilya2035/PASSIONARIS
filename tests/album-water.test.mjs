@@ -54,6 +54,11 @@ test('water: ice comes from the shore and from the north, later over deep water;
   assert.ok(m.res[nearN] < m.res[nearS], 'the north freezes before the south');
   assert.ok(m.res[lake] < m.res[nearN], 'still fresh water freezes before the sea');
   assert.ok(m.depth[farN] > m.depth[nearN] && m.off[farN] > m.off[nearN]);
+  // when a lake becomes a chunk of water of its own, it freezes as fresh water, not as the sea
+  const tarn = (lat, lon) => (Math.hypot(lat - 42, (lon + 6) * .74) < .12 ? -30 : heightAt(lat, lon)), surface = (lat, lon) => (tarn(lat, lon) < 0 && lon < -2.75 ? 900 : heightAt(lat, lon));
+  const chL = new Chunks(tarn), kL = chL.at(42, -6), mL = makeFreeze(chL, surface);
+  assert.equal(chL.kind[kL], 0, 'the hollow is a chunk of water'); assert.ok(mL.lake[kL] > 800 && mL.lake[chL.at(44, 2)] === 0);
+  assert.ok(mL.res[kL] < mL.res[chL.at(42, -2.74)], 'a mountain lake freezes before the sea shore at its latitude');
   for (const k of [nearN, farN, nearS, lake, high]) {
     let last = -1;
     for (let c = 0; c <= 1.0001; c += .05) { const t = m.target(k, { cold: c }); assert.ok(t >= last - 1e-9, 'more cold, never less ice'); last = t; }

@@ -34,7 +34,7 @@ export function makeFreeze(ch, heightAt) {
 
   // Chunks are natural cells, each all land or all water (ch.kind). The mean depth of a water chunk is taken from
   // nine points in and around its middle; how far it lies from the land is counted in chunks.
-  const queue = [], KX = 111.195 * Math.cos(40 * Math.PI / 180);
+  const queue = [], KX = 111.195 * Math.cos(40 * Math.PI / 180), lake = new Float32Array(n);
   for (let k = 0; k < n; k++) {
     water[k] = (ch.kind ? ch.kind[k] === 0 : ch.land[k] < .6) ? 1 : 0;
     let sum = 0, cnt = 0;
@@ -44,19 +44,21 @@ export function makeFreeze(ch, heightAt) {
     }
     depth[k] = cnt ? sum / cnt : 0;
     if (!water[k]) { off[k] = 0; queue.push(k); }
+    // a chunk of water that stands above the sea is a lake (none yet: the lakes lie inside chunks of land)
+    lake[k] = water[k] && heightAt && heightAt(centres[k].lat, centres[k].lon) > 1 ? Math.max(1, heightAt(centres[k].lat, centres[k].lon)) : 0;
   }
   for (let q = 0; q < queue.length; q++) for (const m of ch.neighbours(queue[q])) if (off[m] > off[queue[q]] + 1) { off[m] = off[queue[q]] + 1; queue.push(m); }
 
   // how cold it must get before a chunk starts to freeze: 0 at once .. ~.86 last of all
   for (let k = 0; k < n; k++) {
-    const c = centres[k], north = sat((c.lat - 35.2) / 9.6), jit = hash(k), land = water[k] ? 0 : 1;
-    const onLand = .10 + .22 * (1 - north) - .12 * sat(ch.height[k] / 1500);                                   // lakes and rivers: mountain water first
+    const c = centres[k], north = sat((c.lat - 35.2) / 9.6), jit = hash(k), land = water[k] && !lake[k] ? 0 : 1;   // still fresh water freezes like the land around it
+    const onLand = .10 + .22 * (1 - north) - .12 * sat((lake[k] || ch.height[k]) / 1500);                      // lakes and rivers: mountain water first
     const atSea = .16 + .26 * (1 - north) + .20 * Math.sqrt(sat(depth[k] / 2000)) + .028 * Math.min(off[k] === 1e9 ? 8 : off[k], 8);   // salt, deep, far from the shore: last
     res[k] = Math.max(.02, onLand * land + atSea * (1 - land) + (jit - .5) * .03);
     // the natural state of the sea: the ocean is rougher than the inner sea, the open water rougher than the coast
     const ocean = ss(-5.2, -6.2, c.lon) + ss(43.2, 43.6, c.lat) * ss(-1.2, -2, c.lon), far = sat((off[k] === 1e9 ? 8 : off[k]) / 8);
     const patch = .5 + .5 * Math.sin(c.x * .021 + 1.3) * Math.cos(c.y * .017 + .4);
-    seaNat[k] = land ? 0 : sat(.16 + .14 * Math.min(1, ocean) + .12 * far + .12 * patch);
+    seaNat[k] = land ? (lake[k] ? .15 : 0) : sat(.16 + .14 * Math.min(1, ocean) + .12 * far + .12 * patch);
   }
 
   const target = (k, o) => ss(0, SPAN, (o.cold || 0) - (o.thaw || 0) * .2 - res[k]);
@@ -136,7 +138,7 @@ export function makeFreeze(ch, heightAt) {
   function natural() { for (let k = 0; k < n; k++) { ch.setNatural(SEA_CHANNEL, k, seaNat[k]); sea[k] = seaNat[k]; seen[SEA_CHANNEL][k] = Math.round(ch.get(SEA_CHANNEL, k) * 255); } }
   // after chunks.reset(): the natural state is back in the chunks, lay the model's own over it again
   function relay(o) { pin.fill(0); for (const a of Object.values(seen)) a.fill(-1); write(o); }
-  return { ice, melt, snow, sea, res, depth, off, water, seaNat, state, target, aim, settle, step, write, natural, relay };
+  return { ice, melt, snow, sea, res, depth, off, water, lake, seaNat, state, target, aim, settle, step, write, natural, relay };
 }
 
 // the winter that comes and goes ("Зима идёт по кругу"): 0 → 1 → 0 share of the page's cold over one round
