@@ -31,6 +31,15 @@ test('water: the channels of the chunk are the ones the docs name, and the aspec
   assert.ok(SHEET_FRAG.includes(WATER_CORE), 'lakes and rivers run the same water code as the sea');
   assert.ok(!/\b(vnoise|fbm|hash21)\(/.test(WATER_CORE), 'the water uses its own precision-safe noise');
   for (const fn of ['wHash', 'wNoise', 'wCells', 'wTrain', 'waterBody', 'waterLit']) assert.ok(WATER_CORE.includes(fn + '('), fn);
+  // The detail of the ice is the detail of the height it is seen from: great plates and long leads from space, floes
+  // from 200 km, and the small things (pancakes, the pieces of a floe, ridges, seams, drifts) only from low down —
+  // each of those is switched off by the size of a pixel before it could turn into a mesh of fine cracks.
+  // the text between the last `mark` and the `end` after it (the last one: the waves have an f2 of their own)
+  const after = (mark, end) => { const i = WATER_CORE.lastIndexOf(mark); assert.ok(i >= 0, mark); const j = i + mark.length; return WATER_CORE.slice(j, WATER_CORE.indexOf(end, j)); };
+  // "fp = 1. - smoothstep(a, b, pq)": the detail is gone once a pixel is b km across
+  const fadeAt = name => +after(name + ' = 1. - smoothstep(', ', pq)').split(',')[1];
+  for (const [name, limit] of [['fp', .05], ['f2', .07], ['fb', .08], ['fs', .09]]) assert.ok(fadeAt(name) > 0 && fadeAt(name) <= limit, `${name}: gone before a pixel is ${limit} km across (seen from about ${Math.round(limit * 1500)} km)`);
+  assert.ok(+after('wCells(hq / ', '.') >= 40, 'the plates of the pack are tens of km across');
 });
 
 test('water: no ice without cold; the natural sea has its own weather, rougher on the ocean and far from the shore', () => {
@@ -177,7 +186,7 @@ test('water: rivers — wider by rank, growing from the source down, running dow
 test('water: the album shows it — pages for every state, from 20, 200 and 500 km, and knobs for the model', () => {
   const mine = PAGES.filter(p => water.pages.includes(p));
   assert.ok(mine.length >= 8, `${mine.length} water pages`);
-  for (const need of ['sea-delta', 'water-sea', 'water-ice', 'water-snow', 'water-thaw', 'water-lake', 'water-lake-ice', 'water-river', 'water-edge', 'water-edge-grid', 'water-20', 'water-200', 'water-500'])
+  for (const need of ['sea-delta', 'water-sea', 'water-ice', 'water-snow', 'water-thaw', 'water-lake', 'water-lake-ice', 'water-river', 'water-edge', 'water-edge-grid', 'water-20', 'water-200', 'water-500', 'water-pack-500', 'water-pack-far'])
     assert.ok(mine.some(p => p.id === need), need);
   assert.equal(mine.find(p => p.id === 'water-20').cam.h, 20); assert.equal(mine.find(p => p.id === 'water-200').cam.h, 200); assert.equal(mine.find(p => p.id === 'water-500').cam.h, 500);
   assert.equal(mine.find(p => p.id === 'water-edge-grid').p.grid, 1); assert.ok(!mine.find(p => p.id === 'water-edge').p.grid);

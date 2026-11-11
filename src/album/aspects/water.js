@@ -139,75 +139,100 @@ vec3 waterLit(Wtr w) {
   col = mix(col, vec3(.94, .97, 1.) * (w.skyCol + w.sunCol * .8), clamp(foam, 0., 1.) * .75);
 
   // ---- ice. One number of the chunk runs through every stage: grease ice and slush → pancake ice → broken floes
-  // with leads → a solid sheet with healed cracks → pressure ridges. The number is compared with slow noise, so in a
-  // chunk the weak goes first: thin streaks of slush vanish before the floes, narrow leads close before wide ones.
+  // with leads → a solid sheet → pressure ridges. The number is compared with slow noise, so in a chunk the weak goes
+  // first: thin streaks of slush vanish before the floes, narrow leads close before wide ones.
+  // The detail is the detail of the height it is seen from. From space: where the ice lies, the streamers eddies draw
+  // out of its edge, great plates tens of km across with long leads between a few of them, and otherwise plain white.
+  // From 200 km: floes a few km across in the loose pack. From 20 km: the pieces a floe is welded from, ridges, snow
+  // drifts, the grain of pancake ice. Nothing of a finer level is drawn where it would be a mesh of small cracks.
   float iceA = 0.;
   if (ice > .004) {
     float sc = w.kind == 0 ? 1. : (w.kind == 1 ? .4 : .16);          // on lakes and rivers the ice breaks into smaller pieces
     vec2 q = pk / sc, qw = wq / sc, sun2 = normalize(uSun.xy + 1e-4); float pq = px / sc;
-    float big = pq < 30. ? wFbm(q / 11. + 31.) : .5, room = ice * (1. - ice);
-    float a = clamp(ice + (big - .5) * 1.7 * room + (1. - smoothstep(0., 30., w.depth)) * .9 * room, 0., 1.);   // shallows freeze first
+    // eddies bend the edge of the ice into streamers and long chains; the same slow field lets one part of a chunk freeze before another
+    vec2 ed = (vec2(wNoise(q / 31. + 3.), wNoise(q / 31. + 17.)) - .5) * 36.;
+    float big = pq < 30. ? wFbm((q + ed) / 15. + 31.) : .5, room = ice * (1. - ice);
+    float a = clamp(ice + (big - .5) * 1.9 * room + (1. - smoothstep(0., 30., w.depth)) * .9 * room, 0., 1.);   // shallows freeze first
     vec3 direct = w.sunCol * sunUp * w.sh * 1.25, amb = w.skyCol;
     // melt water on the ice: a thaw wets all of it, unevenly; ice in retreat stands in water once it is no longer whole
     float melt = min(max(uWaterThaw.x * (.55 + .9 * big), uWaterThaw.y * clamp((${MELT_TOP} - ice) / ${MELT_SPAN}, 0., 1.)), 1.) * smoothstep(.04, .3, ice);
 
-    // 1. grease ice and slush: matt streaks along the wind that kill the ripple
-    float gz = pq < 3. ? mix(.5, wFbm(vec2(qw.x / 3.1, qw.y / .55) + 3. + t * .004), smoothstep(3., .8, pq)) : .5;
+    // 1. grease ice and slush: matt belts drawn out by the wind, long ones from afar, fine streaks up close
+    float gz = wNoise(vec2(qw.x / 21., qw.y / 2.8) + (q.yx + ed.yx) / 47. + 6.);
+    if (pq < 1.2) gz = mix(gz, wFbm(vec2(qw.x / 3.1, qw.y / .55) + 3. + t * .004), .6 * (1. - smoothstep(.3, 1.2, pq)));
     float grease = smoothstep(-.15, .15, smoothstep(0., .2, a) * 1.3 - gz - .1);
     vec3 gc = mix(vec3(.17, .27, .35), vec3(.40, .50, .57), smoothstep(.3, .95, a)) + .05 * gz;         // dark slush thickens into grey young ice
     col = mix(col, pow(gc, vec3(2.2)) * (direct + amb), grease * .86);
     iceA = grease * .5;
 
-    // 2. pancake ice: round cakes with a raised white rim, born in the slush
+    // 2. pancake ice: from any height a pale grain on the slush; only from the lowest heights the cakes themselves,
+    // small, packed close, herded into rows by the wind
     float pA = smoothstep(.1, .36, a);
     if (pA > .002) {
-      float fp = 1. - smoothstep(.03, .085, pq), pan = pA * .55, rim = 0., id = .5;
+      float fp = 1. - smoothstep(.017, .045, pq), pan = pA * .6, rim = 0., id = .5;
       if (fp > 0.) {
-        vec4 c = wCells(q / .12 + 5.3);
-        float d = length(c.zw), r = (.27 + .23 * fract(c.y * 7.31)) * (.62 + .38 * pA), aa = pq / .12 * 1.1 + .012;
-        float row = wNoise(vec2(qw.x / .9, qw.y / .1) + 2.2);                                           // the wind herds the cakes into rows
-        float disc = (1. - smoothstep(r - aa, r + aa, d)) * smoothstep(0., .1, pA * 1.5 - .1 - c.y * .55 - row * .75);
+        vec4 c = wCells(q / .075 + 5.3);
+        float d = length(c.zw), r = (.33 + .2 * fract(c.y * 7.31)) * (.7 + .3 * pA), aa = pq / .075 * 1.1 + .02;
+        float row = wNoise(vec2(qw.x / .7, qw.y / .09) + 2.2);
+        float disc = (1. - smoothstep(r - aa, r + aa, d)) * smoothstep(0., .1, pA * 1.6 - .1 - c.y * .5 - row * .7);
         rim = disc * smoothstep(r * .5, r * .92, d) * fp; id = mix(.5, fract(c.y * 3.7), fp);
         pan = mix(pan, disc, fp);
       }
       pan *= grease;
-      vec3 pc = mix(vec3(.47, .57, .64), vec3(.72, .80, .85), id) + rim * vec3(.24, .19, .15);
-      col = mix(col, pow(min(pc, vec3(.97)), vec3(2.2)) * (direct * (1. + rim * .25) + amb), pan);
+      vec3 pc = mix(vec3(.50, .60, .66), vec3(.66, .75, .80), id) + rim * vec3(.2, .16, .13);
+      col = mix(col, pow(min(pc, vec3(.97)), vec3(2.2)) * (direct * (1. + rim * .2) + amb), pan);
       iceA = max(iceA, pan);
     }
 
-    // 3. floes: rafts of cakes welded together, leads of slush between them; then one sheet, then ridges
+    // 3. the pack
     float fA = smoothstep(.3, .64, a);
     if (fA > .002) {
-      vec2 fw = q + (vec2(wNoise(q / 1.9 + 5.), wNoise(q / 1.9 + 11.)) - .5) * 1.3;        // ragged outlines
-      vec4 F = wCells(fw / 2.9 + 17.);
-      float aa = clamp(pq / 2.9 * 1.3, .003, .6), tone = F.y;
-      float lead = mix(.4, -.03, smoothstep(.38, .88, a)) + melt * .16;                   // half the width of the water between two floes
-      float floe = smoothstep(lead - aa, lead + aa, F.x) * smoothstep(0., .12, fA * 1.3 - .12 - F.y);   // floes are born one at a time
-      float weld = smoothstep(.45, .82, a), f2 = 1. - smoothstep(.16, .5, pq);
+      // great plates: the pack as it is seen from space. Long leads run between some of them — open water in a loose
+      // pack, a strip of grey young ice once the cold has closed it.
+      vec2 hq = q + (vec2(wNoise(q / 27. + 2.), wNoise(q / 27. + 9.)) - .5) * 26.;
+      vec4 H = wCells(hq / 52. + 5.);
+      float hKm = H.x * 52., plate = H.y - .5;
+      float cracked = smoothstep(.5, .62, wNoise(q / 75. + 14.) + plate * .22);        // leads come in systems; between them the ice is whole
+      float lwReal = mix(1.6, .45, smoothstep(.55, 1., a)), lw = max(lwReal, pq * 1.15), la = max(pq * .9, .015);
+      float longLead = (1. - smoothstep(lw - la, lw + la, hKm)) * cracked * clamp(lwReal / (pq * 1.15), .45, 1.);  // a lead thinner than a pixel is a faint line
+      float frozen = smoothstep(.84, .97, a);
+
+      // floes a few km across, born one at a time; the leads between them narrow as the ice grows, and close
+      vec2 fw = q + (vec2(wNoise(q / 2.9 + 5.), wNoise(q / 2.9 + 11.)) - .5) * 2.1;        // ragged outlines
+      vec4 F = wCells(fw / 4.6 + 17.);
+      float aa = clamp(pq / 4.6 * 1.3, .003, .6), tone = F.y;
+      float lead = mix(.4, -.03, smoothstep(.38, .86, a)) + melt * .16;                   // half the width of the water between two floes
+      float floe = smoothstep(lead - aa, lead + aa, F.x) * smoothstep(0., .12, fA * 1.3 - .12 - F.y);
+      // from low down a young floe is seen to be pieces welded together, with slush between them
+      float weld = smoothstep(.45, .82, a), f2 = 1. - smoothstep(.022, .06, pq);
       if (weld < .999) {
-        float cake = 1. - (1. - weld) * .42;
+        float cake = 1. - (1. - weld) * .3;
         if (f2 > 0.) {
-          vec4 G = wCells(fw / .66 + 3.);
-          float l2 = mix(.3, -.03, weld) + melt * .1, a2 = clamp(pq / .66 * 1.3, .004, .6);
-          cake = mix(cake, smoothstep(l2 - a2, l2 + a2, G.x), f2); tone = mix(tone, G.y, .55 * f2 * (1. - weld));
+          vec4 G = wCells(fw / .62 + 3.);
+          float l2 = mix(.26, -.03, weld) + melt * .1, a2 = clamp(pq / .62 * 1.3, .004, .6);
+          cake = mix(cake, smoothstep(l2 - a2, l2 + a2, G.x), f2); tone = mix(tone, G.y, .5 * f2 * (1. - weld));
         }
         floe *= cake;
       }
-      // the solid sheet keeps the scars of its leads; where floes were driven together, ridges stand
-      float sheet = smoothstep(.78, .9, a), fb = 1. - smoothstep(.5, 1.5, pq), crack = 0., ridge = 0., side = 0.;
+      floe *= 1. - longLead * (1. - frozen);
+
+      // the solid sheet: plain from afar. Only from low down the healed seams of its floes show, and the ridges
+      // where they were driven together.
+      float sheet = smoothstep(.76, .9, a), fb = 1. - smoothstep(.03, .075, pq), crack = 0., ridge = 0., side = 0.;
       if (sheet > 0. && fb > 0.) {
-        crack = (1. - smoothstep(0., aa * 1.2 + .014, F.x)) * smoothstep(.3, .52, wNoise(q / 1.6 + 9.)) * sheet * fb;
-        float rA = smoothstep(.86, 1., a) * fb, wR = .05 + .07 * wNoise(q / .7 + 2.);
-        ridge = (1. - smoothstep(wR * .25, wR, F.x)) * smoothstep(.5, .72, wNoise(q / 2.3 + 40.) + rA * .4) * rA;
+        crack = (1. - smoothstep(0., aa * 1.2 + .008, F.x)) * smoothstep(.5, .66, wNoise(q / 2.6 + 9.)) * sheet * fb;
+        float rA = smoothstep(.86, 1., a) * fb, wR = .022 + .03 * wNoise(q / 1.1 + 2.);
+        ridge = (1. - smoothstep(wR * .25, wR, F.x)) * smoothstep(.56, .74, wNoise(q / 3.7 + 40.) + rA * .1) * rA;   // here and there, never a closed net
         side = dot(normalize(F.zw + 1e-5), sun2);                     // > 0 on the flank of the ridge that faces the sun
       }
       float age = smoothstep(.35, .95, a);
-      vec3 fc = mix(vec3(.47, .60, .68), vec3(.76, .85, .90), clamp(age * .7 + tone * .34 + (big - .5) * .3, 0., 1.));   // bare ice: grey-blue when thin, pale blue when thick
+      // bare ice: grey-blue when thin, pale blue when thick; every floe its own tone while the pack is loose, every
+      // plate once it is one sheet
+      vec3 fc = mix(vec3(.47, .60, .68), vec3(.76, .85, .90), clamp(age * .7 + tone * .34 * (1. - sheet * .8) + plate * .14 * sheet + (big - .5) * .3, 0., 1.));
       if (w.kind != 0) fc = mix(fc, vec3(.50, .70, .74), .3);           // lake and river ice is clearer and greener
-      fc = mix(fc, vec3(.40, .54, .63), crack * .75);
+      fc = mix(fc, vec3(.42, .55, .64), max(crack * .6, longLead * frozen * .85));
       fc = mix(fc, vec3(.94, .96, .98), ridge * .7);
-      float shade = 1. + ridge * side * .6 * w.day;
+      float shade = 1. + ridge * side * .5 * w.day;
 
       // thaw: the ice goes grey and wet, turquoise ponds stand on it, then holes open through it
       if (melt > .01) {
@@ -217,14 +242,15 @@ vec3 waterLit(Wtr w) {
         fc = mix(fc, mix(vec3(.50, .73, .79), vec3(.20, .42, .55), smoothstep(.3, 1., melt) * smoothstep(.5, .25, pn)), pond * .92);
         floe *= 1. - smoothstep(.45, 1., melt) * smoothstep(.36, .26, pn);
       }
-      // snow on the ice: drifts drawn out along the wind and banked against the ridges; bare ice where it is blown off
+      // snow on the ice: from afar broad fields of it with bare ice between, and none on the young ice of a lead;
+      // from low down drifts drawn out along the wind and banked against the ridges
       float sn = w.cB.g * (1. - smoothstep(0., .6, melt));
       if (sn > .004) {
-        float fs = 1. - smoothstep(.07, .22, pq);
+        float fs = 1. - smoothstep(.028, .08, pq);
         vec3 d1 = fs > 0. ? wNoiseD(vec2(qw.x / 1.25, qw.y / .19) + 21.) : vec3(.5, 0., 0.);
-        float blot = pq < 5. ? mix(.5, wFbm(q / 3.6 + 12.), smoothstep(5., 1.5, pq)) : .5;
-        float snowM = smoothstep(-.12, .12, sn * 1.12 + ridge * .5 - (mix(.5, d1.x, fs) * .48 + blot * .62) - .03) * smoothstep(.3, .52, a);
-        fc = mix(fc, vec3(.93, .95, .99) * (.97 + .03 * tone), snowM);
+        float blot = pq < 9. ? mix(.5, wFbm(q / 8.5 + 12.), smoothstep(9., 3., pq)) : .5;
+        float snowM = smoothstep(-.12, .12, sn * 1.12 + ridge * .5 - (mix(.5, d1.x, fs * .8) * .48 + blot * .62) - .03 - longLead * frozen * .5) * smoothstep(.3, .52, a);
+        fc = mix(fc, vec3(.93, .95, .99) * (.975 + .025 * tone + plate * .02), snowM);
         shade += snowM * (dot(W_WIND * d1.y / 1.25 + W_WINX * d1.z / .19, sun2) * .045 * fs - ridge * .2 * (1. - side)) * w.day;   // sastrugi lit from the sunny side
         shade = mix(shade, 1. + (shade - 1.) * .6, snowM);
       }
@@ -338,9 +364,9 @@ export default {
     { id: 'water-sea-storm', group: G, title: 'Шторм вблизи: барашки', note: 'Гребни ломаются, за ними остаётся пена; вода темнее и зеленее.', p: { waterShow: 'sea' }, cam: bay(-3.463, 22, 35) },
     // ---- ice
     { id: 'water-ice', group: G, title: 'Лёд: от сала до торосов', note: 'Стадии льда рядами с запада на восток: сало и шуга, блинчатый лёд, блины смерзаются в льдины, битый лёд с разводьями, сплошное поле, торосы. Одно число чанка проходит все стадии; слабое уходит первым.', p: { waterShow: 'ice' }, cam: bay(-4.58, 140) },
-    { id: 'water-ice-pancake', group: G, title: 'Блинчатый лёд вблизи', note: 'Круглые льдины с белым валиком по краю; ветер сгоняет их в ряды. Между ними тёмная шуга.', p: { waterShow: 'ice' }, cam: bay(-5.048, 22, 30) },
-    { id: 'water-ice-floes', group: G, title: 'Битый лёд с разводьями вблизи', note: 'Льдины собраны из смёрзшихся кусков; в разводьях шуга и блины. Чем больше льда в чанке, тем уже разводья.', p: { waterShow: 'ice' }, cam: bay(-4.579, 22, 30) },
-    { id: 'water-ice-ridges', group: G, title: 'Сплошное поле и торосы вблизи', note: 'Поле хранит швы старых разводий; там, где льдины сдавило, стоят гряды торосов: одна сторона на свету, другая в тени.', p: { waterShow: 'ice' }, cam: bay(-3.874, 22, 30) },
+    { id: 'water-ice-pancake', group: G, title: 'Блинчатый лёд вблизи', note: 'С 22 км блинчатый лёд — мелкое зерно: круглые льдины чуть крупнее настоящих, ветер сгоняет их в ряды. Между ними тёмная шуга. С большей высоты зерно сливается в ровный серо-голубой тон.', p: { waterShow: 'ice' }, cam: bay(-5.048, 22, 30) },
+    { id: 'water-ice-floes', group: G, title: 'Битый лёд с разводьями вблизи', note: 'Льдины в несколько километров; с этой высоты видно, что молодая льдина собрана из смёрзшихся кусков. В разводьях шуга и блины. Чем больше льда в чанке, тем уже разводья.', p: { waterShow: 'ice' }, cam: bay(-4.579, 22, 30) },
+    { id: 'water-ice-ridges', group: G, title: 'Сплошное поле и торосы вблизи', note: 'Поле ровное. Кое-где остались швы старых разводий, а там, где льдины сдавило, стоят гряды торосов: одна сторона на свету, другая в тени. Сплошной сетки трещин нет.', p: { waterShow: 'ice' }, cam: bay(-3.874, 22, 30) },
     { id: 'water-snow', group: G, title: 'Снег на льду: от голого льда до сплошного снега', note: 'Голый лёд голубой, снег белый, в тон снегу на суше. Снега в чанке больше — полосы намётов шире, голый лёд остаётся только на выдувах.', p: { waterShow: 'snow' }, cam: bay(-5.048, 100) },
     { id: 'water-snow-near', group: G, title: 'Снег на льду вблизи: намёты и выдувы', note: 'Намёты вытянуты по ветру и лежат у торосов; между ними голый лёд.', p: { waterShow: 'snow' }, cam: bay(-5.19, 22, 30) },
     { id: 'water-thaw', group: G, title: 'Оттепель: тающий лёд', note: 'Лёд сереет, на нём стоят бирюзовые проталины; дальше проталины темнеют и лёд рвётся. Ручка «Оттепель: лёд тает».', p: { waterShow: 'melt' }, cam: bay(-5.048, 100) },
@@ -351,6 +377,8 @@ export default {
     { id: 'water-20', group: G, title: 'Край припая с 20 км', note: 'Самая близкая высота: припай под снегом, перед ним битый лёд и блины.', p: { cold: .5, iceSnow: .4 }, cam: { lat: 43.76, lon: -4.5, h: 20, tilt: 48, heading: 180 } },
     { id: 'water-200', group: G, title: 'Замёрзший берег с 200 км', note: 'Обычная игровая высота: лёд вдоль Кантабрийского берега.', p: { cold: .5, iceSnow: .4 }, cam: { lat: 43.9, lon: -4.6, h: 200, tilt: 35, heading: 180 } },
     { id: 'water-500', group: G, title: 'Зима с 500 км', note: 'Высота больших держав: лёд у северного берега, реки и озёра подо льдом.', p: { cold: .5, iceSnow: .4 }, cam: { lat: 42.5, lon: -4.0, h: 500, tilt: 20, heading: 0 } },
+    { id: 'water-pack-500', group: G, title: 'Сплошной лёд с 500 км: поля и длинные трещины', note: 'Море замёрзло целиком. С высоты видно только крупное: белые поля под снегом, пятна голого льда и редкие длинные трещины, которые идут на десятки километров. Мелких трещин с такой высоты не видно.', p: { cold: .97, iceSnow: .5 }, cam: { lat: 44.0, lon: -5.5, h: 500, tilt: 0, heading: 0 } },
+    { id: 'water-pack-far', group: G, title: 'Замёрзшее море из космоса', note: 'С 1100 км лёд — ровное белое поле с едва заметными большими трещинами. Подробности появляются по мере спуска: с 200 км — льдины у кромки, с 20 км — торосы, намёты и блинчатый лёд.', p: { cold: .97, iceSnow: .6 }, cam: { lat: 41.5, lon: -3.5, h: 1100, tilt: 0, heading: 0 } },
     { id: 'water-winter', group: G, title: 'Зима приходит и уходит', note: 'Лёд нарастает от берегов и с севера, от чанка к чанку, сначала на мелкой воде; потом тает обратно, с проталинами. Скорость — «Ход времени» (раздел «Система»).', p: { cold: .62, iceSnow: .5, winterCycle: 1 }, cam: { lat: 43.3, lon: -4.5, h: 420, tilt: 25, heading: 0 } },
     // ---- lakes and rivers
     { id: 'water-lake', group: G, title: 'Озёра летом', note: 'Озёра Ландов: та же вода, что в море, только пресная. У берега отмель и полоска пляжа, к середине глубже.', p: {}, cam: { lat: 44.42, lon: -1.16, h: 45, tilt: 40, heading: 0 } },
