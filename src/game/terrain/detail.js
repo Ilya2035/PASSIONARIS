@@ -1,10 +1,14 @@
 import * as THREE from 'three';
+import { loadCoastFix } from './coast.js';
 
 // Streams detailed heights (~1.2 km, public/assets/terrain/z7) into a 2048x2048 toroidal window around the camera.
 // Tile (gx, gy) lives in slot (gx mod 8, gy mod 8); the texture wraps, so bilinear/mips work across slots.
 // New slots are first filled from the global 8192x4096 heights (no holes), then replaced by detail tiles.
+// The land mask of a tile comes from the coast fix (assets/coast/z7m/, terrain/coast.js) when it has one there —
+// also for islands without detail heights — else from z7m.
 const SLOTS = 8, T = 256, WIN = SLOTS * T;
 const OFF = 12500;
+const SEA_BIT = 0x40000000;   // sea-zone ids in the cell raster (world/regions.js): water
 
 let LUT = null;
 function halfLUT() {
@@ -55,12 +59,22 @@ export class DetailTerrain {
     const sh = globe.shared;
     sh.uDetail.value = tex;
     sh.uDetailMask.value = this.maskTex;
-    this.ready = fetch(`${base}index.json`).then(r => (r.ok ? r.json() : null)).then(j => {
+    // the window starts once both the tile index and the coast fix are in (a tile streamed before the fix would keep
+    // its old mask)
+    this.coast = null;
+    const index = fetch(`${base}index.json`).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    this.ready = Promise.all([index, loadCoastFix()]).then(([j, coast]) => {
+      this.coast = coast;
       if (!j) return;
       this.index = j; this.TX = j.tiles[0]; this.TY = j.tiles[1];
       this.kept = new Uint8Array(this.TX * this.TY);
       for (const k of j.kept) this.kept[k] = 1;
     }).catch(() => {});
+  }
+  // the mask tile of a detail tile: the coast fix's, else z7m's for a tile with detail heights, else none
+  maskUrl(gx, gy, key) {
+    if (this.coast?.tiles.has(key)) return `${this.coast.base}z7m/${gx}_${gy}.bin.gz`;
+    return this.kept[key] ? `${this.maskBase}${gx}_${gy}.bin.gz` : null;
   }
 
   // fill a slot from the global coarse heights (bilinear), so the window never shows holes
@@ -80,13 +94,19 @@ export class DetailTerrain {
         this.f32[row + x] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
       }
     }
-    // coarse land mask from the global cells until the 1.2 km mask arrives
+    // coarse land mask from the global cells until the 1.2 km mask arrives (or for good, on open sea): the bilinear
+    // land share of the four cells around, like the coast drawn from the cells further out (shaders.js). Land is a
+    // district id: 0 ocean, 1 lake and the sea zones (SEA_BIT | id) are water
     const cells = this.data.cells;
+    const isLand = (cx, cy) => { const c = cells[cy * W + ((cx % W) + W) % W]; return c >= 2 && c < SEA_BIT ? 1 : 0; };
     for (let y = 0; y < T; y++) {
-      const cy = Math.min(H - 1, Math.floor((gy * T + y) / ratio));
+      const fy = Math.max(0, Math.min(H - 1.001, (gy * T + y + 0.5) / ratio - 0.5));
+      const y0 = Math.floor(fy), ty = fy - y0, y1 = Math.min(H - 1, y0 + 1);
       for (let x = 0; x < T; x++) {
-        const cx = Math.floor((gx * T + x) / ratio) % W;
-        this.mask[(sy + y) * WIN + sx + x] = cells[cy * W + cx] >= 2 ? 255 : 0;
+        const fx = (gx * T + x + 0.5) / ratio - 0.5;
+        const x0 = Math.floor(fx), tx = fx - x0;
+        const v = (isLand(x0, y0) * (1 - tx) + isLand(x0 + 1, y0) * tx) * (1 - ty) + (isLand(x0, y1) * (1 - tx) + isLand(x0 + 1, y1) * tx) * ty;
+        this.mask[(sy + y) * WIN + sx + x] = Math.round(v * 255);
       }
     }
     this.maskDirty = true;
@@ -133,24 +153,27 @@ export class DetailTerrain {
     this.dirty = true;
   }
 
+  // heights (tiles with detail heights) and the land mask, fetched side by side; whatever fails keeps the prefill
   async loadTile(gx, gy, key) {
-    try {
-      const bytes = await fetchGz(`${this.base}${gx}_${gy}.bin.gz`);
-      if (this.slotTile[(gy % SLOTS) * SLOTS + (gx % SLOTS)] !== key) return; // slot reassigned meanwhile
+    const slot = (gy % SLOTS) * SLOTS + (gx % SLOTS);
+    const sx = (gx % SLOTS) * T, sy = (gy % SLOTS) * T;
+    const maskUrl = this.maskUrl(gx, gy, key);
+    const heights = this.kept[key] ? fetchGz(`${this.base}${gx}_${gy}.bin.gz`).then(bytes => {
+      if (this.slotTile[slot] !== key) return; // slot reassigned meanwhile
       const d = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
-      const sx = (gx % SLOTS) * T, sy = (gy % SLOTS) * T;
       for (let y = 0; y < T; y++) {
         let acc = 0;
         const row = (sy + y) * WIN + sx;
         for (let x = 0; x < T; x++) { acc += d[y * T + x]; this.f32[row + x] = acc; }
       }
       this.writeSlot(gx, gy);
-      const mb = await fetchGz(this.maskBase + `${gx}_${gy}.bin.gz`).catch(() => null);
-      if (mb && mb.length === T * T && this.slotTile[(gy % SLOTS) * SLOTS + (gx % SLOTS)] === key) {
-        for (let y = 0; y < T; y++) this.mask.set(mb.subarray(y * T, y * T + T), (sy + y) * WIN + sx);
-        this.maskDirty = true;
-      }
-    } catch { /* keep coarse prefill */ }
+    }) : null;
+    const mask = maskUrl ? fetchGz(maskUrl).then(mb => {
+      if (mb.length !== T * T || this.slotTile[slot] !== key) return;
+      for (let y = 0; y < T; y++) this.mask.set(mb.subarray(y * T, y * T + T), (sy + y) * WIN + sx);
+      this.maskDirty = true;
+    }) : null;
+    await Promise.all([heights?.catch(() => {}), mask?.catch(() => {})]);
   }
 
   pump() {
@@ -172,7 +195,7 @@ export class DetailTerrain {
       if (this.slotTile[slot] === key) continue;
       this.slotTile[slot] = key;
       this.prefill(gx, gy);
-      if (this.kept[key]) jobs.push({ gx, gy, key, d: Math.hypot(i - 3.5, j - 3.5) });
+      if (this.kept[key] || this.coast?.tiles.has(key)) jobs.push({ gx, gy, key, d: Math.hypot(i - 3.5, j - 3.5) });
     }
     jobs.sort((a, b) => a.d - b.d);
     this.queue = jobs.concat(this.queue);

@@ -7,6 +7,7 @@
 // The shader's cellAt() masks SEA_BIT to 0 (water), rawAt() keeps it for sea-zone borders.
 import * as THREE from 'three';
 import { RIVER_VERT, RIVER_FRAG } from '../shaders.js';
+import { loadCoastFix, fixDistricts } from '../terrain/coast.js';
 
 export const SEA_BIT = 0x40000000;
 const BASE = 'assets/regions/';
@@ -45,13 +46,16 @@ function assignFamilies(regions) {
 }
 
 export async function createRegions({ globe, scene, settings, infoW }) {
-  const [meta, raster] = await Promise.all([
+  const [meta, raster, coast] = await Promise.all([
     fetch(BASE + 'regions.json').then(r => { if (!r.ok) throw new Error(`regions.json: ${r.status}`); return r.json(); }),
     fetchBytes(BASE + 'districts.bin.gz'),
+    loadCoastFix(),
   ]);
   const { W, H } = globe.data;
   if (meta.grid.width !== W || meta.grid.height !== H) throw new Error('regions: grid size differs from the map');
   const ids = new Uint16Array(raster.buffer, raster.byteOffset, W * H);
+  // one coastline for every zoom, as in 5000 BC: lost islands, reservoirs, the IJsselmeer basin (terrain/coast.js)
+  fixDistricts(ids, coast, meta.districts.length);
 
   const maxId = meta.districts.reduce((m, d) => Math.max(m, d.id), 0);
   const dist = new Array(maxId + 1);

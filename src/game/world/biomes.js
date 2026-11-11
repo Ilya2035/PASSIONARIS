@@ -1,3 +1,5 @@
+import { loadCoastFix, fixBiomes } from '../terrain/coast.js';
+
 // Terrain-mode colours for the climate module's biome classes (public/assets/climate/biomes.json).
 // Clear, pleasant, slightly saturated period tones — the approved map style.
 export const BIOME_COLORS = {
@@ -34,7 +36,8 @@ export async function loadBiomes(globe, base = 'assets/climate/') {
   const meta = await fetch(`${base}biomes.json`).then(r => (r.ok ? r.json() : null)).catch(() => null);
   if (!meta) return null;
   const { W, H } = meta.grid;
-  const data = await fetchBytes(`${base}${meta.file || 'biome-open.bin.gz'}`);
+  const [data, coast] = await Promise.all([fetchBytes(`${base}${meta.file || 'biome-open.bin.gz'}`), loadCoastFix()]);
+  fixBiomes(data, coast);   // classes for the land the coast fix adds, and for thin islands (terrain/coast.js)
   const colors = [];
   for (const c of meta.classes) colors[c.id] = hexToRgb(BIOME_COLORS[c.key] || c.color || '#cccccc');
   for (let i = 0; i < 16; i++) if (!colors[i]) colors[i] = [0.8, 0.8, 0.75];
