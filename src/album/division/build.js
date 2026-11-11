@@ -166,19 +166,31 @@ function landProvinces(ch, kind, rel, lands, admin) {
   for (let k = 0; k < n; k++) {
     if (kind[k] !== LAND) continue;
     let best = -1, bh = ch.height[k] - 40;
-    for (const l of ch.links[k]) if (kind[l.k] === LAND && ch.height[l.k] < bh) { bh = ch.height[l.k]; best = l.k; }
+    for (const l of ch.links[k]) if (kind[l.k] === LAND && ch.height[l.k] < bh && reliefOf(rel, k, l.k).ridge < 100) { bh = ch.height[l.k]; best = l.k; }   // water does not run over a ridge
     down[k] = best;
   }
+  // the floor of the valley a chunk drains to: down the steepest way while the ground keeps falling
+  const floorOf = k => { let x = k; for (let i = 0; i < 16 && down[x] >= 0; i++) x = down[x]; return x; };
+  // where the heart of every land drains to: a slope that drains to the same valley floor stays (an upper valley like
+  // Andorra or Cerdanya is a land of its own, even if its river runs on into another)
+  const homeFloors = P.map(p => new Set(p.at.map(a => anchorChunk(a)).filter(k => k >= 0 && kind[k] === LAND).map(floorOf)));
   const order = [...Array(n).keys()].filter(k => kind[k] === LAND && down[k] >= 0).sort((a, b) => ch.height[a] - ch.height[b] || a - b);
   const moved = [];
-  for (let pass = 0; pass < 4; pass++) {
+  for (let pass = 0; pass < 6; pass++) {
     let changed = 0;
     for (const k of order) {
       const d = down[k]; if (prov[d] === prov[k]) continue;
-      let rOwn = Infinity;
-      for (const l of ch.links[k]) if (kind[l.k] === LAND && prov[l.k] === prov[k]) rOwn = Math.min(rOwn, reliefOf(rel, k, l.k).ridge);
-      const rDown = reliefOf(rel, k, d).ridge;
-      if (rOwn >= Math.max(150, rDown + 120)) { moved.push([k, prov[k], prov[d]]); prov[k] = prov[d]; changed++; }
+      // with its own land the chunk keeps only ridges or ground along and up the slope — no way down
+      let rOwn = Infinity, open = false;
+      for (const l of ch.links[k]) {
+        if (kind[l.k] !== LAND || prov[l.k] !== prov[k]) continue;
+        const r = reliefOf(rel, k, l.k).ridge; rOwn = Math.min(rOwn, r);
+        if (r < 150 && ch.height[l.k] <= ch.height[k] - 20) open = true;
+      }
+      const rDown = reliefOf(rel, k, d).ridge, f = floorOf(k);
+      const behindRidge = rOwn >= Math.max(150, rDown + 120);                                   // cut off by a ridge
+      const onSlope = !open && prov[f] === prov[d] && ch.height[k] - ch.height[f] >= 150 && !homeFloors[prov[k]].has(f);   // a slope of the other valley
+      if (behindRidge || onSlope) { moved.push([k, prov[k], prov[d]]); prov[k] = prov[d]; changed++; }
     }
     if (!changed) break;
   }

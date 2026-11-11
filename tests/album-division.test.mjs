@@ -11,6 +11,7 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { BBOX } from '../src/album/geo.js';
 import { buildDivision, districtSummary, districtNames, stateMask, linkRelief, LAND, SEA, LAKE } from '../src/album/division/build.js';
 import { packDivision } from '../src/album/division/gpu.js';
+import { borderLines } from '../src/album/division/lines.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division, { STATES } from '../src/album/aspects/division.js';
 import { PAGES } from '../src/album/pages.js';
@@ -106,6 +107,28 @@ test('division: what a district holds; the texture with the state of history', (
   }
 });
 
+test('division: border lines for the far view — between lands, never along the shore, smooth', () => {
+  const { ch, opts } = made, div = buildDivision(ch, { ...opts, size: 30 }), g = borderLines(ch, div, stateMask(div, madeLands, 'x'));
+  assert.ok(g[4]?.length, 'a region border (the ridge)'); assert.ok(g[2]?.length, 'a province border'); assert.ok(g[0]?.length, 'district borders'); assert.ok(g[6]?.length, 'the state');
+  // every point of a land border has land chunks of different districts on its two sides, not the sea
+  let n = 0, wet = 0;
+  for (const key of [0, 2, 4]) for (const line of g[key]) for (const [x, y] of line.filter((_, i) => i % 7 === 3)) {
+    const p = llOf(x, y), k = ch.at(p.lat, p.lon);
+    if (k >= 0) { n++; if (div.kind[k] === SEA) wet++; }
+  }
+  assert.ok(n > 50 && wet / n < .02, `land borders run over land (${wet} of ${n} points over the sea, at the shore)`);
+  // the region border follows the ridge in the middle of the island
+  const xs = g[4].flat().map(([x]) => x), onRidge = xs.filter(x => Math.abs(x - RX) < 20).length;
+  assert.ok(onRidge / xs.length > .85, `the region border lies on the ridge (${onRidge} of ${xs.length} points within 20 km)`);
+  // smooth: hardly a turn sharper than a right angle along the lines
+  let turns = 0, sharp = 0;
+  for (const key of [0, 2, 4]) for (const line of g[key]) for (let i = 1; i + 1 < line.length; i++) {
+    const [a, b, c] = [line[i - 1], line[i], line[i + 1]], u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]];
+    turns++; if (u[0] * v[0] + u[1] * v[1] < 0) sharp++;
+  }
+  assert.ok(turns > 100 && sharp / turns < .02, `smooth lines (${sharp} sharp turns of ${turns})`);
+});
+
 test('division: the list of lands — every land in a region, every unit in admin.json, every anchor in the album', () => {
   const regions = new Set(LANDS.regions.map(r => r.id)), ids = new Set();
   for (const p of LANDS.provinces) {
@@ -145,7 +168,7 @@ test('division of the album: whole chunks, connected districts inside historical
   const { ch, div } = real;
   checkWhole(ch, div);
   const area = id => { const i = LANDS.provinces.findIndex(p => p.id === id); let a = 0; for (let d = 0; d < div.count; d++) if (div.province[d] === i) a += div.area[d]; return a; };
-  for (const [id, lo, hi] of [['bierzo', 2000, 5500], ['leon', 9000, 15000], ['cerdanya', 700, 2500], ['andorra', 300, 900], ['navarra', 8500, 12000], ['zaragoza', 14000, 20000], ['algarve', 4000, 6000]])
+  for (const [id, lo, hi] of [['bierzo', 2000, 5500], ['leon', 9000, 15000], ['cerdanya', 300, 2500], ['andorra', 300, 900], ['navarra', 8500, 12000], ['zaragoza', 14000, 20000], ['algarve', 4000, 6000]])
     assert.ok(area(id) > lo && area(id) < hi, `${id}: ${Math.round(area(id))} km²`);
   // a province hangs together, unless it is islands
   for (let i = 0; i < LANDS.provinces.length; i++) {

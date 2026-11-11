@@ -7,6 +7,7 @@ import { buildDivision, districtSummary, districtNames, stateMask, KIND_ID, LAND
 import { divisionTexture } from './gpu.js';
 import { createPanel } from './panel.js';
 import { createLabels } from './labels.js';
+import { createLines } from './lines.js';
 import { pickGround } from '../pick.js';
 import { FN, FKM, kmOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
@@ -20,7 +21,7 @@ export async function startDivision(album, U) {
   const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [] };
   const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
   const listeners = [], labels = createLabels(album);
-  let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0;
+  let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null;
 
   const active = () => p.get('division') > 0 || !!p.get('divPick');
   function use(size) {
@@ -42,8 +43,10 @@ export async function startDivision(album, U) {
     const id = p.get('divState') || '';
     if (!force && cur.state === id) return;
     cur.tex?.dispose();
-    cur.tex = divisionTexture(ch, cur.div, id ? stateMask(cur.div, lands, id) : null); cur.state = id;
+    const mask = id ? stateMask(cur.div, lands, id) : null;
+    cur.tex = divisionTexture(ch, cur.div, mask); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
+    lines?.dispose(); lines = createLines(album, ch, cur.div, mask);
   }
   // the district at a point of the ground, as the shader draws it: the district of the chunk there; a point of land in
   // a chunk of water (or the other way round, at the shore) takes the nearest chunk of its own kind
@@ -129,7 +132,24 @@ export async function startDivision(album, U) {
   album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => cur.div.names[i], onChange: api.onChange };
   use(+p.get('divSize') || 30);
 
+  // from higher up the borders are lines laid on the ground, clear and of steady width; up close the ground shader
+  // draws them on the very outline of the chunks. far: 0 up close .. 1 high up, by the size of a pixel on the ground
+  const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  function drawLines(cam) {
+    const mode = p.get('division'), pxKm = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, dom.clientHeight);
+    const far = mode ? ss(.07, .16, pxKm) : 0;
+    U.uDivFar.value = far;
+    if (!lines) return;
+    const base = mode === 1 ? [.8, .9, 1] : mode === 2 ? [.35, .9, 1] : mode === 3 ? [0, .45, 1] : [0, 0, 0];
+    const s = levelSizes(cur.div.size), fade = [ss(9, 24, s.district / pxKm), ss(9, 24, s.province / pxKm), 1];
+    const alpha = {};
+    for (let l = 0; l < 3; l++) { alpha[l * 2] = base[l] * fade[l] * far; alpha[l * 2 + 1] = base[l] * fade[l] * far * .6; }
+    alpha[6] = mode && p.get('divState') ? far : 0;
+    lines.update(cam, dom, alpha, p.get('look'));
+  }
+
   return { id: 'division', update(dt, t, cam) {
+    drawLines(cam);
     if (p.get('division') && p.get('divLabels')) labels.update(cam, p.get('look'));
     if (tick++ % 3) return;
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : -1;

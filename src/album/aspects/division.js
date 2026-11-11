@@ -19,6 +19,7 @@ import { startDivision } from '../division/runtime.js';
 const GLSL = /* glsl */`
 uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState;
 uniform vec3 uDivSize;                          // district, province, region size, km
+uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
 uniform highp usampler2D tDiv;                  // a texel per chunk (chunkTexel): see division/gpu.js
 // tints of the three levels, as seen on screen: land, water
 const vec3 DIV_LAND[8] = vec3[8](vec3(.93, .80, .62), vec3(.72, .86, .62), vec3(.92, .88, .56), vec3(.80, .72, .88), vec3(.62, .82, .86), vec3(.94, .70, .64), vec3(.78, .82, .52), vec3(.86, .86, .82));
@@ -97,14 +98,14 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
     float lD = 1. - smoothstep(hw.x - .6, hw.x + .6, a.eD / px);
     float lP = 1. - smoothstep(hw.y - .6, hw.y + .6, a.eP / px);
     float lR = 1. - smoothstep(hw.z - .6, hw.z + .6, a.eR / px);
-    col = mix(col, ink, max(max(lD * al.x, lP * al.y), lR * al.z));
+    col = mix(col, ink, max(max(lD * al.x, lP * al.y), lR * al.z) * (1. - uDivFar));
   }
   // a state of history assembled from provinces: bright inside, the rest of the map dimmed, a bold border
   if (uDivState == 1) {
     if (a.st == 0) col = mix(col, vec3(dot(col, vec3(.3, .55, .15))), .6) * .62;
     else col = mix(col, vec3(.98, .80, .42) * (.6 + .5 * lum), .35);
     float e = a.eS / px, w = 2.2 * zoom;
-    col = mix(col, vec3(.42, .05, .04), 1. - smoothstep(w - .6, w + .6, e));
+    col = mix(col, vec3(.42, .05, .04), (1. - smoothstep(w - .6, w + .6, e)) * (1. - uDivFar));
   }
   // the district under the cursor and the chosen one
   if (uDivHover >= 0 && a.d == uDivHover) col = mix(col, vec3(1.), .16);
@@ -151,7 +152,7 @@ export default {
   id: 'division', title: 'Деление', glsl: GLSL,
   uniforms: {
     uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 },
-    uDivSize: { value: new Vector3(30, 100, 340) }, tDiv: { value: emptyTexture() },
+    uDivSize: { value: new Vector3(30, 100, 340) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() },
   },
   params: [
     { key: 'division', label: 'Деление', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'Районы'], [2, 'Провинции'], [3, 'Регионы']], value: 0, uniform: 'uDivision' },
