@@ -26,7 +26,7 @@ export const STAGES = [
 export const stageOf = r => { let s = 0; for (let i = 0; i < STAGES.length; i++) if (r >= STAGES[i].r) s = i; return s; };
 
 // ---- numbers shared with the shader
-export const wob = (x, y) => .5 * Math.sin(x * 1.7 + 1.3 * Math.sin(y * 1.1)) + .5 * Math.sin(y * 2.3 + 1.7 * Math.sin(x * .9));
+export const wob = (x, y) => Math.sin(x * 1.7 + 1.3 * Math.sin(y * 1.1));
 // a random number 0..1 of a lattice cell: integer arithmetic only, the same bits in JS and in GLSL
 export function cellHash(i, j, k, salt) {
   let h = (Math.imul(i + 4096, 0x27d4eb2d) ^ Math.imul(j + 4096, 0x165667b1) ^ Math.imul(k * 16 + salt, 0x9e3779b1)) >>> 0;
@@ -98,15 +98,16 @@ export const RULES_GLSL = /* glsl */`
 #define SET_RMAX ${RMAX.toFixed(4)}
 #define SET_RVIS ${RVIS.toFixed(4)}
 #define SET_CN ${CN}
-float setWob(vec2 pk) { return .5 * sin(pk.x * 1.7 + 1.3 * sin(pk.y * 1.1)) + .5 * sin(pk.y * 2.3 + 1.7 * sin(pk.x * .9)); }
+float setWob(vec2 pk) { return sin(pk.x * 1.7 + 1.3 * sin(pk.y * 1.1)); }
 float setHash(ivec2 id, int k, int salt) {
   uint h = uint(id.x + 4096) * 0x27d4eb2du ^ uint(id.y + 4096) * 0x165667b1u ^ uint(k * 16 + salt) * 0x9e3779b1u;
   h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15;
   return float(h >> 8) / 16777216.;
 }
 // what stands in lattice cell id of a patch (twin of cellRule() in town/rules.js): returns the class 0..5.
-// r is the radius the patch is drawn with, rs the radius its chunk holds (the size that decides what is built)
-float setCell(ivec2 id, vec2 site, float r, float rs, float th, float cul, int k, float S, out vec2 hs, out vec2 off, out float rot, out vec4 rnd) {
+// r is the radius the patch is drawn with, rs the radius its chunk holds (the size that decides what is built),
+// cs sn the cosine and sine of the turn of its lattice
+float setCell(ivec2 id, vec2 site, float r, float rs, float cs, float sn, float cul, int k, float S, out vec2 hs, out vec2 off, out float rot, out vec4 rnd) {
   hs = vec2(0.); off = vec2(0.); rot = 0.; rnd = vec4(.5);
   bool centre = id.x == 0 && id.y == 0, atl = cul > 1.5;
   if (r < .6 * S) {
@@ -114,7 +115,7 @@ float setCell(ivec2 id, vec2 site, float r, float rs, float th, float cul, int k
     hs = vec2(clamp(.9 * r / S, .12, .45));
     return atl || rs < .45 ? 3. : 2.;
   }
-  vec2 ij = vec2(id); float cs = cos(th), sn = sin(th);
+  vec2 ij = vec2(id);
   float m = r - length(ij) * S + min(.9, .3 * r) * setWob(site + vec2(cs * ij.x - sn * ij.y, sn * ij.x + cs * ij.y) * S) + (rs < .45 ? .12 : 0.);
   if (m <= -.05) {
     if (m > -min(.9 * S, .6) && setHash(id, k, 5) < .22) { hs = vec2(.36); rnd.z = setHash(id, k, 3); return 5.; }

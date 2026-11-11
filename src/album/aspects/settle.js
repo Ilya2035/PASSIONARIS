@@ -16,16 +16,16 @@ ${RULES_GLSL}
 ${PALETTE_GLSL}
 // The roof over lattice point q of a patch: how much of the pixel it covers. cls = class of the cell, fl = the place
 // inside the footprint (−1..1), ang = turn of the building against the lattice, edge = distance out of the footprint.
-float setRoof(vec2 q, vec2 site, float r, float rs, float th, float cul, int k, float S, float aa, out float cls, out vec2 fl, out float ang, out vec4 rnd, out float edge) {
+float setRoof(vec2 q, vec2 site, float r, float rs, float cs, float sn, float cul, int k, float S, float aa, out float cls, out vec2 fl, out float ang, out vec4 rnd, out float edge) {
   ivec2 id = ivec2(floor(q + .5)); vec2 hs, off;
-  cls = setCell(id, site, r, rs, th, cul, k, S, hs, off, ang, rnd);
+  cls = setCell(id, site, r, rs, cs, sn, cul, k, S, hs, off, ang, rnd);
   fl = vec2(0.); edge = 1.;
   if (cls < .5) return 0.;
   vec2 f = q - vec2(id) - off;
   if (ang != 0.) { float c = cos(ang), s = sin(ang); f = vec2(c * f.x + s * f.y, -s * f.x + c * f.y); }
   fl = f / hs;
   vec2 d = abs(f) - hs; edge = max(d.x, d.y);
-  return 1. - smoothstep(-aa, aa, edge);
+  return clamp(.5 - edge / (2. * aa), 0., 1.);
 }
 // the colour of a roof seen from above: a block is many houses, every slope takes the sun its own way
 vec3 setRoofCol(float cls, vec2 fl, float turn, vec4 rnd, float atl, float day, out float court) {
@@ -39,108 +39,122 @@ vec3 setRoofCol(float cls, vec2 fl, float turn, vec4 rnd, float atl, float day, 
   float house = hash21(floor(fl * vec2(3., 2.)) + 7. + rnd.z * 57.);
   return settleMat(0, atl, fract(rnd.z * 5.3 + house * .45)) * (.93 + .14 * house) * (1. + 1.2 * lit * day);
 }
-// ---- fields: strips of ploughland, fallow, pasture, groves; terraces on slopes; paths and balks between them
+// ---- fields: strips of ploughland, fallow, pasture, groves; terraces on slopes; balks and paths between them
 // smooth noise from the integer hash: fine patterns far from the origin, where the float hash of COMMON runs out of bits
 float setNoise(vec2 p) {
   vec2 i = floor(p), u = p - i; u = u * u * (3. - 2. * u); ivec2 c = ivec2(i);
   return mix(mix(setHash(c, 7, 31), setHash(c + ivec2(1, 0), 7, 31), u.x), mix(setHash(c + ivec2(0, 1), 7, 31), setHash(c + ivec2(1, 1), 7, 31), u.x), u.y);
 }
-// the furlong (an irregular piece of ploughland) a point lies in: its id; border = km to its edge, roughly; mid = its middle
-vec2 setFurlong(vec2 pk, float fs, out float border, out vec2 mid) {
-  vec2 fp = pk / fs, fi = floor(fp), ff = fp - fi, cid = fi, best = vec2(0.); float d1 = 9., d2 = 9.;
-  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-    vec2 g = vec2(float(x), float(y)); ivec2 ci = ivec2(fi + g);
-    vec2 rr = g + .22 + .56 * vec2(setHash(ci, 3, 11), setHash(ci, 3, 12)) - ff; float dd = dot(rr, rr);
-    if (dd < d1) { d2 = d1; d1 = dd; cid = fi + g; best = rr; } else if (dd < d2) d2 = dd;
-  }
-  border = (sqrt(d2) - sqrt(d1)) * fs * .5; mid = pk + best * fs;
-  return cid;
+// The furlong (a piece of ploughland) a point lies in. Furlongs lie like bricks, longer than wide, every row shifted
+// against the next; bend makes their edges not quite straight. Returns its id; f = the place inside it (0..1),
+// border = km to its edge.
+vec2 setFurlong(vec2 pk, float fs, float bend, out vec2 f, out float border) {
+  vec2 q = vec2(.866 * pk.x + .5 * pk.y, -.5 * pk.x + .866 * pk.y) / fs + bend;     // the rows are turned against the compass
+  float row = floor(q.y);
+  q.x = q.x * .62 + setHash(ivec2(7, int(row)), 3, 11);
+  float col = floor(q.x);
+  f = q - vec2(col, row);
+  border = min(min(f.x, 1. - f.x) * 1.6, min(f.y, 1. - f.y)) * fs;
+  return vec2(col, row);
 }
-vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, float border, float near) {
-  float px = p.px; vec2 pk = p.pk;
-  // every colour of a field is a tint of the ground it was ploughed from: the land keeps its own grain and tone
-  vec3 tone = mix(ground, mix(mix(vec3(.70, .64, .38), vec3(.56, .59, .31), smoothstep(.42, .7, p.wet)), vec3(.45, .53, .27), atl), .68);
-  if (near <= 0.) return tone;                                      // from afar the fields are one calm tone
-  ivec2 ic = ivec2(cid);
-  float h1 = setHash(ic, 3, 13), h2 = setHash(ic, 3, 14), h3 = setHash(ic, 3, 15);
+// the colour of a field close by. Every colour is a tint of the ground the field was ploughed from, so the land keeps
+// its own grain and tone.
+vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, float fs) {
+  float px = p.px; ivec2 ic = ivec2(cid);
+  float h1 = setHash(ic, 3, 13), h2 = fract(h1 * 61.), h3 = fract(h1 * 331.);
   float kind = atl > .5 ? (h1 < .3 ? 0. : h1 < .88 ? 2. : 1.) : (h1 < .62 ? 0. : h1 < .74 ? 1. : h1 < .87 ? 2. : 3.);
   vec3 c;
-  if (kind < .5) {                                                   // ploughland in strips, each with its own crop
-    float a = h2 * 3.14159, sw = mix(.055, .1, h3);
-    float sc = dot(pk, vec2(cos(a), sin(a))) / sw, si = floor(sc), sf = sc - si, cr = setHash(ic, int(si) + 200000, 16);
-    vec3 green = mix(vec3(.45, .53, .26), vec3(.66, .58, .36), uSeason);
-    c = cr < .34 ? vec3(.71, .64, .42) : cr < .56 ? green : cr < .72 ? vec3(.61, .55, .41) : cr < .86 ? vec3(.50, .40, .31) : vec3(.40, .47, .26);
-    float vis = smoothstep(.55, .22, px / sw);                       // strips thinner than two pixels melt together
-    c = mix(vec3(.61, .57, .37), c, vis);
-    c = mix(c, vec3(.44, .46, .28), (1. - smoothstep(0., .07 + px / sw, min(sf, 1. - sf))) * .4 * vis);    // the balk between two strips
-  } else if (kind < 1.5) c = vec3(.61, .55, .42) * (.9 + .2 * setNoise(pk / .12));                      // fallow
+  if (kind < .5) {                                                   // ploughland in strips along the furlong, each with its own crop
+    float n = floor(5. + 5. * h3), sc = h2 > .78 ? f.x * n * 1.6 : f.y * n, si = floor(sc), sf = sc - si, thin = n * px / fs;
+    float cr = setHash(ic, int(si) + 64, 16);
+    c = cr < .34 ? vec3(.71, .64, .42) : cr < .56 ? mix(vec3(.45, .53, .26), vec3(.66, .58, .36), uSeason) : cr < .72 ? vec3(.61, .55, .41) : cr < .86 ? vec3(.50, .40, .31) : vec3(.40, .47, .26);
+    c *= 1. - .22 * clamp(1. - min(sf, 1. - sf) / (.07 + thin), 0., 1.);       // the balk between two strips
+    c = mix(vec3(.61, .57, .37), c, clamp(2.2 - 4. * thin, 0., 1.));           // strips thinner than two pixels melt together
+  } else if (kind < 1.5) c = vec3(.61, .55, .42) * (.9 + .2 * setNoise(p.pk / .12));                       // fallow
   else if (kind < 2.5) {                                             // common pasture with bushes
-    c = mix(vec3(.50, .53, .30), vec3(.42, .50, .27), atl) * (.92 + .16 * setNoise(pk / .2));
-    vec2 bq = pk / .04;
-    c = mix(c, vec3(.25, .33, .16), step(.78, setHash(ivec2(floor(bq)), 5, 21)) * smoothstep(.42, .25, length(fract(bq) - .5)) * smoothstep(.05, .02, px) * .8);
+    c = (atl > .5 ? vec3(.42, .50, .27) : vec3(.50, .53, .30)) * (.92 + .16 * setNoise(p.pk / .2));
+    vec2 bq = p.pk / .04;
+    if (px < .05) c = mix(c, vec3(.25, .33, .16), step(.78, setHash(ivec2(floor(bq)), 5, 21)) * smoothstep(.42, .25, length(fract(bq) - .5)) * smoothstep(.05, .02, px) * .8);
   } else {                                                           // a grove: trees in rows on pale earth
-    float tv = smoothstep(.04, .015, px);
-    c = mix(vec3(.68, .61, .46), vec3(.31, .38, .21), smoothstep(.36, .26, length(fract(pk / .055 + h2) - .5)) * tv + .28 * (1. - tv));
+    float tv = clamp((.04 - px) * 40., 0., 1.);
+    c = mix(vec3(.68, .61, .46), vec3(.31, .38, .21), smoothstep(.36, .26, length(fract(p.pk / .055 + h2) - .5)) * tv + .28 * (1. - tv));
   }
-  c = mix(ground, c, mix(.62, .42, atl));
-  float bw = max(.005, px * .7);                                     // the edge of a furlong: a balk, or a hedge in the wet lands
-  vec3 bc = mix(mix(vec3(.42, .43, .27), vec3(.72, .66, .54), step(.62, h3)), vec3(.26, .32, .18), atl);     // a green balk or a trodden path; a hedge
-  c = mix(c, bc, (1. - smoothstep(bw * .5, bw * 1.2, border)) * mix(.5, .3 + .45 * h2, atl) * smoothstep(.3, .1, px));
-  float ter = smoothstep(.09, .17, p.slope) * (1. - .5 * atl);       // terraces on a slope: walls along the contours
-  if (ter > .003) {
-    float tc = p.hl / 14., tf = fract(tc), tw = .014 / max(p.slope, .05);
-    vec3 tcol = mix(vec3(.58, .57, .34), vec3(.45, .50, .28), step(.5, fract(floor(tc) * .618)));
-    tcol = mix(tcol, vec3(.47, .43, .36), 1. - smoothstep(0., .22, tf));
+  c = mix(ground, c, atl > .5 ? .42 : .62);
+  // the edge of a furlong: a balk or a trodden path, or a hedge in the wet lands
+  vec3 bc = atl > .5 ? vec3(.26, .32, .18) : h3 > .62 ? vec3(.72, .66, .54) : vec3(.42, .43, .27);
+  c = mix(c, bc, clamp(1.7 - border / max(.005, px * .7), 0., 1.) * (atl > .5 ? .3 + .45 * h2 : .5));
+  if (p.slope > .09) {                                               // terraces on a slope: walls along the contours
+    float tc = p.hl / 14., tf = fract(tc), tw = .014 / max(p.slope, .05), ter = smoothstep(.09, .17, p.slope) * (1. - .5 * atl);
+    vec3 tcol = mix(fract(floor(tc) * .618) > .5 ? vec3(.45, .50, .28) : vec3(.58, .57, .34), vec3(.47, .43, .36), 1. - smoothstep(0., .22, tf));
     c = mix(c, mix(ground, mix(vec3(.54, .54, .33), tcol, smoothstep(.5, .22, px / tw)), .65), ter);
   }
-  return mix(tone, c, near);
+  return c;
 }
 
+// one of the chunks around a point: if it holds a patch that lies deeper over the point than the best so far, it wins
+void setTry(ivec2 c, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec2 bc) {
+  if (c.x < 0 || c.y < 0 || c.x >= SET_CN || c.y >= SET_CN) return;
+  vec4 t = texelFetch(tSettle, c, 0);
+  if (t.b <= 0.) return;
+  float d = min(t.b * SET_RMAX * uSettle.w, SET_RVIS) - distance(pk, uChunkRect.xy + (vec2(c) + (t.rg * 255. + .5) / 256.) * 10.);   // drawn larger than life from high up
+  if (d > own) { riv = own; own = d; best = t; bc = c; } else if (d > riv) riv = d;
+}
 void aspSettle(Px p, inout Land L) {
   float fieldsV = p.cC.g;
   ivec2 c0 = ivec2(floor((p.pk - uChunkRect.xy) * .1));
-  float nearA = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_CN && c0.y < SET_CN ? texelFetch(tSettle, c0, 0).a : 0.;
-  if (nearA == 0. && fieldsV < .004) return;
-  float S = uSettle.x, px = p.px, dry = smoothstep(.4, 2., p.h), bog = smoothstep(.3, .5, p.cA.a);
-  // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 chunks around
+  int code = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_CN && c0.y < SET_CN ? int(texelFetch(tSettle, c0, 0).a * 255. + .5) : 0;
+  if ((code == 0 && fieldsV < .004) || p.h < .4) return;
+  // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 chunks around.
+  // The code of the chunk says which of the nine hold a patch: most often it is one or two, and only those are read.
   float own = -1e3, riv = -1e3, r = 0., rs = 0., th = 0., cul = 1.; vec2 site = vec2(0.); int ck = 0;
-  if (nearA > 0.) for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    ivec2 c = c0 + ivec2(i, j);
-    if (c.x < 0 || c.y < 0 || c.x >= SET_CN || c.y >= SET_CN) continue;
-    vec4 t = texelFetch(tSettle, c, 0);
-    if (t.b <= 0.) continue;
-    vec2 b = floor(t.rg * 255. + .5), s = uChunkRect.xy + (vec2(c) + (b + .5) / 256.) * 10.;
-    float rr = min(t.b * SET_RMAX * uSettle.w, SET_RVIS), d = rr - distance(p.pk, s);   // drawn larger than life from high up
-    if (d > own) { riv = own; own = d; r = rr; rs = t.b * SET_RMAX; site = s; th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = floor(t.a * 255. + .5) - 200.; ck = c.y * SET_CN + c.x; }
-    else if (d > riv) riv = d;
+  vec4 best = vec4(0.); ivec2 bc = c0;
+  if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), p.pk, own, riv, best, bc); }
+  else if (code > 0) {
+    int c1 = code <= 9 ? code - 1 : code < 100 ? (code - 10) / 9 : 4, c2 = code <= 9 || code >= 200 ? -1 : code < 100 ? (code - 10) % 9 : (code - 110) / 2;
+    setTry(c0 + ivec2(c1 % 3 - 1, c1 / 3 - 1), p.pk, own, riv, best, bc);
+    if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), p.pk, own, riv, best, bc);
   }
-  float atl = cul > 1.5 ? 1. : 0.;
-  float m = r > 0. ? own + min(.9, .3 * r) * setWob(p.pk) : -1e3;
+  if (best.b > 0.) {
+    vec2 b = floor(best.rg * 255. + .5); float ca = floor(best.a * 255. + .5);
+    rs = best.b * SET_RMAX; r = min(rs * uSettle.w, SET_RVIS); site = uChunkRect.xy + (vec2(bc) + (b + .5) / 256.) * 10.;
+    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.; ck = bc.y * SET_CN + bc.x;
+  }
+  float px = p.px, W = 1.2 + 1.6 * r, m = r > 0. ? own : -1e3;      // W: how far the fields reach beyond the houses
+  bool close = m > -W - 1.;
+  if (!close && fieldsV < .004) return;
+  if (m > -2.5) m += min(.9, .3 * r) * setWob(p.pk) * min(1., 1. + m / 2.5);   // the wobble of the edge fades out away from it
   // houses stand on dry, level ground only; a settlement too small for its pixels still shows as a mark
-  float tm = smoothstep(-.12, .06, m + max(0., 1.6 * px - r)) * dry * (1. - smoothstep(.26, .44, p.slope)) * (1. - bog);
+  float tm = 0., mt = m + max(0., 1.6 * px - r);
+  if (mt > -.12) tm = smoothstep(-.12, .06, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
 
   // ---- fields: the land next to the houses is ploughed first, then the best of the rest of the chunk
-  float able = dry * (1. - bog) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(1300., 1700., p.hl)) * (1. - tm);   // land that can be ploughed
-  if (fieldsV > .004 && able > .003) {
-    float W = 1.2 + 1.6 * r, nz = p.n2 * .45 + vnoise(p.pk / 2.7 + 61.) * .35 + setNoise(p.pk / .8) * .2;
-    float want = .12 + .6 * fieldsV + (r > 0. ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - nz;
-    if (want > -.3) {                                                // far below the threshold no furlong here can be a field: nothing more to work out
-      float atlF = step(1.5, p.cC.b * 255.), fm = smoothstep(-.05, .05, want);
-      float near = smoothstep(.5, .16, px), border = 1.; vec2 cid = vec2(0.), mid = p.pk;
+  if (fieldsV > .004 && tm < .997 && p.slope < .6 && p.hl < 1700.) {
+    float want = .12 + .6 * fieldsV + (close ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - p.n2 * .6 - p.n3 * .4;
+    if (want > -.25) {                                               // far below the threshold no furlong can be a field: nothing more to work out
+      float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .36 : .62, near = clamp((.5 - px) * 3., 0., 1.), fm = 0., border = 1.;
+      vec2 cid = vec2(0.), ff = vec2(.5);
+      if (near < 1.) fm = smoothstep(-.05, .05, want);               // from afar: a soft edge
       if (near > 0.) {                                               // close by a furlong is ploughed whole or not at all: the edge of the fields is the edge of furlongs
-        cid = setFurlong(p.pk, atlF > .5 ? .4 : .78, border, mid);
-        float ringC = r > 0. ? clamp(1. + (r - distance(mid, site) + min(.9, .3 * r) * setWob(mid)) / W, 0., 1.) : 0.;
-        float nzC = fbm(mid / 7.3 + 5.) * .45 + vnoise(mid / 2.7 + 61.) * .35 + setNoise(mid / .8) * .2;
-        fm = mix(fm, step(nzC, .12 + .6 * fieldsV + .75 * ringC), near);
+        cid = setFurlong(p.pk, fs, (p.n3 - .5) * .3, ff, border);
+        fm = mix(fm, step(setHash(ivec2(cid), 3, 14), want * 2.3 + .5), near);
       }
-      fm *= able;
-      if (fm > .003) { L.col = mix(L.col, setFields(p, L.col, atlF, cid, border, near), fm); L.cover *= 1. - fm; }
+      // the common case, good level land, costs nothing more; only shores, swamps, slopes and heights are weighed
+      if (p.h < 2. || p.cA.a > .3 || p.slope > .42 || p.hl > 1300. || tm > 0.) fm *= smoothstep(.4, 2., p.h) * (1. - smoothstep(.3, .5, p.cA.a)) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(1300., 1700., p.hl)) * (1. - tm);
+      if (fm > .003) {
+        vec3 fc = L.col;
+        if (near > 0.) fc = setFields(p, L.col, atlF, cid, ff, border, fs);
+        if (near < 1.) {                                             // from afar the fields are one calm tone
+          vec3 tone = mix(L.col, atlF > .5 ? vec3(.45, .53, .27) : mix(vec3(.70, .64, .38), vec3(.56, .59, .31), smoothstep(.42, .7, p.wet)), .68);
+          fc = mix(tone, fc, near);
+        }
+        L.col = mix(L.col, fc, fm); L.cover *= 1. - fm;
+      }
     }
   }
   if (tm < .003) return;
 
   // ---- the settlement itself
-  float coarse = clamp((uSettle.x - .7) / .6, 0., 1.);
+  float S = uSettle.x, atl = cul > 1.5 ? 1. : 0., coarse = clamp((S - .7) / .6, 0., 1.);
   vec3 earth = mix(mix(vec3(.68, .61, .48), vec3(.48, .45, .34), atl), L.col, .25 + .3 * atl) * (.93 + .14 * p.n3);
   earth = mix(earth, settleMat(0, atl, .4), .3 * coarse * (1. - uSettle.y));         // from afar the streets are too thin to show their dust
   vec3 col = earth;
@@ -148,7 +162,7 @@ void aspSettle(Px p, inout Land L) {
   vec2 q = vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S;        // the point in the lattice of the patch
   float aa = clamp(px / S, .002, .5) * .9, seam = smoothstep(.3, .55, (own - riv) / S), blocks = uSettle.y, night = 1. - p.day;
   float cls, ang, edge; vec2 fl; vec4 rnd;
-  float cover = setRoof(q, site, r, rs, th, cul, ck, S, aa, cls, fl, ang, rnd, edge) * seam;
+  float cover = setRoof(q, site, r, rs, cs, sn, cul, ck, S, aa, cls, fl, ang, rnd, edge) * seam;
   if (cls > 2.5 && cls < 3.5) {                                            // a house stands in its plot: a garden, a yard
     vec2 g = abs(q - floor(q + .5)); float plot = (1. - smoothstep(.40, .44, max(g.x, g.y))) * seam;
     vec3 gc = mix(mix(vec3(.47, .52, .27), vec3(.58, .48, .33), step(.5, rnd.x * 1.6)) * (.93 + .1 * step(.5, fract(q.x * 9.))), vec3(.41, .47, .25), atl);
@@ -165,13 +179,13 @@ void aspSettle(Px p, inout Land L) {
     }
     col = mix(col, earth * .8, cover * blocks);                            // under a standing block the ground is in its shade
   }
-  if (p.day > .05) {                                                       // the shade of the houses toward the sun
+  if (p.day > .05 && cover < .99) {                                        // the shade of the houses toward the sun
     vec2 sl = vec2(cs * p.sd.x + sn * p.sd.y, -sn * p.sd.x + cs * p.sd.y);
     float len = .1 * uSettle.z / max(uSun.z / max(length(uSun.xy), 1e-3), .35), c2, a2, e2; vec2 f2; vec4 r2;
-    float sh = setRoof(q + sl * len * .6, site, r, rs, th, cul, ck, S, aa + .03, c2, f2, a2, r2, e2);
+    float sh = setRoof(q + sl * len * .6, site, r, rs, cs, sn, cul, ck, S, aa + .03, c2, f2, a2, r2, e2);
     if (c2 > .5 && c2 < 3.5) col *= 1. - .36 * sh * (1. - cover) * p.day * seam;
   }
-  col += vec3(1.4, .9, .45) * night * blocks * (1. - cover) * (1. - smoothstep(-.02, .3, edge)) * step(cls, 3.5) * step(.5, cls) * step(.4, rnd.y) * .42;   // light spills into the street
+  if (night > 0.) col += vec3(1.4, .9, .45) * night * blocks * (1. - cover) * (1. - smoothstep(-.02, .3, edge)) * step(cls, 3.5) * step(.5, cls) * step(.4, rnd.y) * .42;   // light spills into the street
   col = mix(col, mix(earth, settleMat(0, atl, .3), .5), smoothstep(.25, .5, px / S) * (1. - blocks));   // cells of a pixel or two melt into one tone
   L.col = mix(L.col, col, tm); L.cover *= 1. - tm;
 }`;

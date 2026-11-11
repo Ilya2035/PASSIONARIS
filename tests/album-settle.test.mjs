@@ -120,12 +120,21 @@ test('settle mirror and plan: the blocks are drawn from the built share of the c
     const out = new Uint8Array(CN * CN * 4), { lobes, changed } = mirrorSettle(ch, site, out);
     assert.ok(changed); assert.equal(lobes.length, 1); assert.equal(lobes[0].k, k);
     assert.equal(out[k * 4 + 2], radiusByte(ch.get('built', k))); assert.equal(out[k * 4 + 3], 200 + CULTURES.med);
-    assert.equal(out[(k + 1) * 4 + 3], 255, 'the neighbours know a patch is near'); assert.equal(out[(k + 3) * 4 + 3], 0);
+    assert.equal(out[(k + 1) * 4 + 3], 1 + 3, 'the neighbours know which chunk holds the patch'); assert.equal(out[(k - CN) * 4 + 3], 1 + 7); assert.equal(out[(k + 3) * 4 + 3], 0);
     const plan = rows(planLobe(lobes[0], S, env)); counts.push(plan.length);
     for (const r of plan) { assert.ok(r[3] >= 0 && r[3] < 12 && r[8] > 0 && r[8] <= 2 && r[9] > 0 && r[9] <= 2 && r[10] >= 0 && r[10] <= 1, `row ${r}`); }
   }
   for (let i = 1; i < counts.length; i++) assert.ok(counts[i] > counts[i - 1] * 1.5, `blocks by built share: ${counts}`);
   assert.ok(counts[0] >= 2 && counts[0] <= 10 && counts[4] > 400, `from a hamlet to a chunk full of houses: ${counts}`);
+  // two built chunks side by side: each names the other, a chunk between knows both, and the patches are rivals
+  ch.set('built', k + 2, .1);
+  const two = new Uint8Array(CN * CN * 4), pair = mirrorSettle(ch, site, two);
+  assert.equal(two[k * 4 + 3], 200 + CULTURES.med); assert.equal(two[(k + 1) * 4 + 3], 10 + 9 * 3 + 5); assert.equal(two[(k + 3) * 4 + 3], 1 + 3);
+  ch.set('built', k + 1, .1);
+  const three = new Uint8Array(CN * CN * 4), trio = mirrorSettle(ch, site, three);
+  assert.equal(three[k * 4 + 3], 110 + 2 * 5 + CULTURES.med - 1); assert.equal(three[(k + 1) * 4 + 3], 210 + CULTURES.med); assert.equal(three[(k + 1 + CN) * 4 + 3], 100);
+  assert.equal(pair.lobes[0].rivals.length, 0); assert.equal(trio.lobes.find(L => L.k === k + 1).rivals.length, 2);
+  ch.set('built', k + 1, 0); ch.set('built', k + 2, 0);
   // a chunk built up by a brush, with no model behind it, is drawn all the same; its manner comes from the chunk
   ch.set('culture', k, CULTURES.atl / 255);
   const { lobes } = mirrorSettle(ch, site, new Uint8Array(CN * CN * 4));

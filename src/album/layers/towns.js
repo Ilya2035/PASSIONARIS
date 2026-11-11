@@ -137,6 +137,7 @@ export default async function init(album) {
     uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T),
       tShapes: { value: tShapes }, uS: { value: CELL20 }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 } } });
   const mesh = new Mesh(new InstancedBufferGeometry(), mat); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
+  mesh.renderOrder = -100;                                          // before the land: under a roof the costly ground shader is never run
   let cap = 0, count = 0, real = 0;
   function fill(rows) {
     const n = Math.min(MAX_BLOCKS, rows.length / ROW);
