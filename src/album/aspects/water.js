@@ -1,72 +1,344 @@
-// ASPECT «Вода»: the sea, its shallows and surf, ice and snow on the water. This file and layers/rivers.js belong to
-// the water work; the contract with the rest of the album is in docs/ALBUM-CHUNKS.md.
+// ASPECT «Вода»: the sea, the lakes and the rivers; ice on them, snow on the ice, thaw. This file, layers/rivers.js,
+// layers/lakes.js and layers/freeze.js belong to the water work; the contract with the rest of the album is in
+// docs/ALBUM-CHUNKS.md, the states and rules of the water are in docs/album/water.md.
 //   aspWater(p) → the finished, lit colour of the water at this pixel (linear light, before air and tone curve)
-// The state comes from the chunks: p.cB = (ice 0 open .. 1 solid, snow, flood, spare).
-const GLSL = /* glsl */`
-// a floe of pack ice: x = distance to its edge (0 at the crack between two floes), y = a random number of its own
-vec2 iceFloe(vec2 p) {
-  vec2 i = floor(p), u = fract(p); float d1 = 9., d2 = 9., id = 0.;
+// The state comes from the chunks, p.cB:
+//   r  ice         0 open water .. 1 solid ice with pressure ridges
+//   g  snow        snow lying on the ice (on the land the ground shader draws it)
+//   b  flood       on a water chunk: melt water on the ice, 0 frozen hard .. 1 rotten ice full of thaw holes
+//   a  spareB      the state of the sea: 0 calm .. 1 storm with whitecaps
+// One water for everything: WATER_CORE is the same code in the ground shader (the sea), in the lakes and in the rivers.
+import { lightUniforms } from '../glsl.js';
+
+export const WATER_CORE = /* glsl */`
+const vec2 W_WIND = vec2(.83, -.558), W_WINX = vec2(.558, .83);    // the wind blows toward the east-south-east; W_WINX lies across it
+
+// what the water is told about a pixel
+struct Wtr {
+  vec2 pk; float px;       // flat km (east, north); km per screen pixel
+  float depth;             // metres of water under the surface
+  float surf;              // km to the waterline of a real shore where surf breaks; large when there is none
+  vec3 V;                  // direction to the eye (east, north, up)
+  float day, sh;           // 0 night .. 1 day; 0 in the shadow of relief .. 1 lit
+  vec3 sunCol, skyCol;     // light of the sun and of the sky
+  vec4 cB;                 // the chunk: ice, snow, melt water on the ice, state of the sea
+  int kind;                // 0 sea, 1 lake, 2 river
+};
+
+// The water draws fine patterns far from the origin of the km grid, where a hash with large multipliers runs out of
+// float precision and repeats itself. These keep their randomness there: use them, not the shared value noise.
+float wHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float wNoise(vec2 p) {
+  vec2 i = floor(p), u = fract(p); u = u * u * (3. - 2. * u);
+  return mix(mix(wHash(i), wHash(i + vec2(1, 0)), u.x), mix(wHash(i + vec2(0, 1)), wHash(i + vec2(1, 1)), u.x), u.y);
+}
+float wFbm(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 4; i++) { s += a * wNoise(p); p = p * 2.03 + 17.1; a *= .5; } return s; }
+// value noise with its slope: x = value 0..1, yz = d/dp
+vec3 wNoiseD(vec2 p) {
+  vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f), du = 6. * f * (1. - f);
+  float a = wHash(i), b = wHash(i + vec2(1, 0)), c = wHash(i + vec2(0, 1)), d = wHash(i + vec2(1, 1)), k = a - b - c + d;
+  return vec3(a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y, du * vec2(b - a + k * u.y, c - a + k * u.x));
+}
+// cells of a jittered lattice (floes, pancakes): x = 0 on the border between two cells, growing inward; y = a random
+// number of the cell; zw = from the pixel to the centre of its cell
+vec4 wCells(vec2 p) {
+  vec2 i = floor(p), u = fract(p), best = vec2(0.), bi = vec2(0.); float d1 = 9., d2 = 9.;
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
     vec2 g = vec2(float(x), float(y)), r = g + hash22(i + g) - u; float dd = dot(r, r);
-    if (dd < d1) { d2 = d1; d1 = dd; id = hash21(i + g + 7.7); } else if (dd < d2) d2 = dd;
+    if (dd < d1) { d2 = d1; d1 = dd; best = r; bi = i + g; } else if (dd < d2) d2 = dd;
   }
-  return vec2(sqrt(d2) - sqrt(d1), id);
+  return vec4(sqrt(d2) - sqrt(d1), wHash(bi + 7.7), best);
 }
-vec3 aspWater(Px p) {
-  float depth = max(-p.h, 0.), px = p.px; vec2 pk = p.pk;
-  vec3 wc = mix(vec3(.15, .50, .52), vec3(.04, .27, .42), smoothstep(0., 45., depth));
-  wc = mix(wc, vec3(.025, .12, .25), smoothstep(40., 1800., depth));
-  wc = mix(vec3(.50, .62, .50), wc, smoothstep(0., 6., depth));
-  wc = pow(wc, vec3(2.2)) * 1.6;
-  vec2 wn = vec2(0.);
-  for (int i = 0; i < 3; i++) {
-    float s = i == 0 ? .22 : (i == 1 ? 1.3 : 7.), f = 1. - smoothstep(s * .18, s * .42, px);
-    vec2 q = pk / s + uTime * vec2(.035, .021) * (1.5 - float(i) * .4);
-    float a = vnoise(q); wn += f * vec2(vnoise(q + vec2(.3, 0.)) - a, vnoise(q + vec2(0., .3)) - a);
+// a train of waves L km long running along dir (in wind coordinates): xy = slope, z = height −1 trough .. 1 crest,
+// w = how high the waves of this group are (about 1). Two slow noises bend the crests and gather the waves into
+// groups, so the sea never looks ruled.
+vec4 wTrain(vec2 wq, vec2 dir, float L, float t, float seed) {
+  float n1 = wNoise(wq / vec2(L * 4.6, L * 1.9) + seed), n2 = wNoise(wq / (L * 9.3) + seed + 5.);                // crests are short across the wind
+  float ph = dot(wq, dir) * 6.2832 / L - t * 1.1 * sqrt(.05 / L) + n1 * 7. + n2 * 15., amp = .1 + .9 * min(n1 * n2 * 4., 2.2);
+  return vec4(dir * cos(ph) * amp, sin(ph), amp);
+}
+// colour of the water body by depth, as seen on screen: pale over sand, turquoise shallows, deep blue
+vec3 waterBody(float depth, int kind) {
+  vec3 c;
+  if (kind == 0) {
+    c = mix(vec3(.15, .50, .52), vec3(.04, .27, .42), smoothstep(0., 45., depth));
+    c = mix(c, vec3(.025, .12, .25), smoothstep(40., 1800., depth));
+    c = mix(vec3(.47, .61, .50), c, smoothstep(0., 4.5, depth));
+  } else {                                                          // fresh water: greener, darker, the bottom shows only at the edge
+    if (kind == 1) c = mix(vec3(.14, .44, .44), vec3(.045, .25, .36), smoothstep(0., 16., depth));
+    else c = mix(vec3(.19, .45, .40), vec3(.06, .27, .32), smoothstep(0., 5., depth));       // a river carries silt: greener than a lake
+    c = mix(vec3(.50, .58, .44), c, smoothstep(0., kind == 1 ? 3.5 : 1.8, depth));
   }
-  vec3 nW = normalize(vec3(-wn * .26, 1.)), Rv = reflect(-p.V, nW);
-  float fres = .02 + .98 * pow(1. - max(dot(nW, p.V), 0.), 5.), sp = max(dot(Rv, uSun), 0.);
-  vec3 skyRef = mix(vec3(.58, .72, .90), vec3(.22, .40, .70), clamp(Rv.z, 0., 1.)) * (.25 + .75 * p.day);
-  vec3 sea = wc * (p.skyCol * 1.5 + p.sunCol * max(dot(nW, uSun), 0.) * .75);
-  float glint = smoothstep(.22, .04, px);                          // sparkle only when waves are resolved
-  sea = mix(sea, skyRef, fres * .7) + p.sunCol * (pow(sp, 420.) * .9 * glint + pow(sp, 22.) * .02 * smoothstep(1.2, .3, px)) * p.sh;
-  float near = smoothstep(.35, .06, px);
-  float shore = smoothstep(.0012, .006, p.slope);                  // surf only where the bottom rises to a shore, not on flats
-  float foam = smoothstep(2.4, 0., depth) * (.5 + .5 * vnoise(pk / .045 + uTime * .25)) * (.35 + .65 * near) * shore;
-  foam += smoothstep(12., 2., depth) * smoothstep(.6, .97, sin(depth * 1.1 - uTime * 1.3 + vnoise(pk / .6) * 6.)) * .3 * smoothstep(.1, .03, px) * shore;
-  sea = mix(sea, vec3(.94, .97, 1.) * (p.skyCol + p.sunCol * .8), clamp(foam, 0., 1.) * .75);
+  return c;
+}
 
-  // ice by chunk — a first, plain version. A thin share of ice is scattered floes; as it grows the floes close up,
-  // the leads of open water between them narrow to cracks, and the solid sheet keeps only a few of those.
-  float ice = p.cB.r;
-  if (ice > .003) {
-    float fine = smoothstep(1.1, .25, px);
-    float brk = fbm(pk / 2.6 + 31.) * .62 + mix(.19, vnoise(pk / .42 + 5.) * .38, smoothstep(.5, .12, px));
-    vec2 fl = iceFloe(pk / 3.1 + vec2(vnoise(pk / 1.3), vnoise(pk / 1.3 + 7.)) * .35);   // angular floes a few km across, edges a little ragged
-    float w = mix(.42, .02, smoothstep(.15, 1., ice));              // half-width of the open lead between floes
-    float lead = mix(clamp(w * 1.4, 0., 1.), 1. - smoothstep(w, w + .05, fl.x), fine);
-    float sheet = smoothstep(-.07, .07, ice * 1.3 - brk) * (1. - lead);
-    float snow = smoothstep(-.1, .1, p.cB.g * 1.25 - (fbm(pk / 1.3 + 9.) * .7 + .15));
-    vec3 iceCol = mix(vec3(.58, .73, .80), vec3(.84, .89, .93), vnoise(pk / .9 + 2.) * .5 + fl.y * .5 * fine);   // blue young ice, pale old ice
-    iceCol *= 1. - .12 * (1. - smoothstep(w, w + .16, fl.x)) * fine;                                             // thinner, darker ice at the edge of a floe
-    iceCol = mix(iceCol, vec3(.96, .97, .99) * (.94 + .06 * vnoise(pk / .3)), snow);
-    sea = mix(sea, pow(iceCol, vec3(2.2)) * (p.sunCol * max(uSun.z, 0.) * p.sh * 1.15 + p.skyCol), sheet);
+vec3 waterLit(Wtr w) {
+  vec2 pk = w.pk; float px = w.px, t = uTime;
+  float ice = w.cB.r, melt = w.cB.b * smoothstep(.04, .3, w.cB.r);
+  vec2 wq = vec2(dot(pk, W_WIND), dot(pk, W_WINX));                 // km along and across the wind
+  float sunUp = max(uSun.z, 0.);
+
+  // ---- the state of the surface: 0 calm .. 1 storm. Gusts and slicks make it uneven; ice calms it.
+  float st = w.kind == 0 ? w.cB.a : (w.kind == 1 ? .2 : .1);
+  float gust = px < 4. ? mix(.5, wFbm(pk / 6.2 + vec2(t * .012, t * .005)), smoothstep(4., 1.5, px)) : .5;
+  st = clamp(st * (.45 + 1.1 * gust) + (gust - .5) * .1, 0., 1.) * (1. - smoothstep(.03, .4, ice));
+
+  // ---- waves: three sizes drawn out across the wind, each fading into roughness once it is smaller than a pixel
+  float s0 = .012 + .075 * smoothstep(0., .5, st), s1 = .11 * smoothstep(.2, .75, st), s2 = .09 * smoothstep(.5, 1., st);
+  float f0 = 1. - smoothstep(.016, .04, px), f1 = 1. - smoothstep(.045, .11, px), f2 = 1. - smoothstep(.2, .5, px);
+  vec2 wn = vec2(0.), crest = vec2(0.);
+  if (f0 > 0.) wn += f0 * s0 * wTrain(wq, vec2(.946, .326), .075, t, 1.3).xy;
+  if (f1 > 0. && s1 > .002) { vec4 tr = wTrain(wq, vec2(.978, -.208), .24, t, 7.3); wn += f1 * s1 * tr.xy; crest = tr.zw; }
+  if (f2 > 0. && s2 > .002) wn += f2 * s2 * wTrain(wq, vec2(.996, .087), 1.1, t, 3.1).xy;
+  float hid = (1. - f0) * s0 + (1. - f1) * s1 + (1. - f2) * s2;      // waves the pixel cannot show: they widen the glint instead
+  vec3 nW = normalize(vec3(-(W_WIND * wn.x + W_WINX * wn.y) * 1.5, 1.)), Rv = reflect(-w.V, nW);
+
+  // ---- the water itself, the sky in it, the sun on it
+  // the sea charts are coarse: a little unevenness turns their steps into the patchy sandbanks of a real shoal
+  float dC = w.depth;
+  if (w.kind == 0 && dC < 30. && px < 1.5) dC = max(dC + ((wNoise(pk / 1.7 + 3.3) - .5) * 4.5 + (wNoise(pk / .45 + 8.1) - .5) * 1.6) * smoothstep(0., 3., dC) * smoothstep(30., 12., dC) * smoothstep(1.5, .5, px), 0.);
+  vec3 body = pow(waterBody(dC, w.kind), vec3(2.2)) * 1.6;
+  body = mix(body, body * vec3(.74, .92, .9) + vec3(.004, .012, .012), smoothstep(.45, 1., st) * .6);   // a storm sea is duller and greener
+  float fres = .02 + .98 * pow(1. - max(dot(nW, w.V), 0.), 5.), sp = max(dot(Rv, uSun), 0.);
+  float vz = max(w.V.z, 0.), k1 = 1. - vz;                            // waves too small to see still turn the water toward the sky: the same mean as when they are drawn
+  fres += .98 * k1 * k1 * k1 * (10. * (1. - vz * vz) + 2.5 * k1 * vz) * hid * hid * .9;
+  vec3 skyRef = mix(vec3(.58, .72, .90), vec3(.22, .40, .70), clamp(Rv.z, 0., 1.)) * (.25 + .75 * w.day);
+  vec3 col = body * (w.skyCol * 1.5 + w.sunCol * max(dot(nW, uSun), 0.) * .75);
+  float lobe = sqrt(clamp(hid * 3. + st * .2, 0., 1.));
+  col = mix(col, skyRef, min(fres + .07 * st, 1.) * .7) + w.sunCol * pow(sp, mix(460., 20., lobe)) * mix(.7, .02, sqrt(lobe)) * w.sh;
+
+  // ---- foam: whitecaps in a strong wind, surf where the bottom rises to a real shore
+  float foam = 0., capAmt = smoothstep(.4, 1., st); capAmt *= capAmt;
+  if (capAmt > .003) {
+    foam = capAmt * .025;                                            // from afar: a sea a little paler
+    float fcap = f1 * (1. - smoothstep(.018, .045, px));
+    if (fcap > 0.) {                                                 // up close: the crests of the middle waves break, here and there
+      float brk = wNoise(vec2(wq.x / .07 - t * .5, wq.y / .13) + 1.7) + (crest.y - 1.) * .16, th = mix(.93, .66, capAmt);
+      float cap = smoothstep(.3, .8, crest.x) * smoothstep(th, th + .06, brk);
+      cap += smoothstep(-.5, .4, crest.x) * smoothstep(th + .03, th + .2, brk) * .3;                           // foam left behind the crest
+      foam = mix(foam, cap, fcap);
+    }
+  }
+  if (w.surf < 2.) {
+    float surge = .7 + .9 * st, wd = max(.045 * surge, px * 2.2);     // the white line never thinner than a couple of pixels
+    float sf = smoothstep(wd, wd * .15, w.surf) * (.3 + .7 * wNoise(pk / .045 + t * .25)) * (.35 + .65 * smoothstep(.25, .6, wNoise(pk / .3 + t * .04)));
+    sf += smoothstep(wd * 5., wd * 1.5, w.surf) * smoothstep(.55, .97, sin(w.surf / wd * 5.5 - t * 1.3 + wNoise(pk / .6) * 6.)) * .32 * smoothstep(.12, .03, px);   // rollers coming in
+    foam = max(foam, sf * (1. - smoothstep(.15, .5, ice)));
+  }
+  col = mix(col, vec3(.94, .97, 1.) * (w.skyCol + w.sunCol * .8), clamp(foam, 0., 1.) * .75);
+
+  // ---- ice. One number of the chunk runs through every stage: grease ice and slush → pancake ice → broken floes
+  // with leads → a solid sheet with healed cracks → pressure ridges. The number is compared with slow noise, so in a
+  // chunk the weak goes first: thin streaks of slush vanish before the floes, narrow leads close before wide ones.
+  float iceA = 0.;
+  if (ice > .004) {
+    float sc = w.kind == 0 ? 1. : (w.kind == 1 ? .4 : .16);          // on lakes and rivers the ice breaks into smaller pieces
+    vec2 q = pk / sc, qw = wq / sc, sun2 = normalize(uSun.xy + 1e-4); float pq = px / sc;
+    float big = pq < 30. ? wFbm(q / 11. + 31.) : .5, room = ice * (1. - ice);
+    float a = clamp(ice + (big - .5) * 1.7 * room + (1. - smoothstep(0., 30., w.depth)) * .9 * room, 0., 1.);   // shallows freeze first
+    vec3 direct = w.sunCol * sunUp * w.sh * 1.25, amb = w.skyCol;
+
+    // 1. grease ice and slush: matt streaks along the wind that kill the ripple
+    float gz = pq < 3. ? mix(.5, wFbm(vec2(qw.x / 3.1, qw.y / .55) + 3. + t * .004), smoothstep(3., .8, pq)) : .5;
+    float grease = smoothstep(-.15, .15, smoothstep(0., .2, a) * 1.3 - gz - .1);
+    vec3 gc = mix(vec3(.17, .27, .35), vec3(.40, .50, .57), smoothstep(.3, .95, a)) + .05 * gz;         // dark slush thickens into grey young ice
+    col = mix(col, pow(gc, vec3(2.2)) * (direct + amb), grease * .86);
+    iceA = grease * .5;
+
+    // 2. pancake ice: round cakes with a raised white rim, born in the slush
+    float pA = smoothstep(.1, .36, a);
+    if (pA > .002) {
+      float fp = 1. - smoothstep(.03, .085, pq), pan = pA * .55, rim = 0., id = .5;
+      if (fp > 0.) {
+        vec4 c = wCells(q / .12 + 5.3);
+        float d = length(c.zw), r = (.27 + .23 * fract(c.y * 7.31)) * (.62 + .38 * pA), aa = pq / .12 * 1.1 + .012;
+        float row = wNoise(vec2(qw.x / .9, qw.y / .1) + 2.2);                                           // the wind herds the cakes into rows
+        float disc = (1. - smoothstep(r - aa, r + aa, d)) * smoothstep(0., .1, pA * 1.5 - .1 - c.y * .55 - row * .75);
+        rim = disc * smoothstep(r * .5, r * .92, d) * fp; id = mix(.5, fract(c.y * 3.7), fp);
+        pan = mix(pan, disc, fp);
+      }
+      pan *= grease;
+      vec3 pc = mix(vec3(.47, .57, .64), vec3(.72, .80, .85), id) + rim * vec3(.24, .19, .15);
+      col = mix(col, pow(min(pc, vec3(.97)), vec3(2.2)) * (direct * (1. + rim * .25) + amb), pan);
+      iceA = max(iceA, pan);
+    }
+
+    // 3. floes: rafts of cakes welded together, leads of slush between them; then one sheet, then ridges
+    float fA = smoothstep(.3, .64, a);
+    if (fA > .002) {
+      vec2 fw = q + (vec2(wNoise(q / 1.9 + 5.), wNoise(q / 1.9 + 11.)) - .5) * 1.3;        // ragged outlines
+      vec4 F = wCells(fw / 2.9 + 17.);
+      float aa = clamp(pq / 2.9 * 1.3, .003, .6), tone = F.y;
+      float lead = mix(.4, -.03, smoothstep(.38, .88, a)) + melt * .16;                   // half the width of the water between two floes
+      float floe = smoothstep(lead - aa, lead + aa, F.x) * smoothstep(0., .12, fA * 1.3 - .12 - F.y);   // floes are born one at a time
+      float weld = smoothstep(.45, .82, a), f2 = 1. - smoothstep(.16, .5, pq);
+      if (weld < .999) {
+        float cake = 1. - (1. - weld) * .42;
+        if (f2 > 0.) {
+          vec4 G = wCells(fw / .66 + 3.);
+          float l2 = mix(.3, -.03, weld) + melt * .1, a2 = clamp(pq / .66 * 1.3, .004, .6);
+          cake = mix(cake, smoothstep(l2 - a2, l2 + a2, G.x), f2); tone = mix(tone, G.y, .55 * f2 * (1. - weld));
+        }
+        floe *= cake;
+      }
+      // the solid sheet keeps the scars of its leads; where floes were driven together, ridges stand
+      float sheet = smoothstep(.78, .9, a), f1 = 1. - smoothstep(.5, 1.5, pq), crack = 0., ridge = 0., side = 0.;
+      if (sheet > 0. && f1 > 0.) {
+        crack = (1. - smoothstep(0., aa * 1.2 + .014, F.x)) * smoothstep(.3, .52, wNoise(q / 1.6 + 9.)) * sheet * f1;
+        float rA = smoothstep(.86, 1., a) * f1, wR = .05 + .07 * wNoise(q / .7 + 2.);
+        ridge = (1. - smoothstep(wR * .25, wR, F.x)) * smoothstep(.5, .72, wNoise(q / 2.3 + 40.) + rA * .4) * rA;
+        side = dot(normalize(F.zw + 1e-5), sun2);                     // > 0 on the flank of the ridge that faces the sun
+      }
+      float age = smoothstep(.35, .95, a);
+      vec3 fc = mix(vec3(.47, .60, .68), vec3(.76, .85, .90), clamp(age * .7 + tone * .34 + (big - .5) * .3, 0., 1.));   // bare ice: grey-blue when thin, pale blue when thick
+      if (w.kind != 0) fc = mix(fc, vec3(.50, .70, .74), .3);           // lake and river ice is clearer and greener
+      fc = mix(fc, vec3(.40, .54, .63), crack * .75);
+      fc = mix(fc, vec3(.94, .96, .98), ridge * .7);
+      float shade = 1. + ridge * side * .6 * w.day;
+
+      // thaw: the ice goes grey and wet, turquoise ponds stand on it, then holes open through it
+      if (melt > .01) {
+        float pn = pq < .5 ? mix(.5, wFbm(vec2(q.x * .8 + q.y * .6, q.y * .8 - q.x * .6) / .55 + 13.), smoothstep(.5, .12, pq)) : .5;
+        float pond = smoothstep(-.05, .05, melt * .78 - pn + .1);
+        fc = mix(fc, vec3(.55, .62, .66), melt * .65);
+        fc = mix(fc, mix(vec3(.50, .73, .79), vec3(.20, .42, .55), smoothstep(.3, 1., melt) * smoothstep(.5, .25, pn)), pond * .92);
+        floe *= 1. - smoothstep(.45, 1., melt) * smoothstep(.36, .26, pn);
+      }
+      // snow on the ice: drifts drawn out along the wind and banked against the ridges; bare ice where it is blown off
+      float sn = w.cB.g * (1. - smoothstep(0., .6, melt));
+      if (sn > .004) {
+        float fs = 1. - smoothstep(.07, .22, pq);
+        vec3 d1 = fs > 0. ? wNoiseD(vec2(qw.x / 1.25, qw.y / .19) + 21.) : vec3(.5, 0., 0.);
+        float blot = pq < 5. ? mix(.5, wFbm(q / 3.6 + 12.), smoothstep(5., 1.5, pq)) : .5;
+        float snowM = smoothstep(-.12, .12, sn * 1.12 + ridge * .5 - (mix(.5, d1.x, fs) * .48 + blot * .62) - .03) * smoothstep(.3, .52, a);
+        fc = mix(fc, vec3(.93, .95, .99) * (.97 + .03 * tone), snowM);
+        shade += snowM * (dot(W_WIND * d1.y / 1.25 + W_WINX * d1.z / .19, sun2) * .045 * fs - ridge * .2 * (1. - side)) * w.day;   // sastrugi lit from the sunny side
+        shade = mix(shade, 1. + (shade - 1.) * .6, snowM);
+      }
+      vec3 hard = pow(fc, vec3(2.2)) * (direct * shade + amb) + w.sunCol * pow(max(dot(reflect(-w.V, vec3(0., 0., 1.)), uSun), 0.), 70.) * .12 * w.sh;
+      col = mix(col, hard, floe);
+      iceA = max(iceA, floe);
+    }
   }
 
-  if (uStyle == 2) sea = mix(vec3(.72, .84, .90), vec3(.50, .68, .82), smoothstep(0., 2500., depth));
-  else if (uStyle == 3) sea = mix(vec3(.70, .77, .80), vec3(.60, .69, .74), smoothstep(0., 1500., depth));
-  else if (uStyle == 6) sea = mix(vec3(.035, .05, .08), vec3(.02, .03, .05), smoothstep(0., 800., depth)) + vec3(.85, .68, .38) * pow(sp, 60.) * .25;
-  return sea;
+  if (uStyle == 2) col = mix(mix(vec3(.72, .84, .90), vec3(.50, .68, .82), smoothstep(0., 2500., w.depth)), vec3(.95, .97, .98), iceA * .85);
+  else if (uStyle == 3) col = mix(mix(vec3(.70, .77, .80), vec3(.60, .69, .74), smoothstep(0., 1500., w.depth)), vec3(.93, .94, .93), iceA * .8);
+  else if (uStyle == 6) col = mix(mix(vec3(.035, .05, .08), vec3(.02, .03, .05), smoothstep(0., 800., w.depth)) + vec3(.85, .68, .38) * pow(sp, 60.) * .25, vec3(.16, .19, .24), iceA * .8);
+  return col;
+}
+`;
+
+// ---- water that lies on the land: lakes and rivers. A sheet is a mesh drawn right after the ground and before the
+// things that stand on it, with the same water (WATER_CORE), the same light and air. Its depth is written a little
+// toward the eye (uPull, km), so the trees, houses and roads that the land layers put where the water is stay hidden.
+export const SHEET_VERT = /* glsl */`
+uniform float uPull; varying vec2 vLL; varying vec3 vPos; varying vec2 vZW;
+void sheetVertex(vec2 ll, float hKm) {
+  vLL = ll; vPos = worldOf(ll, hKm);
+  gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.);
+  vZW = (projectionMatrix * viewMatrix * vec4(vPos + normalize(cameraPosition - vPos) * uPull, 1.)).zw;
 }`;
+export const SHEET_FRAG = /* glsl */`
+uniform float uTime; varying vec2 vLL; varying vec3 vPos; varying vec2 vZW;
+${WATER_CORE}
+// what the water must know about this pixel of a sheet, the way the ground shader tells it (depth is left to the caller)
+Wtr sheetWater(int kind) {
+  Wtr w; vec2 pk = vec2(vLL.y * KM * COSREF, vLL.x * KM);
+  vec3 up = normalize(vPos + vec3(0., RKM, 0.)), Vw = normalize(cameraPosition - vPos); float dl = radians(vLL.y - LON0);
+  vec3 east = normalize(vec3(cos(dl), -sin(dl) * C0, -sin(dl) * S0)), north = cross(up, east);
+  w.pk = pk; w.px = (length(dFdx(pk)) + length(dFdy(pk))) * .7; w.V = vec3(dot(Vw, east), dot(Vw, north), dot(Vw, up));
+  w.day = albumDay(); w.sh = 1.; w.sunCol = albumSunCol(); w.skyCol = albumSkyCol(); w.cB = texture(tChunkB, chunkUV(pk));
+  w.depth = 1.; w.surf = 1e3; w.kind = kind;
+  return w;
+}
+// the ground beside the water (a beach, a bank), lit like the land: its colour as seen on screen
+vec3 sheetGround(vec3 seen, vec3 n) { return albumLit(seen, n, .4 + .6 * normalize(n).z); }
+void sheetOut(vec3 col, float alpha) {
+  gl_FragColor = vec4(albumFinish(albumAir(col, vPos)), alpha);
+  gl_FragDepth = clamp(vZW.x / vZW.y * .5 + .5, 0., 1.);
+}`;
+export const sheetUniforms = album => {
+  const T = album.terrain.u;
+  return { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uTime: T.uTime, ...lightUniforms(T), ...album.chunks.uniforms, uPull: { value: .05 } };
+};
+// how far toward the eye a sheet writes its depth: over the crowns of the trees the forest layer draws at this height
+export function sheetPull(album, cam) {
+  const p = album.params, h = cam.s.h;
+  const crowns = p.get('forest3d') && h < 170 ? 2 ** Math.round(Math.log2(Math.max(.05, h * .0046))) * (p.get('trees') || 0) * .66 * 1.3 : 0;
+  return Math.max(.02 + h * .0005, crowns);
+}
+
+const GLSL = /* glsl */`
+${WATER_CORE}
+vec3 aspWater(Px p) {
+  Wtr w; w.pk = p.pk; w.V = p.V; w.day = p.day; w.sh = p.sh; w.sunCol = p.sunCol; w.skyCol = p.skyCol; w.cB = p.cB; w.kind = 0;
+  w.px = (length(p.pdx) + length(p.pdy)) * .7;                       // measured along the ground: p.px jumps on the skirts between the levels of the grid
+  w.depth = max(-p.h, 0.); w.surf = 1e3;
+  w.cB.r *= inRegion(p.ll);                                         // the chunks end with the mapped region; no ice beyond it
+  if (w.depth < 14.) {
+    // Surf breaks only where the bottom, smoothed over half a kilometre, really rises to a shore, and only in a
+    // narrow band at the waterline. On a flat floor that the height data fills with noise (the shoals of a delta)
+    // the sea stays calm and clean.
+    float lod = log2(max(w.px, .234) / .234) + 1.6, e = .5, cl = cos(radians(p.ll.x));
+    float hC = heightLod(p.ll, lod), hE = heightLod(p.ll + vec2(0., e / (KM * cl)), lod), hN = heightLod(p.ll + vec2(e / KM, 0.), lod);
+    float gs = length(vec2(hE - hC, hN - hC)) / (e * 1000.);          // rise over run of the smoothed bottom
+    w.surf = w.depth / (1000. * max(gs, 1e-4)) + 4. * (1. - smoothstep(.0012, .004, gs));
+  }
+  return waterLit(w);
+}`;
+
+const G = 'Вода и свет';
+// a camera over the open Bay of Biscay, where the rows of states of «Показ воды» are laid out
+const bay = (lon, h, tilt = 0) => ({ lat: 44.1, lon, h, tilt, heading: 0 });
 
 export default {
   id: 'water', title: 'Вода', glsl: GLSL, uniforms: {},
   params: [
     { key: 'rivers', label: 'Ширина рек', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
+    { key: 'cold', label: 'Холод: лёд на воде', group: 'land', min: 0, max: 1, step: .02, value: 0, zero: 'льда нет' },
+    { key: 'thaw', label: 'Оттепель: лёд тает', group: 'land', min: 0, max: 1, step: .02, value: 0, zero: 'нет' },
+    { key: 'iceSnow', label: 'Снег на льду', group: 'land', min: 0, max: 1, step: .02, value: 0, zero: 'нет' },
+    { key: 'seaState', label: 'Волнение моря', group: 'land', min: 0, max: 1, step: .02, value: 0, zero: 'как в чанках' },
     { key: 'riversOn', label: 'Реки', group: 'layers', type: 'toggle', value: 1 },
+    { key: 'lakesOn', label: 'Озёра', group: 'layers', type: 'toggle', value: 1 },
+    { key: 'waterShow', label: 'Показ воды: состояния рядами', group: 'modes', type: 'select', value: '', options: [['', 'нет'], ['sea', 'Состояния моря'], ['ice', 'Стадии льда'], ['snow', 'Снег на льду'], ['melt', 'Тающий лёд']] },
+    { key: 'winterCycle', label: 'Зима идёт по кругу', group: 'modes', type: 'toggle', value: 0 },
   ],
   pages: [
-    { id: 'sea-delta', group: 'Вода и свет', title: 'Берег и отмели: дельта Эбро', note: 'Глубина видна цветом, у берега пена.', p: {}, cam: { lat: 40.72, lon: .72, h: 60, tilt: 40, heading: -40 } },
+    { id: 'sea-delta', group: G, title: 'Берег и отмели: дельта Эбро', note: 'Глубина видна цветом: песок под водой, бирюза отмелей, синяя глубина. Прибой только у настоящего берега.', p: {}, cam: { lat: 40.72, lon: .72, h: 60, tilt: 40, heading: -40 } },
+    // ---- the open sea
+    { id: 'water-sea', group: G, title: 'Море: от штиля до шторма', note: 'Состояния открытого моря рядами с запада на восток: штиль, рябь, волнение, сильное волнение, шторм. Состояние хранит чанк, соседние чанки сливаются без шва. Ручка «Волнение моря» (раздел «Земля») задаёт одно состояние всему морю.', p: { waterShow: 'sea' }, cam: bay(-4.17, 150) },
+    { id: 'water-sea-waves', group: G, title: 'Волнение вблизи', note: 'С 22 км видны гряды волн и первые барашки. Волны идут по ветру, группами, гребни короткие и неровные.', p: { waterShow: 'sea' }, cam: bay(-3.815, 22, 35) },
+    { id: 'water-sea-storm', group: G, title: 'Шторм вблизи: барашки', note: 'Гребни ломаются, за ними остаётся пена; вода темнее и зеленее.', p: { waterShow: 'sea' }, cam: bay(-3.463, 22, 35) },
+    // ---- ice
+    { id: 'water-ice', group: G, title: 'Лёд: от сала до торосов', note: 'Стадии льда рядами с запада на восток: сало и шуга, блинчатый лёд, блины смерзаются в льдины, битый лёд с разводьями, сплошное поле, торосы. Одно число чанка проходит все стадии; слабое уходит первым.', p: { waterShow: 'ice' }, cam: bay(-4.58, 140) },
+    { id: 'water-ice-pancake', group: G, title: 'Блинчатый лёд вблизи', note: 'Круглые льдины с белым валиком по краю; ветер сгоняет их в ряды. Между ними тёмная шуга.', p: { waterShow: 'ice' }, cam: bay(-5.048, 22, 30) },
+    { id: 'water-ice-floes', group: G, title: 'Битый лёд с разводьями вблизи', note: 'Льдины собраны из смёрзшихся кусков; в разводьях шуга и блины. Чем больше льда в чанке, тем уже разводья.', p: { waterShow: 'ice' }, cam: bay(-4.579, 22, 30) },
+    { id: 'water-ice-ridges', group: G, title: 'Сплошное поле и торосы вблизи', note: 'Поле хранит швы старых разводий; там, где льдины сдавило, стоят гряды торосов: одна сторона на свету, другая в тени.', p: { waterShow: 'ice' }, cam: bay(-3.874, 22, 30) },
+    { id: 'water-snow', group: G, title: 'Снег на льду: от голого льда до сплошного снега', note: 'Голый лёд голубой, снег белый, в тон снегу на суше. Снега в чанке больше — полосы намётов шире, голый лёд остаётся только на выдувах.', p: { waterShow: 'snow' }, cam: bay(-5.048, 100) },
+    { id: 'water-snow-near', group: G, title: 'Снег на льду вблизи: намёты и выдувы', note: 'Намёты вытянуты по ветру и лежат у торосов; между ними голый лёд.', p: { waterShow: 'snow' }, cam: bay(-5.19, 22, 30) },
+    { id: 'water-thaw', group: G, title: 'Оттепель: тающий лёд', note: 'Лёд сереет, на нём стоят бирюзовые проталины; дальше проталины темнеют и лёд рвётся. Ручка «Оттепель: лёд тает».', p: { waterShow: 'melt' }, cam: bay(-5.048, 100) },
+    { id: 'water-thaw-near', group: G, title: 'Проталины вблизи', note: 'Талая вода стоит на льдинах; в разводьях блины и шуга.', p: { waterShow: 'melt' }, cam: bay(-5.048, 22, 30) },
+    // ---- the freeze model: ice from the shore and from the north, chunk by chunk
+    { id: 'water-edge', group: G, title: 'Кромка льда: чанки сливаются без шва', note: 'Лёд пришёл от берега. Кромка неровная, как в природе: у берега припай под снегом, дальше битый лёд, блины и шуга. Двигайте «Холод: лёд на воде» (раздел «Земля»): лёд нарастает и тает на глазах, скорость — «Ход времени».', p: { cold: .5, iceSnow: .4 }, cam: { lat: 44.0, lon: -4.6, h: 150, tilt: 0, heading: 0 } },
+    { id: 'water-edge-grid', group: G, title: 'Та же кромка с сеткой чанков', note: 'Сетка 10 км поверх той же картины. Наведите курсор: внизу видно, сколько льда и снега хранит чанк. Числа по чанкам квадратами — «Показать по чанкам: Лёд» (раздел «Режимы и бедствия»).', p: { cold: .5, iceSnow: .4, grid: 1, chunkInfo: 1 }, cam: { lat: 44.0, lon: -4.6, h: 150, tilt: 0, heading: 0 } },
+    { id: 'water-20', group: G, title: 'Край припая с 20 км', note: 'Самая близкая высота: припай под снегом, перед ним битый лёд и блины.', p: { cold: .5, iceSnow: .4 }, cam: { lat: 43.76, lon: -4.5, h: 20, tilt: 48, heading: 180 } },
+    { id: 'water-200', group: G, title: 'Замёрзший берег с 200 км', note: 'Обычная игровая высота: лёд вдоль Кантабрийского берега.', p: { cold: .5, iceSnow: .4 }, cam: { lat: 43.9, lon: -4.6, h: 200, tilt: 35, heading: 180 } },
+    { id: 'water-500', group: G, title: 'Зима с 500 км', note: 'Высота больших держав: лёд у северного берега, реки и озёра подо льдом.', p: { cold: .5, iceSnow: .4 }, cam: { lat: 42.5, lon: -4.0, h: 500, tilt: 20, heading: 0 } },
+    { id: 'water-winter', group: G, title: 'Зима приходит и уходит', note: 'Лёд нарастает от берегов и с севера, от чанка к чанку, сначала на мелкой воде; потом тает обратно, с проталинами. Скорость — «Ход времени» (раздел «Система»).', p: { cold: .62, iceSnow: .5, winterCycle: 1 }, cam: { lat: 43.3, lon: -4.5, h: 420, tilt: 25, heading: 0 } },
+    // ---- lakes and rivers
+    { id: 'water-lake', group: G, title: 'Озёра летом', note: 'Озёра Ландов: та же вода, что в море, только пресная. У берега отмель и полоска пляжа, к середине глубже.', p: {}, cam: { lat: 44.42, lon: -1.16, h: 45, tilt: 40, heading: 0 } },
+    { id: 'water-lake-ice', group: G, title: 'Те же озёра подо льдом', note: 'Озеро замерзает вместе со своим чанком, тем же льдом, что и море. По льду можно будет пройти.', p: { cold: .3, iceSnow: .35 }, cam: { lat: 44.42, lon: -1.16, h: 45, tilt: 40, heading: 0 } },
+    { id: 'water-lake-20', group: G, title: 'Горное озеро с 20 км: Санабрия', note: 'Ледниковое озеро в лесу. На воде не растут деревья и не стоят дома.', p: {}, cam: { lat: 42.123, lon: -6.716, h: 20, tilt: 50, heading: 0 } },
+    { id: 'water-river', group: G, title: 'Река: русло, отмели, берега', note: 'Эбро у Сарагосы. Русло шире воды: поток ходит от берега к берегу и оставляет светлые отмели; у внешнего берега глубже и темнее. Ручка «Ширина рек» (раздел «Масштаб объектов»).', p: {}, cam: { lat: 41.66, lon: -.95, h: 24, tilt: 48, heading: 20 } },
+    { id: 'water-river-ice', group: G, title: 'Река подо льдом', note: 'Текущая вода замерзает позже стоячей, но тем же льдом.', p: { cold: .42, iceSnow: .3 }, cam: { lat: 41.66, lon: -.95, h: 24, tilt: 48, heading: 20 } },
+    { id: 'water-river-200', group: G, title: 'Реки с 200 км', note: 'С высоты река не тоньше нескольких пикселей: чем выше камера, тем шире она нарисована.', p: {}, cam: { lat: 41.65, lon: -.9, h: 200, tilt: 40, heading: 0 } },
   ],
-  async init(album) { return (await import('../layers/rivers.js')).default(album); },
+  async init(album) {
+    const layers = [];
+    for (const mod of [() => import('../layers/freeze.js'), () => import('../layers/lakes.js'), () => import('../layers/rivers.js')]) {
+      try { layers.push(await (await mod()).default(album)); } catch (e) { console.warn('[album] water layer failed:', e.message); }
+    }
+    return layers;
+  },
 };
