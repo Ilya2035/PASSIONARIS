@@ -79,10 +79,10 @@ export function makeFreeze(ch, heightAt) {
     return { ice: T, snow: water[k] ? (o.snow || 0) * ss(.5, .85, i) * (1 - meltOf(i)) : -1, sea: o.sea > 0 ? sat(o.sea * (.8 + .4 * seaNat[k] / .5)) : seaNat[k] };
   }
   // lays the model's numbers into the chunks (only where they changed)
-  function write(o = {}) {
+  function write() {
     for (let k = 0; k < n; k++) {
-      if (!o.keepIce) put('ice', k, ice[k]);
-      if (!o.keepSnow && water[k]) put('snow', k, snow[k]);
+      put('ice', k, ice[k]);
+      if (water[k]) put('snow', k, snow[k]);                          // snow on the land is not the water's to set
       put(SEA_CHANNEL, k, sea[k]);
       melt[k] = meltOf(ice[k]);
     }
@@ -104,7 +104,7 @@ export function makeFreeze(ch, heightAt) {
     pin.fill(0);
     state.thaw = shown(o) ? 0 : sat(o.thaw || 0); state.retreat = shown(o) === 'melt' ? 1 : 0;
     for (let k = 0; k < n; k++) { const t = aim(k, o); ice[k] = t.ice; if (t.snow >= 0) snow[k] = t.snow; sea[k] = t.sea; }
-    write(o);
+    write();
   }
   // one step of time, dt in seconds of album time
   function step(dt, o) {
@@ -112,7 +112,7 @@ export function makeFreeze(ch, heightAt) {
     const next = new Float32Array(ice); let going = 0;
     for (let k = 0; k < n; k++) {
       const cur = ice[k], t = aim(k, o, cur);
-      if (!o.keepIce && !(pin[k] & 1)) {
+      if (!(pin[k] & 1)) {
         if (t.ice > cur) {
           // ice comes from the shore and from a frozen neighbour, never out of the open sea
           let hold = off[k] <= 1 || cur > .2;                         // (a chunk of land holds the ice of its own lakes and rivers)
@@ -125,19 +125,19 @@ export function makeFreeze(ch, heightAt) {
           if (cur > .05) going = Math.max(going, sat((cur - t.ice) * 3));   // ice above what the cold allows is melting
         }
       }
-      if (t.snow >= 0 && !o.keepSnow && !(pin[k] & 2)) snow[k] += Math.max(-dt * .5, Math.min(dt * .12, t.snow - snow[k]));
+      if (t.snow >= 0 && !(pin[k] & 2)) snow[k] += Math.max(-dt * .5, Math.min(dt * .12, t.snow - snow[k]));
       sea[k] += Math.max(-dt * .25, Math.min(dt * .25, t.sea - sea[k]));
     }
     ice.set(next);
     const show = shown(o), thaw = show ? 0 : sat(o.thaw || 0), retreat = show ? (show === 'melt' ? 1 : 0) : going;
     state.thaw += Math.max(-dt, Math.min(dt, thaw - state.thaw));
     state.retreat += Math.max(-dt * .6, Math.min(dt * 1.5, retreat - state.retreat));
-    write(o);
+    write();
   }
   // the natural state: an open sea with its own weather, no ice
   function natural() { for (let k = 0; k < n; k++) { ch.setNatural(SEA_CHANNEL, k, seaNat[k]); sea[k] = seaNat[k]; seen[SEA_CHANNEL][k] = Math.round(ch.get(SEA_CHANNEL, k) * 255); } }
   // after chunks.reset(): the natural state is back in the chunks, lay the model's own over it again
-  function relay(o) { pin.fill(0); for (const a of Object.values(seen)) a.fill(-1); write(o); }
+  function relay(o) { pin.fill(0); for (const a of Object.values(seen)) a.fill(-1); write(); }
   return { ice, melt, snow, sea, res, depth, off, water, lake, seaNat, state, target, aim, settle, step, write, natural, relay };
 }
 
@@ -154,8 +154,7 @@ export default async function init(album) {
   let settle = true, clock = 0;
   const knobs = () => {
     const cycle = !!p.get('winterCycle');
-    return { cold: p.get('cold') * (cycle ? (album.shot ? .8 : winterPhase(clock)) : 1), thaw: p.get('thaw'), snow: p.get('iceSnow'), sea: p.get('seaState'), show: p.get('waterShow'),
-      keepIce: p.get('demoIce') > 0, keepSnow: p.get('demoSnow') > 0 };          // the stand-in demonstrations of chunktool.js keep their say while they are on
+    return { cold: p.get('cold') * (cycle ? (album.shot ? .8 : winterPhase(clock)) : 1), thaw: p.get('thaw'), snow: p.get('iceSnow'), sea: p.get('seaState'), show: p.get('waterShow') };
   };
   p.on(key => { if (key == null || album.shot || !album.ready || key === 'waterShow' || key === 'winterCycle') { settle = true; if (key == null || key === 'winterCycle') clock = 0; } });
   ch.onReset(() => model.relay(knobs()));

@@ -124,9 +124,10 @@ test('water: a reset of the chunks is followed by the model laying its state aga
   assert.ok(ch.get('ice', far) > .85, 'and leaves it alone: ice frozen by hand stays');
   assert.equal(ch.get('ice', near), 1, 'the rest of the sea goes on as before');
   m.settle(o); assert.equal(ch.get('ice', far), 0, 'until the state is laid anew');
-  // while a stand-in demonstration of chunktool.js is on, the model leaves ice alone
-  ch.set('ice', far, .5); m.step(1, { ...o, keepIce: true }); m.settle({ ...o, keepIce: true });
-  assert.ok(Math.abs(ch.get('ice', far) - .5) < .01);
+  // snow on the land belongs to the ground (the «Показ: снег» of the chunk tools): the model never writes it
+  const inland = ch.at(43, -6); ch.set('snow', inland, .7);
+  m.step(1, { ...o, snow: .9 }); m.settle({ ...o, snow: .9 });
+  assert.ok(Math.abs(ch.get('snow', inland) - .7) < .01 && ch.get('snow', near) > .6);
 });
 
 test('water: the rows of states for the album pages cover every stage in order', () => {
