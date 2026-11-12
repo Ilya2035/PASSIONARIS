@@ -1,64 +1,53 @@
-// A first road network to look at: main roads between the largest places and lesser roads to the rest. Each road is
-// the cheapest path over the real relief (flat ground and passes are cheap, slopes dear, sea forbidden), so roads wind
-// through valleys and cross ranges at passes — the owner's "logical routes" before historical ones are drawn in.
+// Roads laid over the real relief from the centre of one district to the centre of the next (roads/routes.js): main
+// roads between the largest places, lesser roads to the other places, and a track into every district that has none.
+// A road keeps to valleys, takes a range at a pass, crosses a river once; roads meet and part at the centres of
+// districts, where the towns stand. They are drawn close to their real width: from high up a road is a thin line, and
+// the tracks are left out. When the division changes (another size of districts), the roads are laid again.
 import { makeRibbons, smoothLine } from './ribbon.js';
-import { BBOX, KM_PER_DEG, distKm } from '../geo.js';
+import { roadNetwork, roadLine } from '../roads/routes.js';
+import { llOf } from '../chunks.js';
 
-const CELL = 4; // km
-function route(grid, W, H, a, b) {
-  const N = W * H, g = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), closed = new Uint8Array(N);
-  const heap = [], push = (f, i) => { heap.push([f, i]); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
-  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = k * 2 + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
-  const bx = b % W, by = (b / W) | 0, hx = i => Math.hypot((i % W) - bx, ((i / W) | 0) - by);
-  g[a] = 0; push(hx(a), a);
-  while (heap.length) {
-    const [, i] = pop(); if (closed[i]) continue; closed[i] = 1; if (i === b) break;
-    const x = i % W, y = (i / W) | 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      if (!dx && !dy) continue; const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-      const j = ny * W + nx, hj = grid[j]; if (closed[j] || hj <= 0) continue;
-      const d = Math.hypot(dx, dy), s = Math.abs(hj - grid[i]) / (d * CELL * 1000), c = g[i] + d * (1 + 900 * s * s + hj * .00018);
-      if (c < g[j]) { g[j] = c; from[j] = i; push(c + hx(j), j); }
-    }
-  }
-  if (from[b] < 0) return null;
-  const path = []; for (let i = b; i >= 0; i = from[i]) path.push(i);
-  return path.reverse();
-}
+// main road, lesser road, track: width on the ground km, least width in pixels, colour on the natural land and on paper
+const LOOK = [
+  // (a little wider than life, as the owner allows: «совсем незначительно… то же самое и с дорогами»)
+  { w: .030, px: 2.8, light: 0xf0d9a6, ink: 0x6b4a2a, alpha: 1 },
+  { w: .020, px: 2.0, light: 0xe2c992, ink: 0x7a5a38, alpha: .9 },
+  { w: .012, px: 1.4, light: 0xd6bc88, ink: 0x8a6c4a, alpha: .8 },
+];
+const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 export default async function init(album) {
-  const at = album.data.base.at, c0 = Math.cos(40 * Math.PI / 180);
-  const W = Math.round((BBOX.lon1 - BBOX.lon0) * KM_PER_DEG * c0 / CELL), H = Math.round((BBOX.lat1 - BBOX.lat0) * KM_PER_DEG / CELL);
-  const lonOf = x => BBOX.lon0 + (x + .5) / W * (BBOX.lon1 - BBOX.lon0), latOf = y => BBOX.lat1 - (y + .5) / H * (BBOX.lat1 - BBOX.lat0);
-  const grid = new Float32Array(W * H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) grid[y * W + x] = at(latOf(y), lonOf(x));
-  const node = p => { // nearest land cell to a place
-    const x0 = Math.max(0, Math.min(W - 1, Math.floor((p.lon - BBOX.lon0) / (BBOX.lon1 - BBOX.lon0) * W))), y0 = Math.max(0, Math.min(H - 1, Math.floor((BBOX.lat1 - p.lat) / (BBOX.lat1 - BBOX.lat0) * H)));
-    for (let r = 0; r < 6; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = x0 + dx, y = y0 + dy; if (x >= 0 && y >= 0 && x < W && y < H && grid[y * W + x] > 0) return y * W + x; }
-    return -1;
-  };
-  const places = album.data.vectors.places.filter(p => p.lat > 35.9 || p.lon > -5.2).slice(0, 60).map(p => ({ ...p, n: node(p) })).filter(p => p.n >= 0);
-  const big = places.slice(0, 16), edges = new Map();
-  const link = (a, b, kind) => { if (a === b) return; const k = a.n < b.n ? `${a.n}-${b.n}` : `${b.n}-${a.n}`; if (!edges.has(k) || kind < edges.get(k).kind) edges.set(k, { a, b, kind }); };
-  for (const a of big) for (const b of [...big].sort((p, q) => distKm(a, p) - distKm(a, q)).slice(1, 4)) link(a, b, 0);
-  for (const a of places.slice(16)) for (const b of [...places].sort((p, q) => distKm(a, p) - distKm(a, q)).slice(1, 3)) link(a, b, 1);
-  const main = [], minor = [];
-  for (const { a, b, kind } of edges.values()) {
-    if (distKm(a, b) > 520) continue;
-    const path = route(grid, W, H, a.n, b.n); if (!path || path.length < 2) continue;
-    const pts = smoothLine(path.map(i => [lonOf(i % W), latOf((i / W) | 0)]), 1.0, 4);
-    (kind ? minor : main).push({ pts, width: kind ? .03 : .06 });
+  const p = album.params, division = album.division;
+  if (!division?.data?.cells) { console.warn('[album] roads: no division to lay them over'); return null; }
+  let ribbons = [], net = null;
+  function build() {
+    for (const r of ribbons) { album.scene.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose(); }
+    const div = division.data, t0 = performance.now();
+    // the places stand where their houses really are (a settlement by a river is moved off the water)
+    const founded = new Map((album.layers.towns?.model?.()?.towns || []).map(t => [t.index, t]));
+    const places = album.data.vectors.places.map((pl, i) => { const t = founded.get(i); return t ? { ...llOf(t.x, t.y), pop: pl.pop } : pl; });
+    net = roadNetwork(div, div.centres, places);
+    const byKind = [[], [], []];
+    for (const l of net.lines) byKind[l.kind].push({ pts: smoothLine(roadLine(l.pts), .35, 2), width: LOOK[l.kind].w });
+    ribbons = byKind.map((lines, k) => ({ ...makeRibbons(album, lines, { colour: LOOK[k].light, minPx: LOOK[k].px, lift: .005 }), kind: k }));
+    const s = net.stats;
+    album.roadNet = { main: s.main, minor: s.lesser, tracks: s.track, km: s.km, crossings: net.crossings, impassable: s.hard, lines: net.lines, legs: net.legs, stats: s };
+    console.log(`[album] roads: ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${s.crossings} river crossings, ${s.hard} impassable, ${s.unreached} districts without a road (${(performance.now() - t0).toFixed(0)} ms)`);
+    sync();
   }
-  const r1 = makeRibbons(album, main, { colour: 0xe6cc98, minPx: 2.8, lift: .006 });
-  const r2 = makeRibbons(album, minor, { colour: 0xd9bf8a, minPx: 1.9, lift: .005 });
-  r2.u.uAlpha.value = .8;
-  album.roadNet = { main: main.length, minor: minor.length };
-  const p = album.params;
-  const sync = () => {
+  function sync() {
     const on = !!p.get('roadsOn') && p.get('roads') > 0, dark = p.get('look') === 'paper' || p.get('look') === 'atlas';
-    r1.mesh.visible = r2.mesh.visible = on; r1.u.uK.value = r2.u.uK.value = p.get('roads');
-    r1.u.uColour.value.set(dark ? 0x6b4a2a : 0xe6cc98); r2.u.uColour.value.set(dark ? 0x7a5a38 : 0xd9bf8a);
-  };
-  p.on(sync); sync();
-  return { id: 'roads', update(dt, t, cam) { const dom = album.renderer.domElement; r1.setPx(cam, dom); r2.setPx(cam, dom); } };
+    for (const r of ribbons) { r.mesh.visible = on; r.u.uK.value = p.get('roads'); r.u.uColour.value.set(dark ? LOOK[r.kind].ink : LOOK[r.kind].light); }
+  }
+  build();
+  division.onChange(build); p.on(sync);
+  return { id: 'roads', net: () => net,
+    update(dt, t, cam) {
+      const dom = album.renderer.domElement, px = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, dom.clientHeight);
+      // from high up only the greater roads are left: tracks fade past 250 km, lesser roads past 700 km
+      const fade = [1, 1 - ss(.45, .75, px), 1 - ss(.15, .27, px)];
+      // a road is seen through the forest it runs in: it is drawn at the height of the tallest crown the forest draws now
+      const crown = typeof album.layers.forest?.top === 'number' ? album.layers.forest.top : 0, lift = Math.max(.005, crown * 1.08 + .003);
+      for (const r of ribbons) { r.setPx(cam, dom); r.u.uLift.value = lift; r.u.uAlpha.value = LOOK[r.kind].alpha * fade[r.kind]; if (fade[r.kind] <= 0) r.mesh.visible = false; else r.mesh.visible = !!p.get('roadsOn') && p.get('roads') > 0; }
+    } };
 }

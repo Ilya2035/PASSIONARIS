@@ -375,7 +375,7 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   div.landProv = landProv; div.moved = moved; div.seaOf = seaOf;
   // the outline of every land province and district, texel by texel: straightened, along the rivers and the crests
   // (cells.js). The chunks of a district (div.chunks) stay what the district's numbers are summed from.
-  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; }
+  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv }; }
   div.ms = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   return div;
 }

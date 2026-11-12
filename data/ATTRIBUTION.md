@@ -46,6 +46,7 @@
 |---|---|---|
 | Естественные озёра региона (`public/assets/album/water/lakes.json`, в репозитории) | Перечень свой: названия, места, уровни и глубины записаны в `scripts/album/water-lakes.mjs`. Очертания сняты этим скриптом с высот альбома ([AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/)) | Перечень — свой. Высоты — открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
 | Русла рек с шириной (`public/assets/album/water/rivers.bin.gz`) и пляжи (`public/assets/album/water/coast.bin.gz`), оба файла в репозитории | © участники [OpenStreetMap](https://www.openstreetmap.org/copyright); выгрузки по странам с [download.geofabrik.de](https://download.geofabrik.de). Собраны скриптами `scripts/album/fetch-osm.mjs`, `osm-extract.mjs`, `bake-rivers.mjs`, `bake-coast.mjs` | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/): нужно указание авторства; производная база данных распространяется на тех же условиях — оба файла открыто лежат в репозитории |
+| Места настоящих городов, городков и сёл (`public/assets/album/town/sites.json.gz`, в репозитории): по ним стоят центры районов | © участники [OpenStreetMap](https://www.openstreetmap.org/copyright); те же выгрузки; `scripts/album/bake-sites.mjs` | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) |
 
 ## Ресурсы
 

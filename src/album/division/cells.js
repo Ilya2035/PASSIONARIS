@@ -39,7 +39,9 @@ export function riverRaster(rivers = []) {
 
 const NB = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
 // one step of the way from texel t to its neighbour u: the distance, the slope, the river or the crest entered or left
-const stepCost = (q, t, u, hgt, riv, crest) => (q < 8 ? FKM : FKM * 1.4142) + Math.abs(hgt[u] - hgt[t]) * CLIMB
+// (a step along the river itself is three times as long: otherwise whoever reached the river first would run along
+// it for tens of kilometres and its bed would be a thin arm of one district between all the others)
+const stepCost = (q, t, u, hgt, riv, crest) => (q < 8 ? FKM : FKM * 1.4142) * (riv[t] > 0 && riv[u] > 0 ? 3 : 1) + Math.abs(hgt[u] - hgt[t]) * CLIMB
   + ((riv[t] > 0) !== (riv[u] > 0) ? RIVER_TOLL[riv[t] > riv[u] ? riv[t] : riv[u]] : 0) + ((crest[t] > 0) !== (crest[u] > 0) ? CREST_TOLL[crest[t] > crest[u] ? crest[t] : crest[u]] : 0);
 
 // Crests: a texel that stands above the land 3.75 km away on both sides of it, along some line through it — by 130 m
@@ -128,7 +130,8 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
 
 // ch: the chunks; div: the division of the chunk graph (district per chunk, kinds, province, cx, cy);
 // heightAt(lat, lon) → metres; rivers as for riverRaster
-// → { cells: Int32Array FN × FN, the district of every texel (−1 none); prov: the province of every land texel }
+// → { cells: Int32Array FN × FN, the district of every texel (−1 none); prov: the province of every land texel;
+//     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land }
 export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
   const n = FN * FN, cell = ch.cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
   for (let ty = 0, t = 0; ty < FN; ty++) {
@@ -167,16 +170,16 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
       }
     } }
   const dist = new Float64Array(n), label = new Int32Array(n), heap = new Heap(1 << 16), start = new Float64Array(count);   // (whole doubles: a rounded distance would be bettered by itself for ever)
-  const cx = new Float64Array(count), cy = new Float64Array(count), size = new Float64Array(count);
+  const cx = new Float64Array(count), cy = new Float64Array(count), size = new Float64Array(count), heart = new Uint8Array(n);
   for (let round = 0; round < ROUNDS; round++) {
-    dist.fill(Infinity); label.fill(-1); heap.clear();
-    for (let d = 0; d < count; d++) if (seed[d] >= 0) { dist[seed[d]] = start[d]; label[seed[d]] = d; heap.push(start[d], seed[d]); }
+    dist.fill(Infinity); label.fill(-1); heap.clear(); heart.fill(0);
+    for (let d = 0; d < count; d++) if (seed[d] >= 0) { dist[seed[d]] = start[d]; label[seed[d]] = d; heart[seed[d]] = 1; heap.push(start[d], seed[d]); }
     while (heap.n) {
       const t = heap.pop(), dt = heap.key; if (dt > dist[t]) continue;
       const tx = t % FN, ty = (t - tx) / FN, p = prov[t];
       for (let q = 0; q < 16; q += 2) {
         const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue;
-        const u = uy * FN + ux; if (prov[u] !== p) continue;
+        const u = uy * FN + ux; if (prov[u] !== p || heart[u]) continue;       // a heart is never taken by a neighbour, however late its district starts
         const c = dt + stepCost(q, t, u, hgt, riv, crest);
         if (c < dist[u]) { dist[u] = c; label[u] = label[t]; heap.push(c, u); }
       }
@@ -188,7 +191,7 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
     for (let t = 0; t < n; t++) { const d = label[t]; if (d < 0) continue; cx[d] += X0 + (t % FN + .5) * FKM; cy[d] += Y0 + (Math.floor(t / FN) + .5) * FKM; size[d]++; }
     const sum = new Map(), num = new Map();
     for (let d = 0; d < count; d++) if (size[d]) { cx[d] /= size[d]; cy[d] /= size[d]; const p = div.province[d]; sum.set(p, (sum.get(p) || 0) + size[d]); num.set(p, (num.get(p) || 0) + 1); }
-    for (let d = 0; d < count; d++) if (size[d]) { const p = div.province[d], mean = sum.get(p) / num.get(p); start[d] = Math.max(-6, Math.min(12, start[d] + GAIN * (size[d] - mean) / mean)); }
+    for (let d = 0; d < count; d++) if (size[d]) { const p = div.province[d], mean = sum.get(p) / num.get(p); start[d] = Math.max(-6, Math.min(9, start[d] + GAIN * (size[d] - mean) / mean)); }
     const old = Int32Array.from(seed);
     nearest(label, cx, cy);
     for (let d = 0; d < count; d++) if (seed[d] < 0) seed[d] = old[d];
@@ -203,7 +206,7 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
     for (const d of byProv.get(prov[t]) || []) { const dx = (t % FN) - (seed[d] % FN), dy = Math.floor(t / FN) - Math.floor(seed[d] / FN), q = dx * dx + dy * dy; if (q < bd) { bd = q; bi = d; } }
     if (bi >= 0) out[t] = bi;
   }
-  return { cells: out, prov, prov0 };
+  return { cells: out, prov, prov0, hgt, riv };
 }
 
 // what the outlines are like, for the notes and the tests: for every land district its texels, the sides it shares

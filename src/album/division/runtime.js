@@ -5,6 +5,8 @@
 //   album.districts = { count, of(k), name(i) } — the same, in the form the resources work asked for
 import { buildDivision, districtSummary, districtNames, stateMask, KIND_ID, LAND, levelSizes } from './build.js';
 import { divisionTexture, districtOfTexel } from './gpu.js';
+import { districtCentres } from './centres.js';
+import { loadSites } from '../town/sites.js';
 import { createPanel } from './panel.js';
 import { createLabels } from './labels.js';
 import { createLines } from './lines.js';
@@ -17,7 +19,14 @@ const load = async name => (await fetch(`assets/album/division/${name}`)).json()
 
 export async function startDivision(album, U) {
   const ch = album.chunks, p = album.params, data = album.data, dom = album.renderer.domElement;
-  const [lands, admin] = await Promise.all([load('lands.json'), load('admin.json')]);
+  const [lands, admin, osmSites] = await Promise.all([load('lands.json'), load('admin.json'), loadSites()]);
+  // where people settled, the most important first: the places the album draws (where their houses really stand: a
+  // settlement by a river is moved off the water), then the real towns and villages of the region (town/sites.js)
+  const founded = new Map((album.layers.towns?.model?.()?.towns || []).map(t => [t.index, t]));
+  const own = (data.vectors.places || []).map((pl, i) => { const t = founded.get(i), [x, y] = t ? [t.x, t.y] : kmOf(pl.lat, pl.lon); return { x, y, pop: pl.pop, name: pl.name }; });
+  // (a town the album draws is in the other list too, a kilometre or two away: left out there, or the district next
+  // door would take the same town for its centre)
+  const sites = [...own, ...osmSites.filter(s => { const [x, y] = kmOf(s.lat, s.lon); return !own.some(o => Math.hypot(o.x - x, o.y - y) < 6); })];
   const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [] };
   const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
   const listeners = [], labels = createLabels(album);
@@ -28,6 +37,9 @@ export async function startDivision(album, U) {
     if (!cache.has(size)) {
       const div = buildDivision(ch, { ...opts, size });
       div.names = districtNames(ch, div, data.vectors.places || []);
+      // the centre of every land district (centres.js); a district is called after the settlement at its centre
+      div.centres = districtCentres(div, sites);
+      for (let d = 0; d < div.count; d++) { const s = div.centres.site[d]; if (s >= 0 && sites[s].name) div.names[d] = sites[s].name; }
       cache.set(size, { div, tex: null, state: null });
     }
     const next = cache.get(size);
@@ -130,6 +142,9 @@ export async function startDivision(album, U) {
     neighbours: d => cur.div.neighbours[d] || [],
     kind: d => KIND_ID[cur.div.kinds[d]],
     districtName: d => cur.div.names[d],
+    // the centre of a land district: where its town stands and its roads meet → { x, y (flat km), site } or null
+    centre: d => (cur.div.centres && cur.div.centres.texel[d] >= 0 ? { x: cur.div.centres.x[d], y: cur.div.centres.y[d], site: cur.div.centres.site[d] >= 0 ? sites[cur.div.centres.site[d]] : null } : null),
+    sites,
     districtAt,
     summary: d => districtSummary(cur.div, d, ch),
     select, get selected() { return sel; },
