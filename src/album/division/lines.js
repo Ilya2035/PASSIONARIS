@@ -18,7 +18,7 @@ const X0 = -880, Y0 = 3880;
 export function borderLines(ch, div, state = null, rivers = null) {
   const n = FN * FN, cell = ch.cell, out = {}, cells = div.cells, snap = riverSnapper(rivers);
   const d = new Int32Array(n), wet = new Uint8Array(n), st = new Uint8Array(n);
-  for (let t = 0; t < n; t++) { const k = cell[t]; d[t] = cells && cells[t] >= 0 ? cells[t] : div.district[k]; wet[t] = div.kind[k] === LAND ? 0 : 1; st[t] = state && state[k] ? 1 : 0; }
+  for (let t = 0; t < n; t++) { const k = cell[t]; d[t] = cells && cells[t] >= 0 ? cells[t] : div.district[k]; wet[t] = div.kind[k] === LAND ? 0 : 1; st[t] = state && state[cells && d[t] >= 0 ? div.chunks[d[t]][0] : k] ? 1 : 0; }
   const P = div.province, R = div.region;
   // the sides of cells, grouped by (level, water): vertical sides at x + 1 between (x, y) and (x + 1, y), horizontal
   // at y + 1 between (x, y) and (x, y + 1); corners numbered y × (FN + 1) + x
@@ -142,15 +142,19 @@ export function createLines(album, ch, div, state, rivers = null) {
   for (const [key, lines] of Object.entries(groups)) {
     const s = STYLE[key], list = [];
     for (const line of lines) {
-      const ll = line.map(([x, y]) => { const p = llOf(x, y); return [p.lon, p.lat]; });
+      // a point every 400 m: a line along a crest stands on every rise of it and is not buried between two far corners
+      const fine = [line[0]];
+      for (let i = 1; i < line.length; i++) { const a = line[i - 1], b = line[i], k = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / .4); for (let j = 1; j <= k; j++) fine.push([a[0] + (b[0] - a[0]) * j / k, a[1] + (b[1] - a[1]) * j / k]); }
+      const ll = fine.map(([x, y]) => { const p = llOf(x, y); return [p.lon, p.lat]; });
       // the album shows nothing beyond its region: cut a line where it leaves it
       let part = [];
       for (const q of ll) { if (inside(q)) part.push(q); else { if (part.length > 1) list.push(part); part = []; } }
       if (part.length > 1) list.push(part);
     }
     if (!list.length) continue;
-    const rib = makeRibbons(album, list.map(pts => ({ pts, width: s.w, kind: 0 })), { colour: s.ink, minPx: s.px, lift: .006 });
-    rib.mesh.renderOrder = 6; meshes[key] = { ...rib, style: s };
+    const rib = makeRibbons(album, list.map(pts => ({ pts, width: s.w, kind: 0 })), { colour: s.ink, minPx: s.px, lift: .015 });
+    rib.mesh.renderOrder = 6; rib.mesh.material.depthTest = false;      // a border is drawn over the land whatever the relief: on a crest the coarse ground of the far view would bury parts of it
+    meshes[key] = { ...rib, style: s };
   }
   return {
     update(cam, dom, alpha, look) {

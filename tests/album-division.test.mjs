@@ -12,7 +12,7 @@ import { BBOX } from '../src/album/geo.js';
 import { buildDivision, districtSummary, districtNames, stateMask, linkRelief, LAND, SEA, LAKE } from '../src/album/division/build.js';
 import { packDivision } from '../src/album/division/gpu.js';
 import { FN as RASTER } from '../src/album/chunks.js';
-import { districtCells, riverRaster, cellStats, RIVER_TOLL } from '../src/album/division/cells.js';
+import { districtCells, riverRaster, cellStats, RIVER_TOLL, SMOOTH_KM } from '../src/album/division/cells.js';
 import { borderLines } from '../src/album/division/lines.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division, { STATES } from '../src/album/aspects/division.js';
@@ -123,8 +123,21 @@ test('division: the outlines of districts — texel by texel, inside their provi
     const k = ch.cell[t]; if (k >= ch.count) continue;
     const d = div.cells[t], dk = div.district[k];
     assert.ok(d >= 0 && d < div.count); texels[d]++;
-    if (d !== dk) { assert.equal(div.kinds[d], LAND); assert.equal(div.kinds[dk], LAND, 'water keeps the districts of its chunks'); assert.equal(div.province[d], div.province[dk], 'an outline never leaves its province'); }
+    if (d !== dk) { assert.equal(div.kinds[d], LAND); assert.equal(div.kinds[dk], LAND, 'water keeps the districts of its chunks'); }
+    if (div.kinds[d] === LAND) assert.equal(div.province[d], div.provCells[t], 'a district never leaves its province as it is drawn');
+    else assert.equal(div.provCells[t], -1);
   }
+  // the borders of the provinces are straightened: a little land changes hands, no province falls apart or shrinks much
+  { const parts = P => { const seen = new Uint8Array(TN), out = new Map(); for (let s0 = 0; s0 < TN; s0++) { const p = P[s0]; if (p < 0 || seen[s0]) continue; out.set(p, (out.get(p) || 0) + 1); const st = [s0]; seen[s0] = 1;
+        while (st.length) { const t = st.pop(), x = t % RASTER; for (const u of [x > 0 ? t - 1 : -1, x < RASTER - 1 ? t + 1 : -1, t - RASTER, t + RASTER]) if (u >= 0 && u < TN && !seen[u] && P[u] === p) { seen[u] = 1; st.push(u); } } } return out; };
+    const a0 = parts(div.provChunks), a1 = parts(div.provCells); for (const [p, c] of a1) assert.ok(c <= a0.get(p), 'province ' + p + ' is in as many pieces as before');
+    let land = 0, moved = 0, s0 = 0, s1 = 0; const size0 = new Map(), size1 = new Map();
+    for (let t = 0; t < TN; t++) { const p = div.provChunks[t], q = div.provCells[t]; assert.equal(p < 0, q < 0, 'the shore does not move'); if (p < 0) continue; land++; if (p !== q) moved++; size0.set(p, (size0.get(p) || 0) + 1); size1.set(q, (size1.get(q) || 0) + 1);
+      if (t % RASTER < RASTER - 1) { const u = t + 1; if (div.provChunks[u] >= 0 && div.provChunks[u] !== p) s0++; if (div.provCells[u] >= 0 && div.provCells[u] !== q) s1++; } }
+    assert.ok(moved > 0 && moved / land < .1, (moved / land * 100).toFixed(1) + ' % of the land changed province');
+    for (const [p, c] of size0) assert.ok(size1.get(p) > c * .7, 'province ' + p + ' keeps its land');
+    assert.ok(s1 <= s0, 'the borders are no longer than the outlines of chunks: ' + s1 + ' against ' + s0);
+    assert.ok(SMOOTH_KM >= 3 && SMOOTH_KM <= 7); }
   for (let d = 0; d < div.count; d++) assert.ok(texels[d] > 0, 'district ' + d + ' has land of its own');
   // sizes stay close to those of the chunk partition
   const land = []; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) land.push(texels[d] * 1.5625); land.sort((a, b) => a - b);
@@ -234,7 +247,11 @@ test('division of the album: whole chunks, connected districts inside historical
 test('division of the album: places lie in their historical lands; mountains divide, slopes go with their valleys', { skip }, () => {
   for (const [lat, lon, id] of [[41.65, -0.88, 'zaragoza'], [42.55, -6.60, 'bierzo'], [42.60, -5.57, 'leon'], [43.30, -0.37, 'bearn'], [43.49, -1.47, 'labourd'],
     [42.43, 1.93, 'cerdanya'], [43.60, 1.44, 'toulousain'], [43.11, 0.72, 'comminges'], [38.72, -9.14, 'lisboa'], [37.02, -7.93, 'algarve'], [37.39, -5.98, 'sevilla'],
-    [42.51, 1.52, 'andorra'], [39.72, 2.91, 'mallorca'], [35.77, -5.80, 'tangier'], [36.75, 3.06, 'alger']]) assert.equal(provAt(lat, lon), id, `${lat}, ${lon}`);
+    [42.51, 1.52, 'andorra'], [39.72, 2.91, 'mallorca'], [35.77, -5.80, 'tangier'], [36.75, 3.06, 'alger']]) {
+    assert.equal(provAt(lat, lon), id, `${lat}, ${lon}`);
+    const [x, y] = kmOf(lat, lon), t = Math.floor((y - 3880) / 1.25) * RASTER + Math.floor((x + 880) / 1.25);      // … and as the province is drawn, texel by texel
+    assert.equal(LANDS.provinces[real.div.provCells[t]]?.id, id, `${lat}, ${lon}: the straightened border keeps the place`);
+  }
   // across the crests: Gavarnie (north) and Torla (south) of the Pyrenees, Covadonga and Riaño of the Cantabrian
   // range, Cercedilla and El Espinar of the Guadarrama
   for (const [lat, lon, land, region] of [[42.73, -0.01, 'guyenne', 'westeurope'], [42.62, -0.11, 'ebro', 'iberia'], [43.31, -5.06, 'galicia', 'iberia'], [42.97, -5.02, 'duero', 'iberia'], [40.74, -4.06, 'newcastile', 'iberia'], [40.72, -4.25, 'duero', 'iberia']]) {
