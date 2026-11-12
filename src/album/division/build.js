@@ -14,9 +14,9 @@ import { makeGraph, partition, tidy } from './graph.js';
 export const LAND = 0, SEA = 1, LAKE = 2;
 export const KIND_ID = ['land', 'sea', 'lake'];
 export const KIND_TITLE = ['суша', 'море', 'озеро'];
-export const SIZES = [30, 50, 100];                     // district sizes the knob offers, km: a district is about size² km²
+export const SIZES = [20, 30, 50, 100];                 // district sizes the knob offers, km: a district is about size² km²
 // nominal sizes of the levels, km: the provinces and regions are historical lands; these only say how big they are
-export const levelSizes = s => ({ district: s, province: Math.max(100, 2 * s), region: 340 });
+export const levelSizes = s => ({ district: s, province: Math.max(100, 2 * s), region: 900 });
 
 const X0 = -880, Y0 = 3880;                             // the corner of the fine raster (chunks.js)
 const inside = (lat, lon) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
@@ -265,15 +265,16 @@ export function seaChunks(ch, kind, seas) {
 // larger in the mountains and on the dry plateau (a district is about the same "weight")
 function weight(ch, kind, k) {
   const h = ch.height[k];
-  let f = h < 200 ? 1.35 : h < 500 ? 1.15 : h < 900 ? .9 : h < 1300 ? .75 : .6;
-  if (ch.links[k].some(l => kind[l.k] === SEA)) f *= 1.2;
+  // (the owner, 12.11.2026: districts may differ in size but should all be about the same — so the spread is mild)
+  let f = h < 200 ? 1.17 : h < 500 ? 1.08 : h < 900 ? .96 : h < 1300 ? .88 : .8;
+  if (ch.links[k].some(l => kind[l.k] === SEA)) f *= 1.1;
   return ch.area[k] * f;
 }
 
 // ---- the division
 // ch: album.chunks; lands: lands.json, admin: admin.json (public/assets/album/division/); heightAt(lat, lon) metres;
-// lakes: [{ ring }]; size: district size in km (30, 50, 100) — a district is about size² km² of middling land.
-export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 30 } = {}) {
+// lakes: [{ ring }]; size: district size in km (20, 30, 50, 100) — a district is about size² km² of middling land.
+export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20 } = {}) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const n = ch.count, sizes = levelSizes(size), T = size ** 2;
   const kind = chunkKinds(ch, lakes), rel = linkRelief(ch, heightAt);
@@ -355,7 +356,8 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
 
   // ---- provinces and regions: the land ones of lands.json, then the sea ones
   const regionIds = lands.regions.map(r => r.id), nLR = regionIds.length;
-  const provinces = lands.provinces.map(p => ({ name: p.name, region: regionIds.indexOf(p.region), kind: LAND, at: p.at }));
+  const landName = Object.fromEntries((lands.lands || []).map(l => [l.id, l.name]));        // the historical land a province belongs to
+  const provinces = lands.provinces.map(p => ({ name: p.name, region: regionIds.indexOf(p.region), kind: LAND, at: p.at, land: landName[p.land] || '' }));
   const seaProvBase = provinces.length, seaCountIn = new Int32Array(seas.length);
   const spSea = new Int32Array(sp.count); for (let d = 0; d < nSD; d++) spSea[sp.label[d]] = sdSea[d];
   for (let i = 0; i < sp.count; i++) seaCountIn[spSea[i]]++;

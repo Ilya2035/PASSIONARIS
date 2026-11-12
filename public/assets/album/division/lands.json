@@ -1,160 +1,2048 @@
 {
-  "about": "Исторические земли альбома: регионы и провинции; моря — регионы на воде, с очертаниями по описаниям Международной гидрографической организации (граница по мысам и проливам). admin — единицы Natural Earth admin-1 (admin.json), к которым земля тянется; at — опорные точки [широта, долгота]: сердце земли, по ним делится единица, которую делят несколько земель, и к ним ставится подпись. Точную границу проводит рельеф (docs/album/division.md).",
-  "regions": [
-    { "id": "galicia", "name": "Галисия и Астурия" },
-    { "id": "vasconia", "name": "Кантабрия и Страна басков" },
-    { "id": "duero", "name": "Леон и Старая Кастилия" },
-    { "id": "ebro", "name": "Наварра и Арагон" },
-    { "id": "catalonia", "name": "Каталония" },
-    { "id": "newcastile", "name": "Новая Кастилия и Ла-Манча" },
-    { "id": "levant", "name": "Левант" },
-    { "id": "andalusia", "name": "Андалусия" },
-    { "id": "extremadura", "name": "Эстремадура" },
-    { "id": "portugal_n", "name": "Португалия к северу от Тежу" },
-    { "id": "portugal_s", "name": "Португалия к югу от Тежу" },
-    { "id": "balearics", "name": "Балеарские острова" },
-    { "id": "guyenne", "name": "Гасконь и Гиень" },
-    { "id": "languedoc", "name": "Лангедок и Руссильон" },
-    { "id": "morocco", "name": "Северное Марокко" },
-    { "id": "oran", "name": "Оран" },
-    { "id": "algiers", "name": "Алжир и Кабилия" }
-  ],
-  "provinces": [
-    { "id": "coruna", "name": "Ла-Корунья", "region": "galicia", "admin": ["ESP-5827"], "at": [[42.88, -8.55]] },
-    { "id": "lugo", "name": "Луго", "region": "galicia", "admin": ["ESP-5832"], "at": [[43.01, -7.56]] },
-    { "id": "ourense", "name": "Оренсе", "region": "galicia", "admin": ["ESP-5838"], "at": [[42.34, -7.86]] },
-    { "id": "pontevedra", "name": "Понтеведра", "region": "galicia", "admin": ["ESP-5840"], "at": [[42.43, -8.64]] },
-    { "id": "asturias", "name": "Астурия", "region": "galicia", "admin": ["ESP-5805"], "at": [[43.36, -5.85]] },
-
-    { "id": "cantabria", "name": "Кантабрия", "region": "vasconia", "admin": ["ESP-5813"], "at": [[43.30, -4.10]] },
-    { "id": "bizkaia", "name": "Бискайя", "region": "vasconia", "admin": ["ESP-5851"], "at": [[43.20, -2.85]] },
-    { "id": "gipuzkoa", "name": "Гипускоа", "region": "vasconia", "admin": ["ESP-5823"], "at": [[43.15, -2.15]] },
-    { "id": "alava", "name": "Алава", "region": "vasconia", "admin": ["ESP-5801"], "at": [[42.85, -2.67]] },
-
-    { "id": "bierzo", "name": "Бьерсо", "region": "duero", "admin": ["ESP-5830"], "at": [[42.55, -6.60]] },
-    { "id": "leon", "name": "Леон", "region": "duero", "admin": ["ESP-5830"], "at": [[42.60, -5.57], [42.46, -6.06], [42.85, -5.20]] },
-    { "id": "zamora", "name": "Самора", "region": "duero", "admin": ["ESP-5852"], "at": [[41.60, -5.90]] },
-    { "id": "salamanca", "name": "Саламанка", "region": "duero", "admin": ["ESP-5841"], "at": [[40.85, -6.00]] },
-    { "id": "valladolid", "name": "Вальядолид", "region": "duero", "admin": ["ESP-5850"], "at": [[41.65, -4.75]] },
-    { "id": "palencia", "name": "Паленсия", "region": "duero", "admin": ["ESP-5839"], "at": [[42.25, -4.50]] },
-    { "id": "burgos", "name": "Бургос", "region": "duero", "admin": ["ESP-5810"], "at": [[42.34, -3.70]] },
-    { "id": "soria", "name": "Сория", "region": "duero", "admin": ["ESP-5845"], "at": [[41.70, -2.55]] },
-    { "id": "segovia", "name": "Сеговия", "region": "duero", "admin": ["ESP-5843"], "at": [[41.15, -4.00]] },
-    { "id": "avila", "name": "Авила", "region": "duero", "admin": ["ESP-5806"], "at": [[40.70, -4.90]] },
-
-    { "id": "navarra", "name": "Наварра", "region": "ebro", "admin": ["ESP-5837"], "at": [[42.75, -1.65]] },
-    { "id": "rioja", "name": "Риоха", "region": "ebro", "admin": ["ESP-5828"], "at": [[42.35, -2.45]] },
-    { "id": "huesca", "name": "Верхний Арагон", "region": "ebro", "admin": ["ESP-5825"], "at": [[42.20, -0.20]] },
-    { "id": "zaragoza", "name": "Сарагоса", "region": "ebro", "admin": ["ESP-5853"], "at": [[41.60, -1.00]] },
-    { "id": "teruel", "name": "Теруэль", "region": "ebro", "admin": ["ESP-5847"], "at": [[40.65, -0.80]] },
-
-    { "id": "barcelona", "name": "Барселона", "region": "catalonia", "admin": ["ESP-5809"], "at": [[41.70, 2.00]] },
-    { "id": "girona", "name": "Жирона", "region": "catalonia", "admin": ["ESP-5820"], "at": [[41.98, 2.82], [42.27, 3.00], [42.18, 2.49]] },
-    { "id": "lleida", "name": "Лерида", "region": "catalonia", "admin": ["ESP-5831"], "at": [[41.62, 0.62], [41.75, 1.10]] },
-    { "id": "urgell", "name": "Урхель и Пальярс", "region": "catalonia", "admin": ["ESP-5831"], "at": [[42.36, 1.46], [42.41, 1.13], [42.17, 0.89], [42.70, 0.80]] },
-    { "id": "cerdanya", "name": "Сердань", "region": "catalonia", "admin": ["ESP-5820", "ESP-5831", "FRA-5337"], "at": [[42.43, 1.93], [42.50, 2.04], [42.37, 1.78]] },
-    { "id": "andorra", "name": "Андорра", "region": "catalonia", "admin": ["AND-4876", "AND-4877", "AND-4878", "AND-4879", "AND-4880", "AND-4881", "AND-4882"], "at": [[42.54, 1.56]] },
-    { "id": "tarragona", "name": "Таррагона", "region": "catalonia", "admin": ["ESP-5846"], "at": [[41.10, 0.90]] },
-
-    { "id": "madrid", "name": "Мадрид", "region": "newcastile", "admin": ["ESP-5833"], "at": [[40.45, -3.70]] },
-    { "id": "toledo", "name": "Толедо", "region": "newcastile", "admin": ["ESP-5848"], "at": [[39.85, -4.30]] },
-    { "id": "guadalajara", "name": "Гвадалахара", "region": "newcastile", "admin": ["ESP-5822"], "at": [[40.80, -2.60]] },
-    { "id": "cuenca", "name": "Куэнка", "region": "newcastile", "admin": ["ESP-5818"], "at": [[39.95, -2.15]] },
-    { "id": "lamancha", "name": "Ла-Манча", "region": "newcastile", "admin": ["ESP-5816"], "at": [[39.00, -3.90]] },
-    { "id": "albacete", "name": "Альбасете", "region": "newcastile", "admin": ["ESP-5802"], "at": [[38.85, -1.95]] },
-
-    { "id": "castellon", "name": "Кастельон", "region": "levant", "admin": ["ESP-5814"], "at": [[40.20, -0.20]] },
-    { "id": "valencia", "name": "Валенсия", "region": "levant", "admin": ["ESP-5849"], "at": [[39.30, -0.60]] },
-    { "id": "alicante", "name": "Аликанте", "region": "levant", "admin": ["ESP-5803"], "at": [[38.50, -0.55]] },
-    { "id": "murcia", "name": "Мурсия", "region": "levant", "admin": ["ESP-5836"], "at": [[38.00, -1.30]] },
-
-    { "id": "sevilla", "name": "Севилья", "region": "andalusia", "admin": ["ESP-5844"], "at": [[37.40, -5.80]] },
-    { "id": "cordoba", "name": "Кордова", "region": "andalusia", "admin": ["ESP-5817"], "at": [[37.85, -4.80]] },
-    { "id": "jaen", "name": "Хаэн", "region": "andalusia", "admin": ["ESP-5826"], "at": [[37.85, -3.55]] },
-    { "id": "granada", "name": "Гранада", "region": "andalusia", "admin": ["ESP-5821"], "at": [[37.25, -3.40]] },
-    { "id": "almeria", "name": "Альмерия", "region": "andalusia", "admin": ["ESP-5804"], "at": [[37.10, -2.35]] },
-    { "id": "malaga", "name": "Малага", "region": "andalusia", "admin": ["ESP-5834"], "at": [[36.85, -4.60]] },
-    { "id": "cadiz", "name": "Кадис", "region": "andalusia", "admin": ["ESP-5812", "GIB+00?"], "at": [[36.60, -5.75]] },
-    { "id": "huelva", "name": "Уэльва", "region": "andalusia", "admin": ["ESP-5824"], "at": [[37.55, -6.85]] },
-
-    { "id": "caceres", "name": "Касерес", "region": "extremadura", "admin": ["ESP-5811"], "at": [[39.65, -6.20]] },
-    { "id": "badajoz", "name": "Бадахос", "region": "extremadura", "admin": ["ESP-5807"], "at": [[38.75, -6.30]] },
-
-    { "id": "minho", "name": "Энтре-Дору-и-Миньу", "region": "portugal_n", "admin": ["PRT-741", "PRT-749", "PRT-754"], "at": [[41.50, -8.40]] },
-    { "id": "tras", "name": "Траз-уж-Монтиш", "region": "portugal_n", "admin": ["PRT-756", "PRT-750"], "at": [[41.55, -7.20]] },
-    { "id": "beira_alta", "name": "Бейра-Алта", "region": "portugal_n", "admin": ["PRT-755", "PRT-753"], "at": [[40.70, -7.55]] },
-    { "id": "beira_lit", "name": "Бейра-Литорал", "region": "portugal_n", "admin": ["PRT-739", "PRT-752", "PRT-740"], "at": [[40.25, -8.50]] },
-    { "id": "beira_baixa", "name": "Бейра-Байша", "region": "portugal_n", "admin": ["PRT-751"], "at": [[39.90, -7.55]] },
-
-    { "id": "lisboa", "name": "Лиссабон", "region": "portugal_s", "admin": ["PRT-746", "PRT-5498"], "at": [[38.80, -9.05]] },
-    { "id": "ribatejo", "name": "Рибатежу", "region": "portugal_s", "admin": ["PRT-748"], "at": [[39.25, -8.50]] },
-    { "id": "alto_alentejo", "name": "Верхнее Алентежу", "region": "portugal_s", "admin": ["PRT-747", "PRT-744"], "at": [[38.85, -7.75]] },
-    { "id": "baixo_alentejo", "name": "Нижнее Алентежу", "region": "portugal_s", "admin": ["PRT-743"], "at": [[37.95, -7.95]] },
-    { "id": "algarve", "name": "Алгарве", "region": "portugal_s", "admin": ["PRT-745"], "at": [[37.15, -8.10]] },
-
-    { "id": "mallorca", "name": "Мальорка", "region": "balearics", "admin": ["ESP-5808"], "at": [[39.62, 2.95]] },
-    { "id": "menorca", "name": "Менорка", "region": "balearics", "admin": ["ESP-5808"], "at": [[39.95, 4.05]] },
-    { "id": "ibiza", "name": "Ибица и Форментера", "region": "balearics", "admin": ["ESP-5808"], "at": [[38.98, 1.43], [38.70, 1.45]] },
-
-    { "id": "bordelais", "name": "Бордле", "region": "guyenne", "admin": ["FRA-5295"], "at": [[44.55, -0.45]] },
-    { "id": "landes", "name": "Ланды", "region": "guyenne", "admin": ["FRA-5313"], "at": [[44.00, -0.80]] },
-    { "id": "agenais", "name": "Ажене", "region": "guyenne", "admin": ["FRA-5319"], "at": [[44.30, 0.55]] },
-    { "id": "perigord", "name": "Перигор", "region": "guyenne", "admin": ["FRA-5286"], "at": [[44.70, 0.85]] },
-    { "id": "quercy", "name": "Керси", "region": "guyenne", "admin": ["FRA-5318", "FRA-5347"], "at": [[44.35, 1.45]] },
-    { "id": "rouergue", "name": "Руэрг", "region": "guyenne", "admin": ["FRA-5272"], "at": [[44.30, 2.60]] },
-    { "id": "armagnac", "name": "Арманьяк", "region": "guyenne", "admin": ["FRA-5294"], "at": [[43.70, 0.30]] },
-    { "id": "bearn", "name": "Беарн", "region": "guyenne", "admin": ["FRA-5336"], "at": [[43.30, -0.37], [43.19, -0.61], [43.49, -0.77]] },
-    { "id": "labourd", "name": "Французская Страна басков", "region": "guyenne", "admin": ["FRA-5336"], "at": [[43.49, -1.47], [43.16, -1.24], [43.22, -0.89]] },
-    { "id": "bigorre", "name": "Бигорр", "region": "guyenne", "admin": ["FRA-5305"], "at": [[43.20, 0.10]] },
-
-    { "id": "toulousain", "name": "Тулузен", "region": "languedoc", "admin": ["FRA-5298"], "at": [[43.60, 1.44], [43.40, 1.30]] },
-    { "id": "comminges", "name": "Комменж", "region": "languedoc", "admin": ["FRA-5298"], "at": [[43.11, 0.72], [42.79, 0.59]] },
-    { "id": "foix", "name": "Фуа", "region": "languedoc", "admin": ["FRA-5269"], "at": [[42.95, 1.60]] },
-    { "id": "albigeois", "name": "Альбижуа", "region": "languedoc", "admin": ["FRA-5346"], "at": [[43.80, 2.15]] },
-    { "id": "carcasses", "name": "Каркассес и Нарбонне", "region": "languedoc", "admin": ["FRA-5271"], "at": [[43.15, 2.45]] },
-    { "id": "roussillon", "name": "Руссильон", "region": "languedoc", "admin": ["FRA-5337"], "at": [[42.70, 2.90], [42.62, 2.42]] },
-    { "id": "montpellier", "name": "Монпелье и Безье", "region": "languedoc", "admin": ["FRA-5307"], "at": [[43.60, 3.50]] },
-    { "id": "nimes", "name": "Ним", "region": "languedoc", "admin": ["FRA-5293", "FRA-5274"], "at": [[43.95, 4.10]] },
-    { "id": "gevaudan", "name": "Жеводан и Виваре", "region": "languedoc", "admin": ["FRA-5320", "FRA-5267"], "at": [[44.50, 3.50]] },
-    { "id": "auvergne", "name": "Верхняя Овернь", "region": "languedoc", "admin": ["FRA-5276", "FRA-5299"], "at": [[44.75, 2.80]] },
-
-    { "id": "tangier", "name": "Танжер", "region": "morocco", "admin": ["MAR-1445"], "at": [[35.70, -5.80]] },
-    { "id": "tetouan", "name": "Тетуан", "region": "morocco", "admin": ["MAR-1445", "ESP-5815"], "at": [[35.55, -5.40], [35.89, -5.32]] },
-    { "id": "rif", "name": "Риф", "region": "morocco", "admin": ["MAR-1447", "MAR-1454", "ESP-5835"], "at": [[35.22, -3.93], [35.29, -2.94]] },
-
-    { "id": "oran", "name": "Оран", "region": "oran", "admin": ["DZA-2145", "DZA-2144", "DZA-2147", "DZA-2146"], "at": [[35.65, -0.70]] },
-    { "id": "mostaganem", "name": "Мостаганем", "region": "oran", "admin": ["DZA-2202", "DZA-2203", "DZA-2201"], "at": [[35.75, 0.35]] },
-    { "id": "chelif", "name": "Шелифф", "region": "oran", "admin": ["DZA-2200", "DZA-2206", "DZA-2205"], "at": [[36.10, 1.40]] },
-
-    { "id": "alger", "name": "Алжир", "region": "algiers", "admin": ["DZA-2195", "DZA-2196"], "at": [[36.72, 3.20]] },
-    { "id": "mitidja", "name": "Митиджа", "region": "algiers", "admin": ["DZA-2209", "DZA-2198"], "at": [[36.50, 2.75]] },
-    { "id": "medea", "name": "Медеа", "region": "algiers", "admin": ["DZA-2213", "DZA-2199", "DZA-2212", "DZA-2214"], "at": [[36.15, 2.70]] },
-    { "id": "kabylie", "name": "Кабилия", "region": "algiers", "admin": ["DZA-2197", "DZA-2210", "DZA-2208", "DZA-2207"], "at": [[36.55, 4.00]] }
-  ],
-  "seas": [
-    { "id": "biscay", "name": "Бискайский залив", "about": "с Кантабрийским морем; на западе — от мыса Ортегаль к северу", "at": [[44.10, -4.20]],
-      "outline": [[-7.87, 43.77], [-6.90, 45.40], [1.00, 45.40], [1.00, 42.80], [-7.87, 42.80]] },
-    { "id": "atlantic", "name": "Атлантический океан у Галисии и Португалии", "about": "от мыса Ортегаль до мыса Сан-Висенти", "at": [[41.50, -9.80]],
-      "outline": [[-13.00, 46.50], [-6.90, 45.40], [-7.87, 43.77], [-8.99, 37.02], [-5.92, 35.79], [-6.20, 33.50], [-13.00, 33.50]] },
-    { "id": "cadiz", "name": "Кадисский залив", "about": "от мыса Сан-Висенти до мысов Трафальгар и Спартель", "at": [[36.65, -7.20]],
-      "outline": [[-8.99, 37.02], [-5.92, 35.79], [-6.03, 36.18], [-6.00, 37.70], [-9.10, 37.70]] },
-    { "id": "gibraltar", "name": "Гибралтарский пролив", "about": "от линии Трафальгар — Спартель до линии Европа — Альмина", "at": [[35.97, -5.62]],
-      "outline": [[-6.03, 36.18], [-5.92, 35.79], [-5.28, 35.90], [-5.35, 36.11]] },
-    { "id": "alboran", "name": "Море Альборан", "about": "от Гибралтара до линии мыс Гата — мыс Фегало", "at": [[36.00, -3.80]],
-      "outline": [[-5.35, 36.11], [-5.28, 35.90], [-5.20, 34.50], [-1.08, 34.50], [-1.08, 35.60], [-2.19, 36.72], [-4.50, 37.20], [-5.40, 36.70]] },
-    { "id": "balearic", "name": "Балеарское море", "about": "между берегом Испании от мыса Сан-Антонио до мыса Креус и Балеарскими островами", "at": [[40.40, 1.40]],
-      "outline": [[0.23, 38.80], [1.21, 38.97], [1.40, 38.62], [3.05, 39.27], [4.30, 39.85], [3.32, 42.32], [2.20, 42.70], [-0.80, 40.20], [-0.40, 38.60]] },
-    { "id": "lion", "name": "Лионский залив", "about": "к северу от линии мыс Креус — Тулон", "at": [[42.95, 4.00]],
-      "outline": [[3.32, 42.32], [5.20, 42.86], [5.20, 45.00], [2.60, 45.00], [2.60, 42.40]] },
-    { "id": "algero", "name": "Алжиро-Прованский бассейн", "about": "открытое Средиземное море между Балеарскими островами и Алжиром", "at": [[37.40, 2.20]],
-      "outline": [[-2.19, 36.72], [-1.08, 35.60], [-1.08, 33.50], [6.00, 33.50], [6.00, 42.86], [5.20, 42.86], [3.32, 42.32], [4.30, 39.85], [3.05, 39.27], [1.40, 38.62], [1.21, 38.97], [0.23, 38.80], [-0.40, 38.60], [-1.50, 37.60]] }
-  ],
-  "states": [
-    { "id": "aragon", "name": "Королевство Арагон, XIII век", "provinces": ["huesca", "zaragoza", "teruel"] },
-    { "id": "crown", "name": "Арагонская корона, XIV век", "provinces": ["huesca", "zaragoza", "teruel", "barcelona", "girona", "lleida", "urgell", "cerdanya", "tarragona", "castellon", "valencia", "alicante", "mallorca", "menorca", "ibiza", "roussillon"] },
-    { "id": "barcelona", "name": "Графство Барселона, XI век", "provinces": ["barcelona", "girona"] },
-    { "id": "navarre", "name": "Королевство Наварра, XII век", "provinces": ["navarra", "gipuzkoa", "alava", "labourd"] },
-    { "id": "portugal", "name": "Королевство Португалия, 1250 год", "provinces": ["minho", "tras", "beira_alta", "beira_lit", "beira_baixa", "lisboa", "ribatejo", "alto_alentejo", "baixo_alentejo", "algarve"] },
-    { "id": "granada", "name": "Гранадский эмират, XV век", "provinces": ["granada", "malaga", "almeria"] }
-  ]
+ "about": "Земли альбома. regions — регионы суши, культурно-географические (слова владельца 12.11.2026: Иберия — один регион, земли между большими реками, горные системы, группы островов). lands — исторические земли внутри региона (Арагон с Наваррой, Андалусия…): в деление не входят, но у каждой провинции записана её земля (land). provinces — провинции, политические и исторические; seas — моря, регионы на воде, с очертаниями по описаниям Международной гидрографической организации (граница по мысам и проливам). admin — единицы Natural Earth admin-1 (admin.json), к которым провинция тянется; at — опорные точки [широта, долгота]: сердце провинции, по ним делится единица, которую делят несколько провинций, и к ним ставится подпись. Точную границу проводит рельеф (docs/album/division.md). states — государства как списки провинций.",
+ "regions": [
+  {
+   "id": "iberia",
+   "name": "Иберия",
+   "about": "Пиренейский полуостров с Балеарскими островами: от Пиренеев до Гибралтара"
+  },
+  {
+   "id": "westeurope",
+   "name": "Западная Европа",
+   "about": "земли от Пиренеев до Рейна; в альбом попадает их юг — Гасконь, Гиень, Лангедок, Руссильон"
+  },
+  {
+   "id": "maghreb",
+   "name": "Магриб",
+   "about": "северный берег Африки от Танжера до Кабилии"
+  }
+ ],
+ "lands": [
+  {
+   "id": "galicia",
+   "name": "Галисия и Астурия",
+   "region": "iberia"
+  },
+  {
+   "id": "vasconia",
+   "name": "Кантабрия и Страна басков",
+   "region": "iberia"
+  },
+  {
+   "id": "duero",
+   "name": "Леон и Старая Кастилия",
+   "region": "iberia"
+  },
+  {
+   "id": "ebro",
+   "name": "Наварра и Арагон",
+   "region": "iberia"
+  },
+  {
+   "id": "catalonia",
+   "name": "Каталония",
+   "region": "iberia"
+  },
+  {
+   "id": "newcastile",
+   "name": "Новая Кастилия и Ла-Манча",
+   "region": "iberia"
+  },
+  {
+   "id": "levant",
+   "name": "Левант",
+   "region": "iberia"
+  },
+  {
+   "id": "andalusia",
+   "name": "Андалусия",
+   "region": "iberia"
+  },
+  {
+   "id": "extremadura",
+   "name": "Эстремадура",
+   "region": "iberia"
+  },
+  {
+   "id": "portugal_n",
+   "name": "Португалия к северу от Тежу",
+   "region": "iberia"
+  },
+  {
+   "id": "portugal_s",
+   "name": "Португалия к югу от Тежу",
+   "region": "iberia"
+  },
+  {
+   "id": "balearics",
+   "name": "Балеарские острова",
+   "region": "iberia"
+  },
+  {
+   "id": "guyenne",
+   "name": "Гасконь и Гиень",
+   "region": "westeurope"
+  },
+  {
+   "id": "languedoc",
+   "name": "Лангедок и Руссильон",
+   "region": "westeurope"
+  },
+  {
+   "id": "morocco",
+   "name": "Северное Марокко",
+   "region": "maghreb"
+  },
+  {
+   "id": "oran",
+   "name": "Оран",
+   "region": "maghreb"
+  },
+  {
+   "id": "algiers",
+   "name": "Алжир и Кабилия",
+   "region": "maghreb"
+  }
+ ],
+ "provinces": [
+  {
+   "id": "coruna",
+   "name": "Ла-Корунья",
+   "region": "iberia",
+   "admin": [
+    "ESP-5827"
+   ],
+   "at": [
+    [
+     42.88,
+     -8.55
+    ]
+   ],
+   "land": "galicia"
+  },
+  {
+   "id": "lugo",
+   "name": "Луго",
+   "region": "iberia",
+   "admin": [
+    "ESP-5832"
+   ],
+   "at": [
+    [
+     43.01,
+     -7.56
+    ]
+   ],
+   "land": "galicia"
+  },
+  {
+   "id": "ourense",
+   "name": "Оренсе",
+   "region": "iberia",
+   "admin": [
+    "ESP-5838"
+   ],
+   "at": [
+    [
+     42.34,
+     -7.86
+    ]
+   ],
+   "land": "galicia"
+  },
+  {
+   "id": "pontevedra",
+   "name": "Понтеведра",
+   "region": "iberia",
+   "admin": [
+    "ESP-5840"
+   ],
+   "at": [
+    [
+     42.43,
+     -8.64
+    ]
+   ],
+   "land": "galicia"
+  },
+  {
+   "id": "asturias",
+   "name": "Астурия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5805"
+   ],
+   "at": [
+    [
+     43.36,
+     -5.85
+    ]
+   ],
+   "land": "galicia"
+  },
+  {
+   "id": "cantabria",
+   "name": "Кантабрия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5813"
+   ],
+   "at": [
+    [
+     43.3,
+     -4.1
+    ]
+   ],
+   "land": "vasconia"
+  },
+  {
+   "id": "bizkaia",
+   "name": "Бискайя",
+   "region": "iberia",
+   "admin": [
+    "ESP-5851"
+   ],
+   "at": [
+    [
+     43.2,
+     -2.85
+    ]
+   ],
+   "land": "vasconia"
+  },
+  {
+   "id": "gipuzkoa",
+   "name": "Гипускоа",
+   "region": "iberia",
+   "admin": [
+    "ESP-5823"
+   ],
+   "at": [
+    [
+     43.15,
+     -2.15
+    ]
+   ],
+   "land": "vasconia"
+  },
+  {
+   "id": "alava",
+   "name": "Алава",
+   "region": "iberia",
+   "admin": [
+    "ESP-5801"
+   ],
+   "at": [
+    [
+     42.85,
+     -2.67
+    ]
+   ],
+   "land": "vasconia"
+  },
+  {
+   "id": "bierzo",
+   "name": "Бьерсо",
+   "region": "iberia",
+   "admin": [
+    "ESP-5830"
+   ],
+   "at": [
+    [
+     42.55,
+     -6.6
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "leon",
+   "name": "Леон",
+   "region": "iberia",
+   "admin": [
+    "ESP-5830"
+   ],
+   "at": [
+    [
+     42.6,
+     -5.57
+    ],
+    [
+     42.46,
+     -6.06
+    ],
+    [
+     42.85,
+     -5.2
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "zamora",
+   "name": "Самора",
+   "region": "iberia",
+   "admin": [
+    "ESP-5852"
+   ],
+   "at": [
+    [
+     41.6,
+     -5.9
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "salamanca",
+   "name": "Саламанка",
+   "region": "iberia",
+   "admin": [
+    "ESP-5841"
+   ],
+   "at": [
+    [
+     40.85,
+     -6
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "valladolid",
+   "name": "Вальядолид",
+   "region": "iberia",
+   "admin": [
+    "ESP-5850"
+   ],
+   "at": [
+    [
+     41.65,
+     -4.75
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "palencia",
+   "name": "Паленсия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5839"
+   ],
+   "at": [
+    [
+     42.25,
+     -4.5
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "burgos",
+   "name": "Бургос",
+   "region": "iberia",
+   "admin": [
+    "ESP-5810"
+   ],
+   "at": [
+    [
+     42.34,
+     -3.7
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "soria",
+   "name": "Сория",
+   "region": "iberia",
+   "admin": [
+    "ESP-5845"
+   ],
+   "at": [
+    [
+     41.7,
+     -2.55
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "segovia",
+   "name": "Сеговия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5843"
+   ],
+   "at": [
+    [
+     41.15,
+     -4
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "avila",
+   "name": "Авила",
+   "region": "iberia",
+   "admin": [
+    "ESP-5806"
+   ],
+   "at": [
+    [
+     40.7,
+     -4.9
+    ]
+   ],
+   "land": "duero"
+  },
+  {
+   "id": "navarra",
+   "name": "Наварра",
+   "region": "iberia",
+   "admin": [
+    "ESP-5837"
+   ],
+   "at": [
+    [
+     42.75,
+     -1.65
+    ]
+   ],
+   "land": "ebro"
+  },
+  {
+   "id": "rioja",
+   "name": "Риоха",
+   "region": "iberia",
+   "admin": [
+    "ESP-5828"
+   ],
+   "at": [
+    [
+     42.35,
+     -2.45
+    ]
+   ],
+   "land": "ebro"
+  },
+  {
+   "id": "huesca",
+   "name": "Верхний Арагон",
+   "region": "iberia",
+   "admin": [
+    "ESP-5825"
+   ],
+   "at": [
+    [
+     42.2,
+     -0.2
+    ]
+   ],
+   "land": "ebro"
+  },
+  {
+   "id": "zaragoza",
+   "name": "Сарагоса",
+   "region": "iberia",
+   "admin": [
+    "ESP-5853"
+   ],
+   "at": [
+    [
+     41.6,
+     -1
+    ]
+   ],
+   "land": "ebro"
+  },
+  {
+   "id": "teruel",
+   "name": "Теруэль",
+   "region": "iberia",
+   "admin": [
+    "ESP-5847"
+   ],
+   "at": [
+    [
+     40.65,
+     -0.8
+    ]
+   ],
+   "land": "ebro"
+  },
+  {
+   "id": "barcelona",
+   "name": "Барселона",
+   "region": "iberia",
+   "admin": [
+    "ESP-5809"
+   ],
+   "at": [
+    [
+     41.7,
+     2
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "girona",
+   "name": "Жирона",
+   "region": "iberia",
+   "admin": [
+    "ESP-5820"
+   ],
+   "at": [
+    [
+     41.98,
+     2.82
+    ],
+    [
+     42.27,
+     3
+    ],
+    [
+     42.18,
+     2.49
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "lleida",
+   "name": "Лерида",
+   "region": "iberia",
+   "admin": [
+    "ESP-5831"
+   ],
+   "at": [
+    [
+     41.62,
+     0.62
+    ],
+    [
+     41.75,
+     1.1
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "urgell",
+   "name": "Урхель и Пальярс",
+   "region": "iberia",
+   "admin": [
+    "ESP-5831"
+   ],
+   "at": [
+    [
+     42.36,
+     1.46
+    ],
+    [
+     42.41,
+     1.13
+    ],
+    [
+     42.17,
+     0.89
+    ],
+    [
+     42.7,
+     0.8
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "cerdanya",
+   "name": "Сердань",
+   "region": "iberia",
+   "admin": [
+    "ESP-5820",
+    "ESP-5831",
+    "FRA-5337"
+   ],
+   "at": [
+    [
+     42.43,
+     1.93
+    ],
+    [
+     42.5,
+     2.04
+    ],
+    [
+     42.37,
+     1.78
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "andorra",
+   "name": "Андорра",
+   "region": "iberia",
+   "admin": [
+    "AND-4876",
+    "AND-4877",
+    "AND-4878",
+    "AND-4879",
+    "AND-4880",
+    "AND-4881",
+    "AND-4882"
+   ],
+   "at": [
+    [
+     42.54,
+     1.56
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "tarragona",
+   "name": "Таррагона",
+   "region": "iberia",
+   "admin": [
+    "ESP-5846"
+   ],
+   "at": [
+    [
+     41.1,
+     0.9
+    ]
+   ],
+   "land": "catalonia"
+  },
+  {
+   "id": "madrid",
+   "name": "Мадрид",
+   "region": "iberia",
+   "admin": [
+    "ESP-5833"
+   ],
+   "at": [
+    [
+     40.45,
+     -3.7
+    ]
+   ],
+   "land": "newcastile"
+  },
+  {
+   "id": "toledo",
+   "name": "Толедо",
+   "region": "iberia",
+   "admin": [
+    "ESP-5848"
+   ],
+   "at": [
+    [
+     39.85,
+     -4.3
+    ]
+   ],
+   "land": "newcastile"
+  },
+  {
+   "id": "guadalajara",
+   "name": "Гвадалахара",
+   "region": "iberia",
+   "admin": [
+    "ESP-5822"
+   ],
+   "at": [
+    [
+     40.8,
+     -2.6
+    ]
+   ],
+   "land": "newcastile"
+  },
+  {
+   "id": "cuenca",
+   "name": "Куэнка",
+   "region": "iberia",
+   "admin": [
+    "ESP-5818"
+   ],
+   "at": [
+    [
+     39.95,
+     -2.15
+    ]
+   ],
+   "land": "newcastile"
+  },
+  {
+   "id": "lamancha",
+   "name": "Ла-Манча",
+   "region": "iberia",
+   "admin": [
+    "ESP-5816"
+   ],
+   "at": [
+    [
+     39,
+     -3.9
+    ]
+   ],
+   "land": "newcastile"
+  },
+  {
+   "id": "albacete",
+   "name": "Альбасете",
+   "region": "iberia",
+   "admin": [
+    "ESP-5802"
+   ],
+   "at": [
+    [
+     38.85,
+     -1.95
+    ]
+   ],
+   "land": "newcastile"
+  },
+  {
+   "id": "castellon",
+   "name": "Кастельон",
+   "region": "iberia",
+   "admin": [
+    "ESP-5814"
+   ],
+   "at": [
+    [
+     40.2,
+     -0.2
+    ]
+   ],
+   "land": "levant"
+  },
+  {
+   "id": "valencia",
+   "name": "Валенсия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5849"
+   ],
+   "at": [
+    [
+     39.3,
+     -0.6
+    ]
+   ],
+   "land": "levant"
+  },
+  {
+   "id": "alicante",
+   "name": "Аликанте",
+   "region": "iberia",
+   "admin": [
+    "ESP-5803"
+   ],
+   "at": [
+    [
+     38.5,
+     -0.55
+    ]
+   ],
+   "land": "levant"
+  },
+  {
+   "id": "murcia",
+   "name": "Мурсия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5836"
+   ],
+   "at": [
+    [
+     38,
+     -1.3
+    ]
+   ],
+   "land": "levant"
+  },
+  {
+   "id": "sevilla",
+   "name": "Севилья",
+   "region": "iberia",
+   "admin": [
+    "ESP-5844"
+   ],
+   "at": [
+    [
+     37.4,
+     -5.8
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "cordoba",
+   "name": "Кордова",
+   "region": "iberia",
+   "admin": [
+    "ESP-5817"
+   ],
+   "at": [
+    [
+     37.85,
+     -4.8
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "jaen",
+   "name": "Хаэн",
+   "region": "iberia",
+   "admin": [
+    "ESP-5826"
+   ],
+   "at": [
+    [
+     37.85,
+     -3.55
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "granada",
+   "name": "Гранада",
+   "region": "iberia",
+   "admin": [
+    "ESP-5821"
+   ],
+   "at": [
+    [
+     37.25,
+     -3.4
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "almeria",
+   "name": "Альмерия",
+   "region": "iberia",
+   "admin": [
+    "ESP-5804"
+   ],
+   "at": [
+    [
+     37.1,
+     -2.35
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "malaga",
+   "name": "Малага",
+   "region": "iberia",
+   "admin": [
+    "ESP-5834"
+   ],
+   "at": [
+    [
+     36.85,
+     -4.6
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "cadiz",
+   "name": "Кадис",
+   "region": "iberia",
+   "admin": [
+    "ESP-5812",
+    "GIB+00?"
+   ],
+   "at": [
+    [
+     36.6,
+     -5.75
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "huelva",
+   "name": "Уэльва",
+   "region": "iberia",
+   "admin": [
+    "ESP-5824"
+   ],
+   "at": [
+    [
+     37.55,
+     -6.85
+    ]
+   ],
+   "land": "andalusia"
+  },
+  {
+   "id": "caceres",
+   "name": "Касерес",
+   "region": "iberia",
+   "admin": [
+    "ESP-5811"
+   ],
+   "at": [
+    [
+     39.65,
+     -6.2
+    ]
+   ],
+   "land": "extremadura"
+  },
+  {
+   "id": "badajoz",
+   "name": "Бадахос",
+   "region": "iberia",
+   "admin": [
+    "ESP-5807"
+   ],
+   "at": [
+    [
+     38.75,
+     -6.3
+    ]
+   ],
+   "land": "extremadura"
+  },
+  {
+   "id": "minho",
+   "name": "Энтре-Дору-и-Миньу",
+   "region": "iberia",
+   "admin": [
+    "PRT-741",
+    "PRT-749",
+    "PRT-754"
+   ],
+   "at": [
+    [
+     41.5,
+     -8.4
+    ]
+   ],
+   "land": "portugal_n"
+  },
+  {
+   "id": "tras",
+   "name": "Траз-уж-Монтиш",
+   "region": "iberia",
+   "admin": [
+    "PRT-756",
+    "PRT-750"
+   ],
+   "at": [
+    [
+     41.55,
+     -7.2
+    ]
+   ],
+   "land": "portugal_n"
+  },
+  {
+   "id": "beira_alta",
+   "name": "Бейра-Алта",
+   "region": "iberia",
+   "admin": [
+    "PRT-755",
+    "PRT-753"
+   ],
+   "at": [
+    [
+     40.7,
+     -7.55
+    ]
+   ],
+   "land": "portugal_n"
+  },
+  {
+   "id": "beira_lit",
+   "name": "Бейра-Литорал",
+   "region": "iberia",
+   "admin": [
+    "PRT-739",
+    "PRT-752",
+    "PRT-740"
+   ],
+   "at": [
+    [
+     40.25,
+     -8.5
+    ]
+   ],
+   "land": "portugal_n"
+  },
+  {
+   "id": "beira_baixa",
+   "name": "Бейра-Байша",
+   "region": "iberia",
+   "admin": [
+    "PRT-751"
+   ],
+   "at": [
+    [
+     39.9,
+     -7.55
+    ]
+   ],
+   "land": "portugal_n"
+  },
+  {
+   "id": "lisboa",
+   "name": "Лиссабон",
+   "region": "iberia",
+   "admin": [
+    "PRT-746",
+    "PRT-5498"
+   ],
+   "at": [
+    [
+     38.8,
+     -9.05
+    ]
+   ],
+   "land": "portugal_s"
+  },
+  {
+   "id": "ribatejo",
+   "name": "Рибатежу",
+   "region": "iberia",
+   "admin": [
+    "PRT-748"
+   ],
+   "at": [
+    [
+     39.25,
+     -8.5
+    ]
+   ],
+   "land": "portugal_s"
+  },
+  {
+   "id": "alto_alentejo",
+   "name": "Верхнее Алентежу",
+   "region": "iberia",
+   "admin": [
+    "PRT-747",
+    "PRT-744"
+   ],
+   "at": [
+    [
+     38.85,
+     -7.75
+    ]
+   ],
+   "land": "portugal_s"
+  },
+  {
+   "id": "baixo_alentejo",
+   "name": "Нижнее Алентежу",
+   "region": "iberia",
+   "admin": [
+    "PRT-743"
+   ],
+   "at": [
+    [
+     37.95,
+     -7.95
+    ]
+   ],
+   "land": "portugal_s"
+  },
+  {
+   "id": "algarve",
+   "name": "Алгарве",
+   "region": "iberia",
+   "admin": [
+    "PRT-745"
+   ],
+   "at": [
+    [
+     37.15,
+     -8.1
+    ]
+   ],
+   "land": "portugal_s"
+  },
+  {
+   "id": "mallorca",
+   "name": "Мальорка",
+   "region": "iberia",
+   "admin": [
+    "ESP-5808"
+   ],
+   "at": [
+    [
+     39.62,
+     2.95
+    ]
+   ],
+   "land": "balearics"
+  },
+  {
+   "id": "menorca",
+   "name": "Менорка",
+   "region": "iberia",
+   "admin": [
+    "ESP-5808"
+   ],
+   "at": [
+    [
+     39.95,
+     4.05
+    ]
+   ],
+   "land": "balearics"
+  },
+  {
+   "id": "ibiza",
+   "name": "Ибица и Форментера",
+   "region": "iberia",
+   "admin": [
+    "ESP-5808"
+   ],
+   "at": [
+    [
+     38.98,
+     1.43
+    ],
+    [
+     38.7,
+     1.45
+    ]
+   ],
+   "land": "balearics"
+  },
+  {
+   "id": "bordelais",
+   "name": "Бордле",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5295"
+   ],
+   "at": [
+    [
+     44.55,
+     -0.45
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "landes",
+   "name": "Ланды",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5313"
+   ],
+   "at": [
+    [
+     44,
+     -0.8
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "agenais",
+   "name": "Ажене",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5319"
+   ],
+   "at": [
+    [
+     44.3,
+     0.55
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "perigord",
+   "name": "Перигор",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5286"
+   ],
+   "at": [
+    [
+     44.7,
+     0.85
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "quercy",
+   "name": "Керси",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5318",
+    "FRA-5347"
+   ],
+   "at": [
+    [
+     44.35,
+     1.45
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "rouergue",
+   "name": "Руэрг",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5272"
+   ],
+   "at": [
+    [
+     44.3,
+     2.6
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "armagnac",
+   "name": "Арманьяк",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5294"
+   ],
+   "at": [
+    [
+     43.7,
+     0.3
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "bearn",
+   "name": "Беарн",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5336"
+   ],
+   "at": [
+    [
+     43.3,
+     -0.37
+    ],
+    [
+     43.19,
+     -0.61
+    ],
+    [
+     43.49,
+     -0.77
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "labourd",
+   "name": "Французская Страна басков",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5336"
+   ],
+   "at": [
+    [
+     43.49,
+     -1.47
+    ],
+    [
+     43.16,
+     -1.24
+    ],
+    [
+     43.22,
+     -0.89
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "bigorre",
+   "name": "Бигорр",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5305"
+   ],
+   "at": [
+    [
+     43.2,
+     0.1
+    ]
+   ],
+   "land": "guyenne"
+  },
+  {
+   "id": "toulousain",
+   "name": "Тулузен",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5298"
+   ],
+   "at": [
+    [
+     43.6,
+     1.44
+    ],
+    [
+     43.4,
+     1.3
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "comminges",
+   "name": "Комменж",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5298"
+   ],
+   "at": [
+    [
+     43.11,
+     0.72
+    ],
+    [
+     42.79,
+     0.59
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "foix",
+   "name": "Фуа",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5269"
+   ],
+   "at": [
+    [
+     42.95,
+     1.6
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "albigeois",
+   "name": "Альбижуа",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5346"
+   ],
+   "at": [
+    [
+     43.8,
+     2.15
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "carcasses",
+   "name": "Каркассес и Нарбонне",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5271"
+   ],
+   "at": [
+    [
+     43.15,
+     2.45
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "roussillon",
+   "name": "Руссильон",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5337"
+   ],
+   "at": [
+    [
+     42.7,
+     2.9
+    ],
+    [
+     42.62,
+     2.42
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "montpellier",
+   "name": "Монпелье и Безье",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5307"
+   ],
+   "at": [
+    [
+     43.6,
+     3.5
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "nimes",
+   "name": "Ним",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5293",
+    "FRA-5274"
+   ],
+   "at": [
+    [
+     43.95,
+     4.1
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "gevaudan",
+   "name": "Жеводан и Виваре",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5320",
+    "FRA-5267"
+   ],
+   "at": [
+    [
+     44.5,
+     3.5
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "auvergne",
+   "name": "Верхняя Овернь",
+   "region": "westeurope",
+   "admin": [
+    "FRA-5276",
+    "FRA-5299"
+   ],
+   "at": [
+    [
+     44.75,
+     2.8
+    ]
+   ],
+   "land": "languedoc"
+  },
+  {
+   "id": "tangier",
+   "name": "Танжер",
+   "region": "maghreb",
+   "admin": [
+    "MAR-1445"
+   ],
+   "at": [
+    [
+     35.7,
+     -5.8
+    ]
+   ],
+   "land": "morocco"
+  },
+  {
+   "id": "tetouan",
+   "name": "Тетуан",
+   "region": "maghreb",
+   "admin": [
+    "MAR-1445",
+    "ESP-5815"
+   ],
+   "at": [
+    [
+     35.55,
+     -5.4
+    ],
+    [
+     35.89,
+     -5.32
+    ]
+   ],
+   "land": "morocco"
+  },
+  {
+   "id": "rif",
+   "name": "Риф",
+   "region": "maghreb",
+   "admin": [
+    "MAR-1447",
+    "MAR-1454",
+    "ESP-5835"
+   ],
+   "at": [
+    [
+     35.22,
+     -3.93
+    ],
+    [
+     35.29,
+     -2.94
+    ]
+   ],
+   "land": "morocco"
+  },
+  {
+   "id": "oran",
+   "name": "Оран",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2145",
+    "DZA-2144",
+    "DZA-2147",
+    "DZA-2146"
+   ],
+   "at": [
+    [
+     35.65,
+     -0.7
+    ]
+   ],
+   "land": "oran"
+  },
+  {
+   "id": "mostaganem",
+   "name": "Мостаганем",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2202",
+    "DZA-2203",
+    "DZA-2201"
+   ],
+   "at": [
+    [
+     35.75,
+     0.35
+    ]
+   ],
+   "land": "oran"
+  },
+  {
+   "id": "chelif",
+   "name": "Шелифф",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2200",
+    "DZA-2206",
+    "DZA-2205"
+   ],
+   "at": [
+    [
+     36.1,
+     1.4
+    ]
+   ],
+   "land": "oran"
+  },
+  {
+   "id": "alger",
+   "name": "Алжир",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2195",
+    "DZA-2196"
+   ],
+   "at": [
+    [
+     36.72,
+     3.2
+    ]
+   ],
+   "land": "algiers"
+  },
+  {
+   "id": "mitidja",
+   "name": "Митиджа",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2209",
+    "DZA-2198"
+   ],
+   "at": [
+    [
+     36.5,
+     2.75
+    ]
+   ],
+   "land": "algiers"
+  },
+  {
+   "id": "medea",
+   "name": "Медеа",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2213",
+    "DZA-2199",
+    "DZA-2212",
+    "DZA-2214"
+   ],
+   "at": [
+    [
+     36.15,
+     2.7
+    ]
+   ],
+   "land": "algiers"
+  },
+  {
+   "id": "kabylie",
+   "name": "Кабилия",
+   "region": "maghreb",
+   "admin": [
+    "DZA-2197",
+    "DZA-2210",
+    "DZA-2208",
+    "DZA-2207"
+   ],
+   "at": [
+    [
+     36.55,
+     4
+    ]
+   ],
+   "land": "algiers"
+  }
+ ],
+ "seas": [
+  {
+   "id": "biscay",
+   "name": "Бискайский залив",
+   "about": "с Кантабрийским морем; на западе — от мыса Ортегаль к северу",
+   "at": [
+    [
+     44.1,
+     -4.2
+    ]
+   ],
+   "outline": [
+    [
+     -7.87,
+     43.77
+    ],
+    [
+     -6.9,
+     45.4
+    ],
+    [
+     1,
+     45.4
+    ],
+    [
+     1,
+     42.8
+    ],
+    [
+     -7.87,
+     42.8
+    ]
+   ]
+  },
+  {
+   "id": "atlantic",
+   "name": "Атлантический океан у Галисии и Португалии",
+   "about": "от мыса Ортегаль до мыса Сан-Висенти",
+   "at": [
+    [
+     41.5,
+     -9.8
+    ]
+   ],
+   "outline": [
+    [
+     -13,
+     46.5
+    ],
+    [
+     -6.9,
+     45.4
+    ],
+    [
+     -7.87,
+     43.77
+    ],
+    [
+     -8.99,
+     37.02
+    ],
+    [
+     -5.92,
+     35.79
+    ],
+    [
+     -6.2,
+     33.5
+    ],
+    [
+     -13,
+     33.5
+    ]
+   ]
+  },
+  {
+   "id": "cadiz",
+   "name": "Кадисский залив",
+   "about": "от мыса Сан-Висенти до мысов Трафальгар и Спартель",
+   "at": [
+    [
+     36.65,
+     -7.2
+    ]
+   ],
+   "outline": [
+    [
+     -8.99,
+     37.02
+    ],
+    [
+     -5.92,
+     35.79
+    ],
+    [
+     -6.03,
+     36.18
+    ],
+    [
+     -6,
+     37.7
+    ],
+    [
+     -9.1,
+     37.7
+    ]
+   ]
+  },
+  {
+   "id": "gibraltar",
+   "name": "Гибралтарский пролив",
+   "about": "от линии Трафальгар — Спартель до линии Европа — Альмина",
+   "at": [
+    [
+     35.97,
+     -5.62
+    ]
+   ],
+   "outline": [
+    [
+     -6.03,
+     36.18
+    ],
+    [
+     -5.92,
+     35.79
+    ],
+    [
+     -5.28,
+     35.9
+    ],
+    [
+     -5.35,
+     36.11
+    ]
+   ]
+  },
+  {
+   "id": "alboran",
+   "name": "Море Альборан",
+   "about": "от Гибралтара до линии мыс Гата — мыс Фегало",
+   "at": [
+    [
+     36,
+     -3.8
+    ]
+   ],
+   "outline": [
+    [
+     -5.35,
+     36.11
+    ],
+    [
+     -5.28,
+     35.9
+    ],
+    [
+     -5.2,
+     34.5
+    ],
+    [
+     -1.08,
+     34.5
+    ],
+    [
+     -1.08,
+     35.6
+    ],
+    [
+     -2.19,
+     36.72
+    ],
+    [
+     -4.5,
+     37.2
+    ],
+    [
+     -5.4,
+     36.7
+    ]
+   ]
+  },
+  {
+   "id": "balearic",
+   "name": "Балеарское море",
+   "about": "между берегом Испании от мыса Сан-Антонио до мыса Креус и Балеарскими островами",
+   "at": [
+    [
+     40.4,
+     1.4
+    ]
+   ],
+   "outline": [
+    [
+     0.23,
+     38.8
+    ],
+    [
+     1.21,
+     38.97
+    ],
+    [
+     1.4,
+     38.62
+    ],
+    [
+     3.05,
+     39.27
+    ],
+    [
+     4.3,
+     39.85
+    ],
+    [
+     3.32,
+     42.32
+    ],
+    [
+     2.2,
+     42.7
+    ],
+    [
+     -0.8,
+     40.2
+    ],
+    [
+     -0.4,
+     38.6
+    ]
+   ]
+  },
+  {
+   "id": "lion",
+   "name": "Лионский залив",
+   "about": "к северу от линии мыс Креус — Тулон",
+   "at": [
+    [
+     42.95,
+     4
+    ]
+   ],
+   "outline": [
+    [
+     3.32,
+     42.32
+    ],
+    [
+     5.2,
+     42.86
+    ],
+    [
+     5.2,
+     45
+    ],
+    [
+     2.6,
+     45
+    ],
+    [
+     2.6,
+     42.4
+    ]
+   ]
+  },
+  {
+   "id": "algero",
+   "name": "Алжиро-Прованский бассейн",
+   "about": "открытое Средиземное море между Балеарскими островами и Алжиром",
+   "at": [
+    [
+     37.4,
+     2.2
+    ]
+   ],
+   "outline": [
+    [
+     -2.19,
+     36.72
+    ],
+    [
+     -1.08,
+     35.6
+    ],
+    [
+     -1.08,
+     33.5
+    ],
+    [
+     6,
+     33.5
+    ],
+    [
+     6,
+     42.86
+    ],
+    [
+     5.2,
+     42.86
+    ],
+    [
+     3.32,
+     42.32
+    ],
+    [
+     4.3,
+     39.85
+    ],
+    [
+     3.05,
+     39.27
+    ],
+    [
+     1.4,
+     38.62
+    ],
+    [
+     1.21,
+     38.97
+    ],
+    [
+     0.23,
+     38.8
+    ],
+    [
+     -0.4,
+     38.6
+    ],
+    [
+     -1.5,
+     37.6
+    ]
+   ]
+  }
+ ],
+ "states": [
+  {
+   "id": "aragon",
+   "name": "Королевство Арагон, XIII век",
+   "provinces": [
+    "huesca",
+    "zaragoza",
+    "teruel"
+   ]
+  },
+  {
+   "id": "crown",
+   "name": "Арагонская корона, XIV век",
+   "provinces": [
+    "huesca",
+    "zaragoza",
+    "teruel",
+    "barcelona",
+    "girona",
+    "lleida",
+    "urgell",
+    "cerdanya",
+    "tarragona",
+    "castellon",
+    "valencia",
+    "alicante",
+    "mallorca",
+    "menorca",
+    "ibiza",
+    "roussillon"
+   ]
+  },
+  {
+   "id": "barcelona",
+   "name": "Графство Барселона, XI век",
+   "provinces": [
+    "barcelona",
+    "girona"
+   ]
+  },
+  {
+   "id": "navarre",
+   "name": "Королевство Наварра, XII век",
+   "provinces": [
+    "navarra",
+    "gipuzkoa",
+    "alava",
+    "labourd"
+   ]
+  },
+  {
+   "id": "portugal",
+   "name": "Королевство Португалия, 1250 год",
+   "provinces": [
+    "minho",
+    "tras",
+    "beira_alta",
+    "beira_lit",
+    "beira_baixa",
+    "lisboa",
+    "ribatejo",
+    "alto_alentejo",
+    "baixo_alentejo",
+    "algarve"
+   ]
+  },
+  {
+   "id": "granada",
+   "name": "Гранадский эмират, XV век",
+   "provinces": [
+    "granada",
+    "malaga",
+    "almeria"
+   ]
+  }
+ ]
 }

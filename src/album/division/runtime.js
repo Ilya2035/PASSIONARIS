@@ -99,7 +99,7 @@ export async function startDivision(album, U) {
 
   // a page may open with one district chosen: page.divAt = [lat, lon]
   p.on(key => {
-    if (key == null || key === 'divSize') use(+p.get('divSize') || 30);
+    if (key == null || key === 'divSize') use(+p.get('divSize') || 20);
     if (key == null || key === 'divState') paintState(false);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
@@ -138,7 +138,7 @@ export async function startDivision(album, U) {
   };
   album.division = api;
   album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => cur.div.names[i], onChange: api.onChange };
-  use(+p.get('divSize') || 30);
+  use(+p.get('divSize') || 20);
 
   // from higher up the borders are lines laid on the ground, clear and of steady width; up close the ground shader
   // draws them on the very outline of the chunks. far: 0 up close .. 1 high up, by the size of a pixel on the ground

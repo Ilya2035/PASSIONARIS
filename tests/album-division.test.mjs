@@ -195,10 +195,20 @@ test('division of the album: places lie in their historical lands; mountains div
     [42.51, 1.52, 'andorra'], [39.72, 2.91, 'mallorca'], [35.77, -5.80, 'tangier'], [36.75, 3.06, 'alger']]) assert.equal(provAt(lat, lon), id, `${lat}, ${lon}`);
   // across the crests: Gavarnie (north) and Torla (south) of the Pyrenees, Covadonga and Riaño of the Cantabrian
   // range, Cercedilla and El Espinar of the Guadarrama
-  for (const [lat, lon, region] of [[42.73, -0.01, 'guyenne'], [42.62, -0.11, 'ebro'], [43.31, -5.06, 'galicia'], [42.97, -5.02, 'duero'], [40.74, -4.06, 'newcastile'], [40.72, -4.25, 'duero']]) {
+  for (const [lat, lon, land, region] of [[42.73, -0.01, 'guyenne', 'westeurope'], [42.62, -0.11, 'ebro', 'iberia'], [43.31, -5.06, 'galicia', 'iberia'], [42.97, -5.02, 'duero', 'iberia'], [40.74, -4.06, 'newcastile', 'iberia'], [40.72, -4.25, 'duero', 'iberia']]) {
     const p = provinceOfChunk(real.div, real.ch.at(lat, lon));
-    assert.equal(LANDS.regions[real.div.region[p]].id, region, `${lat}, ${lon}`);
+    assert.equal(LANDS.provinces[p].land, land, `${lat}, ${lon}`);
+    assert.equal(LANDS.regions[real.div.region[p]].id, region, `${lat}, ${lon}: region`);
   }
+  // the regions are the great lands: Iberia whole, the south of Western Europe, the Maghreb
+  assert.deepEqual(LANDS.regions.map(r => r.id), ['iberia', 'westeurope', 'maghreb']);
+  for (const [lat, lon, region] of [[38.72, -9.14, 'iberia'], [39.72, 2.91, 'iberia'], [42.51, 1.52, 'iberia'], [43.60, 1.44, 'westeurope'], [35.77, -5.80, 'maghreb']])
+    assert.equal(LANDS.regions[real.div.region[provinceOfChunk(real.div, real.ch.at(lat, lon))]].id, region, `${lat}, ${lon}`);
+  // districts of about 20 km: 400–500 km² in the middle
+  { const d20 = buildDivision(real.ch, { ...real.opts, size: 20 }), a = []; for (let d = 0; d < d20.count; d++) if (d20.kinds[d] === LAND) a.push(d20.area[d]);
+    a.sort((x, y) => x - y); const mid = a[a.length >> 1];
+    assert.ok(mid > 330 && mid < 520, `a district of the 20 km division is ${Math.round(mid)} km² in the middle`);
+    assert.ok(a[Math.floor(a.length * .9)] / a[Math.floor(a.length * .1)] < 3.2, 'districts are all of about one size'); }
   // no slope is left cut off from its own land by a ridge while it drains into another
   const { ch, div } = real, rel = linkRelief(ch, data.base.at), rel2 = (a, b) => rel.get(a < b ? a + ',' + b : b + ',' + a)?.ridge || 0;
   let stray = 0;
@@ -222,9 +232,9 @@ test('division of the album: a big lowland river is the axis of its land, not it
       const [ax, ay] = kmOf(lat, lon), [bx, by] = kmOf(r.pts[i + 1][1], r.pts[i + 1][0]), L = Math.hypot(bx - ax, by - ay); if (L < .5) continue;
       const nx = -(by - ay) / L * 3, ny = (bx - ax) / L * 3, p = llOf(ax + nx, ay + ny), q = llOf(ax - nx, ay - ny);
       const k1 = ch.at(p.lat, p.lon), k2 = ch.at(q.lat, q.lon); if (k1 < 0 || k2 < 0 || div.kind[k1] !== LAND || div.kind[k2] !== LAND) continue;
-      n++; if (div.region[provinceOfChunk(div, k1)] === div.region[provinceOfChunk(div, k2)]) same++;
+      n++; if (LANDS.provinces[provinceOfChunk(div, k1)].land === LANDS.provinces[provinceOfChunk(div, k2)].land) same++;
     }
-    assert.ok(n > 20 && same / n > .9, `${name}: both banks in one region at ${same} of ${n} points`);
+    assert.ok(n > 20 && same / n > .9, `${name}: both banks in one historical land at ${same} of ${n} points`);
   }
 });
 
