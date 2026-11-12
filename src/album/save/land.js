@@ -7,13 +7,17 @@
 // that too is worked out, from the numbers kept here:
 //
 //   district    how much of its natural forest stands, how much of it is ploughed, grazed, built on, burnt, how old
-//               the last change is; how many settlements and how many farmsteads it has                  9 bytes
+//               the last change is; how many settlements it has and how many of its chunks carry
+//               farmsteads                                                                               9 bytes
 //   settlement  every one of them, a hamlet as much as a city (the owner, 12.11.2026: «хранить каждую»): which site
 //               of its district, who built it, its people, what stands in it (walls, a temple, a market …), when it
 //               was founded. Its district is not written: settlements lie in the order of their districts 8 bytes
-//   farmstead   every single yard among the fields (the owner, 12.11.2026: «хранить и дворы»): only where it
-//               stands — the chunk of its district and one of sixteen places in that chunk. Its people, its
-//               look and its fields come from the numbers of its district                                2 bytes
+//   farmsteads  every single yard among the fields (the owner, 12.11.2026: «хранить и дворы», then «гуще, поднять
+//               границу»). They are kept chunk by chunk: a chunk of ploughed land has sixteen places for a yard,
+//               and two bytes say which of them are taken. So a yard is one bit of its own — it stands or it does
+//               not — and however thickly the yards stand, the cost is the ploughed land.        2 bytes a chunk
+//               The chunks of a district are counted in the order its land is taken up (the best first): the
+//               first N of them carry yards, and N is kept with the district.
 //   road        for every pair of neighbouring districts a road may join: none, track, road, main road   2 bits
 //   exception   a chunk that does not follow the rule of its district (a burnt wood, a mine): the district, the
 //               chunk in it, what and how much                                                           8 bytes
@@ -21,7 +25,7 @@
 // The sections are those of the game's save container (src/save/saveSystem.js): named typed arrays.
 // This file has no imports: the tests and scripts read it.
 
-export const LAND_FORMAT = 3;
+export const LAND_FORMAT = 4;
 // The version of the rules that turn these numbers into a picture. A save made under other rules is still read, but
 // its houses and fields may stand elsewhere: the numbers hold, the drawing follows the rules of the day.
 export const GENERATOR = 1;
@@ -29,8 +33,8 @@ export const STRUCTURES = ['walls', 'temple', 'market', 'fort', 'port', 'mill', 
 export const ROAD_LEVELS = ['none', 'track', 'road', 'main'];
 export const EXCEPTIONS = ['burnt', 'cleared', 'mine', 'quarry', 'fortress', 'ruin'];
 export const MAX_IN_DISTRICT = 255;                // settlements a district can hold: its count is one byte
-export const YARD_CHUNKS = 4096, YARD_SLOTS = 16;   // a farmstead: twelve bits of the chunk in its district, four of the place in the chunk
-export const MAX_YARDS = 65535;                    // farmsteads a district can hold: their count is two bytes
+export const YARD_SLOTS = 16;                      // places for a farmstead in a chunk of 1 km²: a lattice of 250 m
+export const YARD_CHUNKS = 65535;                  // chunks of a district that can carry farmsteads: their count is two bytes
 
 // people ↔ two bytes: eleven bits of the number and five of its order. Exact up to 2 047, then to one part in a thousand
 export function peopleCode(n) {
@@ -44,7 +48,8 @@ const byte = v => Math.max(0, Math.min(255, Math.round(v * 255)));
 
 // world: { districts: [{ forest, fields, pasture, built, burnt (0..1), age (years, 0..255) }],
 //          settlements: [{ district, site, people, structures (bits of STRUCTURES), culture, founded (year) }],
-//          farmsteads: [{ district, chunk (0 .. YARD_CHUNKS − 1), slot (0 .. YARD_SLOTS − 1) }] (may be left out),
+//          farmsteads: [{ district, chunk (its number in the order the land of the district is taken up, from 0),
+//                         slot (0 .. YARD_SLOTS − 1) }] (may be left out),
 //          roads: [level for every possible leg], exceptions: [{ district, chunk, kind, value (0..255) }] }
 // → sections for encodeSave(): name → typed array or JSON
 export function packLand(world) {
@@ -60,17 +65,19 @@ export function packLand(world) {
     count[s.district]++;
     site[i] = s.site; culture[i] = s.culture; people[i] = peopleCode(s.people); structures[i] = s.structures; founded[i] = s.founded;
   });
-  const farms = world.farmsteads || [], yards = new Uint16Array(farms.length), yardCount = new Uint16Array(D);
-  [...farms].sort((a, b) => a.district - b.district || a.chunk - b.chunk || a.slot - b.slot).forEach((y, i) => {
+  // farmsteads: for every district the chunks that carry them, as many as reach the last one that does; two bytes a chunk
+  const farms = world.farmsteads || [], yardChunks = new Uint16Array(D);
+  for (const y of farms) {
     if (!(y.district >= 0 && y.district < D && y.chunk >= 0 && y.chunk < YARD_CHUNKS && y.slot >= 0 && y.slot < YARD_SLOTS)) throw new RangeError(`a farmstead out of bounds: district ${y.district}, chunk ${y.chunk}, place ${y.slot}`);
-    if (yardCount[y.district] >= MAX_YARDS) throw new RangeError(`more than ${MAX_YARDS} farmsteads in district ${y.district}`);
-    yardCount[y.district]++; yards[i] = y.chunk << 4 | y.slot;
-  });
+    if (y.chunk + 1 > yardChunks[y.district]) yardChunks[y.district] = y.chunk + 1;
+  }
+  const first = new Uint32Array(D + 1); for (let d = 0; d < D; d++) first[d + 1] = first[d] + yardChunks[d];
+  const yards = new Uint16Array(first[D]); for (const y of farms) yards[first[y.district] + y.chunk] |= 1 << y.slot;
   const roads = new Uint8Array(Math.ceil(R / 4)); world.roads.forEach((lv, i) => { roads[i >> 2] |= (lv & 3) << (i & 3) * 2; });
   const xd = new Uint32Array(X), xc = new Uint16Array(X), xk = new Uint8Array(X), xv = new Uint8Array(X);
   world.exceptions.forEach((x, i) => { xd[i] = x.district; xc[i] = x.chunk; xk[i] = x.kind; xv[i] = x.value; });
   return { 'land/head': { format: LAND_FORMAT, generator: GENERATOR, districts: D, settlements: N, farmsteads: farms.length, roads: R, exceptions: X },
-    'land/use': use, 'land/count': count, 'land/yardCount': yardCount, 'land/yards': yards,
+    'land/use': use, 'land/count': count, 'land/yardChunks': yardChunks, 'land/yards': yards,
     'land/s.site': site, 'land/s.culture': culture, 'land/s.people': people, 'land/s.structures': structures, 'land/s.founded': founded,
     'land/roads': roads, 'land/x.of': xd, 'land/x.chunk': xc, 'land/x.kind': xk, 'land/x.value': xv };
 }
@@ -81,7 +88,7 @@ export function unpackLand(s) {
   for (let d = 0; d < D; d++) for (let k = 0; k < count[d]; k++, i++) settlements.push({ district: d, site: s['land/s.site'][i], people: peopleOf(s['land/s.people'][i]),
     structures: s['land/s.structures'][i], culture: s['land/s.culture'][i], founded: s['land/s.founded'][i] });
   const farmsteads = []; let y = 0;
-  for (let d = 0; d < D; d++) for (let k = 0; k < s['land/yardCount'][d]; k++, y++) farmsteads.push({ district: d, chunk: s['land/yards'][y] >> 4, slot: s['land/yards'][y] & 15 });
+  for (let d = 0; d < D; d++) for (let c = 0; c < s['land/yardChunks'][d]; c++, y++) { const m = s['land/yards'][y]; for (let slot = 0; slot < YARD_SLOTS; slot++) if (m >> slot & 1) farmsteads.push({ district: d, chunk: c, slot }); }
   const roads = Array.from({ length: h.roads }, (_, j) => (s['land/roads'][j >> 2] >> (j & 3) * 2) & 3);
   const exceptions = Array.from({ length: h.exceptions }, (_, j) => ({ district: s['land/x.of'][j], chunk: s['land/x.chunk'][j], kind: s['land/x.kind'][j], value: s['land/x.value'][j] }));
   return { format: h.format, generator: h.generator, districts, settlements, farmsteads, roads, exceptions };
@@ -89,7 +96,7 @@ export function unpackLand(s) {
 // bytes of the sections before packing: what each part of the land costs
 export function landBytes(sections) {
   const size = k => (sections[k].byteLength ?? 0), sum = keys => keys.reduce((a, k) => a + size(k), 0);
-  return { districts: sum(['land/use', 'land/count', 'land/yardCount']), settlements: sum(['land/s.site', 'land/s.culture', 'land/s.people', 'land/s.structures', 'land/s.founded']), farmsteads: size('land/yards'),
+  return { districts: sum(['land/use', 'land/count', 'land/yardChunks']), settlements: sum(['land/s.site', 'land/s.culture', 'land/s.people', 'land/s.structures', 'land/s.founded']), farmsteads: size('land/yards'),
     roads: size('land/roads'), exceptions: sum(['land/x.of', 'land/x.chunk', 'land/x.kind', 'land/x.value']) };
 }
 
