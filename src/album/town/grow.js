@@ -10,13 +10,34 @@ import { FKM, FN, kmOf, llOf } from '../chunks.js';
 import { GX0, GY0, stageOf, fieldsBeyond, peopleOf, classOf } from './rules.js';
 
 export const RCAP = 2.2;                                            // km: the largest settlement the album founds
-// radius of a place at full growth, km: the smallest places of the data are villages, the largest a great city
+// radius of a place at full growth, km, from the people who live there today: a hamlet of a few yards (300 people
+// and fewer), a village (15 000: what is a small town today was a village then), up to a great city
 export function fullRadius(pop) {
-  const l = Math.max(0, Math.min(1, Math.log(Math.max(pop, 1) / 15000) / Math.log(5.6e6 / 15000)));
+  if (pop < 15000) return .05 + .07 * Math.max(0, Math.min(1, Math.log(Math.max(pop, 1) / 300) / Math.log(50)));
+  const l = Math.max(0, Math.min(1, Math.log(pop / 15000) / Math.log(5.6e6 / 15000)));
   return .12 + 1.5 * l ** 1.6;
+}
+// The places the model founds once the land is divided into districts (the owner, 12.11.2026: «город всегда в центре
+// района»): the places of the album first, their numbers unchanged, then the centre of every other land district —
+// the real town or village that stands there (division/centres.js, town/sites.js), or a hamlet where none does.
+// base: [{ lat, lon, pop, name }]; div: the division with div.centres; sites: the list the centres were chosen from,
+// which begins with the places of base
+export const HAMLET_POP = 250;
+export function centrePlaces(base, div, sites = []) {
+  const out = base.slice(), c = div?.centres; if (!c) return out;
+  for (let d = 0; d < div.count; d++) {
+    if (div.kinds[d] !== 0 || c.texel[d] < 0) continue;
+    const s = c.site[d]; if (s >= 0 && s < base.length) continue;            // a place of the album: in the list already
+    const q = llOf(c.x[d], c.y[d]);
+    out.push({ lat: q.lat, lon: q.lon, pop: s >= 0 ? sites[s].pop : HAMLET_POP, name: s >= 0 ? sites[s].name || '' : '', district: d });
+  }
+  return out;
 }
 // how far the felling reaches beyond the fields, km
 export const fellBeyond = r => .3 + .5 * r;
+// A hamlet and a village clear only the ground of their houses and fields (the picture of the fields does that); from
+// this radius on a settlement also thins the forest of the chunks around it
+export const FELL_FROM = .15;
 
 // the nearest dry point to (x, y) within 4 km, or null
 export function landNear(at, x, y) {
@@ -69,7 +90,7 @@ export function growTowns(ch, places, growth, at, river = () => 1e9) {
       const s = sum.get(c) || sum.set(c, [0, 0]).get(c);
       const flat = h < 1500 && Math.hypot(at(cx + .5, cy) - at(cx - .5, cy), at(cx, cy + .5) - at(cx, cy - .5)) / 1000 < .2;
       if (flat) s[0] += FKM * FKM * (part(Rf, d) - part(R, d));
-      s[1] += FKM * FKM * (part(Rc, d) + .5 * (part(far, d) - part(Rc, d)));
+      if (R >= FELL_FROM) s[1] += FKM * FKM * (part(Rc, d) + .5 * (part(far, d) - part(Rc, d)));
     }
     for (const [c, s] of sum) { fields[c] = Math.max(fields[c], Math.min(1, s[0] / ch.area[c]) * .95); keep[c] = Math.min(keep[c], Math.max(0, 1 - s[1] / ch.area[c])); }
     const people = peopleOf(R);

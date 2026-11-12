@@ -103,8 +103,13 @@ void setTry(ivec2 c, vec2 pk, inout float own, inout float riv, inout vec4 best,
 void aspSettle(Px p, inout Land L) {
   float fieldsV = p.cC.g;
   ivec2 c0 = ivec2(floor((p.pk - SET_G0) / SET_GK));
-  int code = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_GN && c0.y < SET_GN ? int(texelFetch(tSettle, c0, 0).a * 255. + .5) : 0;
-  if ((code == 0 && fieldsV < .004) || p.h < .4) return;
+  vec4 t0 = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_GN && c0.y < SET_GN ? texelFetch(tSettle, c0, 0) : vec4(0.);
+  int code = int(t0.a * 255. + .5);
+  // (fields far from any houses are drawn only where a fair share of the chunk is ploughed: a hamlet's few fields lie
+  // beside it, and the rest of its chunk costs nothing)
+  if ((code == 0 && fieldsV < .03) || p.h < .4) return;
+  // the commonest case by far: the only patch near is the village of this very square, and the pixel is nowhere near it
+  if (code > 200 && code < 210 && fieldsV < .03) { float r0 = t0.b * t0.b * SET_RMAX; if (distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > 3.5 * r0 + 1.4) return; }
   // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 squares around.
   // The code of the square says which of the nine hold a patch: most often it is one or two, and only those are read.
   float own = -1e3, riv = -1e3, r = 0., th = 0., cul = 1.; vec2 site = vec2(0.); int ck = 0;
@@ -122,7 +127,7 @@ void aspSettle(Px p, inout Land L) {
   }
   float px = p.px, S = uSettle.x, W = .5 + 2.5 * r, m = r > 0. ? own : -1e3;        // W: how far the fields reach beyond the houses
   bool close = m > -W - .3;
-  if (!close && fieldsV < .004) return;
+  if (!close && fieldsV < .03) return;
   if (m > -.6) m += min(.25, .3 * r) * setWob(p.pk) * min(1., 1. + m / .6);          // the wobble of the edge fades out away from it
   // houses stand on dry, level ground only; a settlement too small for its pixels still shows as a mark
   float tm = 0., mt = m + max(0., 2.2 * px - r);
@@ -131,7 +136,7 @@ void aspSettle(Px p, inout Land L) {
   if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
 
   // ---- fields: the land next to the houses is ploughed first, then the best of the rest of the chunk
-  if (fieldsV > .004 && tm < .997 && p.slope < .6 && p.hl < 1700.) {
+  if ((close ? fieldsV > .004 : fieldsV >= .03) && tm < .997 && p.slope < .6 && p.hl < 1700.) {
     float want = .04 + .68 * fieldsV + (close ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - p.n2 * .6 - p.n3 * .4;
     if (want > -.25) {                                               // far below the threshold no furlong can be a field: nothing more to work out
       float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
@@ -220,6 +225,8 @@ export default {
     { id: 'town-500', group: G, title: 'Город с 500 км', note: 'Высота больших держав: поселение читается как отметка в пиксель-другой, заметнее пятно полей и вырубки вокруг.', p: {}, cam: zar(500, 15, 0) },
     { id: 'town-marks', group: G, title: 'Отметки: класс поселения по форме', note: 'Издалека поселение — пятнышко застройки в настоящую величину, а поверх него отметка. По её форме виден класс: кружок — деревня (до 1 000 жителей), треугольник — малый городок (до 20 000), ромб — средний город (до 60 000), квадрат — город (до миллиона), пятиугольник — мегаполис. Чем выше камера, тем меньше классов отмечено: деревни видны только вблизи.', p: { growth: 1.6 }, cam: { lat: 40.9, lon: -1.2, h: 400, tilt: 12, heading: 0 } },
     { id: 'town-marks-near', group: G, title: 'Отметки вблизи: имя рядом с домами', note: 'Когда дома уже различимы, отметка гаснет, а имя стоит сбоку и поселение не закрывает. Деревня отмечена точкой и малой подписью.', p: { growth: .33, forest3d: 0 }, cam: zar(24, 30, 0) },
+    { id: 'town-districts', group: G, title: 'Поселение в каждом районе', note: 'В центре каждого района стоит поселение: настоящий город или село этого места, а где их нет — хутор в низине у воды. К нему сходятся дороги. Размер взят из сегодняшнего числа жителей: большинство — деревни в несколько дворов. Двигайте «Рост городов»: на малом росте стоят только большие места, деревни появляются позже.', p: {}, cam: { lat: 41.3, lon: -1.6, h: 45, tilt: 25, heading: 0 } },
+    { id: 'town-districts-map', group: G, title: 'Поселения, дороги и районы', note: 'То же поверх границ районов: поселение в центре района, дороги от центра к центру.', p: { division: 1, look: 'paper', forest3d: 0 }, cam: { lat: 41.4, lon: -1.4, h: 110, tilt: 10, heading: 0 } },
     { id: 'town-med', group: G, title: 'Манера: средиземноморская', note: 'Плотные кварталы с дворами, черепица и побелка, узкие гнутые улицы, площадь и храм в середине, причал у воды.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.722, lon: -4.42, h: 20, tilt: 35, heading: 0 } },
     { id: 'town-atl', group: G, title: 'Манера: атлантическая', note: 'Разбросанные каменные дворы под тёмными крышами, без сетки улиц; дворы обнесены стенами, вокруг выгоны с живыми изгородями.', p: { forest3d: 0, labels: 0 }, cam: { lat: 43.25, lon: -2.93, h: 20, tilt: 35, heading: 160 } },
     { id: 'fields', group: G, title: 'Поля: наделы, пар, выгон, террасы', note: 'Наделы лежат рядами, в каждом полосы со своими посевами, между ними межи и тропы, пар и выгон; на склонах террасы вдоль горизонталей. От поселения к полям расходятся дорожки. Издалека всё сливается в спокойный тон.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.735, lon: -4.44, h: 20, tilt: 40, heading: 35 } },

@@ -2,14 +2,15 @@
 // of settlement lies where (rules.js). Four bytes per square:
 //   R, G  where in the square the site of its patch lies
 //   B     radius of the patch (radiusByte(); 0 = no patch)
-//   A     which of the 3 × 3 squares around hold a patch (their places 0..8, row by row; 4 is the square itself):
+//   A     which of the 3 × 3 squares around hold a patch whose houses or fields reach into this square (their places
+//         0..8, row by row; 4 is the square itself):
 //         without a patch: 0 none · 1 + a one · 10 + 9 a + b two · 100 more
 //         with a patch, m its manner of building: 200 + m alone · 110 + 2 b + (m − 1) with one neighbour b · 210 + m with more
 // It is a mirror of the chunk state: mirrorSettle() rewrites it whenever `built` or `culture` change. A chunk with
 // `built` > 0 has a patch: at the site and of the size the model of growth gave it, or, for a chunk built up by
 // anything else (a brush), in the middle of the chunk and of the area of its built share.
 import { DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
-import { CELL, GN, radiusByte, radiusOfShare, siteBytes, gridOf, lobeOf, CULTURES } from './rules.js';
+import { CELL, GN, GK, GX0, GY0, radiusByte, radiusOfShare, siteBytes, gridOf, lobeOf, fieldsBeyond, CULTURES } from './rules.js';
 
 export const settleBytes = new Uint8Array(GN * GN * 4);
 export const settleTex = new DataTexture(settleBytes, GN, GN, RGBAFormat, UnsignedByteType);
@@ -39,7 +40,12 @@ export function mirrorSettle(ch, towns = [], out = settleBytes) {
     const x = g % n, y = (g / n) | 0, o = g * 4, p = at.get(g), around = [];
     if (at.size) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const xx = x + dx, yy = y + dy;
-      if ((dx || dy) && xx >= 0 && yy >= 0 && xx < n && yy < n && at.has(yy * n + xx)) around.push((dy + 1) * 3 + dx + 1);
+      if (!(dx || dy) || xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
+      const q = at.get(yy * n + xx); if (!q) continue;
+      // only a neighbour whose houses or fields can reach into this square: a village in the middle of its own square
+      // is no business of the squares around, and their pixels need not look at it
+      const x0 = GX0 + x * GK, y0 = GY0 + y * GK, ex = Math.max(x0 - q.x, 0, q.x - x0 - GK), ey = Math.max(y0 - q.y, 0, q.y - y0 - GK);
+      if (Math.hypot(ex, ey) < q.r + fieldsBeyond(q.r) + .7) around.push((dy + 1) * 3 + dx + 1);
     }
     if (p) {
       const [bx, by] = siteBytes(p.x, p.y), rb = radiusByte(p.r);

@@ -13,7 +13,7 @@ import { smoothLine } from './ribbon.js';
 import { cellSize, cultureAt, CELL, PALETTE_GLSL } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle } from '../town/state.js';
 import { buildShapes, SLOTS, KINDS } from '../town/shapes.js';
-import { growTowns } from '../town/grow.js';
+import { growTowns, centrePlaces } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 
 const MAX_BLOCKS = 40000;
@@ -59,34 +59,42 @@ const FRAG = /* glsl */`${COMMON}
   }`;
 
 export default async function init(album) {
-  const T = album.terrain.u, p = album.params, ch = album.chunks, places = album.data.vectors.places, base = album.data.base;
+  const T = album.terrain.u, p = album.params, ch = album.chunks, base = album.data.base;
+  // the places the model founds: the places of the album to begin with; once the land is divided into districts, also
+  // the centre of every other district (grow.js, centrePlaces)
+  let places = album.data.vectors.places, divSeen = -1;
   const at = (x, y) => base.at(y / KM_PER_DEG, x / (KM_PER_DEG * COS_REF));        // height in metres at a point of the flat km plane
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); ch.setNatural('culture', k, cultureAt(c.lat, c.lon) / 255); }
 
   // ---- rivers as the settlements must know them: nothing stands on the ribbon of a river
-  const segs = [], grid = new Map(), GC = 4;
+  // (stretches of river as five numbers each: x, y of both ends and the width; a grid of 4 km says which lie near a point)
+  let segs = [], grid = new Map(); const GC = 4, REACH = 2.6;
   const seg = (a, b, w) => {
-    const id = segs.length; segs.push([a[0], a[1], b[0], b[1], w]);
-    for (let gy = Math.floor((Math.min(a[1], b[1]) - 3) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + 3) / GC); gy++)
-      for (let gx = Math.floor((Math.min(a[0], b[0]) - 3) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + 3) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
+    const id = segs.length / 5; segs.push(a[0], a[1], b[0], b[1], w);
+    for (let gy = Math.floor((Math.min(a[1], b[1]) - REACH) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + REACH) / GC); gy++)
+      for (let gx = Math.floor((Math.min(a[0], b[0]) - REACH) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + REACH) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
   };
-  if (album.data.courses) {                                         // the real courses, every bend of them, within reach of the places
-    const nearPlace = new Set(); for (const pl of places) { const [x, y] = kmOf(pl.lat, pl.lon); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) nearPlace.add((Math.floor(x / 8) + dx) * 100000 + Math.floor(y / 8) + dy); }
-    for (const rv of album.data.courses.rivers) {
-      let a = null;
-      for (let i = 0; i < rv.n; i++) { const b = kmOf(rv.ll[i * 2 + 1], rv.ll[i * 2]); if (a && rv.w[i] >= .004 && nearPlace.has(Math.floor(b[0] / 8) * 100000 + Math.floor(b[1] / 8))) seg(a, b, Math.max(rv.w[i], rv.w[i - 1])); a = b; }
+  function indexRivers() {
+    segs = []; grid = new Map();
+    if (album.data.courses) {                                       // the real courses, every bend of them, within reach of the places
+      const nearPlace = new Set(); for (const pl of places) { const [x, y] = kmOf(pl.lat, pl.lon); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) nearPlace.add((Math.floor(x / GC) + dx) * 100000 + Math.floor(y / GC) + dy); }
+      for (const rv of album.data.courses.rivers) {
+        let a = null;
+        for (let i = 0; i < rv.n; i++) { const b = kmOf(rv.ll[i * 2 + 1], rv.ll[i * 2]); if (a && rv.w[i] >= .004 && nearPlace.has(Math.floor(b[0] / GC) * 100000 + Math.floor(b[1] / GC))) seg(a, b, Math.max(rv.w[i], rv.w[i - 1])); a = b; }
+      }
+    } else for (const rv of album.data.vectors.rivers || []) {      // the coarse lines of Natural Earth: only a rank, not a width
+      if (rv.pts.length <= 2) continue;
+      const w = rv.rank <= 6 ? .2 : rv.rank <= 8 ? .12 : .07, pts = smoothLine(rv.pts, 1.2, 2).map(q => kmOf(q[1], q[0]));
+      for (let i = 1; i < pts.length; i++) seg(pts[i - 1], pts[i], w);
     }
-  } else for (const rv of album.data.vectors.rivers || []) {        // the coarse lines of Natural Earth: only a rank, not a width
-    if (rv.pts.length <= 2) continue;
-    const w = rv.rank <= 6 ? .2 : rv.rank <= 8 ? .12 : .07, pts = smoothLine(rv.pts, 1.2, 2).map(q => kmOf(q[1], q[0]));
-    for (let i = 1; i < pts.length; i++) seg(pts[i - 1], pts[i], w);
   }
+  indexRivers();
   let riverMin = 0, riverK = 1;                                     // least width of a ribbon in km, and the «Ширина рек» knob
   const bank = (x, y, least, k) => {                                // km to the bank of the nearest river (negative on the water)
     let best = 1e9;
     for (const id of grid.get(Math.floor(x / GC) * 100000 + Math.floor(y / GC)) || []) {
-      const s = segs[id], dx = s[2] - s[0], dy = s[3] - s[1], t = Math.max(0, Math.min(1, ((x - s[0]) * dx + (y - s[1]) * dy) / (dx * dx + dy * dy || 1)));
-      best = Math.min(best, Math.hypot(x - s[0] - dx * t, y - s[1] - dy * t) - Math.max(s[4], least) * k * .5);
+      const o = id * 5, ax = segs[o], ay = segs[o + 1], dx = segs[o + 2] - ax, dy = segs[o + 3] - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+      best = Math.min(best, Math.hypot(x - ax - dx * t, y - ay - dy * t) - Math.max(segs[o + 4], least) * k * .5);
     }
     return best;
   };
@@ -170,7 +178,12 @@ export default async function init(album) {
     stats: () => ({ blocks: count, triangles: real, slots: count * SLOTS / 3, drawCalls: mesh.visible ? 1 : 0, patches: lobes.length, towns: model.towns.length,
       shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: cap * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
     model: () => model,
+    places: () => places,
     update(dt, t, cam) {
+      // the land has been divided (or divided anew): a settlement stands at the centre of every district
+      const dv = album.division;
+      if (dv && dv.version !== divSeen) { divSeen = dv.version; const t0 = performance.now(); places = centrePlaces(album.data.vectors.places, dv.data, dv.sites); indexRivers(); applyGrowth(false);
+        console.log(`[album] settlements: ${places.length} places, ${model.towns.length} founded at growth ${grown} (${(performance.now() - t0).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
       if (ch.version !== seen) { seen = ch.version; mirror(); }
       const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look')), dom = album.renderer.domElement;
       const S = cellSize(h, kH || 1), view = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360), cells = S / (view / Math.max(1, dom.height));   // a block in pixels of the picture

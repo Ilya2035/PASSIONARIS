@@ -9,7 +9,7 @@ import settle from '../src/album/aspects/settle.js';
 import { RMAX, CELL, GN, GK, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond,
   RULES_GLSL, PALETTE_GLSL, MAT } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
-import { growTowns, fullRadius, reachOf, RCAP } from '../src/album/town/grow.js';
+import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
 import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.js';
 import { mirrorSettle, settleUniforms } from '../src/album/town/state.js';
 
@@ -90,7 +90,9 @@ test('settle growth: a place grows from a hamlet to a city and writes houses, fi
   for (let i = 1; i < stages.length; i++) {
     assert.ok(stages[i].towns[0].R > stages[i - 1].towns[0].R && stages[i].built[home] >= stages[i - 1].built[home], 'more growth, more houses');
     assert.ok(stages[i].fields.reduce((a, b) => a + b) > stages[i - 1].fields.reduce((a, b) => a + b), 'and more fields');
-    assert.ok(stages[i].keep.reduce((a, b) => a + b) < stages[i - 1].keep.reduce((a, b) => a + b), 'and less forest');
+    // a hamlet and a village clear only their own ground; from FELL_FROM on a settlement thins the forest of its chunks
+    const k1 = stages[i].keep.reduce((a, b) => a + b), k0 = stages[i - 1].keep.reduce((a, b) => a + b);
+    if (stages[i].towns[0].R >= FELL_FROM) assert.ok(k1 < k0, 'and less forest'); else assert.equal(k1, k0, 'a village leaves the forest of its chunk alone');
   }
   const m = stages[4], t = m.towns[0];
   assert.ok(t.R < 1 && t.R > .7, `a city of its time is under two km across: ${t.R}`);
@@ -131,12 +133,17 @@ test('settle mirror and plan: the blocks are drawn from the state of the chunks'
     assert.ok(changed); assert.equal(lobes.length, 1); assert.equal(L.home, t.home);
     assert.ok(Math.abs(L.r - t.R) < .02 && Math.hypot(L.x - t.x, L.y - t.y) < .06, 'the patch is the settlement of the model');
     const gq = gridOf(t.x, t.y); assert.equal(out[gq * 4 + 2], radiusByte(t.R)); assert.equal(out[gq * 4 + 3], 200 + CULTURES.med);
-    assert.equal(out[(gq + 1) * 4 + 3], 1 + 3, 'the squares around know which one holds the patch'); assert.equal(out[(gq - GN) * 4 + 3], 1 + 7); assert.equal(out[(gq + 3) * 4 + 3], 0);
+    assert.equal(out[(gq + 1) * 4 + 3], 0, 'a settlement in the middle of its square is no business of the squares around'); assert.equal(out[(gq - GN) * 4 + 3], 0); assert.equal(out[(gq + 3) * 4 + 3], 0);
     const plan = rows(planLobe(L, S, env)); counts.push(plan.length);
     for (const r of plan) assert.ok(r[3] >= 0 && r[3] < KINDS.length && r[8] > 0 && r[8] <= 2 && r[9] > 0 && r[9] <= 2 && r[10] >= 0 && r[10] <= 1, `row ${r}`);
     for (const r of plan) assert.ok(Math.hypot(...centreOf(r).map((v, i) => v - [L.x, L.y][i])) < L.r + .6, 'a block far outside its patch');
   }
   for (let i = 1; i < counts.length; i++) assert.ok(counts[i] > counts[i - 1] * 1.3, `blocks by the size of the settlement: ${counts}`);
+  // a settlement by the edge of its square: the square its fields reach into knows of it, the others do not
+  { clear();
+    const m = growTowns(ch, [place(-200.6, 4405, 650000)], 1, at), t = m.towns[0]; ch.set('built', t.home, m.built[t.home]);
+    const out = blank(); mirrorSettle(ch, m.towns, out); const gq = gridOf(t.x, t.y);
+    assert.equal(out[(gq + 1) * 4 + 3], 1 + 3, 'the square to the east knows which one holds the patch'); assert.equal(out[(gq - 1) * 4 + 3], 0); assert.equal(out[(gq + GN) * 4 + 3], 0); }
   assert.ok(counts[0] >= 2 && counts[0] <= 12 && counts[4] > 200 && counts[4] < 500, `from a hamlet to a city: ${counts}`);
   // a chunk built up by a brush, with no model behind it: a patch in its middle, of the area of its built share, in its own manner
   clear();
@@ -215,5 +222,30 @@ test('settle classes: the mark of a settlement follows its people, as the owner 
   const { MARK_FROM, markSvg } = await import('../src/album/layers/labels.js');
   assert.ok(MARK_FROM[0] < 60 && MARK_FROM.every((h, i) => !i || h > MARK_FROM[i - 1]), 'villages are marked only from close by, greater places from higher');
   for (let c = 0; c < 5; c++) assert.match(markSvg(c), c === 0 ? /<circle/ : c === 3 ? /<rect/ : /<polygon/);
-  const ids = settle.pages.map(p => p.id); assert.ok(ids.includes('town-marks') && ids.includes('town-marks-near'));
+  const ids = settle.pages.map(p => p.id); assert.ok(ids.includes('town-marks') && ids.includes('town-marks-near') && ids.includes('town-districts') && ids.includes('town-districts-map'));
+});
+
+test('settle by districts: a settlement at the centre of every district — the album places keep their numbers, the rest follow', async () => {
+  const { centrePlaces, HAMLET_POP, fullRadius: fr } = await import('../src/album/town/grow.js');
+  // small places: a hamlet, a village, and no jump where the villages end
+  assert.ok(fr(100) === fr(300) && fr(300) < fr(1000) && fr(1000) < fr(5000) && fr(5000) < fr(15000));
+  assert.ok(Math.abs(fr(14999) - fr(15000)) < .002 && fr(HAMLET_POP) >= .04 && fr(HAMLET_POP) < .08, 'a hamlet is founded at full growth');
+  assert.ok(stageOf(fr(HAMLET_POP)) === 0 && stageOf(fr(15000)) === 1 && (await import('../src/album/town/rules.js')).classOf((await import('../src/album/town/rules.js')).peopleOf(fr(15000))) === 0, 'a place of 15 000 today was a village');
+  const base = [place(-205, 4405, 5e5), place(-305, 4455, 9e4)];
+  const sites = [{ pop: 5e5, name: 'А' }, { pop: 9e4, name: 'Б' }, { pop: 3000, name: 'Село' }];
+  // five districts: two stand on the album's places, one on a real village, one on bare ground, one is water
+  const div = { count: 5, kinds: [0, 0, 0, 0, 1], centres: { x: Float64Array.of(-205, -305, -250, -150, NaN), y: Float64Array.of(4405, 4455, 4480, 4380, NaN), site: Int32Array.of(0, 1, 2, -1, -1), texel: Int32Array.of(5, 6, 7, 8, -1) } };
+  const all = centrePlaces(base, div, sites);
+  assert.equal(all.length, 4); assert.equal(all[0], base[0]); assert.equal(all[1], base[1]);
+  assert.deepEqual([all[2].pop, all[2].name, all[2].district], [3000, 'Село', 2]); assert.deepEqual([all[3].pop, all[3].name, all[3].district], [HAMLET_POP, '', 3]);
+  const [x, y] = kmOf(all[2].lat, all[2].lon); assert.ok(Math.abs(x + 250) < 1e-6 && Math.abs(y - 4480) < 1e-6);
+  assert.deepEqual(centrePlaces(base, null), base); assert.deepEqual(centrePlaces(base, { count: 0, kinds: [] }), base);
+  // the model founds them all: the village is a village, the bare centre a hamlet, each in its own chunk
+  clear();
+  const m = growTowns(ch, all, 1, at);
+  assert.equal(m.towns.length, 4); assert.deepEqual(m.towns.map(t => t.index).sort(), [0, 1, 2, 3]);
+  const byIndex = Object.fromEntries(m.towns.map(t => [t.index, t]));
+  assert.ok(byIndex[3].R < byIndex[2].R && byIndex[2].R < byIndex[1].R && byIndex[1].R < byIndex[0].R);
+  assert.equal(byIndex[3].cls, 0); assert.equal(byIndex[2].cls, 0);
+  assert.equal(growTowns(ch, all, .5, at).towns.length, 3, 'at half growth the hamlet is not there yet');
 });

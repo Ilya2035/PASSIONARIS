@@ -22,20 +22,24 @@ export const markSvg = cls => { const s = SIZE[cls];
 
 export default async function init(album) {
   const box = document.createElement('div'); box.className = 'map-labels'; document.body.insertBefore(box, document.getElementById('ui'));
-  const items = album.data.vectors.places.map((pl, index) => {
+  const item = (pl, index) => {
     const el = document.createElement('div'); el.className = 'ml'; el.style.cssText = 'margin:-10px 0 0 -10px;height:20px;gap:0'; box.appendChild(el);
     return { pl, index, el, shown: false, cls: -1, lat: pl.lat, lon: pl.lon, r: 0, town: true };
-  });
+  };
+  let items = album.data.vectors.places.map(item), listed = album.data.vectors.places;
   const v = toWorld(0, 0), p = album.params; let tick = 0, model = null;
   // what the model of growth founded: where each place stands now, how large it is, of what class
   function sync() {
     const m = album.layers.towns?.model?.() || null; if (m === model) return; model = m;
+    // the list of places grows when the land is divided: a settlement at the centre of every district
+    const all = album.layers.towns?.places?.() || listed;
+    if (all !== listed) { for (const it of items) it.el.remove(); items = all.map(item); listed = all; }
     const by = new Map((m?.towns || []).map(t => [t.index, t]));
     for (const it of items) {
       const t = by.get(it.index), cls = t ? t.cls : classOf(it.pl.pop / 60);
-      it.town = !m || !!t; it.r = t ? t.R : 0;
+      it.town = (!m || !!t) && !!it.pl.name; it.r = t ? t.R : 0;                 // a hamlet without a name is not marked
       if (t) { const q = llOf(t.x, t.y); it.lat = q.lat; it.lon = q.lon; } else { it.lat = it.pl.lat; it.lon = it.pl.lon; }
-      if (cls !== it.cls) { it.cls = cls; it.el.innerHTML = `${markSvg(cls)}<span${cls ? '' : ' style="font-size:var(--fs-s);letter-spacing:.04em"'}>${it.pl.name}</span>`; it.svg = it.el.firstChild; it.span = it.el.lastChild; }
+      if (cls !== it.cls) { it.cls = cls; it.el.innerHTML = `${markSvg(cls)}<span${cls ? '' : ' style="font-size:var(--fs-s);letter-spacing:.04em"'}></span>`; it.svg = it.el.firstChild; it.span = it.el.lastChild; it.span.textContent = it.pl.name; }   // (a name is text, never markup)
     }
     items.sort((a, b) => b.cls - a.cls || b.pl.pop - a.pl.pop);     // the greater place takes the room first
   }
