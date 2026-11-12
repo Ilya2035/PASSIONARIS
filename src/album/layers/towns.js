@@ -65,14 +65,21 @@ export default async function init(album) {
 
   // ---- rivers as the settlements must know them: nothing stands on the ribbon of a river
   const segs = [], grid = new Map(), GC = 4;
-  for (const rv of album.data.vectors.rivers || []) {
+  const seg = (a, b, w) => {
+    const id = segs.length; segs.push([a[0], a[1], b[0], b[1], w]);
+    for (let gy = Math.floor((Math.min(a[1], b[1]) - 3) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + 3) / GC); gy++)
+      for (let gx = Math.floor((Math.min(a[0], b[0]) - 3) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + 3) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
+  };
+  if (album.data.courses) {                                         // the real courses, every bend of them, within reach of the places
+    const nearPlace = new Set(); for (const pl of places) { const [x, y] = kmOf(pl.lat, pl.lon); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) nearPlace.add((Math.floor(x / 8) + dx) * 100000 + Math.floor(y / 8) + dy); }
+    for (const rv of album.data.courses.rivers) {
+      let a = null;
+      for (let i = 0; i < rv.n; i++) { const b = kmOf(rv.ll[i * 2 + 1], rv.ll[i * 2]); if (a && rv.w[i] >= .004 && nearPlace.has(Math.floor(b[0] / 8) * 100000 + Math.floor(b[1] / 8))) seg(a, b, Math.max(rv.w[i], rv.w[i - 1])); a = b; }
+    }
+  } else for (const rv of album.data.vectors.rivers || []) {        // the coarse lines of Natural Earth: only a rank, not a width
     if (rv.pts.length <= 2) continue;
     const w = rv.rank <= 6 ? .2 : rv.rank <= 8 ? .12 : .07, pts = smoothLine(rv.pts, 1.2, 2).map(q => kmOf(q[1], q[0]));
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i], id = segs.length; segs.push([a[0], a[1], b[0], b[1], w]);
-      for (let gy = Math.floor((Math.min(a[1], b[1]) - 3) / GC); gy <= Math.floor((Math.max(a[1], b[1]) + 3) / GC); gy++)
-        for (let gx = Math.floor((Math.min(a[0], b[0]) - 3) / GC); gx <= Math.floor((Math.max(a[0], b[0]) + 3) / GC); gx++) { const key = gx * 100000 + gy; (grid.get(key) || grid.set(key, []).get(key)).push(id); }
-    }
+    for (let i = 1; i < pts.length; i++) seg(pts[i - 1], pts[i], w);
   }
   let riverMin = 0, riverK = 1;                                     // least width of a ribbon in km, and the «Ширина рек» knob
   const bank = (x, y, least, k) => {                                // km to the bank of the nearest river (negative on the water)
@@ -182,7 +189,7 @@ export default async function init(album) {
       U.set(S, blocks ? stand * stand * (3 - 2 * stand) : 0, u.uH.value, on ? 1 : 0);
       mesh.visible = blocks; if (!blocks) return;
       u.uS.value = S; u.u3D.value = U.y;
-      riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 2.2 * view / Math.max(1, dom.clientHeight);
+      riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 1.5 * view / Math.max(1, dom.clientHeight);
       const ck = `${S}|${mirrorN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${Math.round(h / 8)}`;
       if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.max(25, h * 2.5), S, ck); }
     } };

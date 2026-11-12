@@ -174,8 +174,9 @@ void main() {
       rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .28 * smoothstep(.3, .6, wet));          // lichen and moss
       ground = mix(ground, rockCol * texDetail(tRock, pk, px, pdx, pdy), rockW);
     }
-    float sandW = (1. - smoothstep(2., 9., hl)) * (1. - smoothstep(.015, .06, slope));
+    float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
     if (sandW > .004) ground = mix(ground, mix(vec3(.80, .72, .53), vec3(.27, .37, .20), smoothstep(.45, .62, wet)) * texDetail(tSand, pk, px, pdx, pdy), sandW);
+    ground = aspShore(p, ground, L.cover);                           // beaches and rocks at the waterline (the water work)
     L.col = ground;
 
     // the aspects paint over the bare ground in this order: wet ground, what people did, the forest
@@ -190,7 +191,7 @@ void main() {
     if (p.cB.g > .003) snowW = max(snowW, smoothstep(-.1, .1, p.cB.g * 1.3 - (n2 * .55 + n3 * .45)) * (1. - smoothstep(.85, 1.4, slope)) * (1. - .3 * cover));
     if (snowW > .004) land = mix(land, vec3(.93, .95, .99) * mix(vec3(1.), texDetail(tSnow, pk, px, pdx, pdy), .25), snowW);
     cover *= 1. - snowW;
-    land = pow(land, vec3(2.2));                                    // the palette above is written as seen on screen
+    land = pow(max(land, vec3(0.)), vec3(2.2));                     // the palette above is written as seen on screen
 
     vec3 light = sunCol * nl * sh * 1.25 + skyCol * (.4 + .6 * n.z) * ao;
     if (uStyle == 2) {                                              // atlas: tints by height, contour lines
@@ -214,7 +215,7 @@ void main() {
   vec3 sea = vec3(0.);
   if (h0 < 25.) sea = aspWater(p);
   float landA = clamp(h0 / max(fwidth(h0), 1e-3) + .5, 0., 1.);
-  vec3 col = mix(sea, land, landA);
+  vec3 col = landA <= 0. ? sea : (landA >= 1. ? land : mix(sea, land, landA));   // (a bad number on one side must not leak into the other)
 
   // ---- map modes drawn on the ground
   aspDivision(p, col, landA);

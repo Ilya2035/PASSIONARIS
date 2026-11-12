@@ -171,7 +171,7 @@ export default async function init(album) {
         float snowline = 2980. - (ll.x - 37.) * 55. + uSnow;
         float age = albumAge(cA.b, stand.y, st);
         // a tree for every share of canopy: all of them in closed forest, one here and there in a thinned stand; brush has none
-        float alive = step(r.y, stand.x) * step(.1, stand.x) * step(.06, age) * step(1.5, h) * step(hl, snowline - 150.);
+        float alive = step(r.y, stand.x) * step(.1, stand.x) * step(.06, age) * step(3.8, h) * step(hl, snowline - 150.);
         alive *= step(max(max(cC.g * 1.15, cC.r * 1.6), cA.a * .65), q.x);                           // no trees on fields and under houses, few in a swamp
         alive *= step(lakeShore(pk), -uLakeEdge);                                                    // and none in a lake or on its beach
         float rel = (hl - textureLod(tForestRise, (pk - uChunkRect.xy) * uChunkRect.zw, 0.).r * 4096.) / 300.;

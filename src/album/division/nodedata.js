@@ -4,6 +4,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { mercX, mercY } from '../geo.js';
+import { decodeCourses, mainRivers } from '../water/courses.js';
+import { fillHollows } from '../water/hollows.js';
 
 export function loadAlbumData(root) {
   const dir = join(root, 'public', 'album-data');
@@ -12,6 +14,7 @@ export function loadAlbumData(root) {
   if (!existsSync(join(dir, meta.base.file))) return null;
   const buf = gunzipSync(readFileSync(join(dir, meta.base.file)));
   const raw = new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength / 2);
+  fillHollows(raw, meta.base.w, meta.base.h);                       // as data.js does in the page
   const b = meta.base, n = 2 ** b.z, rect = [b.x0 / n, b.y0 / n, n * 256 / b.w, n * 256 / b.h];
   const at = (lat, lon) => {
     const x = Math.max(0, Math.min(b.w - 1.001, (mercX(lon) - rect[0]) * rect[2] * b.w - 0.5));
@@ -21,5 +24,8 @@ export function loadAlbumData(root) {
     return ((p * (1 - fx) + q * fx) * (1 - fy) + (r * (1 - fx) + s * fx) * fy) / 4 - 8192;
   };
   const vectors = JSON.parse(readFileSync(join(dir, 'vectors.json'), 'utf8'));
-  return { meta, base: { ...b, at }, vectors };
+  // the real courses of the rivers, as data.js gives them to the page
+  const rf = join(root, 'public', 'assets', 'album', 'water', 'rivers.bin.gz'); let courses = null;
+  if (existsSync(rf)) { const u = gunzipSync(readFileSync(rf)); courses = decodeCourses(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength)); vectors.riversCoarse = vectors.rivers; vectors.rivers = mainRivers(courses); }
+  return { meta, base: { ...b, at }, vectors, courses };
 }

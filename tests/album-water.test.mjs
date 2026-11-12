@@ -7,7 +7,11 @@ import { Chunks, CHANNELS, CHUNK_KM, CI0, llOf } from '../src/album/chunks.js';
 import water, { WATER_CORE, SHEET_FRAG, sheetPull, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
-import { riverLines, riverWidth } from '../src/album/layers/rivers.js';
+import { riverSheets, MIN_PX, SHOW } from '../src/album/layers/rivers.js';
+import { decodeCourses, encodeCourses, mainRivers, rankOf, widthCode, widthOf } from '../src/album/water/courses.js';
+import { statSync } from 'node:fs';
+import { fillHollows } from '../src/album/water/hollows.js';
+import { gunzipSync } from 'node:zlib';
 import { treeTop } from '../src/album/layers/forest.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS } from '../src/album/params.js';
@@ -23,8 +27,10 @@ const shoreAt = lat => chunks.at(lat, -2.74);                         // a point
 test('water: the channels of the chunk are the ones the docs name, and the aspect keeps its contract', () => {
   assert.equal(SEA_CHANNEL, 'spareB');
   for (const name of ['ice', 'snow', SEA_CHANNEL]) assert.equal(CHANNELS[name][0], 'B', `${name} is read as p.cB`);
-  assert.equal(water.uniforms, WATER_UNIFORMS);
-  assert.ok(Object.values(WATER_UNIFORMS).every(u => !u.value?.isTexture), 'the ground shader has no texture unit to spare: the water brings none');
+  for (const k of Object.keys(WATER_UNIFORMS)) assert.equal(water.uniforms[k], WATER_UNIFORMS[k]);
+  assert.ok(Object.values(WATER_UNIFORMS).every(u => !u.value?.isTexture), 'the sheets of lakes and rivers bring no texture');
+  assert.deepEqual(Object.keys(water.uniforms).filter(k => water.uniforms[k].value?.isTexture), ['tCoast'], 'one texture of its own in the ground shader: where the shore is a beach');
+  assert.match(water.glsl, /vec3 aspShore\(Px p, vec3 ground, inout float cover\)/);
   assert.ok(WATER_UNIFORMS.uWaterThaw.value.x === 0 && WATER_UNIFORMS.uWaterThaw.value.y === 0, 'no thaw until something thaws');
   assert.ok(!/texture\(|sampler/.test(WATER_CORE), 'and reads none of its own');
   assert.ok(!WATER_CORE.includes('cB.b'), 'flood is water over the land: the water never reads it');
@@ -168,30 +174,65 @@ test('water: lakes — a small open list of natural lakes with outlines inside t
   assert.equal(ringDistance(sq, 2, 2), 2); assert.equal(ringDistance(sq, 2, 5), -1); assert.equal(ringDistance(sq, -3, 2), -3); assert.ok(Math.abs(ringDistance(sq, 1, 2) - 1) < 1e-9);
 });
 
-test('water: rivers — wider by rank, growing from the source down, running downhill', () => {
-  assert.ok(riverWidth(5) > riverWidth(7) && riverWidth(7) > riverWidth(9) && riverWidth(9) > .2);
-  const line = (lon0, lat0, n) => Array.from({ length: n }, (_, i) => [lon0 + i * .05, lat0 + Math.sin(i) * .01]);
-  const hill = (lat, lon) => 900 + lon * 100;                           // the land falls to the west
-  const rivers = [{ name: 'A', rank: 5, pts: line(-6, 41, 40) }, { name: 'A', rank: 5, pts: line(-4.05, 41, 20) }, { name: 'B', rank: 9, pts: [[-1, 40], [-1, 40.01]] }];
-  const [a, b] = riverLines(rivers, hill);
-  assert.equal(riverLines(rivers, hill).length, 2, 'a line of two points is not a river');
-  assert.ok(a.pts[0][0] > a.pts[a.pts.length - 1][0], 'the line is turned to run from the high end to the low end');
-  assert.ok(!a.spring && b.spring, 'a piece that starts where another ends is not a source');
-  assert.ok(a.width.every(w => w === riverWidth(5)));
-  assert.ok(b.width[0] < b.width[b.width.length - 1] && b.width[b.width.length - 1] <= riverWidth(5) && b.width[0] > .2 * riverWidth(5));
-  assert.ok(b.dist.every((d, i) => !i || d > b.dist[i - 1]) && b.pts.length === b.width.length);
-  assert.ok(!a.mouth && a.fade.every(v => v === 1), 'a river that never meets the sea is drawn whole');
-  // the sea lies east of 3° W, with an island in it: the river stops at the shore and does not come out on the island
-  const coast = (lat, lon) => (lon < -3 ? 300 - lon : lon > -2.9 && lon < -2.8 ? 5 : -20);
-  const [m] = riverLines([{ name: 'M', rank: 6, pts: line(-4, 41, 40) }], coast), last = m.pts[m.pts.length - 1];
-  assert.ok(m.mouth && last[0] > -3.01 && last[0] < -2.95, `the mouth is at the shore, got ${last[0]}`);
-  assert.equal(m.fade[m.fade.length - 1], 0); assert.equal(m.fade[0], 1); assert.ok(m.fade.every((v, i) => !i || v <= m.fade[i - 1]));
+test('water: rivers — real courses with their width, drawn at their real size, ending at the sea', () => {
+  // a made-up file: a river running east that widens from 4 m to 150 m, and a dry brook that joins it
+  const mk = (name, lon0, lat0, n, w0, w1, flags = 0) => ({ name, ru: '', flags, acc: 500, lon: Array.from({ length: n }, (_, i) => Math.round((lon0 + i * .004) * 1e5)),
+    lat: Array.from({ length: n }, (_, i) => Math.round((lat0 + Math.sin(i * .5) * .002) * 1e5)), w: Array.from({ length: n }, (_, i) => w0 + (w1 - w0) * i / (n - 1)) });
+  const made = [mk('A', -4, 41, 120, .004, .15), mk('B', -3.9, 41.2, 30, .003, .006, 3)];
+  const c = decodeCourses(encodeCourses(made, { rule: [.002, .5] }));
+  assert.equal(c.rivers.length, 2); assert.deepEqual(c.rule, [.002, .5]);
+  const A = c.rivers[0], B = c.rivers[1];
+  assert.equal(A.n, 120); assert.ok(Math.abs(A.ll[0] + 4) < 1e-9 && Math.abs(A.ll[239] - made[0].lat[119] / 1e5) < 1e-9, 'points come back to a metre');
+  for (let i = 0; i < 120; i++) assert.ok(Math.abs(A.w[i] / made[0].w[i] - 1) < .017, 'a width comes back within its step of 3 %');
+  assert.ok(B.dry && B.joins && !A.dry && !A.joins);
+  assert.ok(widthOf(widthCode(.0015)) <= .0016 && widthOf(255) > 4 && widthCode(.1) > widthCode(.05));
+  // the greater rivers as plain lines: the head waters are left out, the pieces are of one rank each and wider downstream
+  const main = mainRivers(c, .012);
+  assert.ok(main.length >= 3 && main.every(l => l.name === 'A' && l.pts.length > 2 && l.width >= .012), 'the brook is not a main river');
+  assert.ok(main[0].rank > main[main.length - 1].rank && main[main.length - 1].rank === 5 && rankOf(.15) === 5 && rankOf(.005) === 9);
+  assert.ok(main[0].pts[0][0] > -3.99, 'the narrow head of the river is left out');
+  // the sheets: the way from the source grows, the bends are known, the source tapers in
+  const [a, b] = riverSheets(c, () => 300);
+  assert.equal(a.n, 120); assert.ok(a.dist.every((d, i) => !i || d > a.dist[i - 1]) && Math.abs(a.dist[119] - 119 * .004 * 111.195 * Math.cos(41 * Math.PI / 180)) < 1.5);
+  assert.ok(!a.mouth && a.fade[0] < .3 && a.fade[119] === 1 && b.dry, 'a river that never meets the sea is drawn to its end');
+  assert.ok(Math.max(...a.curv) > .2 && Math.min(...a.curv) < -.2, 'a winding river bends both ways');
+  // the sea lies east of 3.8° W, with an island in it: the river stops at the shore and does not come out on the island
+  const coast = (lat, lon) => (lon < -3.8 ? 300 : lon > -3.7 && lon < -3.69 ? 5 : -20);
+  const [m] = riverSheets(c, coast), last = m.ll[(m.n - 1) * 2];
+  assert.ok(m.mouth && last > -3.81 && last < -3.79, 'the mouth is at the shore, got ' + last);
+  assert.equal(m.fade[m.n - 1], 0); assert.ok(m.fade[m.n - 20] > 0);
+  assert.ok(MIN_PX >= 2 && MIN_PX <= 4 && SHOW[0] < SHOW[1] && SHOW[1] <= .2, 'from high up a great river keeps a few pixels and the brooks are left out');
+});
+
+test('water: the baked rivers of the region — thousands of kilometres of real courses, the great rivers the widest', () => {
+  const f = new URL('../public/assets/album/water/rivers.bin.gz', import.meta.url), u = gunzipSync(readFileSync(f));
+  assert.ok(u.length < 12e6 && statSync(f).size < 6e6, 'the file stays small enough for the repository');
+  const c = decodeCourses(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength));
+  assert.match(c.source, /OpenStreetMap/);
+  assert.ok(c.rivers.length > 800, c.rivers.length + ' rivers');
+  const widest = name => Math.max(0, ...c.rivers.filter(r => r.name === name || r.ru === name).map(r => Math.max(...r.w)));
+  for (const name of ['Эбро', 'Гвадалквивир', 'Гаронна', 'Тахо']) assert.ok(widest(name) > .1, name + ' is a great river: ' + widest(name));
+  for (const r of c.rivers) { assert.ok(r.n >= 3); for (let i = 0; i < r.n; i++) assert.ok(r.ll[i * 2] > -10.01 && r.ll[i * 2] < 4.51 && r.ll[i * 2 + 1] > 35.19 && r.ll[i * 2 + 1] < 44.81 && r.w[i] >= .0015); }
+  const main = mainRivers(c);
+  assert.ok(main.length > 200 && main.some(l => l.rank <= 5) && main.every(l => l.pts.length > 2));
+});
+
+test('water: a dip below sea level that the sea cannot reach is land; the sea and a large lagoon stay', () => {
+  const w = 40, h = 30, SEA = 32768, raw = new Uint16Array(w * h).fill(SEA + 400);
+  const put = (x0, y0, x1, y1, v) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) raw[y * w + x] = v; };
+  put(0, 0, 9, 29, SEA - 80);                 // the sea along the west edge
+  put(10, 14, 16, 14, SEA - 8);               // an inlet that the sea reaches
+  put(20, 5, 21, 6, SEA - 4);                 // a pond of four cells
+  put(25, 15, 36, 26, SEA - 12);              // a lagoon of 144 cells behind its bar
+  assert.equal(fillHollows(raw, w, h, 60), 4);
+  assert.equal(raw[5 * w + 20], SEA + 2); assert.equal(raw[14 * w + 16], SEA - 8); assert.equal(raw[20 * w + 30], SEA - 12); assert.equal(raw[3], SEA - 80);
+  assert.equal(fillHollows(raw, w, h, 60), 0, 'nothing left to raise');
 });
 
 test('water: the album shows it — pages for every state, from 20, 200 and 500 km, and knobs for the model', () => {
   const mine = PAGES.filter(p => water.pages.includes(p));
   assert.ok(mine.length >= 8, `${mine.length} water pages`);
-  for (const need of ['sea-delta', 'water-sea', 'water-ice', 'water-snow', 'water-thaw', 'water-lake', 'water-lake-ice', 'water-river', 'water-edge', 'water-edge-grid', 'water-20', 'water-200', 'water-500', 'water-pack-500', 'water-pack-far'])
+  for (const need of ['sea-delta', 'water-sea', 'water-ice', 'water-snow', 'water-thaw', 'water-lake', 'water-lake-ice', 'water-river', 'water-river-bends', 'water-river-50', 'water-river-200', 'water-river-500', 'coast-beach', 'coast-coves', 'coast-dunes', 'coast-200', 'water-edge', 'water-edge-grid', 'water-20', 'water-200', 'water-500', 'water-pack-500', 'water-pack-far'])
     assert.ok(mine.some(p => p.id === need), need);
   assert.equal(mine.find(p => p.id === 'water-20').cam.h, 20); assert.equal(mine.find(p => p.id === 'water-200').cam.h, 200); assert.equal(mine.find(p => p.id === 'water-500').cam.h, 500);
   assert.equal(mine.find(p => p.id === 'water-edge-grid').p.grid, 1); assert.ok(!mine.find(p => p.id === 'water-edge').p.grid);

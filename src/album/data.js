@@ -2,6 +2,8 @@
 import { DataTexture, RedFormat, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, RepeatWrapping,
   DataUtils, TextureLoader, SRGBColorSpace, NoColorSpace } from 'three';
 import { mercX, mercY } from './geo.js';
+import { loadCourses, mainRivers } from './water/courses.js';
+import { fillHollows } from './water/hollows.js';
 
 const BASE = 'album-data/';
 async function gunzipU16(url) {
@@ -24,6 +26,7 @@ export async function loadData(onProgress = () => {}) {
   const meta = await (await fetch(BASE + 'meta.json')).json();
   onProgress('высоты региона');
   const raw = await gunzipU16(BASE + meta.base.file);
+  fillHollows(raw, meta.base.w, meta.base.h);                       // dips below zero that the sea cannot reach are land, not ponds of sea
   const base = { ...meta.base, raw, rect: rectOf(meta.base), tex: heightTexture(raw, meta.base.w, meta.base.h) };
   // bilinear height in metres on the CPU (roads, towns, rivers, picking)
   base.at = (lat, lon) => {
@@ -35,6 +38,9 @@ export async function loadData(onProgress = () => {}) {
   };
   onProgress('реки и поселения');
   const vectors = await (await fetch(BASE + 'vectors.json')).json();
+  // the real courses of the rivers (the water work); those who only ask where a river runs get the greater ones as lines
+  const courses = await loadCourses('assets/album/water/rivers.bin.gz');
+  if (courses) { vectors.riversCoarse = vectors.rivers; vectors.rivers = mainRivers(courses); }
   onProgress('текстуры');
   const loader = new TextureLoader(), tex = {};
   await Promise.all((meta.textures || []).flatMap(t => [['diff', true], ...(t.normal ? [['nor', false]] : [])].map(([kind, srgb]) =>
@@ -52,5 +58,5 @@ export async function loadData(onProgress = () => {}) {
     details.set(id, d);
     return d;
   }
-  return { meta, base, vectors, tex, detail, places: meta.places };
+  return { meta, base, vectors, courses, tex, detail, places: meta.places };
 }

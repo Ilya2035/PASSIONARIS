@@ -11,7 +11,8 @@
 // texture of the water's own (it uses all 16), so it is worked out from the ice of the chunk and two numbers for the
 // whole sea, uWaterThaw, kept by the freeze model (layers/freeze.js).
 // One water for everything: WATER_CORE is the same code in the ground shader (the sea), in the lakes and in the rivers.
-import { Vector2 } from 'three';
+import { Vector2, DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
+import { COAST_N, COAST_X0, COAST_Y0, COAST_KM } from '../water/courses.js';
 import { lightUniforms } from '../glsl.js';
 import { treeTop } from '../layers/forest.js';
 
@@ -20,6 +21,17 @@ import { treeTop } from '../layers/forest.js';
 export const MELT_TOP = .92, MELT_SPAN = .14;
 // uWaterThaw.x: a thaw lies on all the ice, 0..1. uWaterThaw.y: the ice is in retreat, 0..1.
 export const WATER_UNIFORMS = { uWaterThaw: { value: new Vector2(0, 0) } };
+// The water's one texture in the ground shader: where the shore is a beach (water/courses.js, COAST_*). One empty
+// texel until the file is read.
+const coastTex = (data, n) => { const t = new DataTexture(data, n, n, RedFormat, UnsignedByteType); t.magFilter = t.minFilter = LinearFilter; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true; return t; };
+export const COAST_UNIFORMS = { tCoast: { value: coastTex(new Uint8Array(1), 1) } };
+async function loadCoast() {
+  try {
+    const r = await fetch('assets/album/water/coast.bin.gz'); if (!r.ok) return;
+    const u = new Uint8Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    if (u.length === COAST_N * COAST_N) COAST_UNIFORMS.tCoast.value = coastTex(u, COAST_N);
+  } catch { /* no beaches then: the shore is drawn without them */ }
+}
 
 export const WATER_CORE = /* glsl */`
 uniform vec2 uWaterThaw;
@@ -73,13 +85,14 @@ vec4 wTrain(vec2 wq, vec2 dir, float L, float t, float seed) {
 vec3 waterBody(float depth, int kind) {
   vec3 c;
   if (kind == 0) {
-    c = mix(vec3(.15, .50, .52), vec3(.04, .27, .42), smoothstep(0., 45., depth));
-    c = mix(c, vec3(.025, .12, .25), smoothstep(40., 1800., depth));
-    c = mix(vec3(.47, .61, .50), c, smoothstep(0., 4.5, depth));
+    c = mix(vec3(.16, .47, .50), vec3(.05, .28, .42), smoothstep(0., 15., depth));          // turquoise over the shallows only
+    c = mix(c, vec3(.032, .16, .30), smoothstep(10., 90., depth));
+    c = mix(c, vec3(.022, .11, .24), smoothstep(80., 1800., depth));
+    c = mix(vec3(.44, .61, .53), c, smoothstep(0., 1.5, depth));                            // the bottom shows only in the last metre
   } else {                                                          // fresh water: greener, darker, the bottom shows only at the edge
     if (kind == 1) c = mix(vec3(.13, .42, .42), vec3(.04, .215, .31), smoothstep(0., 16., depth));
-    else c = mix(vec3(.19, .45, .40), vec3(.06, .27, .32), smoothstep(0., 5., depth));       // a river carries silt: greener than a lake
-    c = mix(vec3(.50, .58, .44), c, smoothstep(0., kind == 1 ? 3.5 : 1.8, depth));
+    else c = mix(vec3(.27, .37, .30), vec3(.085, .195, .21), smoothstep(0., 5., depth));     // a river carries silt: duller and greener than a lake
+    c = mix(kind == 1 ? vec3(.50, .58, .44) : vec3(.47, .49, .37), c, smoothstep(0., kind == 1 ? 3.5 : 1.5, depth));
   }
   return c;
 }
@@ -97,7 +110,7 @@ vec3 waterLit(Wtr w) {
 
   // ---- waves: three sizes drawn out across the wind, each fading into roughness once it is smaller than a pixel
   float s0 = .012 + .075 * smoothstep(0., .5, st), s1 = .11 * smoothstep(.2, .75, st), s2 = .09 * smoothstep(.5, 1., st);
-  float f0 = 1. - smoothstep(.016, .04, px), f1 = 1. - smoothstep(.045, .11, px), f2 = 1. - smoothstep(.2, .5, px);
+  float f0 = 1. - smoothstep(.008, .019, px), f1 = 1. - smoothstep(.028, .062, px), f2 = 1. - smoothstep(.13, .29, px);
   vec2 wn = vec2(0.), crest = vec2(0.);
   if (f0 > 0.) wn += f0 * s0 * wTrain(wq, vec2(.946, .326), .075, t, 1.3).xy;
   if (f1 > 0. && s1 > .002) { vec4 tr = wTrain(wq, vec2(.978, -.208), .24, t, 7.3); wn += f1 * s1 * tr.xy; crest = tr.zw; }
@@ -132,7 +145,7 @@ vec3 waterLit(Wtr w) {
     }
   }
   if (w.surf < 2.) {
-    float surge = .7 + .9 * st, wd = max(.045 * surge, px * 2.2);     // the white line never thinner than a couple of pixels
+    float surge = .7 + .9 * st, wd = max(.02 * surge, px * 1.6);      // the white line never thinner than a pixel and a half
     float sf = smoothstep(wd, wd * .15, w.surf) * (.3 + .7 * wNoise(pk / .045 + t * .25)) * (.35 + .65 * smoothstep(.25, .6, wNoise(pk / .3 + t * .04)));
     sf += smoothstep(wd * 5., wd * 1.5, w.surf) * smoothstep(.55, .97, sin(w.surf / wd * 5.5 - t * 1.3 + wNoise(pk / .6) * 6.)) * .32 * smoothstep(.12, .03, px);   // rollers coming in
     foam = max(foam, sf * (1. - smoothstep(.15, .5, ice)));
@@ -318,6 +331,33 @@ export function sheetPull(album, cam) {
 
 const GLSL = /* glsl */`
 ${WATER_CORE}
+uniform sampler2D tCoast;
+// The shore: what the land is like where it meets the sea. Where OpenStreetMap knows a beach (tCoast) there is sand:
+// wet and dark at the waterline, pale above, and behind a long beach on a low shore dunes with thin grass. On a
+// rocky shore the beaches are small coves between headlands. Where there is no beach, dark wet rock at the
+// waterline. The band is a few tens of metres wide, as in life; from high up a beachy shore keeps a pale rim.
+// cover: the share under the crowns of the forest; no tree stands on the sand or within reach of the surf.
+vec3 aspShore(Px p, vec3 ground, inout float cover) {
+  if (p.hl > 14. || p.h < -2.) return ground;
+  cover *= smoothstep(1.2, 3.8, p.hl);
+  float beach = texture(tCoast, (p.pk - vec2(${COAST_X0}., ${COAST_Y0}.)) / ${COAST_KM}.).r;
+  float d = p.hl / max(p.slope, .006);                                // metres to the waterline, from the height and the slope
+  float near = smoothstep(.13, .035, p.px);                           // the band is drawn while it is about a pixel wide or more
+  float rim = (1. - near) * beach * (1. - smoothstep(1., 6., p.hl)) * .55;
+  if (near > 0.) {
+    float cove = wNoise(p.pk / .42 + 7.) * .6 + wNoise(p.pk / 1.7 + 3.) * .4;
+    float has = smoothstep(0., .22, beach * 1.5 + (cove - .56) * .7 * (1. - beach));     // a beachy shore is all beach, a rocky one has coves
+    float width = mix(24., 100., beach) * (.7 + .6 * wNoise(p.pk / .9 + 11.));           // metres of sand above the water
+    float sandBand = has * (1. - smoothstep(width * .7, width, d)) * (1. - smoothstep(.10, .24, p.slope));
+    float dune = has * beach * smoothstep(width * .8, width * 1.3, d) * (1. - smoothstep(width * 2.5, width * 5., d)) * (1. - smoothstep(.02, .06, p.slope));
+    float rockBand = (1. - has) * (1. - smoothstep(9., 26., d)) * smoothstep(.03, .09, p.slope);
+    if (dune > .003) ground = mix(ground, mix(vec3(.82, .76, .58), vec3(.50, .54, .32), smoothstep(.35, .7, wNoise(p.pk / .045 + 2.) * .6 + wNoise(p.pk / .19 + 5.) * .4)), dune * .8 * near);
+    if (rockBand > .003) ground = mix(ground, vec3(.35, .33, .30) * texDetail(tRock, p.pk, p.px, p.pdx, p.pdy), rockBand * .85 * near);
+    if (sandBand > .003) ground = mix(ground, mix(vec3(.60, .54, .40), vec3(.93, .87, .70), smoothstep(3., 14., d)) * texDetail(tSand, p.pk, p.px, p.pdx, p.pdy), sandBand * near);
+    cover *= 1. - near * max(sandBand, dune * .8);
+  }
+  return mix(ground, vec3(.84, .78, .60), rim);
+}
 vec3 aspWater(Px p) {
   Wtr w; w.pk = p.pk; w.V = p.V; w.day = p.day; w.sh = p.sh; w.sunCol = p.sunCol; w.skyCol = p.skyCol; w.cB = p.cB; w.kind = 0;
   w.px = (length(p.pdx) + length(p.pdy)) * .7;                       // measured along the ground: p.px jumps on the skirts between the levels of the grid
@@ -347,7 +387,7 @@ const G = 'Вода и свет';
 const bay = (lon, h, tilt = 0) => ({ lat: 44.1, lon, h, tilt, heading: 0 });
 
 export default {
-  id: 'water', title: 'Вода', glsl: GLSL, uniforms: WATER_UNIFORMS,
+  id: 'water', title: 'Вода', glsl: GLSL, uniforms: { ...WATER_UNIFORMS, ...COAST_UNIFORMS },
   params: [
     { key: 'rivers', label: 'Ширина рек', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
     { key: 'cold', label: 'Холод: лёд на воде', group: 'land', min: 0, max: 1, step: .02, value: 0, zero: 'льда нет' },
@@ -387,12 +427,20 @@ export default {
     { id: 'water-lake', group: G, title: 'Озёра летом', note: 'Озёра Ландов: та же вода, что в море, только пресная. У берега отмель и полоска пляжа, к середине глубже.', p: {}, cam: { lat: 44.42, lon: -1.16, h: 45, tilt: 40, heading: 0 } },
     { id: 'water-lake-ice', group: G, title: 'Те же озёра подо льдом', note: 'Озеро замерзает вместе со своим чанком, тем же льдом, что и море. По льду можно будет пройти.', p: { cold: .3, iceSnow: .35 }, cam: { lat: 44.42, lon: -1.16, h: 45, tilt: 40, heading: 0 } },
     { id: 'water-lake-20', group: G, title: 'Горное озеро с 20 км: Санабрия', note: 'Ледниковое озеро в лесу. На воде не растут деревья и не стоят дома.', p: {}, cam: { lat: 42.123, lon: -6.716, h: 20, tilt: 50, heading: 0 } },
-    { id: 'water-river', group: G, title: 'Река: русло, отмели, берега', note: 'Эбро у Сарагосы. Русло шире воды: поток ходит от берега к берегу и оставляет светлые отмели; у внешнего берега глубже и темнее. Ручка «Ширина рек» (раздел «Масштаб объектов»).', p: {}, cam: { lat: 41.66, lon: -.95, h: 24, tilt: 48, heading: 20 } },
-    { id: 'water-river-ice', group: G, title: 'Река подо льдом', note: 'Текущая вода замерзает позже стоячей, но тем же льдом.', p: { cold: .42, iceSnow: .3 }, cam: { lat: 41.66, lon: -.95, h: 24, tilt: 48, heading: 20 } },
-    { id: 'water-river-200', group: G, title: 'Реки с 200 км', note: 'С высоты река не тоньше нескольких пикселей: чем выше камера, тем шире она нарисована.', p: {}, cam: { lat: 41.65, lon: -.9, h: 200, tilt: 40, heading: 0 } },
+    { id: 'water-river', group: G, title: 'Река: настоящее русло и ширина', note: 'Эбро у Сарагосы, как он течёт на самом деле: русло взято из открытой карты OpenStreetMap, ширина — настоящая, около 150 м. Слева впадает Гальего, справа Уэрва. Вода лежит ниже берегов; берег, обращённый к солнцу, светлее. Ручка «Ширина рек» (раздел «Масштаб объектов») умножает ширину.', p: { labels: 0 }, cam: { lat: 41.66, lon: -.93, h: 20, tilt: 42, heading: 20 } },
+    { id: 'water-river-bends', group: G, title: 'Излучины: Тахо у Толедо', note: 'Каждая излучина настоящая. На внутренней стороне поворота светлая отмель, под внешним берегом глубже и темнее.', p: { labels: 0, forest3d: 0 }, cam: { lat: 39.86, lon: -4.03, h: 20, tilt: 35, heading: 0 } },
+    { id: 'water-river-ice', group: G, title: 'Река подо льдом', note: 'Текущая вода замерзает позже стоячей, но тем же льдом.', p: { cold: .42, iceSnow: .3, labels: 0 }, cam: { lat: 41.66, lon: -.93, h: 20, tilt: 42, heading: 20 } },
+    { id: 'water-river-50', group: G, title: 'Реки с 50 км: притоки и ручьи', note: 'С 50 км видна вся сеть: большая река, притоки, ручьи. Всё в настоящую величину; ручей не тоньше пикселя.', p: { labels: 0 }, cam: { lat: 42.1, lon: -1.5, h: 50, tilt: 30, heading: 0 } },
+    { id: 'water-river-200', group: G, title: 'Реки с 200 км', note: 'Обычная игровая высота. Большая река не тоньше двух-трёх пикселей, ручьи тоньше пикселя уже не рисуются: остаются реки, которые видно из космоса.', p: {}, cam: { lat: 41.65, lon: -.9, h: 200, tilt: 40, heading: 0 } },
+    { id: 'water-river-500', group: G, title: 'Реки с 500 км', note: 'Высота больших держав: Эбро, Дуэро, Тахо, Гвадиана, Гвадалквивир и их главные притоки.', p: {}, cam: { lat: 40.4, lon: -3.6, h: 500, tilt: 15, heading: 0 } },
+    // ---- the shore
+    { id: 'coast-beach', group: G, title: 'Берег: пляжи', note: 'Малага с 20 км. Песок лежит там, где пляжи есть на самом деле (открытая карта OpenStreetMap): полоса в несколько десятков метров, у воды мокрая и тёмная, выше светлая. Море синее от самого берега, бирюза только над настоящей отмелью.', p: { labels: 0 }, cam: { lat: 36.70, lon: -4.42, h: 20, tilt: 38, heading: 0 } },
+    { id: 'coast-coves', group: G, title: 'Скалистый берег: бухты', note: 'Коста-Брава с 20 км. На скалистом берегу пляжи малые — бухты между мысами; у воды тёмный мокрый камень и узкая полоса прибоя.', p: { labels: 0 }, cam: { lat: 41.75, lon: 3.0, h: 20, tilt: 38, heading: -60 } },
+    { id: 'coast-dunes', group: G, title: 'Низкий берег: длинный пляж и дюны', note: 'Ланды с 25 км: сплошной пляж на сотни километров, за ним дюны с редкой травой.', p: { labels: 0 }, cam: { lat: 44.3, lon: -1.25, h: 25, tilt: 38, heading: 90 } },
+    { id: 'coast-200', group: G, title: 'Берег с 200 км', note: 'С высоты песчаный берег остаётся светлой каймой, скалистый — тёмным.', p: {}, cam: { lat: 37.0, lon: -6.6, h: 200, tilt: 30, heading: 0 } },
   ],
   async init(album) {
-    const layers = [];
+    const layers = []; await loadCoast();
     for (const mod of [() => import('../layers/freeze.js'), () => import('../layers/lakes.js'), () => import('../layers/rivers.js')]) {
       try { layers.push(await (await mod()).default(album)); } catch (e) { console.warn('[album] water layer failed:', e.message); }
     }
