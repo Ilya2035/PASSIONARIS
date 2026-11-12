@@ -121,12 +121,12 @@ export function planLobe(L, S, env) {
 
 // every kind once in both manners of building, in rows around a point: the «витрина»
 const SHOW = { quarter: [.9, .9], quarterU: [.9, .9], quarterL: [.9, .9], palace: [.9, .9], rows: [.9, .84], lanes: [.9, .86], terrace: [.88, .88], cluster: [.84, .84], farm: [.76, .68], villa: [.8, .7], house: [.52, .3], tower: [.4, .4],
-  temple: [.94, .94], market: [.96, .96], fort: [1.3, 1.3, 1.3], mill: [.5, .5], pier: [.9, .5], site: [.8, .8] };
+  temple: [.94, .94], market: [.96, .96], fort: [1.3, 1.3, 1.3], mill: [.5, .5], pier: [.9, .5], site: [.8, .8], yard: [.9, .8], longyard: [.9, .7], cot: [.7, .6] };
 export function planShowcase(x, y, gap) {
-  const out = [], names = Object.keys(SHOW), cols = 9;
+  const out = [], names = Object.keys(SHOW), cols = 11, rows = Math.ceil(names.length / cols);
   for (let c = 0; c < 2; c++) names.forEach((name, n) => {
-    const col = n % cols, row = Math.floor(n / cols) + c * 2, s = SHOW[name];
-    out.push(x + (col - (cols - 1) / 2) * gap, y + (1.5 - row) * gap, 0, KIND[name], 0, 0, 0, c ? FLAG_ATL : 0, s[0], s[1], (n * .37 + .2) % 1, s[2] || 1);
+    const col = n % cols, row = Math.floor(n / cols) + c * rows, s = SHOW[name];
+    out.push(x + (col - (cols - 1) / 2) * gap, y + (rows - .5 - row) * gap, 0, KIND[name], 0, 0, 0, c ? FLAG_ATL : 0, s[0], s[1], (n * .37 + .2) % 1, s[2] || 1);
   });
   return out;
 }

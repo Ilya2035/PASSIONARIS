@@ -5,21 +5,25 @@
 // drawn before the land so that under a roof the costly ground is never worked out. The model of growth
 // (town/grow.js) turns the places of the map and the «Рост городов» knob into the state of the chunks: houses,
 // fields, felled forest. Places are today's cities (Natural Earth) as stand-ins: the game has no peoples yet.
-import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter } from 'three';
+// Among the fields stand single yards (town/yards.js): the same blocks in a second mesh, one more draw call.
+import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
 import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine } from './ribbon.js';
-import { cellSize, cultureAt, CELL, PALETTE_GLSL } from '../town/rules.js';
+import { roadLine } from '../roads/routes.js';
+import { cellSize, cultureAt, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle } from '../town/state.js';
-import { buildShapes, SLOTS, KINDS } from '../town/shapes.js';
+import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
+import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
 
-const MAX_BLOCKS = 40000;
+const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
 const VERT = /* glsl */`${COMMON}
   attribute vec4 aA, aB, aC;        // site x, y (flat km), turn of the lattice, kind · cell i, j, own turn, flags · size x, y, tint, height
   uniform sampler2D tShapes; uniform float uS, uH, u3D, uLod;
+  uniform vec4 uYard;               // yards among the fields: the point the camera looks at (flat km), how far from it they stand (0 = everywhere), their size ×
   varying vec3 vN, vW, vL; varying vec4 vM;
   void main() {
     int slot = int(position.x + .5), kind = int(aA.w + .5);
@@ -27,11 +31,12 @@ const VERT = /* glsl */`${COMMON}
     vec3 lp = vec3((sa.xy - 128.) / 200., (sa.z - 16.) / 400.), ln = sb.xyz * (255. / 127.) - 128. / 127.;
     float cs = cos(aA.z), sn = sin(aA.z), ra = aA.z + aB.z, cr = cos(ra), sr = sin(ra);
     vec2 centre = aA.xy + vec2(cs * aB.x - sn * aB.y, sn * aB.x + cs * aB.y) * uS;        // the lattice grows with the camera height
-    vec2 lxy = lp.xy * aC.xy * uS, pkv = centre + vec2(cr * lxy.x - sr * lxy.y, sr * lxy.x + cr * lxy.y);
+    float grow = uYard.w * (uYard.z > 0. ? 1. - smoothstep(.75 * uYard.z, uYard.z, distance(centre, uYard.xy)) : 1.);   // far yards shrink to nothing: no ring where they end
+    vec2 lxy = lp.xy * aC.xy * uS * grow, pkv = centre + vec2(cr * lxy.x - sr * lxy.y, sr * lxy.x + cr * lxy.y);
     vec2 llc = vec2(centre.y / KM, centre.x / (KM * COSREF)), llv = vec2(pkv.y / KM, pkv.x / (KM * COSREF));
-    float show = max(step(1.5, aB.w), step(.6, heightLod(llc, 0.)));                    // never on water (a pier may reach over it)
+    float show = max(step(1.5, aB.w), step(.6, heightLod(llc, 0.))) * step(.02, grow);  // never on water (a pier may reach over it)
     float hv = max(heightLod(llv, uLod), 0.) * uExag / 1000.;                            // every corner stands on the relief
-    vW = worldOf(llv, hv + lp.z * uS * uH * aC.w * (lp.z > 0. ? u3D : 1.) + .0015);
+    vW = worldOf(llv, hv + lp.z * uS * uH * aC.w * (lp.z > 0. ? u3D : 1.) * grow + .0015);
     vN = vec3(cr * ln.x - sr * ln.y, sr * ln.x + cr * ln.y, ln.z);
     vM = vec4(mod(sa.w, 16.), floor(sa.w / 16.), sb.a * 1.5, aC.z);
     vL = vec3(abs(ln.x) > abs(ln.y) ? lp.y : lp.x, lp.z, mod(aB.w, 2.));
@@ -131,7 +136,7 @@ export default async function init(album) {
   function mirror() {
     const r = mirrorSettle(ch, model.towns);
     if (!r.changed && mirrorN) return;
-    lobes = r.lobes; mirrorN++; settleTex.needsUpdate = true;
+    lobes = r.lobes; mirrorN++; settleTex.needsUpdate = true; yctx.patches = patchIndex(lobes);
   }
 
   // ---- the blocks: one geometry, one material, one draw call
@@ -140,25 +145,72 @@ export default async function init(album) {
   const slots = new Float32Array(SLOTS * 3); for (let i = 0; i < SLOTS; i++) slots[i * 3] = i;
   const mat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG,
     uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T),
-      tShapes: { value: tShapes }, uS: { value: CELL }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 } } });
-  const mesh = new Mesh(new InstancedBufferGeometry(), mat); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
-  mesh.renderOrder = -100;                                          // before the land: under a roof the costly ground shader is never run
-  let cap = 0, count = 0, real = 0;
-  function fill(rows) {
-    const n = Math.min(MAX_BLOCKS, rows.length / ROW);
-    if (n > cap || !cap) {                                          // the buffers grow by doubling; a small map never pays for a big one
-      cap = Math.max(1024, 2 ** Math.ceil(Math.log2(n)));
-      mesh.geometry.dispose();
-      const g = mesh.geometry = new InstancedBufferGeometry();
-      g.setAttribute('position', new BufferAttribute(slots, 3));
-      for (const name of ['aA', 'aB', 'aC']) g.setAttribute(name, new InstancedBufferAttribute(new Float32Array(cap * 4), 4));
+      tShapes: { value: tShapes }, uS: { value: CELL }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 }, uYard: { value: new Vector4(0, 0, 0, 1) } } });
+  // a set of blocks: one mesh, every block an instance of the same strip of corners. Yards are light, so their strip is shorter.
+  function blockSet(material, strip, most) {
+    const mesh = new Mesh(new InstancedBufferGeometry(), material); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
+    mesh.renderOrder = -100;                                        // before the land: under a roof the costly ground shader is never run
+    const set = { mesh, cap: 0, count: 0, real: 0,
+      fill(rows) {
+        const n = Math.min(most, rows.length / ROW);
+        if (n > set.cap || !set.cap) {                              // the buffers grow by doubling; a small map never pays for a big one
+          set.cap = Math.max(1024, 2 ** Math.ceil(Math.log2(n)));
+          mesh.geometry.dispose();
+          const g = mesh.geometry = new InstancedBufferGeometry();
+          g.setAttribute('position', new BufferAttribute(strip, 3));
+          for (const name of ['aA', 'aB', 'aC']) g.setAttribute(name, new InstancedBufferAttribute(new Float32Array(set.cap * 4), 4));
+        }
+        const g = mesh.geometry, A = g.attributes.aA.array, B = g.attributes.aB.array, C = g.attributes.aC.array;
+        set.real = 0;
+        for (let i = 0; i < n; i++) { const o = i * ROW, q = i * 4;
+          A[q] = rows[o]; A[q + 1] = rows[o + 1]; A[q + 2] = rows[o + 2]; A[q + 3] = rows[o + 3]; B[q] = rows[o + 4]; B[q + 1] = rows[o + 5]; B[q + 2] = rows[o + 6]; B[q + 3] = rows[o + 7];
+          C[q] = rows[o + 8]; C[q + 1] = rows[o + 9]; C[q + 2] = rows[o + 10]; C[q + 3] = rows[o + 11]; set.real += shapes.tris[rows[o + 3]]; }
+        g.instanceCount = set.count = n; for (const name of ['aA', 'aB', 'aC']) g.attributes[name].needsUpdate = true;
+      } };
+    return set;
+  }
+  const town = blockSet(mat, slots, MAX_BLOCKS), mesh = town.mesh, fill = town.fill;
+  // ---- yards among the fields (town/yards.js): the same blocks, the same shader, a mesh of their own
+  const ySlots = Math.max(...YARD_KINDS.map(k => shapes.tris[KIND[k]])) * 3;
+  const ymat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { ...mat.uniforms, uYard: { value: new Vector4(0, 0, 0, 1) } } });
+  const yard = blockSet(ymat, slots.subarray(0, ySlots * 3), MAX_YARDS);
+  // roads as the yards must know them: no yard stands on a road
+  let roadSeen = null, roadN = 0, rsegs = [], rgrid = new Map(); const RC = 2;
+  function indexRoads() {
+    rsegs = []; rgrid = new Map(); roadSeen = album.roadNet || null; roadN++;
+    for (const l of roadSeen?.lines || []) {
+      const pts = smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0]));       // the line as the road layer draws it
+      for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], id = rsegs.length / 4; rsegs.push(a[0], a[1], b[0], b[1]);
+        for (let gy = Math.floor((Math.min(a[1], b[1]) - .2) / RC); gy <= Math.floor((Math.max(a[1], b[1]) + .2) / RC); gy++)
+          for (let gx = Math.floor((Math.min(a[0], b[0]) - .2) / RC); gx <= Math.floor((Math.max(a[0], b[0]) + .2) / RC); gx++) { const key = gx * 100000 + gy; (rgrid.get(key) || rgrid.set(key, []).get(key)).push(id); } }
     }
-    const g = mesh.geometry, A = g.attributes.aA.array, B = g.attributes.aB.array, C = g.attributes.aC.array;
-    real = 0;
-    for (let i = 0; i < n; i++) { const o = i * ROW, q = i * 4;
-      A[q] = rows[o]; A[q + 1] = rows[o + 1]; A[q + 2] = rows[o + 2]; A[q + 3] = rows[o + 3]; B[q] = rows[o + 4]; B[q + 1] = rows[o + 5]; B[q + 2] = rows[o + 6]; B[q + 3] = rows[o + 7];
-      C[q] = rows[o + 8]; C[q + 1] = rows[o + 9]; C[q + 2] = rows[o + 10]; C[q + 3] = rows[o + 11]; real += shapes.tris[rows[o + 3]]; }
-    g.instanceCount = count = n; for (const name of ['aA', 'aB', 'aC']) g.attributes[name].needsUpdate = true;
+  }
+  const roadAt = (x, y) => {                                        // km to the nearest road (only roads within 200 m are found)
+    let best = 1e9;
+    for (const id of rgrid.get(Math.floor(x / RC) * 100000 + Math.floor(y / RC)) || []) {
+      const o = id * 4, ax = rsegs[o], ay = rsegs[o + 1], dx = rsegs[o + 2] - ax, dy = rsegs[o + 3] - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+      best = Math.min(best, Math.hypot(x - ax - dx * t, y - ay - dy * t));
+    }
+    return best;
+  };
+  const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, fields: c => ch.get('fields', c), culture: c => Math.round(ch.get('culture', c) * 255),
+    patches: new Map(), env: { ...env, road: roadAt }, density: 1, S: CELL };
+  let yKey = '', yCacheKey = ''; const yCache = new Map(), TKM = YARD_TILE * YARD_STEP;
+  function rebuildYards(tx, ty, D, ck) {
+    if (ck !== yCacheKey) { yCache.clear(); yCacheKey = ck; }
+    const ci = Math.floor((tx - GX0) / TKM), cj = Math.floor((ty - GY0) / TKM), n = Math.ceil(D / TKM) + 1, tiles = [];
+    for (let dj = -n; dj <= n; dj++) for (let di = -n; di <= n; di++) {
+      const d = Math.hypot(GX0 + (ci + di + .5) * TKM - tx, GY0 + (cj + dj + .5) * TKM - ty);
+      if (d < D) tiles.push([d, ci + di, cj + dj]);
+    }
+    tiles.sort((a, b) => a[0] - b[0]);                              // the nearest first: if there are too many yards, the far ones are left out
+    const parts = []; let total = 0;
+    for (const [, ti, tj] of tiles) {
+      const key = tj * 100000 + ti; let rows = yCache.get(key); if (!rows) { rows = planYards(yctx, ti, tj); yCache.set(key, rows); }
+      if (rows.length) { parts.push(rows); total += rows.length; if (total >= MAX_YARDS * ROW) break; }
+    }
+    const all = new Float32Array(total); let o = 0; for (const r of parts) { all.set(r, o); o += r.length; }
+    yard.fill(all);
   }
   let planKey = '', cacheKey = ''; const cache = new Map();
   function rebuild(tx, ty, D, S, ck) {
@@ -175,8 +227,10 @@ export default async function init(album) {
   const U = settleUniforms.uSettle.value, u = mat.uniforms;
   const layer = { id: 'towns', kinds: KINDS,
     // numbers for the notes of this part (docs/album/settle.md)
-    stats: () => ({ blocks: count, triangles: real, slots: count * SLOTS / 3, drawCalls: mesh.visible ? 1 : 0, patches: lobes.length, towns: model.towns.length,
-      shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: cap * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
+    stats: () => ({ blocks: town.count, triangles: town.real, slots: town.count * SLOTS / 3, drawCalls: (mesh.visible ? 1 : 0) + (yard.mesh.visible ? 1 : 0), patches: lobes.length, towns: model.towns.length,
+      yards: yard.mesh.visible ? yard.count : 0, yardTriangles: yard.mesh.visible ? yard.real : 0, yardCorners: yard.mesh.visible ? yard.count * ySlots : 0,
+      shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: (town.cap + yard.cap) * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
+    yardContext: () => yctx,
     model: () => model,
     places: () => places,
     update(dt, t, cam) {
@@ -195,16 +249,26 @@ export default async function init(album) {
       if (p.get('showcase')) {                                      // every kind in rows around the point the camera looks at, far larger than life
         const Ss = h * .05, key = `show|${Ss.toFixed(3)}|${tx.toFixed(1)},${ty.toFixed(1)}`;
         if (key !== planKey) { planKey = key; fill(planShowcase(tx, ty, Ss * 1.45)); }
-        u.uS.value = Ss; u.u3D.value = 1; mesh.visible = true; U.set(S, 0, u.uH.value, 0);
+        u.uS.value = Ss; u.u3D.value = 1; mesh.visible = true; yard.mesh.visible = false; U.set(S, 0, u.uH.value, 0);
         return;
       }
       const blocks = on && kH > 0 && stand > 0;
       U.set(S, blocks ? stand * stand * (3 - 2 * stand) : 0, u.uH.value, on ? 1 : 0);
-      mesh.visible = blocks; if (!blocks) return;
+      const yk = p.get('yards') ?? 1, yards = blocks && yk > 0;
+      mesh.visible = blocks; yard.mesh.visible = yards; if (!blocks) return;
       u.uS.value = S; u.u3D.value = U.y;
       riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 1.5 * view / Math.max(1, dom.clientHeight);
       const ck = `${S}|${mirrorN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${Math.round(h / 8)}`;
       if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.max(25, h * 2.5), S, ck); }
+      if (!yards) return;
+      // yards stand around the point the camera looks at, as far as they can be told from the ground; as the camera
+      // rises they shrink to nothing together with the blocks of the settlements
+      if ((album.roadNet || null) !== roadSeen) indexRoads();
+      const D = Math.min(72, Math.max(20, 4 * Math.ceil(h * 1.5 / 4))), ax = Math.round(tx / 4) * 4, ay = Math.round(ty / 4) * 4;
+      yctx.density = yk; yctx.S = S;
+      const yck = `${ck}|${seen}|${yk}|${roadN}`, ykey = `${yck}|${ax},${ay}|${D}`;
+      if (ykey !== yKey) { yKey = ykey; rebuildYards(ax, ay, D, yck); }
+      ymat.uniforms.uYard.value.set(tx, ty, D - 5.7, U.y);
     } };
   return layer;
 }

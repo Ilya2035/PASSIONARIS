@@ -85,6 +85,8 @@ class Shape {
 
 // ---- the kinds. Order = row in the texture = `kind` of an instance.
 const S = () => new Shape();
+// the plot of a yard: one flat face just over the ground, the whole footprint
+const plot = s => s.quad([-.5, -.5, .0025], [.5, -.5, .0025], [.5, .5, .0025], [-.5, .5, .0025], [0, 0, 1], MAT.plot, 1, 2);
 const DEFS = [
   // квартал: four wings of houses of different heights around an inner court
   ['quarter', 'Квартал с двором', () => S()
@@ -216,6 +218,23 @@ const DEFS = [
     .box(-.5, -.3, .1, .5, .15, { lid: false })
     .pyramid(-.5, -.3, .1, .5, .15, .2, MAT.roof, 1)
     .box(.1, -.3, .5, .3, .05, { top: MAT.roof, faces: 'nse', v: 2 })],
+  // ---- yards that stand alone among the fields (town/yards.js): light ones, there are thousands of them. No
+  // ground is painted under them, so each brings its own plot: the beds of a kitchen garden and trodden earth
+  // двор: a house, a shed under a single slope at a right angle to it, a haystack, a piece of the yard wall
+  ['yard', 'Двор среди полей', () => plot(S())
+    .bar(-.42, .08, .14, .4, .07, { v: 0 })
+    .leanto(.2, -.3, .4, .4, .03, .06, 'e', { v: 2 })
+    .cone(-.18, -.2, .09, 0, .075, 5, MAT.hay)
+    .box(-.5, -.5, .5, -.47, .02, { top: MAT.fence, side: MAT.fence, faces: 's', open: .9 })],
+  // длинный дом: people and cattle under one long roof, a lean-to along it, a haystack
+  ['longyard', 'Длинный дом', () => plot(S())
+    .bar(-.44, -.02, .44, .32, .065, { v: 1 })
+    .leanto(-.28, -.24, .2, -.02, .028, .05, 'n', { v: 3 })
+    .cone(.33, -.28, .08, 0, .07, 5, MAT.hay)],
+  // дом среди полей: one house with a low annex in the corner of its garden
+  ['cot', 'Дом среди полей', () => plot(S())
+    .bar(-.36, 0, .2, .34, .07, { rise: .045, v: 0 })
+    .box(.2, .06, .4, .34, .04, { top: MAT.roof, faces: 'nse', v: 1 })],
 ];
 
 export const KINDS = DEFS.map(d => d[0]);

@@ -173,8 +173,9 @@ float setCell(ivec2 id, vec2 site, float r, float cs, float sn, float cul, int k
 
 // ---- the colours of buildings, one list for the blocks and for the roofs painted on the ground. As seen on screen,
 // before light. m: 0 pitched roof · 1 flat roof · 2 wall · 3 dressed stone · 4 timber · 5 cloth · 6 hay and sand ·
-// 7 dark opening · 8 yard wall · 9 boat. atl: 0 Mediterranean (tile, whitewash) .. 1 Atlantic (slate, thatch, granite)
-export const MAT = { roof: 0, flat: 1, wall: 2, stone: 3, timber: 4, cloth: 5, hay: 6, dark: 7, fence: 8, hull: 9 };
+// 7 dark opening · 8 yard wall · 9 boat · 10 the plot of a yard among the fields. atl: 0 Mediterranean (tile, whitewash)
+// .. 1 Atlantic (slate, thatch, granite)
+export const MAT = { roof: 0, flat: 1, wall: 2, stone: 3, timber: 4, cloth: 5, hay: 6, dark: 7, fence: 8, hull: 9, plot: 10 };
 export const PALETTE_GLSL = /* glsl */`
 vec3 settleMat(int m, float atl, float t) {
   if (m == 0) {
@@ -191,6 +192,10 @@ vec3 settleMat(int m, float atl, float t) {
   if (m == 6) return vec3(.74, .65, .42);
   if (m == 7) return vec3(.22, .19, .17);
   if (m == 8) return mix(vec3(.67, .61, .51), vec3(.46, .46, .43), atl);
+  if (m == 10) {                                                                             // beds of a kitchen garden, trodden earth between them
+    float bed = fract(t * 2.7);
+    return mix(bed < .45 ? vec3(.47, .53, .28) : bed < .7 ? vec3(.60, .52, .36) : vec3(.66, .60, .46), bed < .6 ? vec3(.40, .49, .25) : vec3(.50, .49, .36), atl) * (.95 + .08 * fract(t * 7.));
+  }
   return vec3(.38, .30, .23);
 }
 `;

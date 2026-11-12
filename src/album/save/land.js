@@ -100,10 +100,35 @@ export function landBytes(sections) {
     roads: size('land/roads'), exceptions: sum(['land/x.of', 'land/x.chunk', 'land/x.kind', 'land/x.value']) };
 }
 
+// The farmsteads of the album as such a save keeps them (town/yards.js draws them). The album has no chunks of
+// 1 km² yet, so the square kilometres of its own lattice stand in for them: the lattice begins at (x0, y0) and is
+// n squares wide and high. yards: [{ kx, ky, slot }] — the square of a yard (whole numbers on that lattice) and its
+// place in it. districtOf(x, y) → the district of a point (−1 none); isLand(d); order(x, y) → a number, the smaller
+// the earlier the land at the point is taken up. A square belongs to the district its middle lies in; a square whose
+// middle lies in the sea belongs to the district of its first yard.
+// → [{ district, chunk, slot }], chunk = the number of the square in the order its district takes up its land
+export function farmsteadsOfAlbum(yards, { districtOf, isLand, order, x0, y0, n }) {
+  const mid = k => [x0 + k % n + .5, y0 + Math.floor(k / n) + .5], owner = new Map(), lists = new Map();
+  const list = d => lists.get(d) || lists.set(d, []).get(d);
+  for (const y of yards) {
+    const k = y.ky * n + y.kx; if (owner.has(k)) continue;
+    let d = districtOf(...mid(k)), stray = false;
+    if (!(d >= 0 && isLand(d))) { d = districtOf(x0 + y.kx + (y.slot % 4 + .5) / 4, y0 + y.ky + (Math.floor(y.slot / 4) + .5) / 4); stray = true; }
+    owner.set(k, d >= 0 && isLand(d) ? d : -1);
+    if (owner.get(k) >= 0) { const l = list(d); if (stray) l.push([order(...mid(k)), k]); }
+  }
+  for (let k = 0; k < n * n; k++) { const m = mid(k), d = districtOf(m[0], m[1]); if (lists.has(d)) lists.get(d).push([order(m[0], m[1]), k]); }
+  const rank = new Map();
+  for (const l of lists.values()) { l.sort((a, b) => a[0] - b[0] || a[1] - b[1]); l.forEach((e, r) => rank.set(e[1], r)); }
+  const out = [];
+  for (const y of yards) { const k = y.ky * n + y.kx, d = owner.get(k); if (d >= 0) out.push({ district: d, chunk: rank.get(k), slot: y.slot }); }
+  return out;
+}
+
 // The world of the album as such a save sees it. div: the division with its chunks; model: growTowns();
 // places: what the model was given; legs: roadNetwork().legs (kind 0 main, 1 lesser, 2 track, 3 no road);
-// districtOf(x, y) → the district of a point; cultureOf(place) → a number
-export function landOfAlbum({ ch, div, model, places, legs, districtOf, cultureOf = () => 1 }) {
+// districtOf(x, y) → the district of a point; cultureOf(place) → a number; farmsteads: farmsteadsOfAlbum()
+export function landOfAlbum({ ch, div, model, places, legs, districtOf, cultureOf = () => 1, farmsteads = [] }) {
   const D = div.count, sum = Array.from({ length: D }, () => [0, 0, 0, 0]);
   for (let d = 0; d < D; d++) for (const k of div.chunks[d]) { const a = ch.area[k], s = sum[d]; s[0] += a; s[1] += a * model.keep[k]; s[2] += a * model.fields[k]; s[3] += a * model.built[k]; }
   const districts = sum.map(s => ({ forest: s[0] ? s[1] / s[0] : 1, fields: s[0] ? s[2] / s[0] : 0, pasture: 0, built: s[0] ? s[3] / s[0] : 0, burnt: 0, age: 0 }));
@@ -113,6 +138,5 @@ export function landOfAlbum({ ch, div, model, places, legs, districtOf, cultureO
     const structures = (t.R >= .22 ? 2 : 0) | (t.R >= .4 ? 4 : 0) | (t.R >= .7 ? 8 : 0);            // a temple, a market, a fort: what the plan builds at these sizes
     settlements.push({ district: d, site: taken[d]++, people: t.people, structures, culture: cultureOf(places[t.index]), founded: 0 });   // site 0 is the centre of the district
   }
-  // (the album draws no farmsteads among its fields yet: the list is empty)
-  return { districts, settlements, farmsteads: [], roads: legs.map(l => (l.kind === 0 ? 3 : l.kind === 1 ? 2 : l.kind === 2 ? 1 : 0)), exceptions: [] };
+  return { districts, settlements, farmsteads, roads: legs.map(l => (l.kind === 0 ? 3 : l.kind === 1 ? 2 : l.kind === 2 ? 1 : 0)), exceptions: [] };
 }

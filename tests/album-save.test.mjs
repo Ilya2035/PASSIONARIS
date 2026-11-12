@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packLand, unpackLand, landBytes, landOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS } from '../src/album/save/land.js';
+import { packLand, unpackLand, landBytes, landOfAlbum, farmsteadsOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS } from '../src/album/save/land.js';
 import { encodeSave, decodeSave } from '../src/save/saveSystem.js';
 import { Chunks, kmOf, FN, FKM } from '../src/album/chunks.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
@@ -14,6 +14,8 @@ import { districtCentres } from '../src/album/division/centres.js';
 import { roadNetwork } from '../src/album/roads/routes.js';
 import { decodeSites } from '../src/album/town/sites.js';
 import { growTowns, centrePlaces } from '../src/album/town/grow.js';
+import { cultureAt, GX0, GY0 } from '../src/album/town/rules.js';
+import { allYards, patchIndex, yardPlace, takenOrder } from '../src/album/town/yards.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,7 +79,13 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   const at = (x, y) => data.base.at(y / 111.195, x / (111.195 * Math.cos(40 * Math.PI / 180)));
   const districtOf = (x, y) => { const tx = Math.floor((x + 880) / FKM), ty = Math.floor((y - 3880) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FN ? -1 : div.cells[ty * FN + tx]; };
   let landKm2 = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) landKm2 += div.area[d];
-  const model = growTowns(ch, places, 1, at), world = landOfAlbum({ ch, div, model, places, legs: net.legs, districtOf });
+  const model = growTowns(ch, places, 1, at);
+  // the yards among the fields, as the album draws them (town/yards.js), each at its place in a square kilometre of its district
+  const patches = patchIndex(model.towns.map(t => ({ x: t.x, y: t.y, r: t.R }))), manner = new Uint8Array(ch.count);
+  for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); manner[k] = cultureAt(c.lat, c.lon); }
+  const yards = allYards({ cell: ch.cell, land: c => ch.kind[c] === 1, fields: c => model.fields[c], culture: c => manner[c], patches, density: 1, env: { at, river: () => 1e9, swamp: () => 0 } });
+  const farmsteads = farmsteadsOfAlbum(yards.map(y => yardPlace(y.i, y.j)), { districtOf, isLand: d => div.kinds[d] === LAND, order: takenOrder(patches), x0: GX0, y0: GY0, n: 1280 });
+  const world = landOfAlbum({ ch, div, model, places, legs: net.legs, districtOf, farmsteads });
   assert.equal(world.districts.length, div.count); assert.equal(world.roads.length, net.legs.length);
   const villages = world.settlements.filter(s => s.people < 1000).length;
   assert.equal(world.settlements.length, model.towns.length, 'every settlement has a record of its own, a hamlet as much as a city');
@@ -85,7 +93,11 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   const sections = packLand(world), b = landBytes(sections), raw = b.districts + b.settlements + b.farmsteads + b.roads + b.exceptions;
   const file = await encodeSave({ meta: { t: 0, name: 'album' }, sections }), back = unpackLand((await decodeSave(file)).sections);
   assert.equal(back.settlements.length, world.settlements.length); assert.deepEqual(back.roads, world.roads);
-  assert.equal(b.settlements, world.settlements.length * 8); assert.equal(b.districts, div.count * 9); assert.equal(b.farmsteads, 0, 'the album draws no farmsteads yet');
+  assert.equal(b.settlements, world.settlements.length * 8); assert.equal(b.districts, div.count * 9);
+  // the yards the album draws: a few thousand, every one kept, about two bytes each because they stand thinly
+  assert.ok(yards.length > 2000 && yards.length < 4500, `${yards.length} yards among the fields`); assert.equal(world.farmsteads.length, yards.length, 'every yard has its place in the save');
+  assert.equal(back.farmsteads.length, yards.length); assert.ok(b.farmsteads > 0 && b.farmsteads < yards.length * 3, `${b.farmsteads} bytes for ${yards.length} yards`);
+  { const key = f => f.district * 1e7 + f.chunk * 16 + f.slot, sent = new Set(world.farmsteads.map(key)); assert.equal(sent.size, yards.length); assert.ok(back.farmsteads.every(f => sent.has(key(f)))); }
   // every land district ploughs its first sixty chunks and stands farmsteads on them, four to a chunk and then
   // sixteen: four times as many farmsteads, not a byte more
   { const land = []; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) land.push(d);
@@ -94,8 +106,8 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
     assert.equal(landBytes(thin).farmsteads, land.length * 60 * 2); assert.equal(landBytes(thick).farmsteads, landBytes(thin).farmsteads);
     const got = unpackLand((await decodeSave(await encodeSave({ meta: { t: 0 }, sections: thick }))).sections).farmsteads;
     assert.equal(got.length, land.length * 60 * 16); assert.deepEqual(got[17], { district: land[0], chunk: 1, slot: 1 }); }
-  assert.ok(raw < 45000 && file.length < 16000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
-  assert.ok(raw / landKm2 * 1000 < 60, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
+  assert.ok(raw < 50000 && file.length < 16000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
+  assert.ok(raw / landKm2 * 1000 < 66, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
   assert.ok(raw / landKm2 * 149e6 < 10e6, 'the land of the whole world at this density is under 10 MB before packing');
   // people are not lost on the way: a village keeps every one of its own, a city to a part in a thousand
   const before = world.settlements.reduce((s, t) => s + t.people, 0), after = back.settlements.reduce((s, t) => s + t.people, 0);
