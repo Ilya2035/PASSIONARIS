@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packLand, unpackLand, landBytes, landOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS } from '../src/album/save/land.js';
+import { packLand, unpackLand, landBytes, landOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT } from '../src/album/save/land.js';
 import { encodeSave, decodeSave } from '../src/save/saveSystem.js';
 import { Chunks, kmOf, FN, FKM } from '../src/album/chunks.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
@@ -25,22 +25,28 @@ test('save of the land: people in two bytes — exact for a village, to one part
   assert.ok(STRUCTURES.length <= 16 && ROAD_LEVELS.length === 4 && EXCEPTIONS.length <= 256);
 });
 
-test('save of the land: districts, towns, roads and exceptions come back from the game\'s save file as they went in', async () => {
+test('save of the land: districts, settlements, roads and exceptions come back from the game\'s save file as they went in', async () => {
   const world = {
     districts: [
-      { forest: 1, fields: 0, pasture: 0, built: 0, burnt: 0, age: 0, villages: 0, villagers: 0 },
-      { forest: 153 / 255, fields: 51 / 255, pasture: 20 / 255, built: 2 / 255, burnt: 0, age: 40, villages: 7, villagers: 1890 },
-      { forest: 0, fields: 204 / 255, pasture: 30 / 255, built: 12 / 255, burnt: 5 / 255, age: 255, villages: 31, villagers: 12288 },
+      { forest: 1, fields: 0, pasture: 0, built: 0, burnt: 0, age: 0 },
+      { forest: 153 / 255, fields: 51 / 255, pasture: 20 / 255, built: 2 / 255, burnt: 0, age: 40 },
+      { forest: 0, fields: 204 / 255, pasture: 30 / 255, built: 12 / 255, burnt: 5 / 255, age: 255 },
     ],
-    settlements: [{ district: 2, site: 0, people: 2047 * 32, structures: 0b1110, culture: 2, founded: -210 }, { district: 1, site: 3, people: 1500, structures: 2, culture: 1, founded: 912 }, { district: 2, site: 5, people: 4096, structures: 6, culture: 2, founded: 1250 }],
+    // a city, a town and two villages: every one with a record of its own
+    settlements: [{ district: 2, site: 0, people: 2047 * 32, structures: 0b1110, culture: 2, founded: -210 }, { district: 1, site: 3, people: 1500, structures: 2, culture: 1, founded: 912 },
+      { district: 2, site: 5, people: 240, structures: 0, culture: 2, founded: 1250 }, { district: 1, site: 0, people: 85, structures: 32, culture: 1, founded: 1404 }],
     roads: [0, 1, 2, 3, 3, 0, 1], exceptions: [{ district: 2, chunk: 317, kind: 0, value: 200 }, { district: 1, chunk: 12, kind: 2, value: 1 }],
   };
   const sections = packLand(world), b = landBytes(sections);
-  assert.deepEqual(b, { districts: 3 * 9, settlements: 3 * 12, roads: 2, exceptions: 2 * 8 }, 'nine bytes a district, twelve a town, two bits a road, eight an exception');
+  assert.deepEqual(b, { districts: 3 * 7, settlements: 4 * 8, roads: 2, exceptions: 2 * 8 }, 'seven bytes a district, eight a settlement, two bits a road, eight an exception');
   const file = await encodeSave({ meta: { t: 0, name: 'trial' }, sections }), back = unpackLand((await decodeSave(file)).sections);
   assert.equal(back.format, LAND_FORMAT); assert.equal(back.generator, GENERATOR);
   assert.deepEqual(back.districts, world.districts); assert.deepEqual(back.roads, world.roads); assert.deepEqual(back.exceptions, world.exceptions);
-  assert.deepEqual(back.settlements, [world.settlements[1], world.settlements[0], world.settlements[2]], 'towns come back in the order of their districts');
+  assert.deepEqual(back.settlements, [world.settlements[3], world.settlements[1], world.settlements[0], world.settlements[2]], 'settlements come back in the order of their districts and sites; the district is not written, it is counted');
+  // a district holds no more settlements than its one byte counts, and none lies outside the districts
+  const crowd = Array.from({ length: MAX_IN_DISTRICT + 1 }, (_, i) => ({ district: 1, site: i % 256, people: 50, structures: 0, culture: 1, founded: 0 }));
+  assert.throws(() => packLand({ ...world, settlements: crowd }), RangeError); assert.throws(() => packLand({ ...world, settlements: [{ ...world.settlements[0], district: 3 }] }), RangeError);
+  assert.equal(packLand({ ...world, settlements: crowd.slice(1) })['land/count'][1], MAX_IN_DISTRICT);
   // an empty world is a valid one
   const none = unpackLand((await decodeSave(await encodeSave({ meta: { t: 0 }, sections: packLand({ districts: [], settlements: [], roads: [], exceptions: [] }) }))).sections);
   assert.deepEqual([none.districts.length, none.settlements.length, none.roads.length, none.exceptions.length], [0, 0, 0, 0]);
@@ -62,16 +68,17 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   let landKm2 = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) landKm2 += div.area[d];
   const model = growTowns(ch, places, 1, at), world = landOfAlbum({ ch, div, model, places, legs: net.legs, districtOf });
   assert.equal(world.districts.length, div.count); assert.equal(world.roads.length, net.legs.length);
-  const villages = world.districts.reduce((s, d) => s + d.villages, 0);
-  assert.equal(world.settlements.length + villages, model.towns.length, 'every settlement is a town with a record or a village that is counted');
-  assert.ok(world.settlements.length > 50 && villages > 1000, `${world.settlements.length} towns, ${villages} villages`);
+  const villages = world.settlements.filter(s => s.people < 1000).length;
+  assert.equal(world.settlements.length, model.towns.length, 'every settlement has a record of its own, a hamlet as much as a city');
+  assert.ok(world.settlements.length - villages > 50 && villages > 1000, `${world.settlements.length - villages} towns, ${villages} villages`);
   const sections = packLand(world), b = landBytes(sections), raw = b.districts + b.settlements + b.roads + b.exceptions;
   const file = await encodeSave({ meta: { t: 0, name: 'album' }, sections }), back = unpackLand((await decodeSave(file)).sections);
   assert.equal(back.settlements.length, world.settlements.length); assert.deepEqual(back.roads, world.roads);
-  assert.ok(raw < 40000 && file.length < 12000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
-  assert.ok(raw / landKm2 * 1000 < 50, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
+  assert.equal(b.settlements, world.settlements.length * 8); assert.equal(b.districts, div.count * 7);
+  assert.ok(raw < 45000 && file.length < 16000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
+  assert.ok(raw / landKm2 * 1000 < 60, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
   assert.ok(raw / landKm2 * 149e6 < 10e6, 'the land of the whole world at this density is under 10 MB before packing');
-  // people are not lost on the way: the towns hold theirs to a part in a thousand, the villages are summed
+  // people are not lost on the way: a village keeps every one of its own, a city to a part in a thousand
   const before = world.settlements.reduce((s, t) => s + t.people, 0), after = back.settlements.reduce((s, t) => s + t.people, 0);
   assert.ok(Math.abs(after / before - 1) < 1e-3);
 });
