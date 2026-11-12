@@ -10,6 +10,7 @@
 import { FKM, FN, kmOf, llOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
 import { makeGraph, partition, tidy } from './graph.js';
+import { districtCells } from './cells.js';
 
 export const LAND = 0, SEA = 1, LAKE = 2;
 export const KIND_ID = ['land', 'sea', 'lake'];
@@ -274,7 +275,8 @@ function weight(ch, kind, k) {
 // ---- the division
 // ch: album.chunks; lands: lands.json, admin: admin.json (public/assets/album/division/); heightAt(lat, lon) metres;
 // lakes: [{ ring }]; size: district size in km (20, 30, 50, 100) — a district is about size² km² of middling land.
-export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20 } = {}) {
+// rivers: [{ pts, rank }] — the outlines of districts run along them (cells.js)
+export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20, rivers = [] } = {}) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const n = ch.count, sizes = levelSizes(size), T = size ** 2;
   const kind = chunkKinds(ch, lakes), rel = linkRelief(ch, heightAt);
@@ -371,6 +373,9 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   const province = Int32Array.from(dProv), region = Int32Array.from(provinces.map(p => p.region));
   const div = finish(ch, { district, count, kinds, kind, province, region, provinces, regions, size, sizes, nLP });
   div.landProv = landProv; div.moved = moved; div.seaOf = seaOf;
+  // the outline of every land district, texel by texel: along the rivers and the crests, rounded (cells.js). The
+  // chunks of a district (div.chunks) stay what the district's numbers are summed from.
+  div.cells = districtCells(ch, div, { heightAt, rivers });
   div.ms = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   return div;
 }

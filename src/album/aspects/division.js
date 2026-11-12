@@ -6,13 +6,12 @@
 //                                (map mode «Деление»), lights up the district under the cursor and the chosen one
 //   districtAt(pk)             → the district of a point: xy = its middle in flat km, z = a random number of its own
 //                                (the earthquake asks it to show what every district felt)
-// Every chunk belongs to one district (division/build.js), so a district's border is a chunk's border. The shader
-// reads the chunks around a point the way chunkCell() of glsl.js does (nine cells of the chunk raster, each with a
-// smooth bell), turns each chunk into its district, province and region through the one
-// texture of this aspect (division/gpu.js) and draws the line where two of them weigh the same — exactly on the
-// outline of the chunks.
+// Every texel of the fine raster (1.25 km) belongs to one district (division/cells.js: the outlines run along rivers
+// and crests, rounded, inside their province). The shader reads the nine texels around a point, each with a smooth
+// bell, as chunkCell() of glsl.js does with chunks; it turns each texel into its district, province and region
+// through the one texture of this aspect (division/gpu.js) and draws the line where two of them weigh the same.
 import { Vector3 } from 'three';
-import { FKM } from '../chunks.js';
+import { FKM, FN } from '../chunks.js';
 import { emptyTexture } from '../division/gpu.js';
 import { startDivision } from '../division/runtime.js';
 
@@ -20,12 +19,14 @@ const GLSL = /* glsl */`
 uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState;
 uniform vec3 uDivSize;                          // district, province, region size, km
 uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
-uniform highp usampler2D tDiv;                  // a texel per chunk (chunkTexel): see division/gpu.js
+uniform highp usampler2D tDiv;                  // the district of every texel of the fine raster, then a texel per district: see division/gpu.js
 // tints of the three levels, as seen on screen: land, water
 const vec3 DIV_LAND[8] = vec3[8](vec3(.93, .80, .62), vec3(.72, .86, .62), vec3(.92, .88, .56), vec3(.80, .72, .88), vec3(.62, .82, .86), vec3(.94, .70, .64), vec3(.78, .82, .52), vec3(.86, .86, .82));
 const vec3 DIV_WATER[8] = vec3[8](vec3(.55, .70, .90), vec3(.45, .62, .86), vec3(.62, .78, .92), vec3(.50, .74, .86), vec3(.42, .56, .82), vec3(.58, .66, .90), vec3(.66, .80, .94), vec3(.48, .68, .80));
 
-uvec4 divOf(float chunk) { return texelFetch(tDiv, chunkTexel(chunk), 0); }
+uvec4 divOf(float d) { int i = int(d + .5); return texelFetch(tDiv, ivec2(i % ${FN}, ${FN} + i / ${FN}), 0); }
+// the district of a texel of the fine raster (its outline is drawn texel by texel: division/cells.js)
+float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).r); }
 // A vote among the chunks around a point, the way chunkCell() of glsl.js weighs them: the nine cells of the chunk
 // raster around the point, each with a smooth bell (a quadratic B-spline). Up to four keys (districts, provinces or
 // regions) with their weights; no arrays (on some GPUs an array read at a varying place goes through slow memory).
@@ -60,7 +61,7 @@ DivAt divAt(vec2 pk, float px, bool water) {
   float foreign = 0., stw = 0., last = -1., first = -1.; bool one = true;
   uvec4 u = uvec4(0u), u0 = uvec4(0u), u1 = uvec4(0u), u2 = uvec4(0u), u3 = uvec4(0u);
   for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) {
-    float id = chunkIdTexel(c + ivec2(i - 1, j - 1)), w = wx[i] * wy[j];
+    float id = divTexel(c + ivec2(i - 1, j - 1)), w = wx[i] * wy[j];
     if (first < 0.) first = id; else if (id != first) one = false;
     if (id != last) { u = divOf(id); last = id; }
     stw += float((u.w >> 16u) & 1u) * w;
@@ -170,15 +171,15 @@ export default {
   pages: [
     { id: 'mode-regions', group: 'Режимы карты', title: 'Деление: регионы', note: 'Регион — большая культурно-географическая земля: Иберия (весь полуостров с Балеарскими островами), Западная Европа (в альбоме её юг, до Пиренеев), Магриб. На воде регион — настоящее море со своим именем. Границы идут по гребням и берегам.', p: { ...PAPER, division: 3 }, cam: { lat: 40.3, lon: -2.4, h: 1650, tilt: 0, heading: 0 } },
     { id: 'mode-provinces', group: 'Режимы карты', title: 'Деление: провинции', note: 'Провинция — политическая и историческая единица: Риоха, Ла-Манча, Бьерсо, Сердань, Беарн, Алгарве… Она тянется к нынешним провинциям, округам и департаментам, а точную границу проводит рельеф. Из провинций собираются государства.', p: { ...PAPER, division: 2 }, cam: { lat: 40.9, lon: -2.6, h: 950, tilt: 0, heading: 0 } },
-    { id: 'mode-districts', group: 'Режимы карты', title: 'Деление: районы около 20 км', note: 'Район — долина, комарка, округа города: около 20 км в поперечнике, 400–500 км². Район состоит из целых природных ячеек, поэтому его граница идёт по реке, гребню, берегу. С районом работает игрок; ручка «Деление: размер района» показывает и прежние размеры.', p: { ...PAPER, division: 1 }, cam: { lat: 41.5, lon: -0.9, h: 380, tilt: 10, heading: 0 } },
+    { id: 'mode-districts', group: 'Режимы карты', title: 'Деление: районы около 20 км', note: 'Район — около 20 км в поперечнике, 400–500 км². Его граница идёт по реке или по гребню: река чаще всего край района, а не его середина. Очертания округлые и считаются по клеткам в 1,25 км. Район не выходит за свою провинцию. С районом работает игрок; ручка «Деление: размер района» показывает и прежние размеры.', p: { ...PAPER, division: 1 }, cam: { lat: 41.5, lon: -0.9, h: 380, tilt: 10, heading: 0 } },
     { id: 'division-pyrenees', group: 'Режимы карты', title: 'Деление: Пиренеи — гребень как граница', note: 'Пиренеи не провинция: по гребню идёт граница. Южные склоны принадлежат Верхнему Арагону, Урхелю, Андорре, Сердани, северные — Беарну, Бигорру, Комменжу, Фуа, Руссильону. Каждая долина — свой район и целиком на своей стороне.', p: { ...NATURAL, division: 1 }, cam: { lat: 42.15, lon: 0.6, h: 300, tilt: 48, heading: 0 } },
     { id: 'division-cantabrian', group: 'Режимы карты', title: 'Деление: Кантабрийские горы', note: 'Гребень делит Астурию и Кантабрию на севере и Леон с Паленсией на юге. Северные склоны Пикос-де-Эуропа отошли к Астурии и Кантабрии: туда они стекают.', p: { ...NATURAL, division: 1 }, cam: { lat: 42.55, lon: -5.0, h: 260, tilt: 48, heading: 0 } },
     { id: 'division-central', group: 'Режимы карты', title: 'Деление: Центральная Кордильера', note: 'Сьерра-де-Гвадаррама и Гредос — граница Старой и Новой Кастилии: к северу Сеговия и Авила (бассейн Дуэро), к югу Мадрид и Толедо (бассейн Тахо).', p: { ...NATURAL, division: 1 }, cam: { lat: 40.05, lon: -4.3, h: 260, tilt: 48, heading: 330 } },
-    { id: 'division-ebro', group: 'Режимы карты', title: 'Деление: Эбро — ось Арагона', note: 'В низине большая река — ось земли, а не граница: Сарагоса лежит по обе стороны Эбро, граница Арагона идёт по водоразделам.', p: { ...PAPER, division: 2 }, cam: { lat: 41.5, lon: -0.8, h: 560, tilt: 10, heading: 0 } },
+    { id: 'division-ebro', group: 'Режимы карты', title: 'Деление: Эбро — ось Арагона, граница районов', note: 'Провинция лежит по обе стороны большой реки: Сарагоса — на обоих берегах Эбро, граница Арагона идёт по водоразделам. Районы же делятся по рекам: Эбро, Гальего, Халон и Уэрва — их края.', p: { ...PAPER, division: 2 }, cam: { lat: 41.5, lon: -0.8, h: 560, tilt: 10, heading: 0 } },
     { id: 'division-guadalquivir', group: 'Режимы карты', title: 'Деление: Гвадалквивир — ось Андалусии', note: 'Севилья, Кордова и Хаэн лежат вдоль Гвадалквивира по обоим берегам; с севера Андалусию закрывает Сьерра-Морена, с юга — Бетские горы.', p: { ...PAPER, division: 2 }, cam: { lat: 37.6, lon: -4.6, h: 620, tilt: 10, heading: 0 } },
     { id: 'division-state', group: 'Режимы карты', title: 'Деление: собрано государство — Арагон', note: 'Королевство Арагон XIII века собрано из районов: Верхний Арагон, Сарагоса, Теруэль. Другие государства — ручка «Деление: собрать государство».', p: { ...PAPER, division: 2, divState: 'aragon' }, cam: { lat: 41.3, lon: -0.6, h: 720, tilt: 0, heading: 0 } },
     { id: 'division-crown', group: 'Режимы карты', title: 'Деление: собрано государство — Арагонская корона', note: 'Арагон, Каталония, Валенсия, Балеарские острова и Руссильон XIV века — из тех же районов.', p: { ...PAPER, division: 3, divState: 'crown' }, cam: { lat: 40.6, lon: 0.6, h: 1250, tilt: 0, heading: 0 } },
-    { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: районы из целых чанков', note: 'Светлые линии — очертания чанков, тёмные — границы районов. Граница района всегда идёт по краю чанка: каждый чанк целиком в одном районе.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
+    { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек, в которых хранится состояние леса, льда и застройки; тёмные — границы районов. Очертание района считается по клеткам в 1,25 км и идёт по рекам и гребням, поэтому с ячейками оно совпадает не везде. Числа района (площадь, лес, ресурсы) пока суммируются по ячейкам.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
     { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, чанки, доля леса, болот, застройки и полей, суммы ресурсов по чанкам. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
     { id: 'division-sea', group: 'Режимы карты', title: 'Деление: море и острова', note: 'Моря названы: Бискайский залив, Атлантика, Кадисский залив, море Альборан, Балеарское море, Лионский залив. Прибрежное море поделено на куски напротив прибрежных районов, чтобы высадиться можно было везде.', p: { ...PAPER, division: 3 }, cam: { lat: 39.6, lon: 0.6, h: 900, tilt: 0, heading: 0 } },
     { id: 'division-50', group: 'Режимы карты', title: 'Деление: районы около 50 км', note: 'Тот же способ с районом крупнее. Провинции и регионы — те же исторические земли.', p: { ...PAPER, division: 1, divSize: 50 }, cam: { lat: 41.4, lon: -1.0, h: 560, tilt: 10, heading: 0 } },

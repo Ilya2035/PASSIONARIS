@@ -11,6 +11,8 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { BBOX } from '../src/album/geo.js';
 import { buildDivision, districtSummary, districtNames, stateMask, linkRelief, LAND, SEA, LAKE } from '../src/album/division/build.js';
 import { packDivision } from '../src/album/division/gpu.js';
+import { FN as RASTER } from '../src/album/chunks.js';
+import { districtCells, riverRaster, cellStats, RIVER_TOLL } from '../src/album/division/cells.js';
 import { borderLines } from '../src/album/division/lines.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division, { STATES } from '../src/album/aspects/division.js';
@@ -96,15 +98,55 @@ test('division: what a district holds; the texture with the state of history', (
   assert.ok(Math.abs(s.share.forest - .5) < .01);
   assert.deepEqual(s.sums.map(x => [x.name, x.value]), [['iron', 2 * list.length]], 'only layers with sum: true are summed');
   ch.reset();
-  const mask = stateMask(div, madeLands, 'x'), a = packDivision(ch, div, mask);
-  assert.equal(a.length, ch.palW * ch.palW * 4);
-  for (let k = 0; k < ch.count; k += 97) {
-    const dd = div.district[k], p = div.province[dd];
-    assert.equal(a[k * 4] & 65535, dd); assert.equal(a[k * 4] >>> 16, p); assert.equal(a[k * 4 + 1] & 65535, div.region[p]);
-    assert.equal((a[k * 4 + 1] >>> 16 >> 9) & 3, div.kinds[dd]);
-    assert.equal(a[k * 4 + 3] >>> 16, mask[k], 'the state bit');
-    assert.equal(mask[k], div.kind[k] === LAND && p >= 1 && p <= 2 ? 1 : 0);
+  // the texture: the district of every texel of the fine raster, then a texel per district
+  const mask = stateMask(div, madeLands, 'x'), a = packDivision(ch, div, mask), TN = RASTER * RASTER;
+  assert.equal(a.length, RASTER * (RASTER + Math.ceil(div.count / RASTER)) * 4);
+  for (let t = 0; t < TN; t += 4999) assert.equal(a[t * 4], Math.max(0, div.cells[t]));
+  for (let dd = 0; dd < div.count; dd++) {
+    const o = (TN + dd) * 4, p = div.province[dd], first = div.chunks[dd][0];
+    assert.equal(a[o] & 65535, dd); assert.equal(a[o] >>> 16, p); assert.equal(a[o + 1] & 65535, div.region[p]);
+    assert.equal((a[o + 1] >>> 16 >> 9) & 3, div.kinds[dd]);
+    assert.equal(a[o + 3] >>> 16, mask[first], 'the state bit');
   }
+  for (let k = 0; k < ch.count; k += 97) assert.equal(mask[k], div.kind[k] === LAND && div.province[div.district[k]] >= 1 && div.province[div.district[k]] <= 2 ? 1 : 0);
+});
+
+test('division: the outlines of districts — texel by texel, inside their province, along the river, rounded', () => {
+  // a river runs east–west across the western land, a third of the way up
+  const { ch, opts } = made, yR = IY0 + (IY1 - IY0) / 3, TN = RASTER * RASTER;
+  const river = [{ rank: 5, pts: Array.from({ length: 60 }, (_, i) => { const p = llOf(IX0 + 10 + i * (RX - 40 - IX0) / 59, yR + Math.sin(i * .4) * 3); return [p.lon, p.lat]; }) }];
+  const plain = buildDivision(ch, { ...opts, size: 30 }), div = buildDivision(ch, { ...opts, size: 30, rivers: river });
+  assert.equal(div.cells.length, TN); assert.deepEqual(buildDivision(ch, { ...opts, size: 30, rivers: river }).cells, div.cells, 'the same land gives the same outlines');
+  // every texel lies in a district of the kind and of the province of its chunk; every district has texels
+  const texels = new Int32Array(div.count);
+  for (let t = 0; t < TN; t++) {
+    const k = ch.cell[t]; if (k >= ch.count) continue;
+    const d = div.cells[t], dk = div.district[k];
+    assert.ok(d >= 0 && d < div.count); texels[d]++;
+    if (d !== dk) { assert.equal(div.kinds[d], LAND); assert.equal(div.kinds[dk], LAND, 'water keeps the districts of its chunks'); assert.equal(div.province[d], div.province[dk], 'an outline never leaves its province'); }
+  }
+  for (let d = 0; d < div.count; d++) assert.ok(texels[d] > 0, 'district ' + d + ' has land of its own');
+  // sizes stay close to those of the chunk partition
+  const land = []; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) land.push(texels[d] * 1.5625); land.sort((a, b) => a - b);
+  assert.ok(land[land.length >> 1] > 500 && land[land.length >> 1] < 1400, 'a district of 30 km is ' + Math.round(land[land.length >> 1]) + ' km² in the middle');
+  // the river is a border: far more of it runs along the outlines than without it, and the outlines are rounded
+  const riv = riverRaster(river), along = lab => { let on = 0, all = 0;
+    for (let ty = 1; ty < RASTER - 1; ty++) for (let tx = 1; tx < RASTER - 1; tx++) { const t = ty * RASTER + tx; if (!riv[t] || div.kinds[lab[t]] !== LAND) continue; all++;
+      let edge = false; for (let dy = -1; dy <= 1 && !edge; dy++) for (let dx = -1; dx <= 1; dx++) if (lab[t + dy * RASTER + dx] !== lab[t]) { edge = true; break; } if (edge) on++; }
+    return on / all; };
+  assert.ok(along(div.cells) > .85, 'the river runs along borders for ' + Math.round(along(div.cells) * 100) + ' % of its way');
+  assert.ok(along(div.cells) > along(plain.cells) + .2, 'without the river the outlines do not follow its line');
+  assert.ok(cellStats(div, div.cells, riv).roundMid > .55, 'rounded outlines');
+  assert.ok(RIVER_TOLL[3] > RIVER_TOLL[2] && RIVER_TOLL[2] > RIVER_TOLL[1] && RIVER_TOLL[1] > 5);
+  // a border that runs beside the river is drawn on the river itself
+  const lines = borderLines(ch, div, null, river); let near = 0, onIt = 0;
+  for (const line of lines[0] || []) for (const [x, y] of line) {
+    if (x < IX0 + 15 || x > RX - 50 || Math.abs(y - yR) > 4.5) continue; near++;
+    let best = 1e9; for (let i = 1; i < river[0].pts.length; i++) { const a = kmOf(river[0].pts[i - 1][1], river[0].pts[i - 1][0]), b = kmOf(river[0].pts[i][1], river[0].pts[i][0]), dx = b[0] - a[0], dy = b[1] - a[1];
+      const u = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy))); best = Math.min(best, Math.hypot(x - a[0] - dx * u, y - a[1] - dy * u)); }
+    if (best < .7) onIt++;
+  }
+  assert.ok(near > 20 && onIt / near > .8, onIt + ' of ' + near + ' points of the border by the river lie on it');
 });
 
 test('division: border lines for the far view — between lands, never along the shore, smooth', () => {

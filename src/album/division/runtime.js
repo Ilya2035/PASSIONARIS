@@ -4,7 +4,7 @@
 //   album.division = { districtOf(k), chunksOf(d), provinceOf(d), regionOf(p), neighbours(d), kind(d), name(d), … }
 //   album.districts = { count, of(k), name(i) } — the same, in the form the resources work asked for
 import { buildDivision, districtSummary, districtNames, stateMask, KIND_ID, LAND, levelSizes } from './build.js';
-import { divisionTexture } from './gpu.js';
+import { divisionTexture, districtOfTexel } from './gpu.js';
 import { createPanel } from './panel.js';
 import { createLabels } from './labels.js';
 import { createLines } from './lines.js';
@@ -18,7 +18,7 @@ const load = async name => (await fetch(`assets/album/division/${name}`)).json()
 export async function startDivision(album, U) {
   const ch = album.chunks, p = album.params, data = album.data, dom = album.renderer.domElement;
   const [lands, admin] = await Promise.all([load('lands.json'), load('admin.json')]);
-  const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [] };
+  const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [] };
   const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
   const listeners = [], labels = createLabels(album);
   let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null;
@@ -46,22 +46,23 @@ export async function startDivision(album, U) {
     const mask = id ? stateMask(cur.div, lands, id) : null;
     cur.tex = divisionTexture(ch, cur.div, mask); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
-    lines?.dispose(); lines = createLines(album, ch, cur.div, mask);
+    lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers);
   }
-  // the district at a point of the ground, as the shader draws it: the district of the chunk there; a point of land in
-  // a chunk of water (or the other way round, at the shore) takes the nearest chunk of its own kind
+  // the district at a point of the ground, as the shader draws it: the district of the texel of the fine raster
+  // there (division/cells.js); a point of land in a texel of water (or the other way round, at the shore) takes the
+  // nearest texel of its own kind
   function districtAt(lat, lon) {
     if (!inside(lat, lon)) return -1;
     const k = ch.at(lat, lon); if (k < 0) return -1;
-    const land = data.base.at(lat, lon) > 0, dv = cur.div;
-    if ((dv.kinds[dv.district[k]] === LAND) === land) return dv.district[k];
-    const [x, y] = kmOf(lat, lon), tx = Math.floor((x + 880) / FKM), ty = Math.floor((y - 3880) / FKM);
+    const land = data.base.at(lat, lon) > 0, dv = cur.div, of = t => districtOfTexel(ch, dv, t);
+    const [x, y] = kmOf(lat, lon), tx = Math.max(0, Math.min(FN - 1, Math.floor((x + 880) / FKM))), ty = Math.max(0, Math.min(FN - 1, Math.floor((y - 3880) / FKM))), here = of(ty * FN + tx);
+    if ((dv.kinds[here] === LAND) === land) return here;
     for (let r = 1; r <= 2; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       const u = tx + dx, v = ty + dy; if (u < 0 || v < 0 || u >= FN || v >= FN) continue;
-      const d = dv.district[ch.cell[v * FN + u]];
+      const d = of(v * FN + u);
       if ((dv.kinds[d] === LAND) === land) return d;
     }
-    return dv.district[k];
+    return here;
   }
   const atScreen = (x, y) => { const ll = pickGround(album, x, y); return ll ? districtAt(ll.lat, ll.lon) : -1; };
 
@@ -140,12 +141,13 @@ export async function startDivision(album, U) {
   album.districts = { get count() { return cur.div.count; }, of: k => cur.div.district[k], name: i => cur.div.names[i], onChange: api.onChange };
   use(+p.get('divSize') || 20);
 
-  // from higher up the borders are lines laid on the ground, clear and of steady width; up close the ground shader
-  // draws them on the very outline of the chunks. far: 0 up close .. 1 high up, by the size of a pixel on the ground
+  // The borders are lines laid on the ground at every height, clear and of steady width: a line that runs beside a
+  // river lies on the river itself (lines.js), which the outline of texels of 1.25 km cannot do — drawn by the ground
+  // shader it wove from one bank to the other. The shader still fills the districts and lights the chosen one.
   const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function drawLines(cam) {
     const mode = p.get('division'), pxKm = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, dom.clientHeight);
-    const far = mode ? ss(.07, .16, pxKm) : 0;
+    const far = mode ? 1 : 0;
     U.uDivFar.value = far;
     if (!lines) return;
     const base = mode === 1 ? [.8, .9, 1] : mode === 2 ? [.35, .9, 1] : mode === 3 ? [0, .45, 1] : [0, 0, 0];
