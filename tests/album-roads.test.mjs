@@ -109,6 +109,8 @@ test('roads: the network — main roads from the town of a province to the next 
   const cap = net.capitals, pw = div.province[districtOf(towns[0])], pe = div.province[districtOf(towns[1])];
   assert.notEqual(pw, pe); assert.equal(cap[pw], districtOf(towns[0])); assert.equal(cap[pe], districtOf(towns[1]));
   assert.deepEqual([...provinceTowns(div, div.centres, towns)], [...cap]);
+  // the division may name the main town of a province itself: the seat of the district (bit 1)
+  { const seat = new Uint8Array(div.count); seat[districtOf(towns[2])] = 1; assert.equal(provinceTowns(div, { ...div.centres, seat }, towns)[pw], districtOf(towns[2])); assert.equal(provinceTowns(div, { ...div.centres, seat }, towns)[pe], cap[pe]); }
   const reach = (from, ok) => { const got = new Set([from]), q = [from]; for (const d of q) legs.forEach(L => { if (!ok(L) || (L.a !== d && L.b !== d)) return; const e = L.a === d ? L.b : L.a; if (!got.has(e)) { got.add(e); q.push(e); } }); return got; };
   const byMain = reach(cap[pw], L => L.kind === 0); assert.ok(byMain.has(cap[pe]), 'the towns of the two provinces are joined by main roads');
   assert.ok(byMain.has(districtOf(towns[2])) || reach(districtOf(towns[2]), L => L.kind === 0).has(districtOf(towns[3])), 'the old highway is a main road');

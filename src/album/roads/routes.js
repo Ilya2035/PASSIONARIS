@@ -77,7 +77,8 @@ export function legBetween(G, a, b) {
 // The town of every land province: the district its main roads start from (−1: the province has no district with a
 // centre). The largest of `places` that stands in the province; in a province with none of them, the centre that
 // stands on the most important real settlement (centres.site: the lower the number, the greater the place); failing
-// that, the centre nearest to the middle of the province. div.capitals, if the division brings its own, wins.
+// that, the centre nearest to the middle of the province. What the division says itself wins: centres.seat[d] with
+// bit 1 set (the main town of its province stands in district d), or div.capitals (province → district).
 export function provinceTowns(div, centres, places = []) {
   const P = div.provinceCount ?? (div.provinces ? div.provinces.length : 0), cap = new Int32Array(P).fill(-1); if (!P || !div.province) return cap;
   const districtAt = p => { const [x, y] = kmOf(p.lat, p.lon), t = texelOf(x, y); if (t < 0) return -1; const d = div.cells[t]; return d >= 0 && div.kinds[d] === LAND && centres.texel[d] >= 0 ? d : -1; };
@@ -90,6 +91,8 @@ export function provinceTowns(div, centres, places = []) {
     const s = centres.site[d], sc = s >= 0 ? s : 1e7 + Math.hypot(centres.x[d] - mx[p] / num[p], centres.y[d] - my[p] / num[p]);
     if (sc < best[p]) { best[p] = sc; cap[p] = d; }
   }
+  // the division may say itself which district holds the main town of its province: centres.seat (bit 1), or div.capitals
+  if (centres.seat) for (let d = 0; d < div.count; d++) if ((centres.seat[d] & 1) && div.kinds[d] === LAND && centres.texel[d] >= 0) cap[div.province[d]] = d;
   if (div.capitals) for (let p = 0; p < P; p++) { const d = div.capitals[p]; if (d >= 0 && div.kinds[d] === LAND && centres.texel[d] >= 0) cap[p] = d; }
   return cap;
 }
