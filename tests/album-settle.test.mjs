@@ -646,6 +646,6 @@ test('settle and the swamp: a chunk has one state — a chunk of bog is never pl
   assert.doesNotMatch(gsl, /swamp(Depth|Kind|Field|Slope|Height)\(/, 'no rule of the swamp is run a second time for the fields');
   assert.doesNotMatch(gsl, /smoothstep\([^;]*fSwampW/, 'and no smoothstep is spent on it');
   const { ASPECTS } = await import('../src/album/aspects/index.js'); assert.ok(ASPECTS.findIndex(a => a.id === 'swamp') < ASPECTS.findIndex(a => a.id === 'settle'), 'the swamp is painted before the settlements');
-  // the number of smoothsteps with thresholds in the code of this aspect must not grow (it was 31 in v0.6.53)
-  const pairs = gsl.match(/smoothstep\(\s*-?[.0-9]+\s*,\s*-?[.0-9]+\s*,/g) || []; assert.ok(pairs.length <= 31, `${pairs.length} smoothsteps with numbers in the shader of the settlements`);
+  // the number of smoothsteps with thresholds written in the code of this aspect must not grow (30, as before the swamp block)
+  const pairs = gsl.match(/smoothstep\(\s*-?[.0-9]+\s*,\s*-?[.0-9]+\s*,/g) || []; assert.ok(pairs.length <= 30, `${pairs.length} smoothsteps with numbers in the shader of the settlements`);
 });
