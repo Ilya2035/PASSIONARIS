@@ -114,6 +114,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float verge = uVerge > 1.01 ? (1. - smoothstep(hw, hw * uVerge, x)) * uVergeA * smoothstep(1.5, 3., hw * uVerge) : 0.;
         float cover = core + verge * (1. - core), a = cover * uAlpha * vFade;
         if (uDash > 0.) a *= step(fract(vDist / uDash), .62);
+        if (a < .004) discard;                                                                                  // the soft margin of the ribbon ends here, before the costly sums
         float h0 = heightLod(vLL, 0.);
         if (uSea > 0.) a *= smoothstep(-2., .5, h0);                                                             // a road is not drawn over the sea (a bridge is: uSea 0)
         // In the woods a road is dark earth under the trees, not a pale line across the green: darker and fainter

@@ -49,7 +49,8 @@ export default async function init(album) {
   function draw() {
     drop(ribbons); drop(decks);
     const model = towns(); modelSeen = model;
-    const outside = townIndex((model?.towns || []).map(t => ({ x: t.x, y: t.y, r: t.R }))), sets = LOOK.map(() => []);
+    // (sx, sy: how far the middle of a town lies from its point, where the settlements say so)
+    const outside = townIndex((model?.towns || []).map(t => ({ x: t.x + (t.sx || 0), y: t.y + (t.sy || 0), r: t.R }))), sets = LOOK.map(() => []);
     for (const l of drawn) for (const c of cutAtTowns(l.km, outside)) sets[l.set].push({ pts: c.pts.map(q => { const g = llOf(q[0], q[1]); return [g.lon, g.lat]; }), fade: c.fade, width: LOOK[l.set].w });
     ribbons = sets.map((lines, k) => ({ ...makeRibbons(album, lines, { colour: LOOK[k].light, minPx: LOOK[k].px[0], lift: .005, ground: true, ...VERGE }), set: k }));
     decks = DECK.map((d, kind) => {
@@ -113,7 +114,7 @@ export default async function init(album) {
       for (const r of ribbons) {
         const L = LOOK[r.set], fade = L.fade ? 1 - ss(L.fade[0], L.fade[1], px) : 1;
         r.mesh.visible = on && fade > 0 && p.get(L.key) !== 0; if (!r.mesh.visible) continue;
-        r.setPx(cam, dom); r.u.uLift.value = pull; r.u.uVergeA.value = VERGE.vergeAlpha * (1 - ss(.02, .05, px));   // the cleared strip is a thing of the near view r.u.uMinPx.value = L.px[0] + (L.px[1] - L.px[0]) * high; r.u.uAlpha.value = L.alpha * fade * (1 - (r.set ? .5 : .42) * ss(.03, .2, px));   // from high up a road is a faint thread: it must not argue with the land
+        r.setPx(cam, dom); r.u.uLift.value = pull; r.u.uVergeA.value = VERGE.vergeAlpha * (1 - ss(.02, .05, px)); r.u.uVerge.value = px < .05 ? VERGE.verge : 1;   // the cleared strip is a thing of the near view r.u.uMinPx.value = L.px[0] + (L.px[1] - L.px[0]) * high; r.u.uAlpha.value = L.alpha * fade * (1 - (r.set ? .5 : .42) * ss(.03, .2, px));   // from high up a road is a faint thread: it must not argue with the land
       }
       // a bridge is seen while it is a few pixels long; it lies over the water, which itself is pulled over the crowns
       const bf = 1 - ss(BRIDGE.fade[0], BRIDGE.fade[1], px), kr = p.get('riversOn') ? p.get('rivers') ?? 1 : 0, over = sheetPull(album, cam) + .006;
