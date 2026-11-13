@@ -23,10 +23,10 @@ import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorGates, m
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
-import { growTowns, centrePlaces, townsOfDistricts, builtChunks } from '../town/grow.js';
+import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
-import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { KN, KKM, KX0, KY0, squareOf } from '../division/km.js';
 import { roadChunks, districtTracks, trackLines, trackIndex, TRACK_SNAP } from '../town/tracks.js';
 
 const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
@@ -459,6 +459,10 @@ export default async function init(album) {
         const t1 = performance.now();
         // one town to a district: a place of the album that is not the centre of its district is a village of it
         places = townsOfDistricts([...centrePlaces(album.data.vectors.places, dv.data, dv.sites), ...villagePlaces(siteList, dv.sites, { base: nb, density: vk })], (pl, i) => (i < nb ? siteOfBase.get(i) || null : null));
+        // where the division says nobody can settle no village is founded; where only a hamlet can stand it stays one
+        // (a place on a chunk of water is a place on the shore: the model moves it to dry land)
+        const st = dv.settleFacts?.();
+        if (st?.can) places = placesAllowed(places, pl => { const c = squareOf(...kmOf(pl.lat, pl.lon)); return c < 0 || st.why?.[c] === 1 ? 2 : st.can[c]; });
         indexRivers(); applyGrowth(false);
         console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages, ${model.farm.area.toFixed(0)} km² of fields in ${model.farm.list.length} chunks (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
       spts.visible = !!p.get('sitesShow') && !!siteList;

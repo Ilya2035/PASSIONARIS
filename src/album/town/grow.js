@@ -80,6 +80,20 @@ export function towardWater(at, river, x, y, R) {
   return held(-gx / gl, -gy / gl, Math.min(most, d - R * 1.05));
 }
 
+// Where nobody can settle, no village is founded; where only a hamlet can stand, a village stays a hamlet (the owner,
+// 13.11.2026: «отметить все места, где поселиться нельзя»; the division marks the chunks: km.js chunkSettle). The
+// town of a district stands where the division put it. The places keep their numbers: a village that may not be
+// founded stays in the list with no size.
+//   canAt(place) → 2 a town or a village may stand there · 1 a hamlet only · 0 nobody
+export const HAMLET_ONLY_R = .095;                                  // km: under the radius of a village (STAGES)
+export function placesAllowed(places, canAt) {
+  return places.map(pl => {
+    if (!pl.village) return pl;
+    const can = canAt(pl); if (can >= 2) return pl;
+    return { ...pl, r: can === 1 ? Math.min(pl.r ?? fullRadius(pl.pop), HAMLET_ONLY_R) : 0 };
+  });
+}
+
 // One town to a district: of the places given as towns, only the one at the centre of its district stays a town; any
 // other becomes a village of that district (it keeps its number, its name and its people, and stops at VILLAGE_RMAX).
 //   places      [{ lat, lon, pop, village, district, site }]

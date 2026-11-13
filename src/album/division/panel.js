@@ -77,6 +77,7 @@ export function createPanel(onClose, onGo = null) {
         if (s.settle) {                                             // the places of the district and who lives on them (town/villages.js)
           row('Жителей', num(s.settle.people)); row('Поселений', num(s.settle.settlements));
           row('Мест под поселения', num(s.settle.places));
+          if (s.place) row('Место города', s.place);              // why the town of the district stands where it stands (division/centres.js)
           if (s.settle.tracksKm >= .5) row('Тропы к деревням', `${num(s.settle.tracksKm)} км`);
         }
         row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built));

@@ -570,3 +570,18 @@ test('settle marks under a tilted camera: a far settlement is shown as from fart
   assert.ok(g.indexOf('float past = ') < g.indexOf('if (tm < .003) return;') && g.indexOf('if (tm < .003) return;') < g.indexOf('setWall(r, th, atan(dc.y, dc.x))'), 'before the pixel is given up as open land; the wall after');
   assert.equal((g.match(/texelFetch\(tSettle, bc\.xy \+ SET_GATES, 0\)/g) || []).length, 1, 'the gates are read once');
 });
+
+test('settle and the land nobody can live on: no village is founded there; where only a hamlet can stand a village stays a hamlet', async () => {
+  const { placesAllowed, HAMLET_ONLY_R } = await import('../src/album/town/grow.js');
+  const v = (x, pop, more = {}) => ({ ...place(x, 4405, pop), village: true, ...more });
+  const pls = [place(-205, 4405, 9e5), v(-195, 9000), v(-185, 9000), v(-175, 9000), v(-165, 300, { r: .06 })];
+  const out = placesAllowed(pls, pl => [2, 0, 1, 2, 1][pls.indexOf(pl)]);
+  assert.equal(out.length, 5); assert.equal(out[0], pls[0]); assert.equal(out[3], pls[3]); assert.equal(out[1].r, 0);
+  assert.ok(out[2].r > .05 && out[2].r <= HAMLET_ONLY_R && HAMLET_ONLY_R < STAGES[1].r); assert.equal(out[4].r, .06, 'a hamlet is a hamlet already');
+  assert.equal(placesAllowed([pls[0]], () => 0)[0], pls[0], 'the town of a district stands where the division put it');
+  clear();
+  const m = growTowns(ch, out, 1, at);
+  assert.deepEqual(m.towns.map(t => t.index).sort(), [0, 2, 3, 4], 'the village on forbidden land is not founded; the others stand under their own numbers');
+  const cramped = m.towns.find(t => t.index === 2), free = m.towns.find(t => t.index === 3);
+  assert.ok(cramped.R <= HAMLET_ONLY_R && stageOf(cramped.R) === 0 && free.R > HAMLET_ONLY_R && stageOf(free.R) === 1, 'where only a hamlet can stand, the village is a hamlet');
+});
