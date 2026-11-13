@@ -7,7 +7,7 @@ import { Chunks, CHANNELS, CHUNK_KM, CI0, llOf } from '../src/album/chunks.js';
 import water, { WATER_CORE, SHEET_FRAG, sheetPull, SHEET_PULL, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
-import { riverSheets, riverGeneral, riverFar, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT } from '../src/album/layers/rivers.js';
+import { riverSheets, riverGeneral, riverFar, riverDrawn, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT, MID } from '../src/album/layers/rivers.js';
 import { decodeCourses, encodeCourses, mainRivers, rankOf, widthCode, widthOf } from '../src/album/water/courses.js';
 import { statSync } from 'node:fs';
 import { fillHollows } from '../src/album/water/hollows.js';
@@ -276,4 +276,32 @@ test('water: rivers from high up — near the ground nothing changes; higher the
   // the tributary still ends on the river: its last point slides with the point of the river it lies on
   for (let k = 0; k < 4; k++) assert.ok(Math.abs(trib.off[(M - 1) * 4 + k] - big.off[300 * 4 + k]) < .02, 'the tributary follows the smoother line of its river');
   assert.ok(Math.abs(trib.off[0]) < 1e-6 && Math.abs(trib.off[1]) < 1e-6 && Math.abs(trib.off[100 * 4 + 1]) < .02, 'and far from the mouth it runs as it ran');
+});
+
+test('water: rivers from the middle heights — a small river is thin and soft, a great one stays; near the ground and from high up nothing changes', () => {
+  const pxOf = h => 2 * h * Math.tan(16 * Math.PI / 180) / 900, pixels = (real, h) => riverDrawn(real, pxOf(h)) / pxOf(h);
+  const before = (real, px) => Math.max(real, px * riverFar(px).minPx * (.42 + .58 * Math.sqrt(Math.min(1, real / .16))));   // the least width as it was
+  const MANZANARES = .02, JARAMA = .035, TAGUS = .09, EBRO = .14;
+  // near the ground the rule of the middle heights is off: the water is as wide as it was, the colour is the water's own
+  for (const h of [20, 30, 45]) { const f = riverFar(pxOf(h)); assert.ok(f.lean === 0 && f.tint[0] === 0 && f.tint[1] === 0 && f.tint[2] === 0, 'from ' + h + ' km a river is as it was');
+    for (const w of [.004, MANZANARES, TAGUS, EBRO, .3]) assert.equal(riverDrawn(w, pxOf(h)), before(w, pxOf(h))); }
+  // from 100 to 300 km it is in force: the thin line is a soft blue
+  for (const h of [100, 200, 300]) { const f = riverFar(pxOf(h)); assert.ok(f.lean > .99 && f.tint[0] > .75 && f.tint[2] < .01, 'from ' + h + ' km'); }
+  // … a small river is a pixel wide, a great one three, and they can be told apart (they could not: 1.8 against 2.9 pixels of water, and half as much again of banks on both)
+  assert.ok(pixels(MANZANARES, 100) < 1.7 && pixels(MANZANARES, 100) > 1.2 && pixels(JARAMA, 100) < 2, `the Manzanares from 100 km: ${pixels(MANZANARES, 100).toFixed(2)} px`);
+  assert.ok(pixels(EBRO, 100) > 2.9 && pixels(TAGUS, 100) > 2.1 && pixels(EBRO, 100) < 3.6, `the Ebro from 100 km: ${pixels(EBRO, 100).toFixed(2)} px`);
+  for (const h of [100, 200, 300]) assert.ok(pixels(EBRO, h) > 2.1 * pixels(MANZANARES, h) && pixels(TAGUS, h) > 1.6 * pixels(MANZANARES, h) && pixels(EBRO, h) > 2.3, 'great and small from ' + h + ' km');
+  // (before, a thin river was drawn as wide as its whole sheet: the water and the room kept for banks that could not be seen)
+  const sheet = w => w * 1.5 + Math.min(w * .8, .03);
+  assert.ok(riverDrawn(MANZANARES, pxOf(100)) < .6 * sheet(before(MANZANARES, pxOf(100))) && riverDrawn(EBRO, pxOf(100)) < .85 * sheet(before(EBRO, pxOf(100))), 'a river is thinner than it was, a small one by half');
+  assert.ok(MID.least[0] <= .42 && MID.least[1] >= 1 && MID.clear < 1 && MID.clear > .5 && MID.tint <= 1);
+  // by 500 km the far view has taken over, as it was: its width, its paler line
+  for (const h of [520, 820, 1500]) { const f = riverFar(pxOf(h)); assert.ok(f.lean === 0 && f.tint[2] === 1 && Math.abs(f.tint[1] - FAR_TINT) < 1e-9, 'from ' + h + ' km the far view');
+    for (const w of [MANZANARES, TAGUS, EBRO]) assert.equal(riverDrawn(w, pxOf(h)), before(w, pxOf(h))); }
+  // and nothing jumps on the way up
+  for (const w of [MANZANARES, JARAMA, TAGUS, EBRO]) { let last = riverDrawn(w, .02) / .02; for (let px = .0204; px < 1; px *= 1.02) { const now = riverDrawn(w, px) / px; assert.ok(Math.abs(now / last - 1) < .035, `a river ${w * 1000} m wide jumps at ${px.toFixed(3)}`); last = now; } }
+  // a sheet of water never writes its depth (the finishing pass shaded the step as a dark rim), and the roads are drawn before it
+  const src = f => readFileSync(new URL('../src/album/layers/' + f, import.meta.url), 'utf8');
+  assert.ok(/depthWrite: false/.test(src('rivers.js')) && !/depthWrite: pass/.test(src('rivers.js')) && /depthWrite: false/.test(src('lakes.js')));
+  assert.ok(/renderOrder = ground \? -7 : 5/.test(src('ribbon.js')) && /renderOrder = -4/.test(src('roads.js')), 'roads −7, rivers −5, bridges −4');
 });

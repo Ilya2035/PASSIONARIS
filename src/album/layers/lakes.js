@@ -59,7 +59,8 @@ export default async function init(album) {
   geo.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3)); geo.setAttribute('aLL', new BufferAttribute(ll, 2));
   geo.setAttribute('aSd', new BufferAttribute(sd, 1)); geo.setAttribute('aLake', new BufferAttribute(info, 4)); geo.setIndex(index);
   const mat = new ShaderMaterial({
-    uniforms: sheetUniforms(album), transparent: false, blending: CustomBlending, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor,
+    // (no depth is written: the depth of a sheet is pulled toward the eye, and the finishing pass shaded that step as a dark rim; see layers/rivers.js)
+    uniforms: sheetUniforms(album), transparent: false, blending: CustomBlending, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, depthWrite: false,
     vertexShader: `${COMMON}
       ${SHEET_VERT}
       attribute vec2 aLL; attribute float aSd; attribute vec4 aLake; varying float vSd; varying vec4 vLake;

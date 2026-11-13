@@ -10,7 +10,7 @@ import { makeRibbons, smoothLine } from './ribbon.js';
 import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature } from '../roads/routes.js';
 import { riverCrossings, squareBridges, cutAtTowns, townIndex, nearIndex, BRIDGE } from '../roads/crossings.js';
 import { sheetPull } from '../aspects/water.js';
-import { MIN_PX as RIVER_MIN_PX } from './rivers.js';
+import { riverDrawn } from './rivers.js';
 import { kmOf, llOf } from '../chunks.js';
 
 // What a kind of road looks like: width on the ground km (a little wider than life, as the owner allows: «совсем
@@ -36,10 +36,12 @@ export function roadFar(set, px) {
   const L = LOOK[set];
   return { minPx: L.px[0] + (L.px[1] - L.px[0]) * ss(THIN[0], THIN[1], px), alpha: 1 - (1 - L.keep) * ss(L.fade[0], L.fade[1], px) };
 }
-const VERGE = { verge: 2.8, vergeColour: 0x77714a, vergeAlpha: .42 };          // the cleared strip: both sides and the road, in widths of the road
+// the cleared strip, both sides and the road, in widths of the road: that wide in the woods (a ride of some forty
+// metres), two thirds of it on open land (the worn verge); what the two look like
+const VERGE = { verge: 3.4, vergeColour: 0x77714a, vergeAlpha: .42, rideColour: 0x58803c };
 // a bridge by the kind of its road: stone on a main road, timber on a lesser one (a track has none)
 const DECK = [{ light: 0xa2957f, ink: 0x3a2a1c, look: 1 }, { light: 0x8a6f4c, ink: 0x4a3622, look: 2 }];
-const DECK_RIM = { verge: 1.45, vergeColour: 0x3a342b, vergeAlpha: .8 };     // the parapets and the shade of the deck on the water
+const DECK_RIM = { verge: 1.82, vergeColour: 0x3a342b, vergeAlpha: .8 };     // the parapets and the shade of the deck on the water
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const setOf = l => (l.kind === 0 ? (l.name ? 0 : 1) : l.kind + 1);
 
@@ -69,7 +71,7 @@ export default async function init(album) {
     decks = DECK.map((d, kind) => {
       const list = fords.filter(f => f.type === 'bridge' && f.road === kind); if (!list.length) return null;
       const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * BRIDGE.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * BRIDGE.wide, lift: .005, ground: true, sea: false, woods: 0, ...DECK_RIM });
-      rib.mesh.renderOrder = 6;
+      rib.mesh.renderOrder = -4;                                    // over the water of the rivers (−5)
       return { ...rib, kind, list };
     }).filter(Boolean);
     spanSeen = ''; sync();
@@ -80,7 +82,7 @@ export default async function init(album) {
     for (const d of decks) {
       const ll = d.mesh.geometry.attributes.aLL, dir = d.mesh.geometry.attributes.aDir;
       d.list.forEach((f, i) => {
-        const real = f.width * kr, water = Math.max(real, px * RIVER_MIN_PX * (.42 + .58 * Math.sqrt(Math.min(1, real / .16)))), half = water / f.sin / 2 + BRIDGE.abut + px * .5;
+        const half = riverDrawn(f.width * kr, px) / f.sin / 2 + BRIDGE.abut + px * .5;
         const a = llOf(f.x - f.dx * half, f.y - f.dy * half), b = llOf(f.x + f.dx * half, f.y + f.dy * half), c = Math.cos(a.lat * Math.PI / 180);
         let ex = (b.lon - a.lon) * c, ey = b.lat - a.lat; const len = Math.hypot(ex, ey) || 1; ex /= len; ey /= len;
         for (let v = 0; v < 4; v++) { const q = v < 2 ? a : b; ll.setXY(i * 4 + v, q.lat, q.lon); dir.setXY(i * 4 + v, ex, ey); }
@@ -133,7 +135,7 @@ export default async function init(album) {
         r.u.uMinPx.value = far.minPx;
         r.u.uAlpha.value = far.alpha;
         // the cleared strip beside a road is a thing of the near view
-        r.u.uVergeA.value = VERGE.vergeAlpha * (1 - ss(.02, .05, px));
+        r.u.uNear.value = 1 - ss(.02, .05, px);
         r.u.uVerge.value = px < .05 ? VERGE.verge : 1;
       }
       // a bridge is seen while it is a few pixels long; it lies over the water, which itself is pulled over the crowns

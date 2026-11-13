@@ -23,14 +23,34 @@ export const SHOW = [.035, .1];        // a river is left out when its water is 
 //   • the least width falls from MIN_PX to FAR_PX pixels: a river does not grow fatter with height;
 //   • fewer rivers are drawn: the widths SHOW are multiplied by up to FAR_SHOW, the small tributaries go first;
 //   • the thin line turns a paler blue, FAR_TINT of it, so that it can be told in a dark forest.
+// Between about 60 and 300 km (the lead, 14.11.2026, on the new light land: реки «стали тяжёлыми: тёмно-синяя толстая
+// линия с тёмной каймой… Мансанарес и Харама читаются как большие реки»):
+//   • a thin river is its water alone: the sheet no longer keeps room for banks that cannot be seen (MID.lean);
+//   • a small river is far thinner than a great one: the least width goes by the width itself, from MID.least[0] of
+//     the full least width for a brook to MID.least[1] for a river 160 m wide, and a small river is a little
+//     transparent (MID.clear), so that it takes the tone of the land it runs through;
+//   • the line is the grey-blue of water seen from above (MID.tint of it): darker than dry land, but not the deep
+//     saturated blue of the near view.
+// By 500 km all of this has given way to the rule of the far view above (MID.back), which stays as it was.
+// And at no height does a river write its depth: the finishing pass shaded the step in depth as a dark rim.
 export const GEN = { w: [.7, 3.5], t: [[.03, .1], [.16, .5]], range: 12 };
 export const FAR_PX = 1.6, FAR_SHOW = 2, FAR_TINT = .7;
+export const MID = { lean: [.03, .06], back: [.2, .32], least: [.42, 1.3], clear: .85, tint: .85, tintAt: [.03, .07] };
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // how a river is drawn when a pixel is px km: its least width in pixels, the widths it shows from, how far its line
 // has slid toward the two smoother shapes
+// … lean: how far the rule of the middle heights is in force (0 near the ground and from 500 km up); tint: how much
+// of the soft blue of the middle heights and of the paler blue of the far view the thin line takes, and which of the two
 export function riverFar(px) {
-  const k = 1 + (FAR_SHOW - 1) * ss(.05, .55, px);
-  return { minPx: MIN_PX - (MIN_PX - FAR_PX) * ss(.03, .35, px), show: [SHOW[0] * k, SHOW[1] * k], gen: [ss(GEN.t[0][0], GEN.t[0][1], px), ss(GEN.t[1][0], GEN.t[1][1], px)] };
+  const k = 1 + (FAR_SHOW - 1) * ss(.05, .55, px), back = ss(MID.back[0], MID.back[1], px);
+  return { minPx: MIN_PX - (MIN_PX - FAR_PX) * ss(.03, .35, px), show: [SHOW[0] * k, SHOW[1] * k], gen: [ss(GEN.t[0][0], GEN.t[0][1], px), ss(GEN.t[1][0], GEN.t[1][1], px)],
+    lean: ss(MID.lean[0], MID.lean[1], px) * (1 - back), tint: [MID.tint * ss(MID.tintAt[0], MID.tintAt[1], px), FAR_TINT * ss(.03, .2, px), back] };
+}
+// the water of a river `real` km wide as it is drawn when a pixel is px km (the same sums as the shader): km
+export function riverDrawn(real, px) {
+  const f = riverFar(px), s2 = Math.max(0, Math.min(1, real / .16)), size = Math.sqrt(s2);
+  const least = (.42 + .58 * size) * (1 - f.lean) + (MID.least[0] + (MID.least[1] - MID.least[0]) * s2) * f.lean;
+  return Math.max(real, px * f.minPx * least);
 }
 
 // The rivers as the sheets are built from them: [{ name, dry, n, ll (lon, lat pairs), w (km), dist (km from the
@@ -107,17 +127,19 @@ export function riverGeneral(lines, widths = GEN.w) {
 
 const VERT = /* glsl */`${COMMON}
   ${SHEET_VERT}
-  attribute vec2 aLL; attribute vec4 aW, aMisc, aGen, aGenDir; uniform float uPx, uK, uMinPx; uniform vec2 uShow, uGen;   // aMisc: the way the river runs (east, north), side −1 | 1, fade · aGen, aGenDir: where the two smoother lines lie and how they run
+  attribute vec2 aLL; attribute vec4 aW, aMisc, aGen, aGenDir; uniform float uPx, uK, uMinPx, uLean; uniform vec2 uShow, uGen;   // aMisc: the way the river runs (east, north), side −1 | 1, fade · aGen, aGenDir: where the two smoother lines lie and how they run
   varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;
   void main() {
-    float real = aW.x * uK, size = sqrt(clamp(real / .16, 0., 1.));                 // the water from bank to bank, km
-    float water = max(real, uPx * uMinPx * mix(.42, 1., size));                     // never thinner than a pixel or three
+    float real = aW.x * uK, s2 = clamp(real / .16, 0., 1.), size = sqrt(s2);        // the water from bank to bank, km
+    // never thinner than a pixel or three; from the middle heights a small river is far thinner than a great one
+    float water = max(real, uPx * uMinPx * mix(mix(.42, 1., size), mix(${MID.least[0].toFixed(2)}, ${MID.least[1].toFixed(2)}, s2), uLean));
     float show = smoothstep(uShow.x, uShow.y, real / max(uPx, 1e-5));               // brooks far thinner than a pixel are left out
-    float bed = water * 1.5 + min(water * .8, .03);                                 // the banks stand beside the water
+    float full = water * 1.5 + min(water * .8, .03);                                // the banks stand beside the water
+    float bed = mix(full, mix(water, full, smoothstep(5., 13., full / max(uPx, 1e-5))), uLean);   // … but a thin river seen from the middle heights is its water alone
     vec2 slide = mix(aGen.xy * uGen.x, aGen.zw, uGen.y) * ${GEN.range.toFixed(1)}, way = mix(mix(aMisc.xy, aGenDir.xy, uGen.x), aGenDir.zw, uGen.y);   // from high up the line is smoother
     vec2 at = aLL + vec2(slide.y / KM, slide.x / (KM * cos(radians(aLL.x))));
     float sd = sign(aMisc.z); vec2 across = normalize(vec2(-way.y, way.x) + 1e-6) * sd, off = across * bed * .5;
-    vSide = sd; vEnd = vec2(aMisc.w * show, step(aW.z, 0.)); vRiv = vec4(bed, aW.y, abs(aW.z), aW.w); vAcross = across; vWater = water / bed;
+    vSide = sd; vEnd = vec2(aMisc.w * show * mix(1., mix(${MID.clear.toFixed(2)}, 1., s2), uLean), step(aW.z, 0.)); vRiv = vec4(bed, aW.y, abs(aW.z), aW.w); vAcross = across; vWater = water / bed;
     sheetVertex(at + vec2(off.y / KM, off.x / (KM * cos(radians(at.x)))), max(heightLod(at, 0.), 0.) * uExag / 1000. + .002);
     if (show <= 0.) gl_Position = vec4(0., 0., 2., 1.);
   }`;
@@ -125,7 +147,7 @@ const FRAG = /* glsl */`${COMMON}
   ${CHUNK_GLSL}
   ${LIGHT}
   ${SHEET_FRAG}
-  uniform vec3 uFlat; uniform float uPass, uTint; varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;   // uPass: 0 the banks · 1 the water
+  uniform vec3 uFlat, uTint; uniform float uPass; varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;   // uPass: 0 the banks · 1 the water
   void main() {
     vec2 pk = sheetPk(); float px = sheetPx(pk);
     float bed = vRiv.x, s = vSide, wpx = bed / max(px, 1e-6), dry = step(.5, vEnd.y);
@@ -164,7 +186,8 @@ const FRAG = /* glsl */`${COMMON}
       w.depth = mix(deep, deep * clamp(1. - t * t * .85, .05, 1.) * smoothstep(0., .45, edge), far);
       w.cB.r = clamp(w.cB.r * 1.25 - .25, 0., 1.);                                    // running water freezes later than still water
       col = waterLit(w);
-      col = mix(col, vec3(.05, .15, .36) * (.2 + .8 * albumDay()), uTint * (1. - far) * (1. - w.cB.r));   // from high up: a thin line that can be told from a dark forest
+      // the thin line: from the middle heights a soft blue that sits in the land, from high up a paler line that can be told from a dark forest
+      col = mix(col, mix(vec3(.05, .125, .19), vec3(.05, .15, .36), uTint.z) * (.2 + .8 * albumDay()), mix(uTint.x, uTint.y, uTint.z) * (1. - far) * (1. - w.cB.r));
       float foot = far * (1. - dry) * (1. - inner) * smoothstep(.35, 0., edge) * clamp(dot(vAcross, uSun.xy) * 1.5, 0., 1.) * .5;   // a steep bank shades the water at its foot
       col *= 1. - foot;
     }
@@ -205,8 +228,11 @@ export default async function init(album) {
   // two meshes of one material: the brooks, which only show from low down, can be switched off whole
   const widest = l => { let m = 0; for (let i = 0; i < l.n; i++) if (l.w[i] > m) m = l.w[i]; return m; };
   const BROOK = .012, sets = [lines.filter(l => widest(l) >= BROOK), lines.filter(l => widest(l) < BROOK)];
-  const u = { ...sheetUniforms(album), uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: MIN_PX }, uShow: { value: [SHOW[0], SHOW[1]] }, uGen: { value: [0, 0] }, uTint: { value: 0 }, uFlat: { value: new Color(FLAT.atlas) } };
-  const material = pass => new ShaderMaterial({ uniforms: { ...u, uPass: { value: pass } }, depthWrite: pass === 1,
+  const u = { ...sheetUniforms(album), uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: MIN_PX }, uShow: { value: [SHOW[0], SHOW[1]] }, uGen: { value: [0, 0] }, uLean: { value: 0 }, uTint: { value: [0, 0, 0] }, uFlat: { value: new Color(FLAT.atlas) } };
+  // (Neither pass writes its depth. The depth of a sheet is pulled toward the eye, and the finishing pass took that
+  // step for relief and shaded a dark rim along every river seen from above. What must stay under the water — the
+  // roads — is drawn before it: layers/ribbon.js.)
+  const material = pass => new ShaderMaterial({ uniforms: { ...u, uPass: { value: pass } }, depthWrite: false,
     transparent: false, blending: CustomBlending, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, side: DoubleSide, vertexShader: VERT, fragmentShader: FRAG });
   const banksMat = material(0), waterMat = material(1);
   // after the ground and the lakes, before trees and houses: first the banks of every river, then the water of every river
@@ -220,7 +246,7 @@ export default async function init(album) {
     update(dt, t, cam) {
       const px = u.uPx.value = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, album.renderer.domElement.clientHeight), far = riverFar(px);
       u.uPull.value = sheetPull(album, cam);
-      u.uMinPx.value = far.minPx; u.uShow.value[0] = far.show[0]; u.uShow.value[1] = far.show[1]; u.uGen.value[0] = far.gen[0]; u.uGen.value[1] = far.gen[1]; u.uTint.value = FAR_TINT * ss(.03, .2, px);
+      u.uMinPx.value = far.minPx; u.uShow.value[0] = far.show[0]; u.uShow.value[1] = far.show[1]; u.uGen.value[0] = far.gen[0]; u.uGen.value[1] = far.gen[1]; u.uLean.value = far.lean; u.uTint.value[0] = far.tint[0]; u.uTint.value[1] = far.tint[1]; u.uTint.value[2] = far.tint[2];
       meshes[0].mesh.visible = on; meshes[1].mesh.visible = on && BROOK * u.uK.value / px > far.show[0];
       meshes[0].banks.visible = on && u.uPx.value < .12;            // banks are drawn only while a great river is a few pixels wide
     } };
