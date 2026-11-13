@@ -60,7 +60,7 @@ vec3 albumHorizon(vec3 dir) {
   vec3 c = albumHazeCol();
   if (uStyle == 0 && uSun.z < .4) {
     float g = (1. - smoothstep(.04, .4, uSun.z)) * smoothstep(-.26, -.01, uSun.z), s = max(dot(dir, uSunW), 0.);
-    s *= s; c += vec3(1., .42, .10) * g * (.26 * s + .62 * s * s * s);
+    s *= s; c = mix(c, vec3(1.12, .58, .24) * (.25 + .75 * smoothstep(-.2, .06, uSun.z)), g * (.34 * s + .58 * s * s * s));
   }
   return c;
 }

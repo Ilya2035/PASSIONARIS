@@ -84,7 +84,11 @@ export class AlbumCamera {
   bind(dom) {
     const typing = e => { const el = e.target; return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable; };
     dom.addEventListener('contextmenu', e => e.preventDefault());
-    dom.addEventListener('pointerdown', e => { this.drag = { b: e.button, x: e.clientX, y: e.clientY }; try { dom.setPointerCapture(e.pointerId); } catch { /* not a live pointer */ } });
+    dom.addEventListener('pointerdown', e => {
+      this.drag = { b: e.button, x: e.clientX, y: e.clientY, g: e.button === 0 ? this.groundUnder(e.clientX, e.clientY) : null };
+      if (e.button === 0) { this.t.lat = this.s.lat; this.t.lon = this.s.lon; this.anchor = null; }   // the hand stops the map
+      try { dom.setPointerCapture(e.pointerId); } catch { /* not a live pointer */ }
+    });
     const up = e => { this.drag = null; if (dom.hasPointerCapture?.(e.pointerId)) dom.releasePointerCapture(e.pointerId); };
     dom.addEventListener('pointerup', up); dom.addEventListener('pointercancel', up);
     dom.addEventListener('pointermove', e => {
@@ -92,16 +96,17 @@ export class AlbumCamera {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y, t = this.t;
       if (!dx && !dy) return;
       if (drag.b === 0) {
-        // the ground follows the cursor: the point that was under it stays under it
-        const kmPerPx = 2 * this.s.h * Math.tan(this.cam.fov * Math.PI / 360) / dom.clientHeight, cl = Math.cos(t.lat * D);
-        const p0 = this.groundUnder(drag.x, drag.y), p1 = this.groundUnder(e.clientX, e.clientY);
+        // The ground follows the hand: the point that was grabbed stays under the cursor. This move is not eased:
+        // the hand itself is smooth, and a map that lags behind it feels loose.
+        const s = this.s, kmPerPx = 2 * s.h * Math.tan(this.cam.fov * Math.PI / 360) / dom.clientHeight, cl = Math.cos(t.lat * D);
+        const p1 = drag.g && this.groundUnder(e.clientX, e.clientY);
         let dLat, dLon;
-        if (p0 && p1) { dLat = p0.lat - p1.lat; dLon = p0.lon - p1.lon; }
-        else { const st = panStep({ ...this.s, h: kmPerPx / PAN_RATE }, { x: -dx, y: dy }, Math.hypot(dx, dy)); dLat = st.lat; dLon = st.lon; }
+        if (p1) { dLat = drag.g.lat - p1.lat; dLon = drag.g.lon - p1.lon; }
+        else { const st = panStep({ ...s, h: kmPerPx / PAN_RATE }, { x: -dx, y: dy }, Math.hypot(dx, dy)); dLat = st.lat; dLon = st.lon; }
         // near the horizon one pixel is a great distance: the drag never runs faster than six times the middle of the view
         const km = Math.hypot(dLat * KM_PER_DEG, dLon * KM_PER_DEG * cl), most = 6 * kmPerPx * Math.hypot(dx, dy);
         if (km > most) { dLat *= most / km; dLon *= most / km; }
-        t.lat += dLat; t.lon += dLon;
+        t.lat += dLat; t.lon += dLon; this.limit(); s.lat = t.lat; s.lon = t.lon; this.pose(0);
       } else { t.heading -= dx * 0.25; t.tilt -= dy * 0.2; }
       drag.x = e.clientX; drag.y = e.clientY;
       this.anchor = null; this.limit(); this.changed = true;
@@ -115,6 +120,7 @@ export class AlbumCamera {
         const cl = Math.cos(s.lat * D), km = Math.hypot((P.lat - s.lat) * KM_PER_DEG, (P.lon - s.lon) * KM_PER_DEG * cl), most = 2 * s.h;
         if (km > most) P = { lat: s.lat + (P.lat - s.lat) * most / km, lon: s.lon + (P.lon - s.lon) * most / km };
         this.anchor = { lat: P.lat, lon: P.lon, kLat: (s.lat - P.lat) / s.h, kLon: (s.lon - P.lon) / s.h };
+        if (km <= most) { this.anchor.x = e.clientX; this.anchor.y = e.clientY; }   // (the anchor is the very point under the cursor)
         Object.assign(this.t, zoomAbout(s, P, h1));
       } else { this.anchor = null; this.t.h = h1; }
       this.limit(); this.changed = true;
@@ -145,6 +151,7 @@ export class AlbumCamera {
   // eases toward the target; returns true while moving
   update(dt, aspect) {
     const s = this.s, t = this.t;
+    this.aspect = aspect;
     if (!this.shot && this.dom) {
       const ask = this.push(), step = Math.min(dt, .1);
       if (ask.x || ask.y) { const st = panStep(s, ask, step, ask.fast); t.lat += st.lat; t.lon += st.lon; this.anchor = null; }
@@ -158,15 +165,31 @@ export class AlbumCamera {
     if (A && moving) { const c = clampLL(A.lat + A.kLat * s.h, A.lon + A.kLon * s.h); s.lat = c.lat; s.lon = c.lon; }   // the wheel: the point under the cursor stays put
     else { if (A) this.anchor = null; for (const key of ['lat', 'lon']) { const d = t[key] - s[key]; if (Math.abs(d) > 1e-6) { s[key] += d * k; moving = true; } } }
     for (const key of ['tilt', 'heading']) { const d = t[key] - s[key]; if (Math.abs(d) > 1e-6) { s[key] += d * k; moving = true; } }
-    const { up, east, north } = frame(s.lat, s.lon), a = s.heading * D, ti = s.tilt * D;
+    if (this.pose(dt)) moving = true;
+    // The wheel, exactly. Relief and the roundness of the Earth bend the simple rule a little, so the point that was
+    // under the cursor is looked up again in the new picture, and the view is moved by what it has strayed.
+    if (A && this.anchor && A.x !== undefined && this.dom) {
+      const p = this.groundUnder(A.x, A.y);
+      if (p) {
+        const c = clampLL(s.lat + A.lat - p.lat, s.lon + A.lon - p.lon); s.lat = c.lat; s.lon = c.lon;
+        A.kLat = (s.lat - A.lat) / s.h; A.kLon = (s.lon - A.lon) / s.h; t.lat = A.lat + A.kLat * t.h; t.lon = A.lon + A.kLon * t.h; this.limit();
+        this.pose(0);
+      }
+    }
+    if (moving || this.changed) { this.changed = false; for (const fn of this.listeners) fn(s); return true; }
+    return false;
+  }
+  // puts the camera where the shown state says; returns true while the eye is still being lifted over the land
+  pose(dt) {
+    const s = this.s, { up, east, north } = frame(s.lat, s.lon), a = s.heading * D, ti = s.tilt * D;
     const fwd = new Vector3().addScaledVector(north, Math.cos(a)).addScaledVector(east, Math.sin(a));
     const ground = Math.max(0, this.groundAt(s.lat, s.lon)) * this.exag / 1000;
     const target = toWorld(s.lat, s.lon, ground);
     const pos = target.clone().addScaledVector(up, s.h * Math.cos(ti)).addScaledVector(fwd, -s.h * Math.sin(ti));
     // the eye never sinks into the land under it: it is lifted to keep a clearance, smoothly
     const here = fromWorld(pos), under = Math.max(0, this.groundAt(here.lat, here.lon)) * this.exag / 1000;
-    const need = Math.max(0, under + Math.max(.35, s.h * .02) - here.h), dl = need - this.lift;
-    if (Math.abs(dl) > 1e-4) { this.lift += dl * (1 - Math.exp(-dt * 8)); moving = true; }
+    const need = Math.max(0, under + Math.max(.35, s.h * .02) - here.h), dl = need - this.lift, lifting = Math.abs(dl) > 1e-4;
+    if (lifting) this.lift += dl * (1 - Math.exp(-dt * 8));
     if (this.lift > 0) pos.addScaledVector(pos.clone().add(new Vector3(0, R, 0)).normalize(), this.lift);
     const c = this.cam;
     c.position.copy(pos); c.up.copy(ti < 0.02 ? fwd : up); c.lookAt(target);
@@ -174,9 +197,8 @@ export class AlbumCamera {
     // nothing stands nearer to the eye than a part of its height over the land, so the near plane can be far: the
     // depth buffer is then fine enough for the far land too
     c.near = Math.max(0.15, (alt - under) * 0.2); c.far = Math.sqrt(2 * R * alt + alt * alt) * 1.25 + 300;
-    c.aspect = aspect; c.updateProjectionMatrix(); c.updateMatrixWorld();
+    c.aspect = this.aspect || 1; c.updateProjectionMatrix(); c.updateMatrixWorld();
     this.alt = alt; this.target = target;
-    if (moving || this.changed) { this.changed = false; for (const fn of this.listeners) fn(s); return true; }
-    return false;
+    return lifting && dt > 0;
   }
 }
