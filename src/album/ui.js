@@ -82,7 +82,10 @@ export function initUI(album) {
   const mBtns = MODES.map(([name, set]) => { const b = button('off album-mode', name); b.onclick = () => p.setMany(set); modes.append(b); return b; });
   root.append(modes);
   const back = button('back', 'В лаунчер'); back.onclick = () => window.passionaris?.exitToLauncher?.(); root.append(back);
-  root.append(el('div', 'hint S', 'Колесо — высота · левая кнопка — двигать · средняя или правая — вращать и наклонять · двойной щелчок — лететь · 1–4 — высоты · H — скрыть панели'));
+  // the strip stays one line (the scale bar of the map stands right above it); the whole list of the keys is its tooltip
+  const keys = el('div', 'hint S', 'Колесо — высота · левая кнопка, край экрана, W A S D — двигать · правая кнопка, Q E R F — вращать и наклонять · двойной щелчок — лететь · H — скрыть панели');
+  keys.title = 'Колесо — ближе и дальше, к точке под курсором · курсор у края экрана, W A S D или стрелки — двигать (с Shift быстрее) · левая кнопка — тащить карту · средняя или правая — вращать и наклонять · Q и E — поворот · R и F — наклон · двойной щелчок — лететь · N — север вверху · 1–4 — высоты · H — скрыть панели';
+  root.append(keys);
 
   function paint() {
     const pg = album.page; title.textContent = pg.title; note.textContent = pg.note; memo.value = fb[pg.id]?.note || '';

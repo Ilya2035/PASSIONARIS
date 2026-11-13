@@ -56,10 +56,13 @@ body.mapview #ui > .hint { left: 392px; right: 20px; bottom: 20px; }
 body:not(.mapview) #ui > .mv { display: none; }
 body.mapview #ui > .mv-open { display: none; }
 body.gameview #ui > .mv .mv-album { display: none; }
-#ui > .mv { left: 20px; top: 20px; width: 352px; gap: 8px; }
+/* the panel ends above the camera panel under it (222 px tall, 20 px from the bottom): the parts of the album keep
+   adding their switches, and when the list no longer fits the window, the list scrolls and nothing else gives way */
+#ui > .mv { left: 20px; top: 20px; width: 352px; gap: 8px; max-height: calc(100vh - 274px); }
+.mv > * { flex: none; }
 .mv .mv-modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .mv .mv-modes .btn { justify-content: center; }
-.mv .mv-sw { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px 10px; }
+.mv .mv-sw { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px 10px; flex: 0 1 auto; min-height: 52px; overflow-y: auto; }
 .mv .mv-sw label { display: flex; align-items: center; gap: 6px; cursor: pointer; font: 400 var(--fs-s)/1.3 var(--font-ui); color: var(--c-text); padding: 2px 0; }
 .mv .mv-fps { font-variant-numeric: tabular-nums; color: var(--c-text); }
 .mv .mv-line { border-top: var(--border) solid var(--c-line); padding-top: 8px; }
