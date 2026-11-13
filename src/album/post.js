@@ -26,7 +26,9 @@ export class Post {
             // of the plane by more than the span of a pixel counts as standing in the way, and where that span
             // outgrows the reach of the shade there is no shade at all. Without this the horizon was all grain, with
             // dark lines along the borders of the grid's levels.
-            float span = length(grad), lo = max(uRad * .05, span * .8), keep = 1. - smoothstep(uRad * .5, uRad * 1.6, span);
+            // And nothing lower than 40 m counts at all: a house, a town wall, the bank of a river have no shade around
+            // them (the owner, 13.11.2026: shadows come from mountains and relief only); cliffs and gullies keep theirs.
+            float span = length(grad), lo = max(max(uRad * .05, span * .8), .04), keep = 1. - smoothstep(uRad * .5, uRad * 1.6, span);
             if (keep > 0.) {
               for (int i = 0; i < 8; i++) {
                 float a = a0 + float(i) * .7854; vec2 o = vec2(cos(a), sin(a)) * r * (.4 + .6 * fract(float(i) * .618 + .3));

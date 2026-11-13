@@ -84,7 +84,7 @@ export class AlbumCamera {
   bind(dom) {
     const typing = e => { const el = e.target; return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable; };
     dom.addEventListener('contextmenu', e => e.preventDefault());
-    dom.addEventListener('pointerdown', e => { this.drag = { b: e.button, x: e.clientX, y: e.clientY }; dom.setPointerCapture(e.pointerId); });
+    dom.addEventListener('pointerdown', e => { this.drag = { b: e.button, x: e.clientX, y: e.clientY }; try { dom.setPointerCapture(e.pointerId); } catch { /* not a live pointer */ } });
     const up = e => { this.drag = null; if (dom.hasPointerCapture?.(e.pointerId)) dom.releasePointerCapture(e.pointerId); };
     dom.addEventListener('pointerup', up); dom.addEventListener('pointercancel', up);
     dom.addEventListener('pointermove', e => {
@@ -122,6 +122,9 @@ export class AlbumCamera {
     addEventListener('keydown', e => {
       if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       this.keys.add(e.code);
+      // on the map shown on its own the up and down arrows move the map and must not also turn the pages of the
+      // album behind it (the album's own handler in ui.js comes after this one)
+      if ((e.code === 'ArrowUp' || e.code === 'ArrowDown') && this.upDown()) { e.stopImmediatePropagation(); e.preventDefault(); }
       const h = { Digit1: 20, Digit2: 50, Digit3: 200, Digit4: 500 }[e.code];
       if (h) this.flyTo({ h });
       if (e.code === 'KeyN') this.flyTo({ heading: 0 });

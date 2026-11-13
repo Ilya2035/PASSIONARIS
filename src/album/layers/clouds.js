@@ -19,24 +19,25 @@ uniform float uShow;
 varying vec3 vW;
 // the cloud field with its curls: the soft field of light.js (the same numbers) plus smaller noise that fades once
 // it is smaller than a pixel
+// (each smaller noise is turned against the one before, so that the square grain of the noise never lines up)
+float curls(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + 17.1; a *= .5; } return s; }
 float cloudN(vec2 q, float px) {
   float n = vnoise(q / 310.) * .46 + vnoise(q / 118. + 7.3) * .32 + vnoise(q / 47. + 3.1) * .22;
-  if (px < 9.) n += (fbm(q / 15. + 5.) - .47) * .26 * smoothstep(9., 3., px);
-  if (px < 1.5) n += (vnoise(q / 2.6 + 11.) - .5) * .07 * smoothstep(1.5, .5, px);
+  if (px < 12.) n += (curls(mat2(.8, .6, -.6, .8) * q / 21. + 5.) - .47) * .30 * smoothstep(12., 4., px);
   return n;
 }
 void main() {
   if (uCloud.x <= 0. || uShow <= 0.) discard;
   vec3 C = normalize(vW + vec3(0., RKM, 0.)) * (RKM + uCloud.w), P = C - vec3(0., RKM, 0.);   // (the triangles of the shell are flat: back onto the sphere)
   vec2 q = C.xz / max(C.y, 1.) * RKM + uCloud.yz; float px = length(fwidth(q));
-  float thr = mix(.80, .30, uCloud.x), n = cloudN(q, px), dens = smoothstep(thr - .03, thr + .12, n);
+  float thr = mix(.80, .30, uCloud.x), n = cloudN(q, px), dens = smoothstep(thr - .04, thr + .16, n);
   if (dens <= .003) discard;
   // the side toward the Sun is bright: there is less cloud between it and the Sun than on the far side
-  vec2 s2 = normalize(uSunW.xz + 1e-4); float n2 = cloudN(q + s2 * 8., px), lit = smoothstep(-.07, .10, n - n2);
-  float day = albumDay(), body = smoothstep(thr, thr + .3, n);                    // the thick middle of a cloud is a little greyer
-  vec3 col = albumSunCol() * (.42 + .78 * lit) * (1. - .22 * body) + albumSkyCol() * 1.25 + albumMoonCol() * (.5 + .7 * lit);
+  vec2 s2 = normalize(uSunW.xz + 1e-4); float n2 = cloudN(q + s2 * 7., px), lit = smoothstep(-.06, .09, n - n2);
+  float day = albumDay(), body = smoothstep(thr + .05, thr + .32, n);              // the thick middle of a cloud is a little greyer
+  vec3 col = albumSunCol() * (.34 + .86 * lit) * (1. - .2 * body) + albumSkyCol() * 1.2 + albumMoonCol() * (.5 + .7 * lit);
   col = mix(col * .93, albumHorizon(normalize(P - cameraPosition)), albumHaze(P));
-  gl_FragColor = vec4(albumFinish(col), dens * (.5 + .45 * dens) * uShow * mix(.8, 1., day));
+  gl_FragColor = vec4(albumFinish(col), dens * (.42 + .52 * dens) * uShow * mix(.8, 1., day));
 }`;
 
 export default async function init(album) {
