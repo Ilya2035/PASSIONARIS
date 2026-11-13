@@ -7,7 +7,8 @@
 import { Vector3, Vector4 } from 'three';
 import { sunDir } from './sky/astro.js';
 
-// the low haze of the air lies in a layer this many km thick (its density falls e times over this height)
+// the low haze of the air lies in a layer this many km thick (the sky of sky/dome.js counts it by its height; the
+// ground's albumHaze() only keeps a level look from crossing more of it than this thickness allows)
 export const HAZE_KM = 1.5;
 
 // ---- one light for everything: the ground and anything that stands on it use the same sun, sky, air and finish
@@ -34,19 +35,18 @@ vec3 albumLit(vec3 seen, vec3 n, float open) {
   vec3 nn = normalize(n);
   return pow(seen, vec3(2.2)) * (albumSunCol() * max(dot(nn, uSun), 0.) * 1.25 + albumMoonLit(nn) + albumSkyCol() * open);
 }
-// Air crossed along a slant, counted in columns of air standing over the sea: q = sqrt((R + h) / H) for an air layer
-// H thick seen from the height h, c = cosine between the way and the zenith. Straight up it is 1, level it is q.
-float albumSlant(float q, float c) { return q / (q * max(c, 0.) + 1.); }
 // The air between the eye and a point of the world: how much of it there is (0..1). Two parts: a thin air that
-// thickens with the way through it (so that a look from any height keeps the same depth), and the low haze that lies
-// over the lowlands — it is what the land sinks into toward the horizon, while a mountain near the eye stays clear.
+// thickens with the way through it (so that a look from any height keeps the same depth), and a low haze, the more
+// of it the flatter the look runs over the land — the land sinks into it toward the horizon. A level look cannot
+// cross more haze than its own length holds (1.5 / dist), so a mountain near the eye stays clear.
+//
+// KEEP THIS SHORT. The ground shader stands at a cliff on the built-in AMD card: about a hundred more operations in
+// it (the first version of this function counted the height of the haze layer, with two exp and two sqrt) and the
+// whole frame is 40–50 % slower, at once, whatever those operations are (measured 13.11.2026, docs/album/sky.md).
 float albumHaze(vec3 wpos) {
-  vec3 P = wpos + vec3(0., RKM, 0.), C = cameraPosition + vec3(0., RKM, 0.), d = C - P;
-  float dist = length(d), rP = length(P), rC = length(C), camAlt = rC - RKM; d /= max(dist, 1e-4);
-  float cP = dot(d, P) / rP, cC = dot(d, C) / rC, s = cP + cC < 0. ? -1. : 1.;       // (s: the point is above the eye)
-  float hP = max(rP - RKM, 0.) / HAZE_KM, hC = max(camAlt, 0.) / HAZE_KM;
-  float low = s * (exp(-hP) * albumSlant(sqrt(RKM / HAZE_KM + hP), s * cP) - exp(-hC) * albumSlant(sqrt(RKM / HAZE_KM + hC), s * cC));
-  return 1. - exp(-uHaze * (.5 * dist / (camAlt * 2.2 + 25.) + .34 * max(low, 0.)));
+  vec3 up = normalize(wpos + vec3(0., RKM, 0.)), Vw = normalize(cameraPosition - wpos);
+  float dist = length(cameraPosition - wpos), camAlt = length(cameraPosition + vec3(0., RKM, 0.)) - RKM;
+  return 1. - exp(-(uHaze * dist / (camAlt * 2.2 + 25.) + .012 / max(dot(Vw, up), max(.004, 1.5 / dist))));
 }
 vec3 albumHazeCol() {
   if (uStyle == 6) return vec3(.05, .07, .11);
@@ -64,7 +64,9 @@ vec3 albumHorizon(vec3 dir) {
   }
   return c;
 }
-// ---- clouds (layers/clouds.js draws them; here is what the ground needs for their shadows)
+vec3 albumAir(vec3 col, vec3 wpos) { return mix(col, albumHorizon(normalize(wpos - cameraPosition)), albumHaze(wpos)); }
+// ---- clouds (layers/clouds.js draws them; their shadows are laid over the finished picture by post.js — not in
+// albumAir(): the noise below is what would push the ground shader off its cliff)
 // the cloud field over a point of the world, 0 clear sky .. 1 thick cloud: soft, without the small curls
 float albumCloudField(vec3 wpos) {
   vec3 P = wpos + vec3(0., RKM, 0.); vec2 q = P.xz / max(P.y, 1.) * RKM + uCloud.yz;   // km on the plane touching the middle of the map
@@ -80,7 +82,6 @@ float albumCloudShade(vec3 wpos) {
   float sh = albumCloudField(wpos + L * rise / max(dot(L, up), .22));
   return 1. - sh * mix(.22, .5, albumDay());
 }
-vec3 albumAir(vec3 col, vec3 wpos) { return mix(col * albumCloudShade(wpos), albumHorizon(normalize(wpos - cameraPosition)), albumHaze(wpos)); }
 // exposure, tone curve, saturation, display gamma: the last step of every pixel
 vec3 albumFinish(vec3 col) {
   col *= uExposure;

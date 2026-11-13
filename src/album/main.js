@@ -19,7 +19,9 @@ if (q.get('view') === 'game') { document.title = 'Passionaris'; const t = docume
 
 const renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 const scene = new Scene();
-const album = window.__album = { ready: false, shot: SHOT, renderer, scene, fps: 0, layers: {} };
+// overlay: what is drawn over the finished picture, after the finishing pass (the clouds: layers/clouds.js)
+const overlay = new Scene();
+const album = window.__album = { ready: false, shot: SHOT, renderer, scene, overlay, fps: 0, layers: {} };
 
 async function start() {
   const data = album.data = await loadData(step);
@@ -61,10 +63,13 @@ async function start() {
   if (q.get('place')) { const p = data.places.find(x => x.id === q.get('place')); if (p) cam.set({ lat: p.lat, lon: p.lon }, true); }
   for (const [k, v] of q) if (k.startsWith('p.')) params.set(k.slice(2), Number.isNaN(+v) ? v : +v);
 
-  const post = album.post = new Post(renderer);
+  const post = album.post = new Post(renderer, terrain.u);
   const clock = new Clock();
   // one picture, with or without the finishing pass (scripts/album/frametime.js times this call)
-  album.draw = () => { if (params.get('fx')) post.render(scene, cam.cam, cam.s.h, params.get('ao'), params.get('sharp')); else renderer.render(scene, cam.cam); };
+  album.draw = () => {
+    if (params.get('fx')) post.render(scene, cam.cam, cam.s.h, params.get('ao'), params.get('sharp')); else renderer.render(scene, cam.cam);
+    if (overlay.children.some(o => o.visible)) { renderer.autoClear = false; renderer.render(overlay, cam.cam); renderer.autoClear = true; }
+  };
   let frames = 0, tAcc = 0, t = 0, auto = 1, slow = 0, fast = 0;
   function size() {
     const w = canvas.clientWidth, h = canvas.clientHeight, pr = Math.min(devicePixelRatio, 2) * (params.get('renderScale') || 1) * auto;
