@@ -140,7 +140,11 @@ test('roads: the network is kept in a file and read back as it was; a file for a
   // the town of one district moves by a chunk: the file is for another division
   const d = districtOf(towns[2]), moved = { ...div.centres, texel: Int32Array.from(div.centres.texel) }; moved.texel[d] += 1;
   assert.equal(decodeNet(buf, div, moved, towns), null, 'another point of a town: the roads are laid anew');
-  assert.equal(decodeNet(buf, div, div.centres, [towns[1], towns[0], towns[3], towns[2]].map((t, i) => (i === 0 ? { ...llOf(IX0 + 200, IY1 - 60), pop: 9e6 } : t))), null, 'another town of a province: laid anew');
+  // the main town of a province is another district now (the division says which: the seat, bit 1)
+  const pv = div.province[d], was = net.capitals[pv]; let other = -1;
+  for (let e = 0; e < div.count && other < 0; e++) if (e !== was && div.kinds[e] === LAND && div.province[e] === pv && div.centres.texel[e] >= 0) other = e;
+  const seat = Uint8Array.from(div.centres.seat || new Uint8Array(div.count)); seat[was] &= ~1; seat[other] |= 1;
+  assert.ok(other >= 0); assert.equal(decodeNet(buf, div, { ...div.centres, seat }, towns), null, 'another town of a province: laid anew');
   assert.equal(decodeNet(buf.slice(0, 64), div, div.centres, towns), null, 'a broken file is no file');
 });
 
