@@ -41,6 +41,7 @@ export function createPanel(onClose) {
           row('Мест под поселения', num(s.settle.places)); row('Поселений', num(s.settle.settlements));
           if (s.settle.villages) row('из них деревень', num(s.settle.villages));
           row('Жителей', num(s.settle.people));
+          if (s.settle.tracksKm >= .5) row('Тропы к деревням', `${num(s.settle.tracksKm)} км`);
         }
       }
       res.textContent = '';

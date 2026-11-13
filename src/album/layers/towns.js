@@ -10,11 +10,13 @@
 // model founds a village on each as the «Рост городов» knob rises. They are patches like the towns, in a finer grid.
 // The fields are the state of the chunks of 1 km² (town/farmland.js): every settlement ploughs the chunks around it,
 // and the ground shader draws the fields from the share each chunk keeps (town/state.js, the rows of the chunks).
+// From every village a track leads to the roads of its district (town/tracks.js): thin ribbons, like the roads, laid
+// around the point the camera looks at and shown while the villages themselves can be told.
 import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, BufferGeometry, Points, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
 import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
-import { smoothLine } from './ribbon.js';
+import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
 import { cellSize, cultureAt, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
@@ -24,9 +26,14 @@ import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
-import { KN } from '../division/km.js';
+import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { roadChunks, districtTracks, trackLines, trackIndex, TRACK_SNAP } from '../town/tracks.js';
 
 const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
+// a track to a village: width on the ground km, least width in pixels, colour on the natural land and on paper — a
+// step below the track that joins two districts (layers/roads.js)
+const TRACK = { w: .008, px: 1.7, light: 0xa08258, ink: 0x8f7354, alpha: 1 };
+const TRACK_FADE = [.045, .085];                                    // km to a pixel: the tracks go as the villages themselves melt into the land
 // How far from the point the camera looks at the ground is in the picture, km: out to the far corners. h: the
 // distance of the camera from that point, tilt: from straight down, degrees, fov: of the picture's height, degrees.
 // With villages everywhere, the blocks are planned no farther than this: what lies outside the picture costs nothing.
@@ -100,6 +107,7 @@ export default async function init(album) {
   // the places the model founds: the places of the album to begin with; once the land is divided into districts, also
   // the centre of every other district (grow.js, centrePlaces) and the villages between them (villages.js)
   let places = album.data.vectors.places, divSeen = -1, villSeen = -1, siteList = null, siteOfBase = new Map(), founded = new Uint8Array(0), perDistrict = new Map();
+  let siteR = new Float32Array(0), grownN = 0;                      // the radius of the settlement on every place of the lists (0: nobody there) · changes with every run of the model
   const at = (x, y) => base.at(y / KM_PER_DEG, x / (KM_PER_DEG * COS_REF));        // height in metres at a point of the flat km plane
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); ch.setNatural('culture', k, cultureAt(c.lat, c.lon) / 255); }
 
@@ -163,12 +171,12 @@ export default async function init(album) {
       written.set(k, { built: byteOf('built', k), fields: byteOf('fields', k), forest: byteOf('forest', k), forest0 });
     }
     // which places of the lists are settled now, and what every district holds
-    perDistrict = new Map();
+    perDistrict = new Map(); grownN++;
     if (siteList) {
-      founded = new Uint8Array(siteList.x.length);
+      founded = new Uint8Array(siteList.x.length); siteR = new Float32Array(siteList.x.length);
       for (const t of model.towns) {
         const s = siteOfTown(t); if (!s) continue;
-        founded[siteList.first[s.district] + s.site] = 1;
+        founded[siteList.first[s.district] + s.site] = 1; siteR[siteList.first[s.district] + s.site] = t.R;
         const q = perDistrict.get(s.district) || perDistrict.set(s.district, { settlements: 0, villages: 0, people: 0 }).get(s.district);
         q.settlements++; q.people += t.people; if (t.village) q.villages++;
       }
@@ -251,9 +259,53 @@ export default async function init(album) {
     }
     return best;
   };
+  // ---- tracks to the villages (town/tracks.js): the ways of a district are worked out when the district is first
+  // looked at, the tracks of its settled villages again whenever the model has run
+  let trackBase = null, trackKey = '', trackRibbon = null, trackShown = 0;
+  const roadSnap = (x, y) => {                                      // the nearest point of a road as it is drawn, within TRACK_SNAP km
+    let best = TRACK_SNAP, at = null; const gx = Math.floor(x / RC), gy = Math.floor(y / RC);
+    for (let j = gy - 1; j <= gy + 1; j++) for (let i = gx - 1; i <= gx + 1; i++) for (const id of rgrid.get(i * 100000 + j) || []) {
+      const o = id * 4, ax = rsegs[o], ay = rsegs[o + 1], dx = rsegs[o + 2] - ax, dy = rsegs[o + 3] - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+      const d = Math.hypot(x - ax - dx * t, y - ay - dy * t); if (d < best) { best = d; at = [ax + dx * t, ay + dy * t]; }
+    }
+    return at;
+  };
+  function tracksReady() {
+    const dv = album.division, net = album.roadNet; if (!dv || !net?.legs || !siteList) return false;
+    if (net !== roadSeen) indexRoads();
+    if (!trackBase || trackBase.net !== net || trackBase.div !== dv.version || trackBase.list !== siteList)
+      trackBase = { net, div: dv.version, list: siteList, G: { hgt: dv.data.raster.hgt, riv: dv.data.raster.riv }, onRoad: roadChunks(net.legs), trees: new Map(), drawn: new Map() };
+    return true;
+  }
+  // the tracks of district d: { lines, km, near(x, y) → km to the nearest }. all: also to the places nobody lives on yet
+  // (for checking, knob «Места поселений»)
+  function tracksOf(d, all = false) {
+    const key = d * 2 + (all ? 1 : 0), stamp = `${grownN}|${villSeen}`; let r = trackBase.drawn.get(key); if (r && r.stamp === stamp) return r;
+    let tree = trackBase.trees.get(d); if (tree === undefined) { tree = districtTracks(album.division.data, trackBase.G, siteList, d, trackBase.onRoad); trackBase.trees.set(d, tree); }
+    const s0 = siteList.first[d], allow = all ? madeAllowed(siteList, d, villSeen) : 0; let made = 0; const open = new Uint8Array(siteList.first[d + 1] - s0);
+    if (all) for (let s = s0; s < siteList.first[d + 1]; s++) open[s - s0] = siteList.kind[s] !== SITE.made || made++ < allow ? 1 : 0;
+    const lines = trackLines(tree, q => siteR[s0 + q] || (open[q] ? .03 : 0), roadSnap);
+    r = { stamp, lines, km: lines.reduce((a, l) => a + l.km, 0), near: trackIndex(lines) }; trackBase.drawn.set(key, r);
+    return r;
+  }
+  // km from a point to the track of a village (only tracks nearer than 200 m are found): for the yards
+  const trackAt = (x, y) => {
+    if (!trackBase) return 1e9;
+    const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); if (i < 0 || j < 0 || i >= KN || j >= KN) return 1e9;
+    const d = album.division.data.cells[j * KN + i]; return d >= 0 && siteList.first[d + 1] > siteList.first[d] ? tracksOf(d).near(x, y) : 1e9;
+  };
+  function layTracks(tx, ty, D, all) {
+    const near = new Set();
+    for (const t of model.towns) { if (Math.hypot(t.x - tx, t.y - ty) > D + 12) continue; const s = siteOfTown(t); if (s) near.add(s.district); }
+    const lines = []; trackShown = 0;
+    for (const d of near) for (const l of tracksOf(d, all).lines) { lines.push({ pts: l.pts.map(q => { const g = llOf(q[0], q[1]); return [g.lon, g.lat]; }), width: TRACK.w }); trackShown += l.km; }
+    const old = trackRibbon;
+    trackRibbon = lines.length ? makeRibbons(album, lines, { colour: TRACK.light, minPx: TRACK.px, lift: .005 }) : null;
+    if (old) { album.scene.remove(old.mesh); old.mesh.geometry.dispose(); old.mesh.material.dispose(); }
+  }
   const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y), farmList: null, culture: c => Math.round(ch.get('culture', c) * 255),
     farmSquare: (kx, ky) => (farmShown && kx >= 0 && ky >= 0 && kx < KN && ky < KN ? farmShown.km[ky * KN + kx] / 255 : 0),
-    patches: new Map(), env: { ...env, road: roadAt }, density: 1, S: CELL,
+    patches: new Map(), env: { ...env, road: (x, y) => Math.min(roadAt(x, y), trackAt(x, y)) }, density: 1, S: CELL,
     // a yard stands at one of the sixteen places of a chunk of 1 km² of land (once the land is divided)
     landSquare: (kx, ky) => { const dv = album.division?.data; if (!dv?.cells) return true; const d = kx >= 0 && ky >= 0 && kx < KN && ky < KN ? dv.cells[ky * KN + kx] : -1; return d >= 0 && dv.kinds[d] === 0; } };
   let yKey = '', yCacheKey = ''; const yCache = new Map(), TKM = YARD_TILE * YARD_STEP;
@@ -303,6 +355,7 @@ export default async function init(album) {
       villages: model.towns.filter(t => t.village).length, places: places.length, sites: siteList ? siteList.x.length : 0,
       farmChunks: farmShown ? farmShown.list.length : 0, farmKm2: farmShown ? farmShown.list.reduce((a, c) => a + farmShown.km[c] / 255, 0) : 0,
       yards: yard.mesh.visible ? yard.count : 0, yardTriangles: yard.mesh.visible ? yard.real : 0, yardCorners: yard.mesh.visible ? yard.count * ySlots : 0,
+      trackKm: trackRibbon?.mesh.visible ? trackShown : 0,
       shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: (town.cap + yard.cap) * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
     yardContext: () => yctx,
     model: () => model,
@@ -312,13 +365,16 @@ export default async function init(album) {
     // the fields of the chunks of 1 km² as they are drawn: { km (a byte a chunk), list (the chunks that have fields) };
     // farmVersion changes whenever they do; farmAt(x, y) → the share of fields at a point of the flat km plane
     farm: () => farmShown, farmVersion: () => farmV, farmAt,
-    // what a district holds: { places (in its list at this density), settlements, villages, people, fieldsKm2 }
+    // the tracks to the villages of district d as they are drawn: { lines: [{ pts (flat km), place, km }], km }, or null
+    // before the roads are laid; trackAt(x, y) → km to the nearest track (within 200 m)
+    tracks: (d, all = false) => (tracksReady() && d >= 0 && siteList.first[d + 1] > siteList.first[d] ? tracksOf(d, all) : null), trackAt,
+    // what a district holds: { places (in its list at this density), settlements, villages, people, fieldsKm2, tracksKm }
     districtInfo(d) {
       if (!siteList || !(d >= 0) || siteList.first[d + 1] === siteList.first[d]) return null;
       let made = 0, n = 0; const allow = madeAllowed(siteList, d, villSeen), dv = album.division;
       for (let s = siteList.first[d]; s < siteList.first[d + 1]; s++) if (siteList.kind[s] !== SITE.made || made++ < allow) n++;
       if (!farmPer && farmShown && dv) farmPer = farmOfDistricts(farmShown, dv.data.cells, dv.data.count);
-      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, ...perDistrict.get(d) };
+      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, tracksKm: tracksReady() ? tracksOf(d).km : 0, ...perDistrict.get(d) };
     },
     update(dt, t, cam) {
       // the land has been divided (or divided anew): a settlement stands at the centre of every district
@@ -345,11 +401,27 @@ export default async function init(album) {
       if (p.get('showcase')) {                                      // every kind in rows around the point the camera looks at, far larger than life
         const Ss = h * .05, key = `show|${Ss.toFixed(3)}|${tx.toFixed(1)},${ty.toFixed(1)}`;
         if (key !== planKey) { planKey = key; fill(planShowcase(tx, ty, Ss * 1.45)); }
-        u.uS.value = Ss; u.u3D.value = 1; mesh.visible = true; yard.mesh.visible = false; U.set(S, 0, u.uH.value, 0);
+        u.uS.value = Ss; u.u3D.value = 1; mesh.visible = true; yard.mesh.visible = false; U.set(S, 0, u.uH.value, 0); if (trackRibbon) trackRibbon.mesh.visible = false;
         return;
       }
       const blocks = on && kH > 0 && stand > 0;
       U.set(S, blocks ? stand * stand * (3 - 2 * stand) : 0, u.uH.value, on ? 1 : 0);
+      // ---- the tracks to the villages: laid as far as the picture reaches, shown with the roads, gone from high up
+      {
+        const pxKm = view / Math.max(1, dom.clientHeight), fade = 1 - Math.max(0, Math.min(1, (pxKm - TRACK_FADE[0]) / (TRACK_FADE[1] - TRACK_FADE[0])));
+        const want = on && !!p.get('roadsOn') && p.get('roads') > 0 && fade > 0 && tracksReady();
+        if (want) {
+          const hb = Math.ceil(h / 8) * 8, tb = Math.min(78, Math.ceil(cam.s.tilt / 6) * 6), all = !!p.get('sitesShow');
+          const key = `${grownN}|${villSeen}|${all}|${roadN}|${divSeen}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${hb}|${tb}`;
+          if (key !== trackKey) { trackKey = key; layTracks(tx, ty, Math.min(Math.max(25, hb * 2.5), viewReach(hb, tb, cam.cam.fov, dom.width / Math.max(1, dom.height)) + 14), all); }
+        }
+        if (trackRibbon) {
+          trackRibbon.mesh.visible = want;
+          if (want) { const crown = typeof album.layers.forest?.top === 'number' ? album.layers.forest.top : 0;
+            trackRibbon.setPx(cam, dom); trackRibbon.u.uK.value = p.get('roads'); trackRibbon.u.uLift.value = Math.max(.005, crown * 1.08 + .003); trackRibbon.u.uAlpha.value = TRACK.alpha * fade * fade * (3 - 2 * fade);
+            trackRibbon.u.uColour.value.set(flat && p.get('look') !== 'night' ? TRACK.ink : TRACK.light); }
+        }
+      }
       const yk = p.get('yards') ?? 1, yards = blocks && yk > 0;
       mesh.visible = blocks; yard.mesh.visible = yards; if (!blocks) return;
       u.uS.value = S; u.u3D.value = U.y;
@@ -365,7 +437,8 @@ export default async function init(album) {
       if ((album.roadNet || null) !== roadSeen) indexRoads();
       const D = Math.min(72, Math.max(20, 4 * Math.ceil(h * 1.5 / 4))), ax = Math.round(tx / 4) * 4, ay = Math.round(ty / 4) * 4;
       yctx.density = yk; yctx.S = S;
-      const yck = `${ck}|${seen}|${farmV}|${yk}|${roadN}|${divSeen}`, ykey = `${yck}|${ax},${ay}|${D}`;
+      tracksReady();                                               // a yard keeps off the tracks to the villages too
+      const yck = `${ck}|${seen}|${farmV}|${grownN}|${yk}|${roadN}|${divSeen}`, ykey = `${yck}|${ax},${ay}|${D}`;
       if (ykey !== yKey) { yKey = ykey; rebuildYards(ax, ay, D, yck); }
       ymat.uniforms.uYard.value.set(tx, ty, D - 5.7, U.y);
     } };
