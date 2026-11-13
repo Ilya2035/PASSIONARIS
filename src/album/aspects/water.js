@@ -14,7 +14,6 @@
 import { Vector2, DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
 import { COAST_N, COAST_X0, COAST_Y0, COAST_KM } from '../water/courses.js';
 import { lightUniforms } from '../glsl.js';
-import { treeTop } from '../layers/forest.js';
 
 // Ice in retreat stands in melt water once it is no longer whole: none at MELT_TOP of ice and more, all of it MELT_SPAN
 // lower. The freeze model and the shader use the same two numbers.
@@ -323,13 +322,15 @@ export const sheetUniforms = album => {
   const T = album.terrain.u;
   return { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uTime: T.uTime, ...lightUniforms(T), ...album.chunks.uniforms, ...WATER_UNIFORMS, uPull: { value: .05 } };
 };
-// How far toward the eye a sheet writes its depth, km: over the tallest crown the forest draws at this height. The
-// forest says how high that is — its layer while it runs (top: 0 when it draws no trees), its rule treeTop() before.
+// How far toward the eye a sheet writes its depth, km. A little, and more from higher up: the grid the ground is
+// drawn with is coarser than the heights a sheet stands on, and the houses and roads must stay under the water.
+// Nothing else stands on the land now (the forest is paint on the ground since v0.6.62); should a layer put
+// something there again, it says how high in album.layers.forest.top, km, and the sheets are pulled over it.
 // No more than needed: a sheet pulled too far would show through a ridge that stands in front of it.
+export const SHEET_PULL = [.02, .0005];                            // km, and km for every km of camera height
 export function sheetPull(album, cam) {
-  const p = album.params, h = cam.s.h, forest = album.layers?.forest;
-  const crown = typeof forest?.top === 'number' ? forest.top : (p.get('forest3d') ? treeTop(h, p.get('trees') || 0) : 0);
-  return Math.max(.02 + h * .0005, crown * 1.08 + .004);
+  const top = album.layers?.forest?.top;
+  return Math.max(SHEET_PULL[0] + cam.s.h * SHEET_PULL[1], top > 0 ? top * 1.08 + .004 : 0);
 }
 
 const GLSL = /* glsl */`

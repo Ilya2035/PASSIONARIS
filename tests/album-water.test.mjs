@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Chunks, CHANNELS, CHUNK_KM, CI0, llOf } from '../src/album/chunks.js';
-import water, { WATER_CORE, SHEET_FRAG, sheetPull, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
+import water, { WATER_CORE, SHEET_FRAG, sheetPull, SHEET_PULL, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
 import { riverSheets, riverGeneral, riverFar, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT } from '../src/album/layers/rivers.js';
@@ -12,7 +12,6 @@ import { decodeCourses, encodeCourses, mainRivers, rankOf, widthCode, widthOf } 
 import { statSync } from 'node:fs';
 import { fillHollows } from '../src/album/water/hollows.js';
 import { gunzipSync } from 'node:zlib';
-import { treeTop } from '../src/album/layers/forest.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS } from '../src/album/params.js';
 import { BBOX } from '../src/album/geo.js';
@@ -238,16 +237,17 @@ test('water: the album shows it — pages for every state, from 20, 200 and 500 
   assert.equal(mine.find(p => p.id === 'water-edge-grid').p.grid, 1); assert.ok(!mine.find(p => p.id === 'water-edge').p.grid);
   for (const key of ['cold', 'thaw', 'iceSnow', 'seaState', 'waterShow', 'winterCycle', 'rivers', 'riversOn', 'lakesOn']) assert.ok(DEFS.some(d => d.key === key), key);
   for (const key of ['cold', 'thaw', 'iceSnow', 'seaState', 'waterShow', 'winterCycle']) assert.ok(!DEFS.find(d => d.key === key).value, `${key}: off by default, the natural sea has no ice`);
-  // The depth of a sheet is pulled toward the eye by a little more than the tallest crown the forest draws at that
-  // height — the forest's own number (treeTop, or the layer's top while it runs), not a copy of its rule.
-  const album = (h, extra = {}) => [{ params: { get: k => ({ forest3d: 1, trees: 1.4 })[k] }, ...extra }, { s: { h } }];
-  for (const h of [20, 25, 45, 60, 100, 150, 165]) {
-    const top = treeTop(h, 1.4), pull = sheetPull(...album(h));
-    assert.ok(top > 0 && pull > top && pull < top * 1.2 + .12, `at ${h} km the pull ${pull.toFixed(3)} just covers the crowns ${top.toFixed(3)}`);
+  // The depth of a sheet is pulled toward the eye a little, more from higher up — for the grid of the ground, the
+  // houses and the roads. Nothing stands on the land (the forest is paint); a layer that puts something there says
+  // how high in album.layers.forest.top, and the sheets are pulled over it.
+  const album = (h, extra = {}) => [{ params: { get: () => undefined }, ...extra }, { s: { h } }];
+  let last = 0;
+  for (const h of [20, 25, 45, 60, 100, 150, 165, 500, 1000]) {
+    const pull = sheetPull(...album(h)); assert.ok(Math.abs(pull - (SHEET_PULL[0] + h * SHEET_PULL[1])) < 1e-12 && pull > last, 'at ' + h + ' km'); last = pull;
+    assert.equal(sheetPull(...album(h, { layers: { forest: { top: 0 } } })), pull, 'a forest that is paint asks for nothing');
   }
-  assert.ok(sheetPull(...album(500)) > .2 && sheetPull(...album(500)) < .4, 'above the trees a small pull remains, for houses and roads');
-  assert.ok(sheetPull(...album(60, { layers: { forest: { top: 0 } } })) < .06, 'no trees drawn (a paper map): no pull for them');
-  assert.ok(sheetPull(...album(60, { layers: { forest: { top: .5 } } })) > .5, 'the running forest layer has the last word');
+  assert.ok(sheetPull(...album(20)) > .025 && sheetPull(...album(20)) < .04 && sheetPull(...album(500)) > .2 && sheetPull(...album(500)) < .4, 'a few tens of metres near the ground, a few hundred from high up');
+  assert.ok(sheetPull(...album(60, { layers: { forest: { top: .5 } } })) > .5, 'what stands on the land has the last word');
 });
 
 test('water: rivers from high up — near the ground nothing changes; higher the line is smoother, thinner, and the small rivers go', () => {

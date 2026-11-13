@@ -43,7 +43,8 @@ const MOON = LIGHT.includes('albumMoonLit(') ? ' + albumMoonLit(n)' : '';
 export const GROUND_LIGHT = /* glsl */`
 uniform float uShade;
 vec3 groundLight(vec2 ll, float px) {
-  float cl = cos(radians(ll.x)), e = clamp(px * 1.3, .035, 6.), lod0 = log2(max(px, .234) / .234);
+  // (the step of the slope is never finer than the height data: 0.23 km a cell, 0.03 km around the showcase places — as in terrain.js)
+  float cl = cos(radians(ll.x)), e = clamp(px * 1.3, mix(.24, .035, detailWeight(merc(ll))), 6.), lod0 = log2(max(px, .234) / .234);
   float h0 = heightLod(ll, lod0), hE = heightLod(ll + vec2(0., e / (KM * cl)), lod0), hN = heightLod(ll + vec2(e / KM, 0.), lod0), hl = max(h0, 0.);
   vec3 n = normalize(vec3(-vec2(hE - h0, hN - h0) / (e * 1000.) * uExag * uShade, 1.));
   vec2 sd = normalize(uSun.xy + 1e-4); float tanEl = uSun.z / max(1e-3, length(uSun.xy)), sh = 1., d = max(e * 2., .4);
