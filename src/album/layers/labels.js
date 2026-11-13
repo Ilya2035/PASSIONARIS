@@ -16,8 +16,11 @@
 // • Nothing overlaps: the greater settlement takes the room first; a mark that would touch another mark or a name is
 //   left out, and a name that has no room is left out while its mark stays.
 // The panel of a district (division/panel.js) shows the same marks: markSvg().
+// The scale bar of the map (town/scale.js) is kept here too: the settlements stand at their real size, and the bar
+// says what that size is.
 import { toWorld } from '../geo.js';
 import { CLASSES, RANKS, NAME_FROM, SHAPES_TO, CELL, classOf } from '../town/rules.js';
+import { createScaleBar, kmPerPixel } from '../town/scale.js';
 
 export const MARK_TO = RANKS.map(r => r.to);                        // the greatest camera height, km, from which a rank is still marked
 const SIZE = [7, 11, 12, 12, 15];                                   // px across: the shape of a class
@@ -92,10 +95,11 @@ export default async function init(album) {
     for (const [index, it] of byIndex) if (!keep.has(index)) { it.el?.remove(); byIndex.delete(index); }
     items = [...byIndex.values()].sort((a, b) => b.rank - a.rank || b.people - a.people || a.index - b.index);   // the greater place takes the room first
   }
-  const cand = [], rows = [];
+  const cand = [], rows = [], scale = createScaleBar(box);
   return { id: 'labels', update(dt, t, cam) {
     if (tick++ % 2) return;
     sync();
+    scale.update(kmPerPixel(cam.s.h, cam.cam.fov, innerHeight), p.get('scaleBar') !== 0);
     const on = !!p.get('labels'), farNames = !!p.get('labelsFar'), h = cam.s.h, w = innerWidth, hh = innerHeight, k = Math.tan(cam.cam.fov * Math.PI / 360) * 2 / hh;
     const reach = Math.max(.6, h * .07), cl = cam.s.lat, co = cam.s.lon;       // degrees around the point the camera looks at: villages farther off are not looked at
     cand.length = rows.length = 0;
@@ -109,9 +113,10 @@ export default async function init(album) {
       v.project(cam.cam);
       const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * hh;
       if (!(v.z < 1 && x > 20 && x < w - 20 && y > 20 && y < hh - 20)) continue;
-      // the houses are readable: no mark over them. A village is a few houses: its dot goes as soon as a single house
-      // can be told (the owner: the name «не прикрывает саму деревушку»)
-      const markA = s.mark * Math.max(0, Math.min(1, (20 - rpx) / 8, it.rank ? 1 : (4.5 - CELL / kmPx) / 1.5));
+      // the houses are readable: no mark over them. A settlement of village size is a few houses — the town of a
+      // district may be no more than that: its mark goes as soon as a single house can be told (the owner: the name
+      // «не прикрывает саму деревушку»; from 20 km one looks at the settlement itself)
+      const markA = s.mark * Math.max(0, Math.min(1, (20 - rpx) / 8, it.cls ? 1 : (4.5 - CELL / kmPx) / 1.5));
       if (!(markA > 0 || s.name > 0)) continue;
       it.x = x; it.y = y; it.markA = markA; it.nameA = s.name; it.wantFar = s.far;
       it.gap = 10 + Math.max(4, rpx - 4) + (it.rank >= 4 && markA > 0 ? 4 : 0);   // the name stands beside the houses, never over them

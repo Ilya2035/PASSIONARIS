@@ -23,9 +23,9 @@ ${RULES_GLSL}
 ${PALETTE_GLSL}
 // The roof over point q of the bent lattice of a patch: how much of the pixel it covers. cls = class of the cell,
 // fl = the place inside the footprint (−1..1), ang = turn of the building against the lattice, edge = distance out of it.
-float setRoof(vec2 q, vec2 site, float r, float cs, float sn, float cul, int k, float S, float aa, out float cls, out vec2 fl, out float ang, out vec4 rnd, out float edge) {
+float setRoof(vec2 q, vec2 site, vec2 sh, float r, float cs, float sn, float cul, int k, float S, float aa, out float cls, out vec2 fl, out float ang, out vec4 rnd, out float edge) {
   ivec2 id = ivec2(floor(q + .5)); vec2 hs, off;
-  cls = setCell(id, site, r, cs, sn, cul, k, S, hs, off, ang, rnd);
+  cls = setCell(id, site, sh, r, cs, sn, cul, k, S, hs, off, ang, rnd);
   fl = vec2(0.); edge = 1.;
   if (cls < .5) return 0.;
   vec2 f = q - vec2(id) - off;
@@ -100,21 +100,23 @@ vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, flo
 
 // One of the squares of a grid around a point: if it holds a patch that lies deeper over the point than the best so
 // far, it wins. fine: the grid of villages, else the grid of towns (where each lies in the texture: town/rules.js).
-void setTry(ivec2 c, bool fine, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec3 bc) {
+// (sh: how far the middle of the winning patch lies from its site — a town grows toward the water)
+void setTry(ivec2 c, bool fine, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec3 bc, inout vec2 sh) {
   int n = fine ? SET_VN : SET_GN;
   if (c.x < 0 || c.y < 0 || c.x >= n || c.y >= n) return;
   vec4 t = texelFetch(tSettle, c + (fine ? SET_FINE : SET_COARSE), 0);
   if (t.b <= 0.) return;
-  float r = t.b * t.b * SET_RMAX, d = r - distance(pk, SET_G0 + (vec2(c) + (t.rg * 255. + .5) / 256.) * (fine ? SET_VK : SET_GK));
-  if (d > own) { riv = own; own = d; best = t; bc = ivec3(c, fine ? 1 : 0); } else if (d > riv) riv = d;
+  vec2 s = fine ? vec2(0.) : (floor(texelFetch(tSettle, c + SET_MORE, 0).rg * 255. + .5) - 128.) * (SET_SHIFT / 127.);
+  float r = t.b * t.b * SET_RMAX, d = r - distance(pk, SET_G0 + (vec2(c) + (t.rg * 255. + .5) / 256.) * (fine ? SET_VK : SET_GK) + s);
+  if (d > own) { riv = own; own = d; best = t; bc = ivec3(c, fine ? 1 : 0); sh = s; } else if (d > riv) riv = d;
 }
 // the squares a code names (town/state.js): all nine around, or one or two of them
-void setSquares(int code, ivec2 c0, bool fine, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec3 bc) {
-  if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), fine, pk, own, riv, best, bc); }
+void setSquares(int code, ivec2 c0, bool fine, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec3 bc, inout vec2 sh) {
+  if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), fine, pk, own, riv, best, bc, sh); }
   else if (code > 0) {
     int c1 = code <= 9 ? code - 1 : code < 100 ? (code - 10) / 9 : 4, c2 = code <= 9 || code >= 200 ? -1 : code < 100 ? (code - 10) % 9 : (code - 110) / 2;
-    setTry(c0 + ivec2(c1 % 3 - 1, c1 / 3 - 1), fine, pk, own, riv, best, bc);
-    if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), fine, pk, own, riv, best, bc);
+    setTry(c0 + ivec2(c1 % 3 - 1, c1 / 3 - 1), fine, pk, own, riv, best, bc, sh);
+    if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), fine, pk, own, riv, best, bc, sh);
   }
 }
 // How much of the land at a point is under fields, 0..1: the state of the chunk of 1 km² the point lies in (the first
@@ -152,7 +154,8 @@ void aspSettle(Px p, inout Land L) {
     // (on ploughed land the lanes of a patch run out 3.5 r + 0.8 km from its site; where nothing is ploughed only its
     // houses matter. From very high up the mark of a town, a couple of pixels wide, reaches farther than that)
     vec2 reach = tilled ? vec2(3.5, .85) : vec2(1.3, .45); bool away = true;
-    if (code != 0) { float r0 = t0.b * t0.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > max(reach.x * r0 + reach.y, 2.3 * p.px + .1); }
+    // (the middle of a town may lie half its radius off its site)
+    if (code != 0) { float r0 = t0.b * t0.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > max((reach.x + .5) * r0 + reach.y, 2.3 * p.px + .1); }
     if (away && vcode != 0) { float r0 = tv.b * tv.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(v0) + (tv.rg * 255. + .5) / 256.) * SET_VK) > reach.x * r0 + reach.y; }
     if (away) { if (!tilled) return; search = false; }
   }
@@ -160,8 +163,8 @@ void aspSettle(Px p, inout Land L) {
   // the grid of towns and in the grid of villages. The code of a square says which of the nine hold a patch: most
   // often it is one or two, and only those are read.
   float own = -1e3, riv = -1e3, r = 0., th = 0., cul = 1.; vec2 site = vec2(0.); int ck = 0;
-  vec4 best = vec4(0.); ivec3 bc = ivec3(c0, 0);
-  if (search) { setSquares(code, c0, false, p.pk, own, riv, best, bc); setSquares(vcode, v0, true, p.pk, own, riv, best, bc); }
+  vec4 best = vec4(0.); ivec3 bc = ivec3(c0, 0); vec2 sh = vec2(0.);
+  if (search) { setSquares(code, c0, false, p.pk, own, riv, best, bc, sh); setSquares(vcode, v0, true, p.pk, own, riv, best, bc, sh); }
   bool village = bc.z == 1;
   if (best.b > 0.) {
     vec2 b = floor(best.rg * 255. + .5); float ca = floor(best.a * 255. + .5);
@@ -233,7 +236,8 @@ void aspSettle(Px p, inout Land L) {
   vec3 earth = mix(mix(vec3(.68, .61, .48), vec3(.48, .45, .34), atl), L.col, .25 + .3 * atl) * (.93 + .14 * p.n3), col = earth;
   float aa = clamp(px / S, .002, .5) * .9, seam = smoothstep(.3, .55, (own - riv) / S), blocks = uSettle.y, night = 1. - p.day;
   float cls, ang, edge; vec2 fl; vec4 rnd;
-  float cover = setRoof(q, site, r, cs, sn, cul, ck, S, aa, cls, fl, ang, rnd, edge) * seam;
+  vec2 shl = vec2(cs * sh.x + sn * sh.y, -sn * sh.x + cs * sh.y);               // the shift of the middle, in the lattice
+  float cover = setRoof(q, site, shl, r, cs, sn, cul, ck, S, aa, cls, fl, ang, rnd, edge) * seam;
   if (cls > 2.5 && cls < 3.5) {                                            // a house stands in its plot: a garden, a yard
     vec2 g = abs(q - floor(q + .5)); float plot = (1. - smoothstep(.40, .44, max(g.x, g.y))) * seam;
     vec3 gc = mix(mix(vec3(.47, .52, .27), vec3(.58, .48, .33), step(.5, rnd.x * 1.6)) * (.93 + .1 * step(.5, fract(q.x * 9.))), vec3(.41, .47, .25), atl);
@@ -256,6 +260,25 @@ void aspSettle(Px p, inout Land L) {
   // that of its roofs, so the mark stands out from the land
   float far = smoothstep(.6, 2.5, px / S);
   col = mix(col, mix(earth, settleMat(0, atl, .3) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));
+  // ---- a town: its main streets, from its site straight out along its roads, and its wall around its middle, with a
+  // gate where a street crosses it (town/plan.js keeps the blocks off both). A line thinner than a pixel is kept a
+  // pixel wide while it can be told; from higher up it melts into the tone of the town.
+  if (!village && r >= SET_STREETS_FROM && px < .07) {
+    vec4 gt = floor(texelFetch(tSettle, bc.xy + SET_GATES, 0) * 255. + .5);
+    vec2 dl = p.pk - site; float street = 1e3, told = 1. - smoothstep(.03, .07, px);
+    for (int g = 0; g < 4; g++) {
+      if (gt[g] < .5) continue;
+      float a = (gt[g] - 1.) * (6.2831853 / 254.); vec2 u = vec2(cos(a), sin(a));
+      if (dot(dl, u) > -.006) street = min(street, abs(dl.x * u.y - dl.y * u.x));
+    }
+    float sa = clamp(1.5 - street / max(SET_STREET_W * .5, px * .8), 0., 1.) * told;
+    col = mix(col, vec3(.85, .81, .71) * (.95 + .08 * p.n3), sa * .95);                     // paved
+    if (r >= SET_WALL_FROM) {
+      vec2 dc = dl - sh; float dw = abs(length(dc) - setWall(r, th, atan(dc.y, dc.x)));
+      col = mix(col, earth, (1. - smoothstep(SET_WALL_CLEAR, SET_WALL_CLEAR + .012, dw)) * (1. - sa) * told * .85);   // the open strip along the wall
+      col = mix(col, vec3(.47, .45, .42), clamp(1.5 - dw / max(SET_WALL_W * .5, px * .65), 0., 1.) * step(SET_GATE_W * .5, street) * told);   // grey stone, as the wall that stands on it
+    }
+  }
   L.col = mix(L.col, col, tm); L.cover *= 1. - tm;
 }`;
 
@@ -283,11 +306,12 @@ export default {
     { key: 'farmHa', label: 'Угодья на жителя', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: ' га', zero: 'нет полей' },
     { key: 'towns', label: 'Поселения', group: 'layers', type: 'toggle', value: 1 },
     { key: 'labelsFar', label: 'Названия столиц издалека', group: 'layers', type: 'toggle', value: 0, map: 'Имена столиц' },
+    { key: 'scaleBar', label: 'Линейка масштаба', group: 'layers', type: 'toggle', value: 1, map: 'Линейка масштаба' },
     { key: 'sitesShow', label: 'Места поселений (проверка)', group: 'layers', type: 'toggle', value: 0 },
     { key: 'showcase', label: 'Витрина построек', group: 'layers', type: 'toggle', value: 0 },
   ],
   pages: [
-    { id: 'town-kinds', group: G, title: 'Витрина своих построек', note: 'Двадцать один вид построек (последние три — дворы среди полей, каждый со своим участком), увеличены для показа: в игре они стоят в настоящую величину. Два верхних ряда в средиземноморской манере (черепица, побелка), два нижних в атлантической (камень, тёмные крыши). По рядам: кварталы с двором, покоем, углом, большой дом с башней, ряды домов, ряды с переулками, дома с плоскими крышами, группа домов, двор-хутор; усадьба, дом, дом-башня, храм, площадь с рынком, укрепление, мельница, причал, стройка.', p: { showcase: 1, forest3d: 0, towns: 0, roadsOn: 0, labels: 0 }, cam: { lat: 39.25, lon: -3.0, h: 20, tilt: 50, heading: 0 } },
+    { id: 'town-kinds', group: G, title: 'Витрина своих построек', note: 'Двадцать три вида построек (три — дворы среди полей, каждый со своим участком; последние два — кусок городской стены с башней и ворота), увеличены для показа: в игре они стоят в настоящую величину. Два верхних ряда в средиземноморской манере (черепица, побелка), два нижних в атлантической (камень, тёмные крыши). По рядам: кварталы с двором, покоем, углом, большой дом с башней, ряды домов, ряды с переулками, дома с плоскими крышами, группа домов, двор-хутор; усадьба, дом, дом-башня, храм, площадь с рынком, укрепление, мельница, причал, стройка.', p: { showcase: 1, forest3d: 0, towns: 0, roadsOn: 0, labels: 0 }, cam: { lat: 39.25, lon: -3.0, h: 20, tilt: 50, heading: 0 } },
     { id: 'grow-1', group: G, title: 'Рост: хутор', note: 'Всё в настоящую величину, один к одному. Хутор — несколько дворов на сотню метров, вокруг первые поля. «Рост городов» на 0,08; двигайте ползунок и смотрите, как поселение растёт.', p: { growth: .082, forest3d: 0, labels: 0 }, cam: zar(20) },
     { id: 'grow-2', group: G, title: 'Рост: деревня', note: 'Три сотни метров в поперечнике: дома с огородами, дворы на краю, стройки следующих домов, дорожки к полям. «Рост городов» на 0,18.', p: { growth: .176, forest3d: 0, labels: 0 }, cam: zar(20) },
     { id: 'grow-3', group: G, title: 'Рост: село', note: 'Появился храм, в середине первые ряды домов, за околицей мельница. «Рост городов» на 0,33.', p: { growth: .33, forest3d: 0, labels: 0 }, cam: zar(20) },
@@ -296,6 +320,12 @@ export default {
     { id: 'town-50', group: G, title: 'Город с 50 км', note: 'Тот же город, тот же план. Кварталы стали мельче пары пикселей, поэтому вместо объектов город нарисован на земле.', p: { forest3d: 0 }, cam: zar(50, 30) },
     { id: 'town-200', group: G, title: 'Город с 200 км', note: 'Обычная игровая высота: город — небольшое пятно застройки среди полей.', p: {}, cam: zar(200, 25, 10) },
     { id: 'town-500', group: G, title: 'Город с 500 км', note: 'Высота больших держав: поселение читается как отметка в пиксель-другой, заметнее пятно полей и вырубки вокруг.', p: {}, cam: zar(500, 15, 0) },
+    { id: 'city-sea', group: G, title: 'Город у моря: Барселона с 20 км', note: 'Город растёт от своей точки к воде: его середина сдвинута к берегу, крайние дома стоят у моря, на берегу причалы гавани. Главные улицы идут от рыночной площади прямо по дорогам; где улица пересекает стену — ворота. Стена обходит плотную середину города, предместья лежат снаружи. На высоком месте замок. Всё в настоящую величину: внизу слева линейка масштаба.', p: { forest3d: 0 }, cam: { lat: 41.39, lon: 2.178, h: 20, tilt: 35, heading: 0 } },
+    { id: 'city-inland', group: G, title: 'Город внутри страны: Сарагоса с 20 км', note: 'Город у реки: его середина сдвинута к берегу, дома доходят до воды и на реку не встают. Стена, ворота на дорогах, главные улицы к рыночной площади. Вокруг поля, деревни и тропы к ним.', p: { forest3d: 0 }, cam: zar(20) },
+    { id: 'city-capital', group: G, title: 'Самый большой город: Мадрид с 20 км', note: 'Мадрид — три с небольшим километра в поперечнике, 41 тысяча жителей, 13 чанков по 1 км². Шесть дорог входят в город через ворота и сходятся на рыночной площади.', p: { forest3d: 0 }, cam: { ...MAD, h: 20, tilt: 35, heading: 0 } },
+    { id: 'city-small', group: G, title: 'Малый городок с замком', note: 'Городку меньше 400 м радиусом стена не по силам: у него замок на высоком месте и главные улицы по дорогам.', p: { forest3d: 0 }, cam: { lat: 40.6328, lon: -3.1602, h: 20, tilt: 35, heading: 0 } },
+    { id: 'city-village', group: G, title: 'Деревня с 20 км', note: 'Деревня — до тысячи жителей: несколько десятков дворов, без стены и замка. К дороге от неё ведёт тропа. С 20 км нет ни отметок, ни названий: видны сами дома.', p: { forest3d: 0 }, cam: { lat: 41.79, lon: -1.13, h: 20, tilt: 35, heading: 20 } },
+    { id: 'city-45', group: G, title: 'Город с 45 км: стена и улицы', note: 'С этой высоты кварталы — два-три пикселя, но кольцо стены и главные улицы ещё читаются; выше они сливаются с тоном города.', p: { forest3d: 0 }, cam: { ...MAD, h: 45, tilt: 25, heading: 0 } },
     ...markPages('marks', MAD, MAD, 'Мадрид'),
     ...markPages('marks-coast', TAR, COAST, 'берег от Барселоны до Валенсии'),
     { id: 'town-marks', group: G, title: 'Отметки: класс поселения по форме', note: 'Ниже 85 км отметка — фигура, по ней виден класс: кружок — деревня (до 1 000 жителей), треугольник — малый городок (до 20 000), ромб — средний город (до 60 000), квадрат — город (до миллиона), пятиугольник — мегаполис. У главного города провинции в середине тёмная точка, у главного города земли и региона ещё и кольцо. Здесь «Рост городов» на 1,6.', p: { growth: 1.6 }, cam: { lat: 40.9, lon: -1.2, h: 70, tilt: 12, heading: 0 } },

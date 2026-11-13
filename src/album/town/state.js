@@ -17,22 +17,30 @@
 //         0..8, row by row; 4 is the square itself):
 //         without a patch: 0 none · 1 + a one · 10 + 9 a + b two · 100 more
 //         with a patch, m its manner of building: 200 + m alone · 110 + 2 b + (m − 1) with one neighbour b · 210 + m with more
+// Beside the coarse grid lie two more blocks of it, a texel a square (rules.js MORE_AT, GATES_AT):
+//   MORE   R, G  how far the middle of the patch lies from its site (shiftByte(); 128 = not at all): a town grows
+//                from its site toward the water
+//   GATES  R, G, B, A  the directions in which the main streets of the town leave its site (gateByte(); 0 = none):
+//                where each crosses the wall there is a gate (mirrorGates())
 // It is a mirror of the chunk state: mirrorSettle() rewrites it whenever `built` or `culture` change. A chunk with
 // `built` > 0 has a patch: at the site and of the size the model of growth gave it, or, for a chunk built up by
 // anything else (a brush), in the middle of the chunk and of the area of its built share.
 import { DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
-import { CELL, GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, CULTURES } from './rules.js';
+import { CELL, GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, MORE_AT, GATES_AT, FARM_SOFT, STREETS_FROM, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, shiftByte, gateByte, gateOf, CULTURES } from './rules.js';
 import { KN, KKM, KX0, KY0, JITTER, kmHash } from '../division/km.js';
 
 export const settleBytes = new Uint8Array(GN * GN * 4);              // the coarse grid
 export const villageBytes = new Uint8Array(VN * VN * 4);             // the fine grid
+export const moreBytes = new Uint8Array(GN * GN * 4);                // the coarse grid: the shift of every patch
+export const gateBytes = new Uint8Array(GN * GN * 4);                // the coarse grid: the gates of every town
 export const atlasBytes = new Uint8Array(TEX_W * TEX_H * 4);         // the texture: the chunks, then the two grids
 export const farmBytes = atlasBytes.subarray(0, KN * KN * 4);        // the chunks of 1 km², in their place in the texture
 export const settleTex = new DataTexture(atlasBytes, TEX_W, TEX_H, RGBAFormat, UnsignedByteType);
 // the two grids into their places in the texture
-export function packAtlas(coarse = settleBytes, fine = villageBytes, out = atlasBytes) {
+export function packAtlas(coarse = settleBytes, fine = villageBytes, out = atlasBytes, more = moreBytes, gates = gateBytes) {
   for (let r = 0; r < VN; r++) out.set(fine.subarray(r * VN * 4, (r + 1) * VN * 4), ((FINE_AT[1] + r) * TEX_W + FINE_AT[0]) * 4);
-  for (let r = 0; r < GN; r++) out.set(coarse.subarray(r * GN * 4, (r + 1) * GN * 4), ((COARSE_AT[1] + r) * TEX_W + COARSE_AT[0]) * 4);
+  for (const [bytes, at] of [[coarse, COARSE_AT], [more, MORE_AT], [gates, GATES_AT]])
+    for (let r = 0; r < GN; r++) out.set(bytes.subarray(r * GN * 4, (r + 1) * GN * 4), ((at[1] + r) * TEX_W + at[0]) * 4);
 }
 settleTex.magFilter = settleTex.minFilter = NearestFilter; settleTex.wrapS = settleTex.wrapT = ClampToEdgeWrapping; settleTex.needsUpdate = true;
 
@@ -87,25 +95,27 @@ export function farmAt(x, y, bytes = farmBytes) {
 // z height of the houses, × · w 1 settlements shown, 0 hidden
 export const settleUniforms = { tSettle: { value: settleTex }, uSettle: { value: new Vector4(CELL, 1, 1.25, 0) } };
 
-// towns: what the model of growth founded, [{ x, y, R, home, byte }] (grow.js); may be empty.
+// towns: what the model of growth founded, [{ x, y, R, sx, sy, home, byte }] (grow.js); may be empty.
+// more: where the shifts of the patches are written (the block of the texture; a block of its own for any other `out`).
 // Returns the patches (each with the patches of the squares around as `rivals`), and whether anything changed.
-export function mirrorSettle(ch, towns = [], out = settleBytes) {
+const moreOf = new WeakMap();
+export function mirrorSettle(ch, towns = [], out = settleBytes, more = out === settleBytes ? moreBytes : moreOf.get(out) || moreOf.set(out, new Uint8Array(GN * GN * 4)).get(out)) {
   const C = ch.bytes.C, n = GN, at = new Map(), homes = new Set(), hamlets = new Set();
-  const put = (x, y, r, home) => {                                  // one patch a square: the larger stays
+  const put = (x, y, r, home, sx = 0, sy = 0) => {                  // one patch a square: the larger stays
     const g = gridOf(x, y); if (g < 0 || !(r > 0)) return;
     const old = at.get(g); if (old && old.r >= r) return;
-    at.set(g, { x, y, r, home, cul: C[home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med });
+    at.set(g, { x, y, r, home, sx, sy, cul: C[home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med });
   };
   for (const t of towns) {
     if (t.village) { hamlets.add(t.home); continue; }               // a village lies in the fine grid (mirrorVillages)
     homes.add(t.home);
     const b = C[t.home * 4]; if (!b) continue;                      // pulled down since
-    put(t.x, t.y, b === t.byte ? t.R : radiusOfShare(b / 255, ch.area[t.home]), t.home);
+    if (b === t.byte) put(t.x, t.y, t.R, t.home, t.sx || 0, t.sy || 0); else put(t.x, t.y, radiusOfShare(b / 255, ch.area[t.home]), t.home);
   }
   // (a cell whose only houses are those of its villages has the least share there is, and no patch of its own)
   for (let k = 0; k < ch.count; k++) if (C[k * 4] && !homes.has(k) && !(hamlets.has(k) && C[k * 4] <= 1)) put(ch.cx[k], ch.cy[k], radiusOfShare(C[k * 4] / 255, ch.area[k]), k);
   let changed = false; const lobes = [], byG = new Map();
-  const set = (o, v) => { if (out[o] !== v) { out[o] = v; changed = true; } };
+  const set = (o, v) => { if (out[o] !== v) { out[o] = v; changed = true; } }, setMore = (o, v) => { if (more[o] !== v) { more[o] = v; changed = true; } };
   for (let g = 0; g < n * n; g++) {
     const x = g % n, y = (g / n) | 0, o = g * 4, p = at.get(g), around = [];
     if (at.size) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -114,16 +124,18 @@ export function mirrorSettle(ch, towns = [], out = settleBytes) {
       const q = at.get(yy * n + xx); if (!q) continue;
       // only a neighbour whose houses or fields can reach into this square: a village in the middle of its own square
       // is no business of the squares around, and their pixels need not look at it
-      const x0 = GX0 + x * GK, y0 = GY0 + y * GK, ex = Math.max(x0 - q.x, 0, q.x - x0 - GK), ey = Math.max(y0 - q.y, 0, q.y - y0 - GK);
-      if (Math.hypot(ex, ey) < q.r + fieldsBeyond(q.r) + .7) around.push((dy + 1) * 3 + dx + 1);
+      // (its houses lie around its middle, its lanes run out from its site: the nearer of the two counts)
+      const x0 = GX0 + x * GK, y0 = GY0 + y * GK, away = (px, py) => Math.hypot(Math.max(x0 - px, 0, px - x0 - GK), Math.max(y0 - py, 0, py - y0 - GK));
+      if (Math.min(away(q.x, q.y), away(q.x + q.sx, q.y + q.sy)) < q.r + fieldsBeyond(q.r) + .7) around.push((dy + 1) * 3 + dx + 1);
     }
     if (p) {
       const [bx, by] = siteBytes(p.x, p.y), rb = radiusByte(p.r);
       set(o, bx); set(o + 1, by); set(o + 2, rb); set(o + 3, around.length === 0 ? 200 + p.cul : around.length === 1 ? 110 + 2 * around[0] + (p.cul - 1) : 210 + p.cul);
-      const L = lobeOf(g, bx, by, rb, p.cul); L.home = p.home; lobes.push(L); byG.set(g, L);
+      const sbx = shiftByte(p.sx), sby = shiftByte(p.sy); setMore(o, sbx); setMore(o + 1, sby);
+      const L = lobeOf(g, bx, by, rb, p.cul, sbx, sby); L.home = p.home; lobes.push(L); byG.set(g, L);
       continue;
     }
-    set(o, 0); set(o + 1, 0); set(o + 2, 0); set(o + 3, around.length === 0 ? 0 : around.length === 1 ? 1 + around[0] : around.length === 2 ? 10 + 9 * around[0] + around[1] : 100);
+    set(o, 0); set(o + 1, 0); set(o + 2, 0); setMore(o, 0); setMore(o + 1, 0); set(o + 3, around.length === 0 ? 0 : around.length === 1 ? 1 + around[0] : around.length === 2 ? 10 + 9 * around[0] + around[1] : 100);
   }
   for (const L of lobes) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dy) continue;
@@ -173,7 +185,26 @@ export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes) 
     }
     const gx = Math.floor((L.x - GX0) / GK), gy = Math.floor((L.y - GY0) / GK);
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = gx + dx, yy = gy + dy; if (xx < 0 || yy < 0 || xx >= GN || yy >= GN) continue;
-      for (const T of towny.get(yy * GN + xx) || []) if (Math.hypot(T.x - L.x, T.y - L.y) < T.r + L.r + 1) L.rivals.push(T); }
+      for (const T of towny.get(yy * GN + xx) || []) if (Math.hypot((T.cx ?? T.x) - L.x, (T.cy ?? T.y) - L.y) < T.r + L.r + 1) L.rivals.push(T); }
   }
   return { lobes, changed };
+}
+
+// The gates of the towns into the texture. lobes: the patches of the coarse grid (mirrorSettle);
+// gatesOf(L) → the directions, radians from the east, in which the main streets leave the site of town L: at most
+// four, the most important first (layers/towns.js tells them from the roads). Every patch gets .gates: the same
+// directions as the bytes hold them, so that the plan of the blocks and the ground shader agree to the metre.
+// Returns whether anything changed.
+export function mirrorGates(lobes, gatesOf, out = gateBytes) {
+  const want = new Uint8Array(out.length);
+  for (const L of lobes) {
+    L.gates = [];
+    if (L.fine !== undefined || L.r < STREETS_FROM) continue;
+    const bytes = [...new Set((gatesOf(L) || []).slice(0, 4).map(gateByte))];   // (two streets the bytes cannot tell apart are one)
+    bytes.forEach((b, i) => { want[L.k * 4 + i] = b; }); L.gates = bytes.map(gateOf);
+  }
+  let changed = false;
+  for (let i = 0; i < out.length; i++) if (out[i] !== want[i]) { changed = true; break; }
+  if (changed) out.set(want);
+  return changed;
 }

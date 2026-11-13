@@ -27,6 +27,9 @@ export const VILLAGE_RMAX = .25, FINE_RMAX = .39;
 // beside it, the coarse grid of towns.
 export const TEX_W = KN, TEX_H = KN + VN;
 export const FINE_AT = [0, KN], COARSE_AT = [VN, KN];              // the corner of each grid in the texture: column, row
+// Two more blocks of the coarse grid lie beside it, a texel a square each: MORE — how far the middle of the patch lies
+// from its site (two bytes); GATES — where the main streets of the town leave it (four bytes, a direction each).
+export const MORE_AT = [VN + GN, KN], GATES_AT = [VN + 2 * GN, KN];
 // How soft the step from the fields of one chunk to the next is: the weight of a chunk falls as exp(−FARM_SOFT · d²)
 // with the distance d to its seed, km. At 4 the fields of a chunk thin out over some five hundred metres around its
 // side — two or three furlongs, so the edge of the fields is an edge of furlongs and no straight line.
@@ -81,6 +84,31 @@ export const rankOf = t => (t.capital === 'region' ? 5 : t.capital === 'land' ? 
 // they come in between these two heights, km, and go at the height of their rank (RANKS[].name)
 export const NAME_FROM = [25, 32];
 export const SHAPES_TO = 85;     // km: below this height a mark is a shape that tells the class; above it, a dot that tells the rank
+// ---- a town grows from its site toward the water (the owner, 13.11.2026: «город должен стоять логично, ближе к морю»;
+// the site itself is the district's and is not moved). The SITE of a patch is the knot of its roads and its market
+// square; the MIDDLE of the patch — of its round outline, its belts and its wall — lies off the site by a SHIFT, kept
+// as two bytes beside the patch (state.js). Twin of SET_SHIFT in the shader.
+export const SHIFT_MAX = 1.5;    // km: the farthest the middle of a patch lies from its site
+export const SHIFT_SHARE = .5;   // …and no farther than this share of its radius: the site stays among the houses
+export const SHIFT_FROM = .15;   // km: a smaller settlement stands where it is
+export const SHORE_AT = .82;     // the middle of a town on the shore lies this share of its radius inland
+export const shiftByte = s => Math.max(1, Math.min(255, 128 + Math.round(s / SHIFT_MAX * 127)));
+export const shiftOf = b => (b - 128) / 127 * SHIFT_MAX;
+// ---- the wall, the gates and the main streets of a town (the owner: «внутри — улицы, построена стена или замок»).
+// A town of a thousand people and more has MAIN STREETS: from its site straight out along its roads, to where each
+// leaves the town. A town from WALL_FROM km has a WALL: a ring around the middle of the patch, a little out of round,
+// with a GATE where every main street crosses it; the suburbs lie outside. A smaller town has a castle instead, a
+// greater one (KEEP_FROM) a castle besides its wall (plan.js).
+export const STREETS_FROM = TOWN_R, CASTLE_FROM = TOWN_R, WALL_FROM = .4, KEEP_FROM = .7;
+export const WALL_SHARE = .62;   // the wall runs at this share of the radius
+export const WALL_W = .006, WALL_CLEAR = .016, STREET_W = .014, GATE_W = .034;   // km: the wall, the open strip on either side of it, a main street, a gateway
+export const WALL_SEG = .05;     // km: a piece of the wall from tower to tower
+const TAU = 6.283185307179586;
+// how far from the middle of patch L its wall runs in direction a (radians from the east), km
+export const wallAt = (L, a) => WALL_SHARE * L.r * (1 + .07 * Math.sin(3 * a + L.th * 5) + .05 * Math.sin(5 * a + L.th * 11));
+// the direction of a gate ↔ the byte that holds it (0: no gate)
+export const gateByte = a => 1 + Math.round((((a % TAU) + TAU) % TAU) / TAU * 254);
+export const gateOf = b => (b - 1) / 254 * TAU;
 // how far the fields reach beyond the last houses, km
 export const fieldsBeyond = r => .5 + 2.5 * r;
 // how far the lanes of a settlement run on past its last houses, km (twin of laneOut in aspects/settle.js): beyond
@@ -107,11 +135,14 @@ export function siteBytes(x, y) {
   return [Math.min(255, Math.floor(fx * 256)), Math.min(255, Math.floor(fy * 256))];
 }
 // the patch of square g of the grid from the four bytes kept for it (state.js): site x, site y, radius, manner
-export function lobeOf(g, bx, by, rb, cul) {
-  const gx = g % GN, gy = (g / GN) | 0, r = radiusOf(rb);
+// (sbx, sby: the two bytes of its shift; cx, cy: the middle of the patch; gates: the directions of its main streets)
+export function lobeOf(g, bx, by, rb, cul, sbx = 128, sby = 128) {
+  const gx = g % GN, gy = (g / GN) | 0, r = radiusOf(rb), x = GX0 + (gx + (bx + .5) / 256) * GK, y = GY0 + (gy + (by + .5) / 256) * GK, sx = shiftOf(sbx), sy = shiftOf(sby);
   return { k: g, gx, gy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
-    x: GX0 + (gx + (bx + .5) / 256) * GK, y: GY0 + (gy + (by + .5) / 256) * GK, rivals: [] };
+    x, y, sx, sy, cx: x + sx, cy: y + sy, gates: [], rivals: [] };
 }
+// the middle of a patch (a patch made by hand, without a shift, has it at its site)
+export const midOf = L => [L.cx ?? L.x, L.cy ?? L.y];
 // the same for a village: the square v of the fine grid it lies in, and the patch of that square. Its number k goes
 // on from the numbers of the coarse grid, so no two patches share one.
 export const fineOf = (x, y) => { const vx = Math.floor((x - GX0) / VK), vy = Math.floor((y - GY0) / VK); return vx >= 0 && vy >= 0 && vx < VN && vy < VN ? vy * VN + vx : -1; };
@@ -121,11 +152,12 @@ export function fineBytes(x, y) {
 }
 export function villageLobe(v, bx, by, rb, cul) {
   const vx = v % VN, vy = (v / VN) | 0, r = radiusOf(rb);
+  const x = GX0 + (vx + (bx + .5) / 256) * VK, y = GY0 + (vy + (by + .5) / 256) * VK;
   return { k: GN * GN + v, fine: v, vx, vy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
-    x: GX0 + (vx + (bx + .5) / 256) * VK, y: GY0 + (vy + (by + .5) / 256) * VK, rivals: [] };
+    x, y, sx: 0, sy: 0, cx: x, cy: y, gates: [], rivals: [] };
 }
 // how deep a point lies inside a patch, km (negative outside)
-export const depthAt = (L, x, y) => L.re - Math.hypot(x - L.x, y - L.y) + L.amp * wob(x, y);
+export const depthAt = (L, x, y) => L.re - Math.hypot(x - (L.cx ?? L.x), y - (L.cy ?? L.y)) + L.amp * wob(x, y);
 // The lattice is bent: a point q of the straight lattice (cell units) lies at bend(q) of the bent one, in which the
 // cells are counted. unbend() goes back: where in the straight lattice the middle of a bent cell lies.
 export const bend = (L, qx, qy) => [qx + BEND * Math.sin(qy * .55 + L.th * 7), qy + BEND * Math.sin(qx * .47 + L.th * 13)];
@@ -147,8 +179,9 @@ export function cellRule(i, j, L, S) {
     const hs = Math.max(.12, Math.min(.45, .9 * R / S));
     return { cls: atl || hamlet ? 3 : 2, hx: hs, hy: hs, ox: 0, oy: 0, rot: 0, m: R, h1: .5, h2: .5, h3: .5, h4: .5, mark: true };
   }
-  const cs = Math.cos(L.th), sn = Math.sin(L.th);
-  const m = R - Math.hypot(i, j) * S + L.amp * wob(L.x + (cs * i - sn * j) * S, L.y + (sn * i + cs * j) * S) + (hamlet ? .03 : 0);   // a hamlet keeps its few farmsteads
+  const cs = Math.cos(L.th), sn = Math.sin(L.th), sx = L.sx || 0, sy = L.sy || 0;
+  // (how deep the cell lies in the patch is told from the middle of the patch: the shift, turned into the lattice)
+  const m = R - Math.hypot(i * S - (cs * sx + sn * sy), j * S - (-sn * sx + cs * sy)) + L.amp * wob(L.x + (cs * i - sn * j) * S, L.y + (sn * i + cs * j) * S) + (hamlet ? .03 : 0);   // a hamlet keeps its few farmsteads
   if (m <= -.012) {                                                 // just outside: the next houses are being built
     if (m > -Math.min(1.5 * S, .15) && cellHash(i, j, L.k, 5) < .2) return { cls: 5, hx: .36, hy: .36, ox: 0, oy: 0, rot: 0, m, h1: 0, h2: 0, h3: cellHash(i, j, L.k, 3), h4: 0 };
     return null;
@@ -187,6 +220,15 @@ export const RULES_GLSL = /* glsl */`
 #define SET_VK ${VK.toFixed(2)}
 #define SET_FINE ivec2(${FINE_AT[0]}, ${FINE_AT[1]})
 #define SET_COARSE ivec2(${COARSE_AT[0]}, ${COARSE_AT[1]})
+#define SET_MORE ivec2(${MORE_AT[0]}, ${MORE_AT[1]})
+#define SET_GATES ivec2(${GATES_AT[0]}, ${GATES_AT[1]})
+#define SET_SHIFT ${SHIFT_MAX.toFixed(3)}
+#define SET_STREETS_FROM ${STREETS_FROM.toFixed(4)}
+#define SET_WALL_FROM ${WALL_FROM.toFixed(3)}
+#define SET_WALL_W ${WALL_W.toFixed(4)}
+#define SET_WALL_CLEAR ${WALL_CLEAR.toFixed(4)}
+#define SET_STREET_W ${STREET_W.toFixed(4)}
+#define SET_GATE_W ${GATE_W.toFixed(4)}
 #define SET_KN ${KN}
 #define SET_KKM ${KKM.toFixed(1)}
 #define SET_K0 vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})
@@ -204,9 +246,12 @@ float setHash(ivec2 id, int k, int salt) {
 }
 // the lattice of a patch is bent (twin of bend() in town/rules.js): q in cells of the straight lattice → the bent one
 vec2 setBend(vec2 q, float th) { return q + SET_BEND * vec2(sin(q.y * .55 + th * 7.), sin(q.x * .47 + th * 13.)); }
+// how far from the middle of a patch its wall runs in direction a (twin of wallAt() in town/rules.js)
+float setWall(float r, float th, float a) { return ${WALL_SHARE.toFixed(3)} * r * (1. + .07 * sin(3. * a + th * 5.) + .05 * sin(5. * a + th * 11.)); }
 // What stands in lattice cell id of a patch (twin of cellRule() in town/rules.js): returns the class 0..5.
-// r is the radius of the patch, cs sn the cosine and sine of the turn of its lattice.
-float setCell(ivec2 id, vec2 site, float r, float cs, float sn, float cul, int k, float S, out vec2 hs, out vec2 off, out float rot, out vec4 rnd) {
+// r is the radius of the patch, cs sn the cosine and sine of the turn of its lattice, sh the shift of its middle from
+// its site, turned into the lattice, km.
+float setCell(ivec2 id, vec2 site, vec2 sh, float r, float cs, float sn, float cul, int k, float S, out vec2 hs, out vec2 off, out float rot, out vec4 rnd) {
   hs = vec2(0.); off = vec2(0.); rot = 0.; rnd = vec4(.5);
   bool centre = id.x == 0 && id.y == 0, atl = cul > 1.5, hamlet = r < ${STAGES[1].r.toFixed(3)};
   if (r < .6 * S) {
@@ -215,7 +260,7 @@ float setCell(ivec2 id, vec2 site, float r, float cs, float sn, float cul, int k
     return atl || hamlet ? 3. : 2.;
   }
   vec2 ij = vec2(id);
-  float m = r - length(ij) * S + min(.25, .3 * r) * setWob(site + vec2(cs * ij.x - sn * ij.y, sn * ij.x + cs * ij.y) * S) + (hamlet ? .03 : 0.);
+  float m = r - length(ij * S - sh) + min(.25, .3 * r) * setWob(site + vec2(cs * ij.x - sn * ij.y, sn * ij.x + cs * ij.y) * S) + (hamlet ? .03 : 0.);
   if (m <= -.012) {
     if (m > -min(1.5 * S, .15) && setHash(id, k, 5) < .2) { hs = vec2(.36); rnd.z = setHash(id, k, 3); return 5.; }
     return 0.;

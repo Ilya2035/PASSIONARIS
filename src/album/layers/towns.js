@@ -18,8 +18,8 @@ import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
-import { cellSize, cultureAt, rankOf, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
-import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
+import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM } from '../town/rules.js';
+import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
@@ -32,7 +32,8 @@ import { roadChunks, districtTracks, trackLines, trackIndex, TRACK_SNAP } from '
 const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
 // a track to a village: width on the ground km, least width in pixels, colour on the natural land and on paper — a
 // step below the track that joins two districts (layers/roads.js)
-const TRACK = { w: .008, px: 1.7, light: 0xa08258, ink: 0x8f7354, alpha: 1 };
+// (the owner, 13.11.2026: around a town «хорошо видны малые дороги» — a little wider and lighter than they were)
+const TRACK = { w: .009, px: 2, light: 0xbfa477, ink: 0x8f7354, alpha: 1 };
 const TRACK_FADE = [.045, .085];                                    // km to a pixel: the tracks go as the villages themselves melt into the land
 // How far from the point the camera looks at the ground is in the picture, km: out to the far corners. h: the
 // distance of the camera from that point, tilt: from straight down, degrees, fov: of the picture's height, degrees.
@@ -229,14 +230,14 @@ export default async function init(album) {
   // ---- the mirror of the chunk state for the shaders, and the patches for the plan
   let lobes = [], seen = -1, mirrorN = 0, farmSig = '', farmSeen = -1, farmShown = null, farmV = 0, farmPer = null;
   function mirror() {
-    const r = mirrorSettle(ch, model.towns), v = mirrorVillages(ch, model.towns, r.lobes);
+    const r = mirrorSettle(ch, model.towns), v = mirrorVillages(ch, model.towns, r.lobes), gatesNew = mirrorGates(r.lobes, gatesFor);
     // the fields of the chunks of 1 km²: what the model ploughed; a natural cell whose share of fields someone has
     // changed since (the brush, the demonstrations of the album) gives that share to every chunk in it
     const over = new Map();
     for (let k = 0; k < ch.count; k++) { if (ch.kind[k] !== 1) continue; const b = byteOf('fields', k); if (b !== Math.round(model.fields[k] * 255)) over.set(k, b / 255); }
     const sig = farmN + '|' + [...over].map(e => e[0] + ':' + Math.round(e[1] * 255)).join(','), farmNew = sig !== farmSig;
     if (farmNew) { farmSig = sig; farmShown = farmWithCells(model.ground, model.farm, over); mirrorFarm(farmShown); farmV++; farmPer = null; yctx.farmList = farmShown.list; }
-    if (!r.changed && !v.changed && !farmNew && mirrorN) return;
+    if (!r.changed && !v.changed && !gatesNew && !farmNew && mirrorN) return;
     packAtlas();
     lobes = r.lobes.concat(v.lobes); mirrorN++; settleTex.needsUpdate = true; yctx.patches = patchIndex(lobes);
   }
@@ -277,12 +278,12 @@ export default async function init(album) {
   const ymat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { ...mat.uniforms, uYard: { value: new Vector4(0, 0, 0, 1) } } });
   const yard = blockSet(ymat, slots.subarray(0, ySlots * 3), MAX_YARDS);
   // roads as the yards must know them: no yard stands on a road
-  let roadSeen = null, roadN = 0, rsegs = [], rgrid = new Map(); const RC = 2;
+  let roadSeen = null, roadN = 0, roadMirrored = -1, rsegs = [], rkind = [], rgrid = new Map(); const RC = 2;
   function indexRoads() {
-    rsegs = []; rgrid = new Map(); roadSeen = album.roadNet || null; roadN++;
+    rsegs = []; rkind = []; rgrid = new Map(); roadSeen = album.roadNet || null; roadN++;
     for (const l of roadSeen?.lines || []) {
       const pts = smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0]));       // the line as the road layer draws it
-      for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], id = rsegs.length / 4; rsegs.push(a[0], a[1], b[0], b[1]);
+      for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], id = rsegs.length / 4; rsegs.push(a[0], a[1], b[0], b[1]); rkind.push(l.kind || 0);
         for (let gy = Math.floor((Math.min(a[1], b[1]) - .2) / RC); gy <= Math.floor((Math.max(a[1], b[1]) + .2) / RC); gy++)
           for (let gx = Math.floor((Math.min(a[0], b[0]) - .2) / RC); gx <= Math.floor((Math.max(a[0], b[0]) + .2) / RC); gx++) { const key = gx * 100000 + gy; (rgrid.get(key) || rgrid.set(key, []).get(key)).push(id); } }
     }
@@ -295,6 +296,28 @@ export default async function init(album) {
     }
     return best;
   };
+  // ---- the gates of a town: the directions in which its main streets leave its site — toward where every road
+  // crosses its wall (or, in a town without a wall, the ring six tenths of its radius out). At most four, the main
+  // roads first, well apart. Where fewer roads come, the town has streets of its own besides, along its lattice. (Stitch with the road work: a road enters the town through a gate and runs to its site along a main
+  // street; album.layers.towns.gates(index) tells where.)
+  function gatesFor(L) {
+    const [mx, my] = midOf(L), ring = a => (L.r >= WALL_FROM ? wallAt(L, a) : .6 * L.r), reach = L.r * .75 + .1, seen = new Set(), found = [];
+    const f = (x, y) => Math.hypot(x - mx, y - my) - ring(Math.atan2(y - my, x - mx));
+    for (let gy = Math.floor((my - reach) / RC); gy <= Math.floor((my + reach) / RC); gy++) for (let gx = Math.floor((mx - reach) / RC); gx <= Math.floor((mx + reach) / RC); gx++)
+      for (const id of rgrid.get(gx * 100000 + gy) || []) {
+        if (seen.has(id)) continue; seen.add(id);
+        const o = id * 4, fa = f(rsegs[o], rsegs[o + 1]), fb = f(rsegs[o + 2], rsegs[o + 3]); if (!(fa * fb < 0)) continue;
+        const t = fa / (fa - fb), x = rsegs[o] + (rsegs[o + 2] - rsegs[o]) * t, y = rsegs[o + 1] + (rsegs[o + 3] - rsegs[o + 1]) * t;
+        found.push({ a: Math.atan2(y - L.y, x - L.x), kind: rkind[id] });
+      }
+    found.sort((p, q) => p.kind - q.kind || p.a - q.a);
+    const out = [];
+    for (const g of found) { if (out.length >= 4) break; if (out.every(a => Math.abs(Math.atan2(Math.sin(a - g.a), Math.cos(a - g.a))) > .6)) out.push(g.a); }
+    // a town has more streets than roads: up to four in a walled town, three in a lesser one — along its lattice,
+    // where no road runs already
+    for (let k = 0, want = L.r >= WALL_FROM ? 4 : 3; k < 4 && out.length < want; k++) { const c = L.th + .3 + k * 1.5707963; if (out.every(a => Math.abs(Math.atan2(Math.sin(a - c), Math.cos(a - c))) > .9)) out.push(c); }
+    return out;
+  }
   // ---- tracks to the villages (town/tracks.js): the ways of a district are worked out when the district is first
   // looked at, the tracks of its settled villages again whenever the model has run
   let trackBase = null, trackKey = '', trackRibbon = null, trackShown = 0;
@@ -372,13 +395,13 @@ export default async function init(album) {
       for (let s = L.first[d]; s < L.first[d + 1]; s++) { if (L.kind[s] === SITE.made && made++ >= allow) continue; a[n++] = L.x[s]; a[n++] = L.y[s]; a[n++] = L.kind[s] + 4 * founded[s]; } }
     spts.geometry.dispose(); spts.geometry = new BufferGeometry(); spts.geometry.setAttribute('position', new BufferAttribute(a.subarray(0, n), 3));
   }
-  let planKey = '', cacheKey = ''; const cache = new Map();
+  let planKey = '', cacheKey = ''; const cache = new Map(), planEnv = { ...env, road: (x, y) => roadAt(x, y) };   // no block stands on a road
   function rebuild(tx, ty, D, S, ck) {
     if (ck !== cacheKey) { cache.clear(); cacheKey = ck; }           // plans of another cell size or another state are of no use
     const near = lobes.filter(L => Math.hypot(L.x - tx, L.y - ty) < D + L.r).sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
     const parts = []; let total = 0;
     for (const L of near) {
-      let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, S, env); cache.set(L.k, rows); }
+      let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, S, planEnv); cache.set(L.k, rows); }
       parts.push(rows); total += rows.length; if (total >= MAX_BLOCKS * ROW) break;
     }
     const all = new Float32Array(total); let o = 0; for (const r of parts) { all.set(r, o); o += r.length; }
@@ -418,6 +441,9 @@ export default async function init(album) {
     // the settlements that stand now, as the marks of the map need them: [{ index, name, cls, rank, capital, town,
     // people, areaKm2, radius, lat, lon }]; version() changes whenever they do
     marks: () => model.towns.map(rowOf), version: () => grownN,
+    // where the roads enter the town of place `index`: { x, y (its site, flat km), streets: [radians from the east] —
+    // the directions of its main streets from its site }, or null. A road should run in along one of them.
+    gates: index => { const t = model.towns.find(x => x.index === index), L = t && lobes.find(o => o.fine === undefined && Math.hypot(o.x - t.x, o.y - t.y) < .05); return L ? { x: L.x, y: L.y, streets: L.gates.slice() } : null; },
     // «чанк города такого-то»: the settlement chunk c of 1 km² is built up by (the number of the chunk: division/km.js),
     // or null; chunksOfTown(index of the place) → the numbers of its chunks
     townOfChunk: c => { const n = own.owner.get(c); return n === undefined ? null : rowOf(model.towns[n]); },
@@ -437,7 +463,8 @@ export default async function init(album) {
         console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages, ${model.farm.area.toFixed(0)} km² of fields in ${model.farm.list.length} chunks (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
       spts.visible = !!p.get('sitesShow') && !!siteList;
       if (spts.visible) { if (!sitesDrawn) drawSites(); smat.uniforms.uPx.value = Math.max(5, Math.min(13, 900 / cam.s.h)) * (album.renderer.getPixelRatio?.() || 1); }
-      if (ch.version !== seen || farmN !== farmSeen) { seen = ch.version; farmSeen = farmN; mirror(); }
+      if ((album.roadNet || null) !== roadSeen) indexRoads();        // the roads have been laid (or laid anew): the gates of the towns follow them
+      if (ch.version !== seen || farmN !== farmSeen || roadN !== roadMirrored) { seen = ch.version; farmSeen = farmN; roadMirrored = roadN; mirror(); }
       const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look')), dom = album.renderer.domElement;
       const S = cellSize(h, kH || 1), view = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360), cells = S / (view / Math.max(1, dom.height));   // a block in pixels of the picture
       // blocks stand while a block is a few pixels wide; smaller than that the ground alone shows the settlement
@@ -476,7 +503,7 @@ export default async function init(album) {
       // the blocks are planned as far as the picture reaches (and a little farther: until the camera has moved 8 km
       // or risen or tilted a step, the plan stays)
       const hb = Math.ceil(h / 8) * 8, tb = Math.min(78, Math.ceil(cam.s.tilt / 6) * 6);
-      const ck = `${S}|${mirrorN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${hb}|${tb}`;
+      const ck = `${S}|${mirrorN}|${roadN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${hb}|${tb}`;
       if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.min(Math.max(25, hb * 2.5), viewReach(hb, tb, cam.cam.fov, dom.width / Math.max(1, dom.height)) + 14), S, ck); }
       if (!yards) return;
       // yards stand around the point the camera looks at, as far as they can be told from the ground; as the camera

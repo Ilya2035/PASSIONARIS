@@ -235,6 +235,16 @@ const DEFS = [
   ['cot', 'Дом среди полей', () => plot(S())
     .bar(-.36, 0, .2, .34, .07, { rise: .045, v: 0 })
     .box(.2, .06, .4, .34, .04, { top: MAT.roof, faces: 'nse', v: 1 })],
+  // ---- the wall of a town (town/plan.js): pieces set end to end along its ring
+  // стена: the curtain from tower to tower — the block is as long as the piece — and a tower at its first end
+  ['wall', 'Стена города', () => S()
+    .box(-.5, -.036, .5, .036, .105, { top: MAT.stone, side: MAT.stone, faces: 'ns', v: 1 })
+    .box(-.5, -.075, -.26, .075, .15, { top: MAT.stone, side: MAT.stone, v: 4 })],
+  // ворота: two towers and the gateway between them; the street runs through along y
+  ['gate', 'Ворота', () => S()
+    .box(-.5, -.3, -.17, .3, .2, { top: MAT.stone, side: MAT.stone, v: 4 })
+    .box(.17, -.3, .5, .3, .2, { top: MAT.stone, side: MAT.stone, v: 4 })
+    .box(-.17, -.15, .17, .15, .15, { z0: .09, top: MAT.stone, side: MAT.stone, faces: 'ns', v: 2 })],
 ];
 
 export const KINDS = DEFS.map(d => d[0]);

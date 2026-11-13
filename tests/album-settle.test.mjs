@@ -29,11 +29,12 @@ const S = cellSize(20);
 const centreOf = r => { const c = Math.cos(r[2]), s = Math.sin(r[2]); return [r[0] + (c * r[4] - s * r[5]) * S, r[1] + (s * r[4] + c * r[5]) * S]; };
 const patch = (x, y, r, cul = CULTURES.med) => { const [bx, by] = siteBytes(x, y), L = lobeOf(gridOf(x, y), bx, by, radiusByte(r), cul); L.rivals = []; return L; };
 
-test('settle shapes: twenty-one kinds of a few triangles each, all in one small texture', () => {
+test('settle shapes: twenty-three kinds of a few triangles each, all in one small texture', () => {
   const s = buildShapes();
-  assert.equal(KINDS.length, 21); assert.equal(KIND_TITLES.length, 21); assert.equal(new Set(KINDS).size, 21);
-  assert.equal(s.width, SLOTS); assert.equal(s.height, 42); assert.equal(s.data.length, SLOTS * 42 * 4);
-  assert.ok(s.data.length < 30000, `the shape texture is ${s.data.length} bytes`);
+  assert.equal(KINDS.length, 23); assert.equal(KIND_TITLES.length, 23); assert.equal(new Set(KINDS).size, 23);
+  assert.ok(KIND.wall === 21 && KIND.gate === 22, 'the wall and the gate come after the yards: the kinds before them keep their numbers');
+  assert.equal(s.width, SLOTS); assert.equal(s.height, 46); assert.equal(s.data.length, SLOTS * 46 * 4);
+  assert.ok(s.data.length < 32000, `the shape texture is ${s.data.length} bytes`);
   s.tris.forEach((n, k) => assert.ok(n >= 12 && n <= MAX_TRIS, `${KINDS[k]}: ${n} triangles`));
   assert.ok(s.tris.reduce((a, b) => a + b) / KINDS.length < 48, 'on average under 48 triangles a block');
   for (const [k, sh] of s.shapes.entries()) for (const t of sh.t) {
@@ -180,7 +181,8 @@ test('settle plan: special buildings by the size of the settlement; nothing on w
   const shore = patch(99.75, 4405, .5), plan = rows(planLobe(shore, S, env));
   assert.ok(plan.length > 30);
   for (const r of plan) if (!(r[7] & FLAG_WATER)) assert.ok(at(...centreOf(r)) > 0, 'a block in the sea');
-  const piers = plan.filter(r => KINDS[r[3]] === 'pier'); assert.equal(piers.length, 1); assert.ok(piers[0][7] & FLAG_WATER && Math.abs(piers[0][0] - 100) < .1, 'the pier stands on the shoreline');
+  // (a small town has a harbour of up to three piers, well apart)
+  const piers = plan.filter(r => KINDS[r[3]] === 'pier'); assert.ok(piers.length >= 1 && piers.length <= 3, `${piers.length} piers`); assert.ok(piers.every(q => q[7] & FLAG_WATER && Math.abs(q[0] - 100) < .1), 'a pier stands on the shoreline');
   // on the steep ridge, in a swamp and along a river nothing stands
   assert.equal(planLobe(patch(-450, 4405, .5), S, env).length, 0);
   assert.equal(planLobe(patch(-205, 4405, .5), S, { ...env, swamp: () => .8 }).length, 0);
@@ -211,8 +213,8 @@ test('settle album: the aspect, its knobs and its pages', () => {
   const cams = Object.fromEntries(settle.pages.map(p => [p.id, p.cam.h]));
   assert.ok(cams['grow-1'] === 20 && cams['town-50'] === 50 && cams['town-200'] === 200 && cams['town-500'] === 500);
   const showcase = rows(planShowcase(0, 4400, 3));
-  assert.equal(showcase.length, 42); assert.deepEqual([...new Set(showcase.map(r => r[3]))].sort((a, b) => a - b), KINDS.map((_, i) => i)); assert.equal(showcase.filter(r => r[7] & 1).length, 21);
-  { const seen = new Set(showcase.map(r => `${r[0].toFixed(2)},${r[1].toFixed(2)}`)); assert.equal(seen.size, 42, 'no two blocks of the showcase stand on one spot'); }
+  assert.equal(showcase.length, 46); assert.deepEqual([...new Set(showcase.map(r => r[3]))].sort((a, b) => a - b), KINDS.map((_, i) => i)); assert.equal(showcase.filter(r => r[7] & 1).length, 23);
+  { const seen = new Set(showcase.map(r => `${r[0].toFixed(2)},${r[1].toFixed(2)}`)); assert.equal(seen.size, 46, 'no two blocks of the showcase stand on one spot'); }
 });
 
 test('settle classes: the mark of a settlement follows its people, as the owner set it', async () => {
@@ -453,4 +455,107 @@ test('settle panel and shade: the list of a district names the class as the map 
   assert.match(classTitle({ partOf: 'Мадрид', town: true, cls: 0 }), /часть города Мадрид/);
   assert.doesNotMatch(settle.glsl, /p\.sd/, 'the ground shader paints no shade of the houses toward the sun');
   assert.doesNotMatch(settle.glsl, /earth \* \.8, cover \* blocks/, 'nor under a block');
+});
+
+test('settle towns by the water: the middle of a town lies off its site, toward the sea or a river; the patch, its belts and its chunks follow', async () => {
+  const { towardWater, builtChunks } = await import('../src/album/town/grow.js');
+  const R = await import('../src/album/town/rules.js'), none = () => 1e9;
+  for (const s of [-1.5, -.4, 0, .013, .77, 1.5]) assert.ok(Math.abs(R.shiftOf(R.shiftByte(s)) - s) <= R.SHIFT_MAX / 254 + 1e-9, `a shift of ${s} km in a byte`);
+  assert.equal(R.shiftByte(0), 128); assert.equal(R.shiftOf(128), 0);
+  // the sea is east of x = 100: a town a kilometre and a half inland grows toward it, as far as half its radius
+  const inland = towardWater(at, none, 98.5, 4405, 1); assert.ok(Math.abs(inland[0] - .5) < .01 && Math.abs(inland[1]) < .02, `toward the sea: ${inland}`);
+  // nearer the shore it stops when its last houses stand on it: the middle is SHORE_AT of the radius inland
+  const near = towardWater(at, none, 98.9, 4405, 1); assert.ok(Math.abs(98.9 + near[0] - (100 - R.SHORE_AT)) < .07, `the middle of the town lies ${(100 - 98.9 - near[0]).toFixed(2)} km from the shore`);
+  // a town founded on the very shore grows inland, along its harbour; far from any water it stands where it is
+  const shore = towardWater(at, none, 99.9, 4405, 1); assert.ok(shore[0] < -.45 && shore[0] >= -.5 - 1e-9);
+  assert.deepEqual(towardWater(at, none, 0, 4405, 1), [0, 0]); assert.deepEqual(towardWater(at, none, 99.5, 4405, R.SHIFT_FROM - .01), [0, 0], 'a hamlet stands where it is');
+  // a river a kilometre north: the town grows to its bank, no farther than half its radius
+  const river = (x, y) => Math.abs(4406 - y), up = towardWater(at, river, 0, 4405, .5); assert.ok(Math.abs(up[0]) < .01 && up[1] > .2 && up[1] <= .25 + .006, `toward the river: ${up}`);
+  assert.deepEqual(towardWater(at, river, 0, 4403, .5), [0, 0], 'a river too far to reach');
+  assert.ok(R.SHIFT_SHARE < R.WALL_SHARE * (1 - .12), 'the site of a town always lies inside its wall');
+  // the model keeps the shift, the patch has its middle there, and the texture holds it
+  clear();
+  const m = growTowns(ch, [place(98.5, 4405, 5.6e6)], 1, at), t = m.towns[0]; assert.ok(t.sx > .1 && Math.abs(98.5 + t.sx - (100 - R.SHORE_AT * t.R)) < .03 && Math.abs(t.sy) < .02 && Math.abs(t.x - 98.5) < 1e-6, 'the site stays, the middle moves to the shore');
+  ch.set('built', t.home, t.byte / 255);
+  const out = blank(), mir = mirrorSettle(ch, m.towns, out), L = mir.lobes[0];
+  assert.ok(Math.abs(L.sx - t.sx) < 1e-9 && Math.abs(L.cx - L.x - t.sx) < 1e-9 && Math.abs(L.x - t.x) < .04 && R.midOf(L)[0] === L.cx);
+  assert.deepEqual(R.midOf({ x: 3, y: 4 }), [3, 4], 'a patch made by hand has its middle at its site');
+  clear();
+  // a patch whose middle lies 400 m east of its site: a cell far to the east is built on, the cell as far to the west is open ground
+  const [hx, hy] = siteBytes(-205, 4405), H = lobeOf(gridOf(-205, 4405), hx, hy, radiusByte(.8), CULTURES.med, R.shiftByte(.4), 128);
+  assert.ok(Math.abs(H.sx - .4) < .007 && H.sy === 0 && Math.abs(H.cx - H.x - H.sx) < 1e-12);
+  const S0 = cellSize(20), cs = Math.cos(H.th), sn = Math.sin(H.th), toCell = (dx, dy) => [Math.round((cs * dx + sn * dy) / S0), Math.round((-sn * dx + cs * dy) / S0)];
+  let east = 0, west = 0; for (let d = .9; d < 1.12; d += .04) for (let s = -.2; s <= .2; s += .08) { if (cellRule(...toCell(d, s), H, S0)) east++; if (cellRule(...toCell(-d, s), H, S0)) west++; }
+  assert.ok(east > 12 && west === 0, `cells built ${east} toward the water, ${west} away from it`);
+  { const even = { ...H, amp: 0 }; assert.ok(Math.abs(R.depthAt(even, H.cx, H.cy) - H.re) < 1e-9 && Math.abs(R.depthAt(even, H.x, H.y) - (H.re - H.sx)) < 1e-9, 'the patch is deepest at its middle'); }
+  const built = rows(planLobe(H, S, env)).map(centreOf); assert.ok(Math.abs(built.reduce((s, p) => s + p[0], 0) / built.length - H.cx) < .08, 'its blocks lie around its middle');
+  // its chunks lie around its middle
+  const own = builtChunks(m.towns); assert.equal(own.owner.get(squareOf(t.x + t.sx, t.y)), 0); assert.equal(own.owner.get(squareOf(t.x, t.y)), 0, 'and the chunk of its site is its own');
+  assert.match(RULES_GLSL, /length\(ij \* S - sh\)/); assert.match(settle.glsl, /SET_MORE/); assert.match(settle.glsl, /SET_SHIFT \/ 127\./);
+});
+
+test('settle wall, gates and streets: a town has main streets along its roads, a wall with a gate on each, a castle; no block stands on them', async () => {
+  const R = await import('../src/album/town/rules.js'), P = await import('../src/album/town/plan.js');
+  const { mirrorGates, packAtlas, gateBytes, moreBytes, settleBytes, villageBytes } = await import('../src/album/town/state.js');
+  for (const a of [0, .5, 1.5708, 3.1416, 4.7, 6.28]) assert.ok(Math.abs(Math.atan2(Math.sin(R.gateOf(R.gateByte(a)) - a), Math.cos(R.gateOf(R.gateByte(a)) - a))) < 6.2832 / 254, `a gate at ${a} in a byte`);
+  assert.ok(R.gateByte(-1) >= 1 && R.gateByte(7) <= 255, 'never the byte of «no gate»');
+  const kindsOf = plan => { const n = {}; for (const r of plan) n[KINDS[r[3]]] = (n[KINDS[r[3]]] || 0) + 1; return n; };
+  // a walled town with four streets
+  const L = patch(-205, 4405, .85); L.gates = [.2, 1.8, 3.4, 5].map(a => R.gateOf(R.gateByte(a)));
+  for (let a = 0; a < 6.28; a += .1) { const w = R.wallAt(L, a); assert.ok(w > .5 * L.r && w < .72 * L.r, 'the wall keeps to the middle of the town'); }
+  assert.ok(P.walled(L) && !P.walled(patch(-205, 4405, .3)));
+  const gates = P.gatesOf(L); assert.equal(gates.length, 4);
+  for (const g of gates) { assert.ok(P.wallDist(L, g.x, g.y) < .006, 'a gate stands on the wall'); assert.ok(P.streetAt(L, g.x, g.y) < 1e-6, 'and on its street'); }
+  assert.ok(P.streetAt(L, L.x + Math.cos(L.gates[0]) * .3, L.y + Math.sin(L.gates[0]) * .3) < 1e-9 && P.streetAt(L, L.x + Math.cos(5.74) * .3, L.y + Math.sin(5.74) * .3) > .15, 'a street runs straight out from the site');
+  assert.equal(P.streetAt({ x: 0, y: 0, gates: [0] }, -.3, 0), 1e9, 'and one way only: behind the site there is none'); assert.equal(P.streetAt({ x: 0, y: 0 }, 1, 1), 1e9);
+  const plan = rows(planLobe(L, S, env)), n = kindsOf(plan);
+  assert.equal(n.gate, 4); assert.ok(n.wall > 40 && n.wall < 80, `${n.wall} pieces of wall`); assert.equal(n.fort, 1, 'a great town has a castle besides');
+  assert.ok(n.market === 1 && n.temple >= 1 && (n.quarter || 0) + (n.quarterU || 0) + (n.quarterL || 0) > 10, JSON.stringify(n));
+  const ring = 2 * Math.PI * R.WALL_SHARE * L.r, laid = plan.filter(r => KINDS[r[3]] === 'wall').reduce((s, r) => s + r[8] * S, 0);
+  assert.ok(laid > ring * .85 && laid < ring * 1.1, `the wall is ${laid.toFixed(2)} km long around a ring of ${ring.toFixed(2)} km`);
+  for (const r of plan) {
+    const k = KINDS[r[3]]; if (['wall', 'gate', 'market', 'pier', 'mill'].includes(k)) continue;
+    const [x, y] = centreOf(r), half = Math.max(r[8], r[9]) * .5 * S;
+    assert.ok(P.streetAt(L, x, y) >= Math.min(half, .03) + R.STREET_W / 2, `${k} on a main street`);
+    assert.ok(P.wallDist(L, x, y) >= Math.min(half, .03) + R.WALL_W / 2, `${k} on the wall`);
+  }
+  for (const r of plan.filter(q => KINDS[q[3]] === 'wall')) assert.ok(P.wallDist(L, r[0], r[1]) < .004 && P.streetAt(L, r[0], r[1]) > R.GATE_W * .3, 'a piece of the wall lies on its ring and leaves the gateways open');
+  // the same town without streets and wall has more and larger blocks
+  const bare = patch(-205, 4405, .85), small = plan.filter(r => !['wall', 'gate'].includes(KINDS[r[3]])).length;
+  assert.ok(rows(planLobe(bare, S, env)).filter(r => !['wall', 'gate'].includes(KINDS[r[3]])).length > small, 'blocks give way to the streets');
+  // a small town: no wall, a castle; a village: neither
+  const T = patch(-205, 4405, .32); T.gates = [.3, 2.4, 4.4].map(a => R.gateOf(R.gateByte(a)));
+  const tn = kindsOf(rows(planLobe(T, S, env))); assert.ok(!tn.wall && !tn.gate && tn.fort === 1, JSON.stringify(tn));
+  const vn = kindsOf(rows(planLobe(patch(-205, 4405, .2), S, env))); assert.ok(!vn.wall && !vn.gate && !vn.fort, JSON.stringify(vn));
+  // a road through a settlement: no block stands on it
+  const road = (x, y) => Math.abs(y - 4405.1), onRoad = rows(planLobe(patch(-205, 4405, .2), S, { ...env, road }));
+  assert.ok(onRoad.length > 5); for (const r of onRoad) { const [x, y] = centreOf(r); assert.ok(road(x, y) >= Math.min(Math.max(r[8], r[9]) * .5 * S, .03), 'a block on the road'); }
+  // a harbour: a town on a gentle beach has its piers at the edge of the water
+  const beach = (x, y) => (x > 100 ? -5 : x > 99.8 ? .5 : 300), port = rows(planLobe(patch(99.4, 4405, .5), S, { ...env, at: beach })).filter(r => KINDS[r[3]] === 'pier');
+  assert.ok(port.length >= 2 && port.every(r => Math.abs(r[0] - 100) < .03), `${port.length} piers at the water`);
+  // ---- the gates in the texture
+  const lobes = [L, patch(-305, 4405, .32), patch(-105, 4405, .2)], G = new Uint8Array(GN * GN * 4);   // (three squares of the grid)
+  assert.ok(mirrorGates(lobes, o => (o === L ? [.2, 1.8, 3.4, 5, 5.9] : [.3, 2.4])));
+  assert.equal(lobes[0].gates.length, 4, 'at most four'); assert.equal(lobes[1].gates.length, 2); assert.equal(lobes[2].gates.length, 0, 'a village has no main streets');
+  assert.deepEqual([...G.subarray(L.k * 4, L.k * 4 + 4)], [0, 0, 0, 0], 'a block of bytes is written only when it is the one named');
+  assert.ok(mirrorGates(lobes, o => (o === L ? [.2, 1.8, 3.4, 5] : [.3, 2.4]), G)); assert.deepEqual([...G.subarray(L.k * 4, L.k * 4 + 4)], [.2, 1.8, 3.4, 5].map(R.gateByte));
+  assert.ok(!mirrorGates(lobes, o => (o === L ? [.2, 1.8, 3.4, 5] : [.3, 2.4]), G), 'nothing changed');
+  assert.ok(R.VN + 3 * GN <= R.TEX_W && R.MORE_AT[0] === R.COARSE_AT[0] + GN && R.GATES_AT[0] === R.MORE_AT[0] + GN, 'three blocks of the coarse grid lie side by side under the chunks');
+  const atlas = new Uint8Array(R.TEX_W * R.TEX_H * 4), more = new Uint8Array(GN * GN * 4); more[L.k * 4] = 200; packAtlas(settleBytes, villageBytes, atlas, more, G);
+  const texel = (at, k) => ((at[1] + ((k / GN) | 0)) * R.TEX_W + at[0] + k % GN) * 4;
+  assert.equal(atlas[texel(R.MORE_AT, L.k)], 200); assert.equal(atlas[texel(R.GATES_AT, L.k)], R.gateByte(.2));
+  mirrorGates(lobes, () => []);                                    // (the gates of the texture itself, left as they were found)
+  assert.match(settle.glsl, /SET_GATES/); assert.match(RULES_GLSL, /float setWall\(float r, float th, float a\)/); assert.match(settle.glsl, /setWall\(r, th, atan\(dc\.y, dc\.x\)\)/);
+  for (const id of ['city-sea', 'city-inland', 'city-capital', 'city-small', 'city-village', 'city-45']) assert.ok(settle.pages.some(p => p.id === id), id);
+  assert.ok(gateBytes.length === GN * GN * 4 && moreBytes.length === GN * GN * 4);
+});
+
+test('settle scale bar: a round length, cut into equal pieces — the real size of the towns can be read off the screen', async () => {
+  const { scaleOf, kmPerPixel, SCALE_STEPS } = await import('../src/album/town/scale.js');
+  const k20 = kmPerPixel(20, 32, 900); assert.ok(Math.abs(k20 - .01274) < .0001, `${k20} km to a pixel from 20 km`);
+  const near = scaleOf(k20); assert.equal(near.km, 2); assert.equal(near.parts, 4); assert.equal(near.part, .5); assert.equal(near.label, '2 км'); assert.equal(near.partLabel, '500 м');
+  const far = scaleOf(kmPerPixel(500, 32, 900)); assert.equal(far.km, 50); assert.equal(far.parts, 5); assert.equal(far.partLabel, '10 км');
+  assert.equal(scaleOf(.0004).label, '50 м'); assert.equal(scaleOf(.0004).partLabel, '10 м');
+  for (const k of [.0004, .003, .0127, .05, .13, .32, .64, 1.3]) { const s = scaleOf(k); assert.ok(s.px <= 170 + 1e-9 && s.px > 60 && SCALE_STEPS.includes(s.km) && Math.abs(s.px * k - s.km) < 1e-9, `${s.km} km is ${s.px.toFixed(0)} px`); }
+  const bar = DEFS.find(d => d.key === 'scaleBar'); assert.ok(bar && bar.value === 1 && bar.map, 'the scale bar is on, with a switch on the map panel');
 });

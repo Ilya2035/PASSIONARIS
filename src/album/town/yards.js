@@ -47,7 +47,7 @@ function nearest(patches, x, y) {
   const gx = Math.floor((x - GX0) / GK), gy = Math.floor((y - GY0) / GK); hit.L = null; hit.m = -1e3;
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     const xx = gx + dx, yy = gy + dy; if (xx < 0 || yy < 0 || xx >= GN || yy >= GN) continue;
-    for (const L of patches.get(yy * GN + xx) || []) { const d = L.r - Math.hypot(x - L.x, y - L.y); if (d > hit.m) { hit.m = d; hit.L = L; } }
+    for (const L of patches.get(yy * GN + xx) || []) { const d = L.r - Math.hypot(x - (L.cx ?? L.x), y - (L.cy ?? L.y)); if (d > hit.m) { hit.m = d; hit.L = L; } }   // (the houses lie around the middle of the patch)
   }
   return hit.L ? hit : null;
 }
