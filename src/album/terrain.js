@@ -193,7 +193,7 @@ void main() {
     cover *= 1. - snowW;
     land = pow(max(land, vec3(0.)), vec3(2.2));                     // the palette above is written as seen on screen
 
-    vec3 light = sunCol * nl * sh * 1.25 + skyCol * (.4 + .6 * n.z) * ao;
+    vec3 light = sunCol * nl * sh * 1.25 + skyCol * (.4 + .6 * n.z) * ao + albumMoonLit(n);   // (the Moon: light.js, the part «Небо»)
     if (uStyle == 2) {                                              // atlas: tints by height, contour lines
       float cw = fwidth(hl) * 1.2, c200 = 1. - smoothstep(0., cw, abs(fract(hl / 200. + .5) - .5) * 200.);
       land = hypso(hl) * (1. - .22 * c200 * smoothstep(.25, .02, px)) * (.62 + .5 * nl * sh + .1 * ao);

@@ -20,12 +20,21 @@ export class Post {
           if (uAO > 0. && z0 < uFar * .97) {
             float r = clamp(uRad * uProj / z0, 2., 26.), a0 = hash(gl_FragCoord.xy) * 6.283;
             vec2 grad = vec2(vz(vUv + vec2(uPx.x, 0.)) - vz(vUv - vec2(uPx.x, 0.)), vz(vUv + vec2(0., uPx.y)) - vz(vUv - vec2(0., uPx.y))) * .5;   // the surface as a plane
-            for (int i = 0; i < 8; i++) {
-              float a = a0 + float(i) * .7854; vec2 o = vec2(cos(a), sin(a)) * r * (.4 + .6 * fract(float(i) * .618 + .3));
-              float dz = z0 + dot(grad, o) - vz(vUv + o * uPx);                   // above the plane = something stands in the way
-              ao += smoothstep(uRad * .05, uRad * .55, dz) * (1. - smoothstep(uRad * 1.6, uRad * 4.5, dz));
+            // Toward the horizon one pixel spans kilometres of depth, and the depth written there is not exact: it is
+            // off by a small part of that span from one triangle to the next, and the levels of the land's grid lie
+            // half such a span apart (they are pushed back in depth so as not to flicker). So only what stands out
+            // of the plane by more than the span of a pixel counts as standing in the way, and where that span
+            // outgrows the reach of the shade there is no shade at all. Without this the horizon was all grain, with
+            // dark lines along the borders of the grid's levels.
+            float span = length(grad), lo = max(uRad * .05, span * .8), keep = 1. - smoothstep(uRad * .5, uRad * 1.6, span);
+            if (keep > 0.) {
+              for (int i = 0; i < 8; i++) {
+                float a = a0 + float(i) * .7854; vec2 o = vec2(cos(a), sin(a)) * r * (.4 + .6 * fract(float(i) * .618 + .3));
+                float dz = z0 + dot(grad, o) - vz(vUv + o * uPx);                 // above the plane = something stands in the way
+                ao += smoothstep(lo, lo + uRad * .5, dz) * (1. - smoothstep(uRad * 1.6, uRad * 4.5, dz));
+              }
+              ao *= keep / 8.;
             }
-            ao /= 8.;
           }
           c *= 1. - uAO * ao * .8;
           vec3 n4 = (texture(tCol, vUv + vec2(uPx.x, 0.)).rgb + texture(tCol, vUv - vec2(uPx.x, 0.)).rgb + texture(tCol, vUv + vec2(0., uPx.y)).rgb + texture(tCol, vUv - vec2(0., uPx.y)).rgb) * .25;
