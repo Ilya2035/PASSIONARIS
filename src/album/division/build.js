@@ -11,6 +11,7 @@ import { FKM, FN, kmOf, llOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
 import { makeGraph, partition, tidy } from './graph.js';
 import { districtCells } from './cells.js';
+import { borderGeometry } from './border.js';
 import { KKM, kmData, kmFacts, cellsOfDistrict, cellsOfChunks, chunksOfDistrict, livingOf } from './km.js';
 
 export const LAND = 0, SEA = 1, LAKE = 2;
@@ -378,7 +379,12 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   // (cells.js), chunk by chunk of 1 km² (km.js): a district is the chunks div.cells gives it, and its numbers are
   // summed from them (districtSummary). div.chunks — the natural cells the partition gave a district — is what the
   // district was laid out from, and what the other aspects still ask by.
-  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, heightAt }; kmData(div); }
+  // The borders are then drawn once as smooth lines along the rivers and the crests (border.js), and every chunk goes
+  // to the district its seed lies in by those lines: the chunks of a district are what is drawn as the district.
+  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, heightAt };
+    div.geo = borderGeometry(div, rivers);
+    for (let t = 0; t < div.cells.length; t++) { const d = div.cells[t]; if (d >= 0 && div.kinds[d] === LAND) div.provCells[t] = div.province[d]; }
+    kmData(div); }
   div.ms = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   return div;
 }

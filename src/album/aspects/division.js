@@ -12,13 +12,15 @@
 // through the one texture of this aspect (division/gpu.js) and draws the line where two of them weigh the same.
 // The chunks themselves are never seen on the map (the owner: «чанки не видим сами по себе… только в dev-режиме»):
 // the knob «Чанки 1 км²» draws their outlines and what each is like, for checking.
-import { Vector3 } from 'three';
+import { Vector2, Vector3 } from 'three';
 import { KKM as FKM, KN as FN, KM_GLSL } from '../division/km.js';
 import { emptyTexture } from '../division/gpu.js';
+import { NEAR_KM, MAX_FOURS, PIECE_KM, TIE_KM } from '../division/border.js';
 import { startDivision } from '../division/runtime.js';
 
 const GLSL = /* glsl */`
 uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm;
+uniform ivec2 uDivGeo;                          // the first rows of the lists of border pieces and of the pieces in tDiv (division/gpu.js); 0 none
 uniform vec3 uDivSize;                          // district, province, region size, km
 uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
 uniform highp usampler2D tDiv;                  // the district of every texel of the fine raster, then a texel per district: see division/gpu.js
@@ -74,12 +76,66 @@ float divWin(DivAcc a, float foreign, out int win, out int other) {
   other = sec < 0. ? -1 : rest.x == sec ? a.k.x : rest.y == sec ? a.k.y : rest.z == sec ? a.k.z : a.k.w;
   return sec < 0. ? 1e4 : best + foreign - sec;
 }
+// The one shape of the borders (division/border.js): the lines drawn on the ground are also what the fill and the
+// light under the cursor follow. Every square lists the pieces of line that come within DIV_NEAR km of it; the
+// nearest piece says which district a point is in (the side it lies on) and how far the border of each level is.
+// → false when no piece of this layer is that near (the point is in the district of the middle of its square); lone:
+// the nearest is the end of a line no other line shares (at the shore) — the district of the square the point is in
+bool divNear(vec2 pk, uint lst, bool water, out ivec2 dd, out vec3 e, out bool lone) {
+  int first = int(lst & 0xffffffu), nf = int(lst >> 24u);
+  uint wb = water ? 1u : 0u, lr = 0u; float best = 1e9, ang0 = 9.; bool left = false, ext = false; int ends = 0;
+  e = vec3(1e4); dd = ivec2(-1); lone = false;
+  for (int j = 0; j < ${MAX_FOURS}; j++) {
+    if (j >= nf) break;
+    int li = first + j; uvec4 lt = texelFetch(tDiv, ivec2(li % ${FN}, uDivGeo.x + li / ${FN}), 0);
+    for (int k = 0; k < 4; k++) {
+      uint en = lt[k]; if (en == 0xffffffffu || ((en >> 24u) & 1u) != wb) continue;
+      int s = int(en & 0xffffffu), lv = int(en >> 25u);
+      uvec4 sg = texelFetch(tDiv, ivec2(s % ${FN}, uDivGeo.y + s / ${FN}), 0);
+      vec2 a = vec2(uintBitsToFloat(sg.x), uintBitsToFloat(sg.y)), ab = (vec2(float(sg.z & 65535u), float(sg.z >> 16u)) / 65535. - .5) * ${(2 * PIECE_KM).toFixed(3)}, ap = pk - a;
+      float L2 = max(dot(ab, ab), 1e-12), u0 = dot(ap, ab) / L2, u = clamp(u0, 0., 1.), dist = length(ap - ab * u);
+      e.x = min(e.x, dist); if (lv >= 1) e.y = min(e.y, dist); if (lv >= 2) e.z = min(e.z, dist);
+      // nearest to a point inside the piece: its side says the district; nearest to an end other pieces share (a
+      // junction, a bend): the district on the right of the first piece met turning left from the point (border.js)
+      // (an end no other piece shares, at the shore: the side of the piece drawn on)
+      float ang = -1.; bool side = ab.x * ap.y - ab.y * ap.x > 0., l = side;
+      if (u0 <= 0. || u0 >= 1.) {
+        bool at1 = u0 >= 1.; vec2 w = at1 ? ap - ab : ap, rr = at1 ? -ab : ab; float k2 = max(length(w) * length(rr), 1e-12);
+        float cs = dot(w, rr) / k2, sn = (w.x * rr.y - w.y * rr.x) / k2;
+        ang = sn >= 0. ? 1. - cs : 3. + cs; l = at1;
+      }
+      bool nearer = dist < best - ${TIE_KM.toFixed(4)}, tie = !nearer && dist <= best + ${TIE_KM.toFixed(4)};
+      if (nearer) ends = ang >= 0. ? 1 : 0; else if (tie && ang >= 0.) ends++;
+      if (nearer || (tie && ang0 >= 0. && (ang < 0. || ang < ang0))) { best = min(best, dist); ang0 = ang; lr = sg.w; left = l; ext = side; }
+    }
+  }
+  lone = ang0 >= 0. && ends == 1; if (lone) left = ext;
+  if (best > ${NEAR_KM.toFixed(3)}) return false;
+  dd = left ? ivec2(int(lr & 65535u), int(lr >> 16u)) : ivec2(int(lr >> 16u), int(lr & 65535u));
+  return true;
+}
 // one layer (land or water) at a point: the district, province, region, the look bits and the texel of the district,
-// and how far the borders of the three levels and of the state are, km (the margin grows by 1.6 per km)
+// and how far the borders of the three levels and of the state are, km
 struct DivAt { int d, d2, pv, rg, look, st; uvec4 u; float eD, eP, eR, eS; };
 DivAt divAt(vec2 pk, float px, bool water) {
   DivAt r = DivAt(0, -1, 0, 0, 0, 0, uvec4(0u), 1e4, 1e4, 1e4, 1e4);
   vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t); ivec2 c = ivec2(floor(t));
+  // the square is of this layer's kind: the lines say it all
+  if (uDivGeo.x > 0) {
+    uvec4 sq = texelFetch(tDiv, clamp(c, ivec2(0), ivec2(${FN - 1})), 0);
+    int own = int(sq.r & 65535u); uvec4 uo = divOf(float(own)); int kind = int((uo.y >> 25u) & 3u);
+    if (water ? kind != 0 : kind == 0) {
+      ivec2 dd; vec3 e = vec3(1e4); bool lone = false;
+      if (sq.b == 0u) r.d = own;
+      else if (divNear(pk, sq.b, water, dd, e, lone)) { r.d = lone ? own : dd.x; r.d2 = dd.y; }
+      else r.d = int(sq.a & 65535u);
+      r.eD = e.x; r.eP = e.y; r.eR = e.z;
+      r.u = r.d == own ? uo : divOf(float(r.d));
+      r.look = int(r.u.y >> 16u); r.pv = int(r.u.x >> 16u); r.rg = int(r.u.y & 65535u); r.st = int((r.u.w >> 16u) & 1u);
+      return r;
+    }
+  }
+  // at the shore, the other layer: a vote among the squares of its kind around the point
   vec3 wx = vec3(.5 * (1. - f.x) * (1. - f.x), .75 - (f.x - .5) * (f.x - .5), .5 * f.x * f.x);
   vec3 wy = vec3(.5 * (1. - f.y) * (1. - f.y), .75 - (f.y - .5) * (f.y - .5), .5 * f.y * f.y);
   DivAcc ad = divNone(), ap = divNone(), ar = divNone();
@@ -152,15 +208,10 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
     vec3 ink = uStyle == 0 ? vec3(1., .98, .9) : vec3(.12, .10, .12);
     col = mix(col, ink, (1. - smoothstep(w - .5, w + .6, e)) * (wet ? .3 : uDivKm == 1 ? .55 : .2) * seen * smoothstep(.2, .09, px));
   }
-  // the district under the cursor and the chosen one
+  // the district under the cursor and the chosen one: lighter inside; their outline is a line on the ground drawn
+  // over the very same border (division/lines.js), at any height
   if (uDivHover >= 0 && a.d == uDivHover) col = mix(col, vec3(1.), .16);
   if (uDivSel >= 0 && a.d == uDivSel) col = mix(col, vec3(1., .97, .88), .26);
-  bool onSel = uDivSel >= 0 && (a.d == uDivSel || a.d2 == uDivSel), onHov = uDivHover >= 0 && (a.d == uDivHover || a.d2 == uDivHover);
-  if (onSel || onHov) {
-    float e = a.eD / px, w = (onSel ? 1.5 : 1.0) * zoom;
-    col = mix(col, vec3(.02), (1. - smoothstep(w + .9, w + 1.9, e)) * .55);           // a dark edge under the light line
-    col = mix(col, onSel ? vec3(1., .96, .82) : vec3(.95), 1. - smoothstep(w - .5, w + .5, e));
-  }
   return col;
 }
 // before the division is worked out the earthquake falls back on a plain lattice of districts of 30 km
@@ -197,7 +248,7 @@ export default {
   id: 'division', title: 'Деление', glsl: GLSL,
   uniforms: {
     uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 },
-    uDivSize: { value: new Vector3(20, 100, 900) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() },
+    uDivSize: { value: new Vector3(20, 100, 900) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() }, uDivGeo: { value: new Vector2(0, 0) },
   },
   params: [
     { key: 'division', label: 'Деление', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'Районы'], [2, 'Провинции'], [3, 'Регионы']], value: 0, uniform: 'uDivision' },

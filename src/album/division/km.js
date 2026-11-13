@@ -55,7 +55,9 @@ export function chunkAt(cells, x, y, d = undefined) {
   if (i0 < 0 || j0 < 0 || i0 >= KN || j0 >= KN) return -1;
   if (d === undefined) d = cells[j0 * KN + i0];
   let best = -1, bd = Infinity;
-  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+  // (the squares around; two squares out when none near is of the district: a border line may run a little off the
+  // squares, border.js)
+  for (let r = 1; r <= 2 && best < 0; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
     const i = i0 + di, j = j0 + dj; if (i < 0 || j < 0 || i >= KN || j >= KN) continue;
     const c = j * KN + i; if (cells[c] !== d) continue;
     const sx = i + .5 + (kmHash(i, j, 1) - .5) * 2 * JITTER - fx, sy = j + .5 + (kmHash(i, j, 2) - .5) * 2 * JITTER - fy, dd = sx * sx + sy * sy;

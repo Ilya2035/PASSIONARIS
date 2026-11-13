@@ -14,6 +14,8 @@ import { packDivision } from '../src/album/division/gpu.js';
 import { KN as RASTER, KKM, cellsOfChunks } from '../src/album/division/km.js';
 import { districtCells, riverRaster, cellStats, RIVER_TOLL, SMOOTH_KM } from '../src/album/division/cells.js';
 import { borderLines } from '../src/album/division/lines.js';
+import { nearestPiece, districtByLines, outlineOf, NEAR_KM, PIECE_KM } from '../src/album/division/border.js';
+import { seedOf } from '../src/album/division/km.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division, { STATES } from '../src/album/aspects/division.js';
 import { PAGES } from '../src/album/pages.js';
@@ -109,9 +111,20 @@ test('division: what a district holds; the texture with the state of history', (
   const sea = districtSummary(div, div.district[ch.at(38.5, -8)], ch); assert.equal(sea.kind, 'sea'); assert.equal(sea.classes, null); assert.equal(sea.landArea, 0); assert.ok(sea.chunks > 100);
   ch.reset();
   // the texture: the district of every chunk of 1 km², then a texel per district
-  const mask = stateMask(div, madeLands, 'x'), a = packDivision(ch, div, mask);
-  assert.equal(a.length, RASTER * (RASTER + Math.ceil(div.count / RASTER)) * 4);
+  const mask = stateMask(div, madeLands, 'x'), rows = {}, a = packDivision(ch, div, mask, null, null, rows), g = div.geo;
+  assert.equal(rows.L0, RASTER + Math.ceil(div.count / RASTER)); assert.equal(rows.S0, rows.L0 + Math.ceil(g.list.length / 4 / RASTER));
+  assert.equal(a.length, RASTER * (rows.S0 + Math.ceil(g.count / RASTER)) * 4);
   for (let t = 0; t < TN; t += 4999) assert.equal(a[t * 4], Math.max(0, div.cells[t]));
+  // the border pieces near every square, and the pieces themselves: the start as float bits, the end as an offset in
+  // steps of 6 cm
+  for (let t = 0; t < TN; t += 97) { const b = a[t * 4 + 2]; assert.equal(b & 0xFFFFFF, g.num[t] ? g.first[t] : 0); assert.equal(b >>> 24, g.num[t]); }
+  const f32 = new Float32Array(a.buffer);
+  for (let s = 0; s < g.count; s += 37) {
+    const o = (rows.S0 * RASTER + s) * 4, dx = ((a[o + 2] & 65535) / 65535 - .5) * 2 * PIECE_KM, dy = ((a[o + 2] >>> 16) / 65535 - .5) * 2 * PIECE_KM;
+    assert.ok(Math.abs(f32[o] - g.seg[s * 4]) < 1e-3 && Math.abs(f32[o + 1] - g.seg[s * 4 + 1]) < 1e-3, 'the start of a piece');
+    assert.ok(Math.abs(f32[o] + dx - g.seg[s * 4 + 2]) < 1e-3 && Math.abs(f32[o + 1] + dy - g.seg[s * 4 + 3]) < 1e-3, 'the end of a piece, within a metre');
+    assert.equal(a[o + 3], g.lab[s]);
+  }
   for (let dd = 0; dd < div.count; dd++) {
     const o = (TN + dd) * 4, p = div.province[dd], first = div.chunks[dd][0];
     assert.equal(a[o] & 65535, dd); assert.equal(a[o] >>> 16, p); assert.equal(a[o + 1] & 65535, div.region[p]);
@@ -134,7 +147,7 @@ test('division: the outlines of districts — texel by texel, inside their provi
     const k = kc[t]; if (k >= ch.count) continue;
     const d = div.cells[t], dk = div.district[k];
     assert.ok(d >= 0 && d < div.count); texels[d]++;
-    if (d !== dk) { assert.equal(div.kinds[d], LAND); assert.equal(div.kinds[dk], LAND, 'water keeps the districts of its chunks'); }
+    if (d !== dk) assert.equal(div.kinds[d] === LAND, div.kinds[dk] === LAND, 'land stays land, water stays water');
     if (div.kinds[d] === LAND) assert.equal(div.province[d], div.provCells[t], 'a district never leaves its province as it is drawn');
     else assert.equal(div.provCells[t], -1);
   }
@@ -171,6 +184,50 @@ test('division: the outlines of districts — texel by texel, inside their provi
     if (best < .7) onIt++;
   }
   assert.ok(near > 20 && onIt / near > .8, onIt + ' of ' + near + ' points of the border by the river lie on it');
+});
+
+// The one shape of a border (the owner, 13.11.2026: the outline of a district and the light under the cursor must be
+// of one shape): what the shader fills, what the cursor finds and what the chunks hold all follow the lines drawn.
+function checkOneShape(div, step = 3) {
+  const g = div.geo, by = (x, y, w) => districtByLines(g, div.cells, div.kinds, x, y, w);
+  // just off a piece of line, on either side, lies the district the line names on that side
+  let n = 0, bad = 0;
+  for (let s = 0; s < g.count; s += step) {
+    const ax = g.seg[s * 4], ay = g.seg[s * 4 + 1], dx = g.seg[s * 4 + 2] - ax, dy = g.seg[s * 4 + 3] - ay, L = Math.hypot(dx, dy); if (L < .1) continue;
+    for (const side of [1, -1]) {
+      const x = ax + dx / 2 - dy / L * side * .03, y = ay + dy / 2 + dx / L * side * .03, got = by(x, y, g.key[s] & 1); if (got < 0) continue;
+      n++; if (got !== (side > 0 ? g.lab[s] & 0xFFFF : g.lab[s] >>> 16)) bad++;
+    }
+  }
+  assert.ok(n > 400 && bad / n < .01, `the fill follows the lines: ${bad} of ${n} points just off a line are in another district`);
+  // every chunk belongs to the district its seed lies in by the lines; no district is left without chunks
+  let wrong = 0, all = 0; const num = new Int32Array(div.count);
+  for (let t = 0; t < RASTER * RASTER; t++) {
+    const d = div.cells[t]; if (d < 0) continue; num[d]++;
+    if (!g.num[t]) continue;
+    const [sx, sy] = seedOf(t % RASTER, Math.floor(t / RASTER)), r = nearestPiece(g, sx, sy, div.kinds[d] === LAND ? 0 : 1);
+    if (!r || r.dist > NEAR_KM || r.lone) continue;
+    all++; if (r.d !== d) wrong++;
+  }
+  assert.equal(wrong, 0, `chunks in the district their seed lies in (${all} near a line)`);
+  for (let d = 0; d < div.count; d++) assert.ok(num[d] > 0, `district ${d} keeps chunks`);
+  return { n, bad };
+}
+
+test('division: one shape — the fill, the cursor and the chunks follow the border lines; the outline of a district', () => {
+  const { ch, opts } = made, yR = IY0 + (IY1 - IY0) / 3;
+  const river = [{ rank: 5, pts: Array.from({ length: 60 }, (_, i) => { const p = llOf(IX0 + 10 + i * (RX - 40 - IX0) / 59, yR + Math.sin(i * .4) * 3); return [p.lon, p.lat]; }) }];
+  const div = buildDivision(ch, { ...opts, size: 30, rivers: river });
+  checkOneShape(div, 1);
+  // the outline of an inland district is one closed line, made of the very points of the border lines
+  const d = div.cells[Math.floor((kmOf(41, -4.5)[1] - 3880)) * RASTER + Math.floor(kmOf(41, -4.5)[0] + 880)], ol = outlineOf(div.geo, d);
+  assert.ok(div.kinds[d] === LAND && ol.length === 1, 'one outline, ' + ol.length);
+  const o = ol[0]; assert.ok(o.length > 20 && o[0][0] === o[o.length - 1][0] && o[0][1] === o[o.length - 1][1], 'it closes on itself');
+  const pts = new Set(div.geo.lines.flatMap(L => L.pts.map(p => p.join(','))));
+  assert.ok(o.every(p => pts.has(p.join(','))), 'every point of the outline is a point of a border line');
+  // a district under the cursor at a point inside its outline
+  const x = o.reduce((s, p) => s + p[0], 0) / o.length, y = o.reduce((s, p) => s + p[1], 0) / o.length;
+  assert.equal(districtByLines(div.geo, div.cells, div.kinds, x, y, 0), d);
 });
 
 test('division: border lines for the far view — between lands, never along the shore, smooth', () => {
@@ -233,6 +290,7 @@ const provAt = (lat, lon) => LANDS.provinces[provinceOfChunk(real.div, real.ch.a
 test('division of the album: whole chunks, connected districts inside historical lands, sizes', { skip }, () => {
   const { ch, div } = real;
   checkWhole(ch, div);
+  checkOneShape(div, 7);
   const area = id => { const i = LANDS.provinces.findIndex(p => p.id === id); let a = 0; for (let d = 0; d < div.count; d++) if (div.province[d] === i) a += div.area[d]; return a; };
   for (const [id, lo, hi] of [['bierzo', 2000, 5500], ['leon', 9000, 15000], ['cerdanya', 300, 2500], ['andorra', 300, 900], ['navarra', 8500, 12000], ['zaragoza', 14000, 20000], ['algarve', 4000, 6000]])
     assert.ok(area(id) > lo && area(id) < hi, `${id}: ${Math.round(area(id))} km²`);
