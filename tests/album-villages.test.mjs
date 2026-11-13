@@ -257,11 +257,12 @@ test('villages of the album: about nine to a district, on level ground by the wa
   assert.ok(byWater / kinds[2] > .3, `${Math.round(byWater / kinds[2] * 100)} % of the made places stand by a river or the shore`);
   // the model: the towns as before, and the villages between them
   const base = centrePlaces(data.vectors.places, div, sites), vill = villagePlaces(list, sites, { base: own.length }), places = [...base, ...vill];
-  const alone = growTowns(ch, base, 1, at), model = growTowns(ch, places, 1, at), founded = model.towns.filter(t => t.village);
+  const alone = growTowns(ch, base, 1, at), model = growTowns(ch, places, 1, at), founded = model.towns.filter(t => !t.town);
   assert.equal(model.towns.length - founded.length, alone.towns.length, 'the towns are the same with the villages and without them');
-  assert.ok(founded.length > vill.length * .95, `${founded.length} of ${vill.length} villages founded`); assert.ok(founded.every(t => t.cls <= 1 && t.R <= VILLAGE_RMAX), 'a place between the centres is a village, at most a small town');
-  assert.ok(founded.filter(t => t.cls === 0).length > founded.length * .97);
-  assert.equal(new Set(founded.map(t => t.fine)).size, founded.length, 'one village a square of the fine grid');
+  assert.ok(founded.length > vill.length * .95, `${founded.length} of ${vill.length} villages founded`); assert.ok(founded.every(t => t.cls === 0 && t.R <= VILLAGE_RMAX), 'a place between the centres is a village: under a thousand people');
+  const inFine = model.towns.filter(t => t.village);
+  assert.equal(new Set(inFine.map(t => t.fine)).size, inFine.length, 'one village a square of the fine grid');
+  assert.ok(inFine.length - founded.length < alone.towns.length * .1, `${inFine.length - founded.length} towns of districts lie in the fine grid: a greater town holds their natural cell`);
   // the save: every settlement stands on a place of its district, and no two on one
   const num = siteNumbers(list), siteOf = t => { const pl = places[t.index]; return pl.site !== undefined ? { district: pl.district, site: pl.site } : pl.district !== undefined ? { district: pl.district, site: 0 } : num.get(t.index) || null; };
   const { cellsOfChunks } = await import('../src/album/division/km.js');

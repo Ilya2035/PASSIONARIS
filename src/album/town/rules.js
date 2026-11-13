@@ -18,7 +18,10 @@ export const GK = CHUNK_KM, GN = CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;
 // corner: VN × VN squares of VK km, one village at most in each. A village and its fields never reach farther than
 // one square, so a point of the ground looks at the 3 × 3 squares around it, as in the coarse grid.
 export const VK = 2.5, VN = GN * GK / VK;
-export const VILLAGE_RMAX = .39; // km: the largest radius of a village of the fine grid (a small town begins at .4, STAGES)
+// km: the largest radius of a village. A village is a village by its people too — under a thousand (TOWN_R below is
+// .2523 km): the owner, 13.11.2026: «в районе один город, деревень может быть много». The town of a district that has
+// to lie in the fine grid (grow.js: a second town in one natural cell) may be as large as FINE_RMAX.
+export const VILLAGE_RMAX = .25, FINE_RMAX = .39;
 // The one texture of the settlement work (state.js) holds three things. Its first KN rows are the chunks of 1 km²
 // (division/km.js), a texel a chunk: what the chunk holds — its fields. Below them lie the fine grid of villages and,
 // beside it, the coarse grid of towns.
@@ -59,6 +62,25 @@ export const peopleOf = r => Math.round(Math.PI * r * r * DENSITY);
 // the map from afar; a village has none (the owner: «деревня до 1000 человек не показывается на карте»)
 export const TOWN_R = Math.sqrt(1000 / (Math.PI * DENSITY));
 export const classOf = (people, areaKm2 = 0) => { let c = 0; for (let i = 0; i < CLASSES.length; i++) if (people >= CLASSES[i].people || areaKm2 >= CLASSES[i].area) c = i; return c; };
+// ---- how long a settlement stays marked as the camera rises (the owner, 13.11.2026: «совсем далеко — ничего; около
+// 500 км — точки самых крупных городов и столиц; 200 км — города поменьше; 100 км — ещё меньше; ближе — отметки разной
+// формы у города и деревни. Деревни пропадают первыми, столицы видны дольше всех»). `to`: the greatest camera height,
+// km, from which a settlement of that rank is still marked; `name`: the greatest height its name is written from.
+export const RANKS = [
+  { id: 'village', title: 'деревня', to: 45, name: 45 },
+  { id: 'town', title: 'город района', to: 110, name: 75 },
+  { id: 'bigtown', title: 'город', to: 230, name: 110 },
+  { id: 'province', title: 'главный город провинции', to: 560, name: 150 },
+  { id: 'land', title: 'главный город земли', to: 760, name: 180 },
+  { id: 'region', title: 'главный город региона', to: 900, name: 180 },
+];
+// t: { town (the town of its district; a village is not), cls (CLASSES), capital ('province', 'land', 'region' or nothing) }.
+// The greatest cities (a middling town and more) stay as long as the chief towns of provinces.
+export const rankOf = t => (t.capital === 'region' ? 5 : t.capital === 'land' ? 4 : t.capital === 'province' || (t.town && t.cls >= 2) ? 3 : !t.town ? 0 : t.cls >= 1 ? 2 : 1);
+// Names (the owner: «на 20 км их не показывать — там смотрят на сам город; показывать около 50 км, дальше убирать»):
+// they come in between these two heights, km, and go at the height of their rank (RANKS[].name)
+export const NAME_FROM = [25, 32];
+export const SHAPES_TO = 85;     // km: below this height a mark is a shape that tells the class; above it, a dot that tells the rank
 // how far the fields reach beyond the last houses, km
 export const fieldsBeyond = r => .5 + 2.5 * r;
 // how far the lanes of a settlement run on past its last houses, km (twin of laneOut in aspects/settle.js): beyond

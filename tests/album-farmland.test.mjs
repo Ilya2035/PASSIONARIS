@@ -83,8 +83,8 @@ test('farmland: only ground that can be ploughed — not the sea, not a ridge; w
   assert.ok(Math.abs(both.towns[1].ploughed - alone.towns[0].ploughed) < .01, 'the lesser town has all the fields it needs');
   const east = m => [...m.farm.list].reduce((s, c) => s + (KX0 + c % KN + .5 > -197 ? m.farm.km[c] / 255 : 0), 0); assert.ok(east(both) > east(alone) * 1.3, 'and they lie farther from the greater town');
   // a village does not walk farther than FARM_REACH[0]: where its people need more than lies within reach, it is short of fields
-  const big = growTowns(ch, [vil(-250, 4405, 400000)], 3, at, undefined, { ha: 5 }), vt = big.towns[0];
-  assert.ok(vt.village && vt.ploughed < vt.people / 20 - 20 && vt.ploughed > 30 && [...big.farm.list].every(c => Math.hypot(KX0 + c % KN + .5 - vt.x, KY0 + Math.floor(c / KN) + .5 - vt.y) < FARM_REACH[0] + 1.2));
+  const big = growTowns(ch, [vil(-250, 4405, 400000)], 3, at, undefined, { ha: 12 }), vt = big.towns[0];
+  assert.ok(vt.village && vt.ploughed < vt.people * .12 - 20 && vt.ploughed > 30 && [...big.farm.list].every(c => Math.hypot(KX0 + c % KN + .5 - vt.x, KY0 + Math.floor(c / KN) + .5 - vt.y) < FARM_REACH[0] + 1.2));
   assert.ok(FARM_REACH[1] > FARM_REACH[0] * 4);
 });
 

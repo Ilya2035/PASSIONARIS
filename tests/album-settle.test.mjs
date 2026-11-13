@@ -225,8 +225,8 @@ test('settle classes: the mark of a settlement follows its people, as the owner 
   const m = growTowns(ch, [place(-205, 4405, 5.6e6), place(-405, 4455, 20000)], 3, at);
   const big = m.towns.find(t => t.index === 0), small = m.towns.find(t => t.index === 1);
   assert.equal(big.cls, 3); assert.equal(big.people, peopleOf(big.R)); assert.equal(small.cls, classOf(small.people));
-  const { MARK_FROM, markSvg } = await import('../src/album/layers/labels.js');
-  assert.ok(MARK_FROM[0] < 60 && MARK_FROM.every((h, i) => !i || h > MARK_FROM[i - 1]), 'villages are marked only from close by, greater places from higher');
+  const { MARK_TO, markSvg } = await import('../src/album/layers/labels.js');
+  assert.ok(MARK_TO[0] < 60 && MARK_TO.every((h, i) => !i || h > MARK_TO[i - 1]), 'villages are marked only from close by, greater places from higher');
   for (let c = 0; c < 5; c++) assert.match(markSvg(c), c === 0 ? /<circle/ : c === 3 ? /<rect/ : /<polygon/);
   const ids = settle.pages.map(p => p.id); assert.ok(ids.includes('town-marks') && ids.includes('town-marks-near') && ids.includes('town-districts') && ids.includes('town-districts-map'));
 });
@@ -379,4 +379,78 @@ test('yards in the save: a chunk of 1 km² and one of its sixteen places; the ch
   // no yard in a chunk of water: with the squares east of the settlement taken for the sea, the yards there are gone
   const dry = allYards({ ...ctx, landSquare: kx => kx < 675 });
   assert.ok(dry.length > 5 && dry.length < all.length && dry.every(y => yardPlace(y.i, y.j).kx < 675));
+});
+
+// ---- the third wave (the owner's review of 13.11.2026): one town to a district, towns that grow together, the chunks
+// of a town, marks and names by the height of the camera, the list of the panel, no shade of the houses
+test('settle towns: one town to a district; towns grown together are one town; a second town of a natural cell lies in the fine grid', async () => {
+  const { townsOfDistricts, builtChunks, MERGE_GAP, RMERGED } = await import('../src/album/town/grow.js');
+  const { VILLAGE_RMAX, FINE_RMAX, TOWN_R, peopleOf, classOf } = await import('../src/album/town/rules.js');
+  assert.ok(VILLAGE_RMAX < TOWN_R && classOf(peopleOf(VILLAGE_RMAX)) === 0, 'a village has under a thousand people');
+  // a place of the album that is not the centre of its district becomes a village of it
+  const pls = [place(-205, 4405, 9e5), place(-203, 4406, 3e5), place(-150, 4405, 2e5), { ...place(-100, 4405, 500), village: true }];
+  const one = townsOfDistricts(pls, (pl, i) => [{ district: 7, site: 0 }, { district: 7, site: 2 }, null, { district: 9, site: 1 }][i]);
+  assert.deepEqual(one.map(p => !!p.village), [false, true, false, true]); assert.equal(one[1].district, 7); assert.equal(one[1].site, 2); assert.equal(one[1].pop, 3e5);
+  assert.equal(one[0], pls[0]); assert.equal(pls[1].village, undefined, 'the list given is left as it was');
+  clear();
+  const m1 = growTowns(ch, one, 1, at), second = m1.towns.find(t => t.index === 1);
+  assert.ok(m1.towns.find(t => t.index === 0).town && (!second || (!second.town && second.R <= VILLAGE_RMAX + 1e-9)), 'the second place of the district is a village or lies under the houses of the town');
+  // two towns whose houses touch: one town, the greater, with the built-up land and the people of both
+  const a = place(-205, 4405, 9e5), b = place(-205 + fullRadius(9e5) + fullRadius(3e5) + MERGE_GAP - .05, 4405, 3e5), apart = place(-205 + fullRadius(9e5) + fullRadius(3e5) + MERGE_GAP + .4, 4405, 3e5);
+  const both = growTowns(ch, [b, a], 1, at), T = both.towns[0];
+  assert.equal(both.towns.length, 1); assert.equal(T.index, 1); assert.deepEqual(T.merged, [0]);
+  assert.ok(Math.abs(T.R - Math.hypot(fullRadius(9e5), fullRadius(3e5))) < 1e-9 && T.R <= RMERGED && T.people === peopleOf(T.R) && Math.abs(T.ploughed - T.people / 100) < .05, 'the area of both, and the fields of all its people');
+  assert.equal(Math.round(both.built[T.home] * 255), T.byte, 'the built share of its cell is that of the town grown together');
+  // a little farther apart they are two towns; the lesser shares the natural cell (or the square of the grid) of the
+  // greater, so it lies in the fine grid — still the town of its district
+  const two = growTowns(ch, [apart, a], 1, at); assert.equal(two.towns.length, 2);
+  const lesser = two.towns.find(t => t.index === 0); assert.ok(lesser.town && lesser.village && lesser.fine >= 0 && lesser.R <= FINE_RMAX + 1e-9 && !two.towns[0].village);
+  // ---- «чанк города такого-то»: the chunks a settlement is built on; its area is their number
+  const big = growTowns(ch, [place(-205.3, 4405.4, 5.6e6), { ...place(-195.5, 4405.5, 400), village: true }, { ...place(-205.3, 4407.2, 300), village: true }], 1, at);
+  const own = builtChunks(big.towns), city = big.towns[0], n0 = own.chunks[0];
+  assert.ok(city.R > 1.5 && n0 >= Math.PI * city.R * city.R * .75 && n0 <= Math.PI * city.R * city.R * 1.6 + 2, `a city of ${city.R.toFixed(2)} km holds ${n0} chunks`);
+  assert.equal(city.chunks, n0); assert.equal(own.owner.get(squareOf(city.x, city.y)), 0);
+  const ham = big.towns.findIndex(t => t.index === 1); assert.equal(own.chunks[ham], 1, 'a hamlet holds the chunk it stands in'); assert.equal(own.owner.get(squareOf(big.towns[ham].x, big.towns[ham].y)), ham);
+  assert.equal([...own.owner.values()].filter(n => n === 0).length, n0);
+  assert.equal(builtChunks(big.towns, () => false).owner.size, 0, 'no chunk of water is built up');
+});
+
+test('settle marks: the scheme of the owner by the height of the camera — far nothing, 500 km capitals, 200 km towns, 100 km lesser towns, villages last; names about 50 km', async () => {
+  const { RANKS, rankOf, NAME_FROM, SHAPES_TO } = await import('../src/album/town/rules.js');
+  const { shownAt, declutter, markSvg, markSize, MARK_TO } = await import('../src/album/layers/labels.js');
+  assert.deepEqual(RANKS.map(r => r.id), ['village', 'town', 'bigtown', 'province', 'land', 'region']); assert.deepEqual(MARK_TO, RANKS.map(r => r.to));
+  assert.deepEqual([{ cls: 0 }, { town: true, cls: 0 }, { town: true, cls: 1 }, { town: true, cls: 2 }, { town: true, cls: 0, capital: 'province' }, { town: true, cls: 1, capital: 'land' }, { town: true, cls: 2, capital: 'region' }, { cls: 1 }].map(rankOf),
+    [0, 1, 2, 3, 3, 4, 5, 0], 'a village first, the town of a district, a greater town, the greatest cities with the chief towns of provinces, of lands, of regions');
+  const marked = h => RANKS.map((_, r) => shownAt(r, h).mark > 0), named = h => RANKS.map((_, r) => shownAt(r, h).name > .5);
+  assert.deepEqual(marked(1000), [false, false, false, false, false, false], 'from very far: nothing');
+  assert.deepEqual(marked(500), [false, false, false, true, true, true], 'about 500 km: the greatest cities and the capitals');
+  assert.deepEqual(marked(200), [false, false, true, true, true, true], '200 km: lesser towns');
+  assert.deepEqual(marked(100), [false, true, true, true, true, true], '100 km: lesser still');
+  assert.deepEqual(marked(40), [true, true, true, true, true, true], 'closer: villages too');
+  assert.ok(RANKS.every((r, i) => !i || (r.to > RANKS[i - 1].to && r.name >= RANKS[i - 1].name)), 'villages go first, capitals stay the longest');
+  assert.deepEqual(named(20), [false, false, false, false, false, false], 'from 20 km no names: one looks at the town itself');
+  assert.deepEqual(named(50), [false, true, true, true, true, true]); assert.deepEqual(named(40), [true, true, true, true, true, true], 'about 50 km the names stand');
+  assert.deepEqual(named(200), [false, false, false, false, false, false], 'farther they are gone');
+  assert.ok(NAME_FROM[0] > 20 && NAME_FROM[1] < 45 && RANKS.every(r => r.name <= 180 && r.name <= r.to));
+  assert.deepEqual(RANKS.map((_, r) => shownAt(r, 500, true).name > .5), [false, false, false, true, true, true], 'the knob keeps the names of the chief towns while they are marked');
+  assert.ok(!shownAt(1, 60).far && shownAt(1, 100).far && SHAPES_TO > 50 && SHAPES_TO < 100, 'near — a shape by the class, from 100 km — a dot');
+  // the marks: a shape near, a dot far; a chief town has a heart, that of a land a ring too
+  assert.match(markSvg(1, 2, false), /<polygon/); assert.doesNotMatch(markSvg(1, 2, true), /<polygon/);
+  assert.equal((markSvg(1, 3, true).match(/<circle/g) || []).length, 2); assert.equal((markSvg(1, 4, true).match(/<circle/g) || []).length, 4);
+  assert.ok(markSize(0, 5, true) > markSize(0, 3, true) && markSize(0, 3, true) > markSize(0, 1, true), 'the higher the rank, the larger the dot');
+  // nothing overlaps: the greater takes the room first; a name without room is left out and its mark stays
+  const got = declutter([{ x: 100, y: 100, mark: 12, name: 80, gap: 14 }, { x: 104, y: 103, mark: 10, name: 60, gap: 14 }, { x: 150, y: 104, mark: 10, name: 60, gap: 14 }, { x: 100, y: 140, mark: 10, name: 60, gap: 14 }, { x: 300, y: 100, mark: 0, name: 70, gap: 30 }, { x: 290, y: 104, mark: 0, name: 70, gap: 30 }, { x: 40, y: 142, mark: 8, name: 50, gap: 12 }]);
+  assert.deepEqual(got, [2, 0, 0, 2, 2, 0, 1], 'a mark on a mark or on a name: left out; a name on a name: the mark alone');
+  for (const id of ['marks-20', 'marks-50', 'marks-100', 'marks-200', 'marks-500', 'marks-1000', 'marks-coast-100', 'marks-coast-500', 'marks-names-far']) assert.ok(settle.pages.some(p => p.id === id), id);
+  assert.ok(settle.pages.filter(p => /^marks(-coast)?-\d+$/.test(p.id)).every(p => p.cam.h === +p.id.split('-').pop()));
+  const far = DEFS.find(d => d.key === 'labelsFar'); assert.ok(far && far.value === 0 && far.map, 'names of capitals from afar: a switch of the map panel, off to begin with');
+});
+
+test('settle panel and shade: the list of a district names the class as the map marks it; houses throw no shade on the ground', async () => {
+  const { classTitle } = await import('../src/album/division/panel.js');
+  assert.equal(classTitle({ cls: 0, town: false }), 'деревня'); assert.equal(classTitle({ cls: 1, town: true }), 'малый городок');
+  assert.equal(classTitle({ cls: 0, town: true }), 'город района (пока деревня)'); assert.match(classTitle({ cls: 2, town: true, capital: 'region' }), /средний город · главный город региона/);
+  assert.match(classTitle({ partOf: 'Мадрид', town: true, cls: 0 }), /часть города Мадрид/);
+  assert.doesNotMatch(settle.glsl, /p\.sd/, 'the ground shader paints no shade of the houses toward the sun');
+  assert.doesNotMatch(settle.glsl, /earth \* \.8, cover \* blocks/, 'nor under a block');
 });

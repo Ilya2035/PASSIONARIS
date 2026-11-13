@@ -14,8 +14,14 @@
 // there is one to a natural cell, and its patch lies in the coarse grid (state.js). A VILLAGE — a place between the
 // centres (villages.js; place.village) — stays a village: its radius stops at VILLAGE_RMAX, there is one to a square
 // of the fine grid, and where a town has grown over its place it is not founded at all.
+//
+// The owner, 13.11.2026: «в районе один город, деревень может быть много; соседние города сливаются в один; чанки
+// города помечены: чанк города такого-то». So a district has one town — the place at its centre (townsOfDistricts());
+// two towns whose houses have grown together are one town with one centre, the greater of the two; and every chunk of
+// 1 km² a settlement is built on knows that settlement (builtChunks()): the area of a town is the number of its chunks.
 import { kmOf, llOf } from '../chunks.js';
-import { GX0, GY0, GK, VK, VN, VILLAGE_RMAX, stageOf, peopleOf, classOf } from './rules.js';
+import { GX0, GY0, GK, VK, VN, VILLAGE_RMAX, FINE_RMAX, stageOf, peopleOf, classOf } from './rules.js';
+import { KN, KKM, KX0, KY0 } from '../division/km.js';
 import { farmGround, farmRun, HA_PER_PERSON, FARM_REACH } from './farmland.js';
 
 export const RCAP = 2.2;                                            // km: the largest settlement the album founds
@@ -50,6 +56,22 @@ export const FELL_FROM = .15, FELL = 1.2;
 // of the cell, and a byte must not round a few fields down to none
 export const FIELD_FLOOR = .006;
 export const KEEP_OFF = .25;                                        // km of open ground between the last houses of a town and a village
+export const MERGE_GAP = .3;                                        // km: two towns whose last houses are nearer than this are one town
+export const RMERGED = 3;                                           // km: the largest radius of towns grown together
+
+// One town to a district: of the places given as towns, only the one at the centre of its district stays a town; any
+// other becomes a village of that district (it keeps its number, its name and its people, and stops at VILLAGE_RMAX).
+//   places      [{ lat, lon, pop, village, district, site }]
+//   districtOf  (place, index) → { district, site } (site 0 is the centre of the district) or null: a place that lies
+//               in no district of land stays as it is
+// → a new list, the places in the same order
+export function townsOfDistricts(places, districtOf) {
+  return places.map((pl, i) => {
+    if (pl.village) return pl;
+    const s = districtOf(pl, i); if (!s || !(s.site > 0)) return pl;
+    return { ...pl, village: true, district: s.district, site: s.site };
+  });
+}
 
 // the nearest dry point to (x, y) within 4 km, or null
 export function landNear(at, x, y) {
@@ -76,14 +98,24 @@ export function reachOf(ch, home, steps, ford) {
 //         ha (hectares of fields a person lives from) }
 // → { built, fields, keep (share of the forest left) — for the natural cells;
 //     farm: { km (the share of every chunk of 1 km² under fields, a byte), list, area, … } (farmland.js),
-//     towns: [{ index, x, y, R, stage, home, byte, people, cls, ploughed (km² of its fields), village,
-//               fine (its square of the fine grid) }] }
+//     towns: [{ index, x, y, R, stage, home, byte, people, cls, ploughed (km² of its fields),
+//               town (true: the town of its district), merged (the places of the towns it has taken in),
+//               village (true: it lies in the fine grid), fine (its square of the fine grid) }] }
 export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) {
   const n = ch.count, built = new Float32Array(n), fields = new Float32Array(n), keep = new Float32Array(n).fill(1), taken = new Set(), takenFine = new Set(), byGrid = new Map(), towns = [];
   const ground = farm.ground || farmGround(ch, at), run = farmRun(ground), perPerson = (farm.ha ?? HA_PER_PERSON) / 100;
-  const order = places.map((_, i) => i).sort((a, b) => places[b].pop - places[a].pop);
+  const order = places.map((_, i) => i).sort((a, b) => places[b].pop - places[a].pop), coarse = new Set();
+  const byteOf = (R, home) => Math.max(1, Math.min(255, Math.round(Math.PI * R * R / ch.area[home] * 255)));
+  // town T takes in the town of place `index`, whose radius would have been R: the built-up land of both, one centre
+  const absorb = (T, index, R) => {
+    const R2 = Math.min(RMERGED, Math.hypot(T.R, R)), more = peopleOf(R2) - T.people;
+    T.R = R2; T.stage = stageOf(R2); T.byte = byteOf(R2, T.home); built[T.home] = Math.max(built[T.home], T.byte / 255);
+    (T.merged || (T.merged = [])).push(index);
+    if (more > 0) { T.people += more; if (perPerson > 0) T.ploughed += run.claim(T.x, T.y, more * perPerson, FARM_REACH[1], reachOf(ch, T.home, 4, 1), FELL); }
+    T.cls = classOf(T.people, Math.PI * R2 * R2);
+  };
   for (const index of order) {
-    const pl = places[index], vil = !!pl.village, R = Math.min(vil ? VILLAGE_RMAX : RCAP, (pl.r ?? fullRadius(pl.pop)) * growth);
+    const pl = places[index]; let vil = !!pl.village, R = Math.min(vil ? VILLAGE_RMAX : RCAP, (pl.r ?? fullRadius(pl.pop)) * growth);
     if (R < .04) continue;
     const dry = landNear(at, ...kmOf(pl.lat, pl.lon)); if (!dry) continue;
     let [x, y] = dry;
@@ -96,6 +128,17 @@ export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) 
     const p = llOf(x, y), home = ch.at(p.lat, p.lon);
     if (home < 0 || ch.kind[home] !== 1) continue;
     const gi = Math.floor((x - GX0) / GK), gj = Math.floor((y - GY0) / GK); let fine = -1;
+    if (!vil) {
+      // two towns grown together are one town: the greater was founded first, keeps its centre and takes the people
+      // of this one
+      let into = null;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) for (const T of byGrid.get((gj + dj) * 4096 + gi + di) || []) if (Math.hypot(T.x - x, T.y - y) < T.R + R + MERGE_GAP && (!into || T.R > into.R)) into = T;
+      if (into) { absorb(into, index, R); continue; }
+      // one town a natural cell and a square of the coarse grid (the texture holds no more): a second one, the town of
+      // another district, lies in the fine grid as a village does, and is no larger than that grid allows
+      if (taken.has(home) || coarse.has(gj * 4096 + gi)) { vil = true; R = Math.min(R, FINE_RMAX); }
+      else { taken.add(home); coarse.add(gj * 4096 + gi); }
+    }
     if (vil) {                                                      // one village a square of the fine grid, and none where a town stands
       const vi = Math.floor((x - GX0) / VK), vj = Math.floor((y - GY0) / VK); if (vi < 0 || vj < 0 || vi >= VN || vj >= VN) continue;
       fine = vj * VN + vi; if (takenFine.has(fine)) continue;
@@ -103,15 +146,13 @@ export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) 
       for (let dj = -1; dj <= 1 && !inTown; dj++) for (let di = -1; di <= 1; di++) for (const T of byGrid.get((gj + dj) * 4096 + gi + di) || []) if (Math.hypot(T.x - x, T.y - y) < T.R + R + KEEP_OFF) inTown = true;
       if (inTown) continue;
       takenFine.add(fine);
-    } else {
-      if (taken.has(home)) continue;                                // one town a natural cell: the larger came first
-      taken.add(home);
     }
-    const byte = vil ? 1 : Math.max(1, Math.min(255, Math.round(Math.PI * R * R / ch.area[home] * 255)));
+    const byte = vil ? 1 : byteOf(R, home);
     built[home] = Math.max(built[home], byte / 255);
     // its fields: the chunks of 1 km² nearest to the houses, over land, not across a great river
     const people = peopleOf(R), ploughed = perPerson > 0 ? run.claim(x, y, people * perPerson, FARM_REACH[vil ? 0 : 1], reachOf(ch, home, vil ? 2 : 4, 1), R >= FELL_FROM ? FELL : 0) : 0;
     const town = { index, x, y, R, stage: stageOf(R), home, byte, people, cls: classOf(people, Math.PI * R * R), ploughed };
+    if (!pl.village) town.town = true;                              // the town of its district, whichever grid it lies in
     if (vil) { town.village = true; town.fine = fine; }
     else { const key = gj * 4096 + gi; (byGrid.get(key) || byGrid.set(key, []).get(key)).push(town); }
     towns.push(town);
@@ -125,4 +166,31 @@ export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) 
     keep[k] = Math.max(0, 1 - state.cellFelled[k] / all);
   }
   return { built, fields, keep, towns, farm: state, ground };
+}
+
+// Which settlement every chunk of 1 km² is built up by (the owner, 13.11.2026: «чанк города такого-то»). A chunk
+// belongs to the settlement whose houses cover the most of it (sixteen points of the square of the chunk are looked
+// at; a settlement needs two of them); a settlement always holds the chunk its own site lies in, unless a greater one
+// stands there. The area of a settlement is the number of its chunks.
+//   towns    growTowns().towns
+//   land(c)  is the chunk of square c land? (may be left out: then every square counts)
+// → { owner: Map(chunk → index into towns), chunks: Int32Array (towns.length: how many chunks each holds) };
+//   every town gets .chunks, and its class is raised if it sprawls (rules.js classOf)
+export function builtChunks(towns, land = null) {
+  const owner = new Map(), share = new Map(), chunks = new Int32Array(towns.length);
+  const take = (c, n, sh) => { if (land && !land(c)) return; const old = share.get(c); if (old !== undefined && old >= sh) return; share.set(c, sh); owner.set(c, n); };
+  const order = towns.map((_, n) => n).sort((a, b) => towns[b].R - towns[a].R || a - b);
+  for (const n of order) {
+    const t = towns[n], i0 = Math.floor((t.x - t.R - KX0) / KKM), i1 = Math.floor((t.x + t.R - KX0) / KKM), j0 = Math.floor((t.y - t.R - KY0) / KKM), j1 = Math.floor((t.y + t.R - KY0) / KKM);
+    const si = Math.floor((t.x - KX0) / KKM), sj = Math.floor((t.y - KY0) / KKM);
+    for (let j = Math.max(0, j0); j <= Math.min(KN - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(KN - 1, i1); i++) {
+      let hit = 0;
+      for (let b = 0; b < 4; b++) for (let a = 0; a < 4; a++) if (Math.hypot(KX0 + (i + (a + .5) / 4) * KKM - t.x, KY0 + (j + (b + .5) / 4) * KKM - t.y) < t.R) hit++;
+      if (hit >= 2) take(j * KN + i, n, hit / 16);
+      else if (i === si && j === sj) take(j * KN + i, n, .06 + Math.min(.05, t.R * .1));   // its own chunk: the least share there is, the greater hamlet first
+    }
+  }
+  for (const n of owner.values()) chunks[n]++;
+  towns.forEach((t, n) => { t.chunks = chunks[n]; t.cls = Math.max(t.cls, classOf(t.people, chunks[n])); });
+  return { owner, chunks };
 }

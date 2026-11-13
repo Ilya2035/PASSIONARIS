@@ -18,12 +18,12 @@ import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
-import { cellSize, cultureAt, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
+import { cellSize, cultureAt, rankOf, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
-import { growTowns, centrePlaces } from '../town/grow.js';
+import { growTowns, centrePlaces, townsOfDistricts, builtChunks } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
@@ -170,21 +170,57 @@ export default async function init(album) {
       if (keep < 1) ch.set('forest', k, Math.min(forest0, keep));   // people fell the forest around them
       written.set(k, { built: byteOf('built', k), fields: byteOf('fields', k), forest: byteOf('forest', k), forest0 });
     }
+    crown();
     // which places of the lists are settled now, and what every district holds
     perDistrict = new Map(); grownN++;
+    const held = d => perDistrict.get(d) || perDistrict.set(d, { settlements: 0, villages: 0, people: 0, list: [] }).get(d);
     if (siteList) {
       founded = new Uint8Array(siteList.x.length); siteR = new Float32Array(siteList.x.length);
       for (const t of model.towns) {
         const s = siteOfTown(t); if (!s) continue;
         founded[siteList.first[s.district] + s.site] = 1; siteR[siteList.first[s.district] + s.site] = t.R;
-        const q = perDistrict.get(s.district) || perDistrict.set(s.district, { settlements: 0, villages: 0, people: 0 }).get(s.district);
-        q.settlements++; q.people += t.people; if (t.village) q.villages++;
+        const q = held(s.district);
+        q.settlements++; q.people += t.people; if (!t.town) q.villages++; q.list.push(t);
+        // a town that has grown into this one: its district has no town of its own, and says whose houses stand there
+        for (const index of t.merged || []) { const m = siteOfPlace(index); if (m && m.district !== s.district) held(m.district).list.push({ index, part: t }); }
       }
     }
     sitesDrawn = false;
   }
+  // ---- every chunk of 1 km² a settlement is built on knows that settlement; the settlements get their names, and the
+  // chief towns of the lands are told apart: they stay marked from higher up (layers/labels.js)
+  let own = { owner: new Map(), chunks: new Int32Array(0) };
+  const siteOfPlace = index => { const pl = places[index]; return !pl ? null : pl.site !== undefined ? { district: pl.district, site: pl.site } : pl.district !== undefined ? { district: pl.district, site: 0 } : siteOfBase.get(index) || null; };
+  function nameOf(t) {
+    const nm = places[t.index].name; if (nm || !t.town) return nm || '';
+    // the town of a district that has no name of its own is called after its district — when the district is itself
+    // called after a settlement (the division says so: nameKind 'place'), not after a land or by the points of the compass
+    const s = siteOfPlace(t.index), dv = album.division, dn = s ? dv?.districtName?.(s.district) : '';
+    return dn && (dv.nameKind ? dv.nameKind(s.district) === 'place' : !/№/.test(dn)) ? dn : '';
+  }
+  function crown() {
+    const dv = album.division, cells = dv?.data?.cells;
+    own = builtChunks(model.towns, cells ? c => { const d = cells[c]; return d >= 0 && dv.data.kinds[d] === 0; } : null);
+    for (const t of model.towns) { t.name = nameOf(t); t.capital = undefined; }
+    if (dv) {
+      // The chief town of a province, of a land (Кастилия, Арагон…) and of a region: the one the division names
+      // (dv.capitalOf(level, id) → { district }); where it names none, the most populous town there.
+      const best = [new Map(), new Map(), new Map()], greater = (a, b) => a.people - b.people || places[a.index].pop - places[b.index].pop, townOf = new Map();
+      for (const t of model.towns) {
+        if (!t.town) continue; const s = siteOfPlace(t.index); if (!s) continue;
+        townOf.set(s.district, t);
+        const pv = dv.provinceOf(s.district); if (!(pv >= 0)) continue;
+        [pv, dv.data.provinces?.[pv]?.land || '', dv.regionOf(pv)].forEach((k, l) => { if (k === '' || k < 0) return; const o = best[l].get(k); if (!o || greater(t, o) > 0) best[l].set(k, t); });
+      }
+      // (the division answers with the district whose town it is: { district })
+      ['province', 'land', 'region'].forEach((level, l) => { for (const [k, t] of best[l]) { const said = dv.capitalOf?.(level, k); ((said && townOf.get(said.district)) || t).capital = level; } });
+    }
+    for (const t of model.towns) t.rank = rankOf(t);
+  }
+  // a settlement as the panel of a district and the marks of the map show it
+  const rowOf = t => { const q = llOf(t.x, t.y); return { index: t.index, name: t.name, cls: t.cls, rank: t.rank, capital: t.capital || '', town: !!t.town, people: t.people, areaKm2: t.chunks || 0, radius: t.R, lat: q.lat, lon: q.lon, merged: (t.merged || []).length }; };
   // which place of which district a settlement stands on: { district, site } (site 0 is the centre), or null
-  const siteOfTown = t => { const pl = places[t.index]; return pl.site !== undefined ? { district: pl.district, site: pl.site } : pl.district !== undefined ? { district: pl.district, site: 0 } : siteOfBase.get(t.index) || null; };
+  const siteOfTown = t => siteOfPlace(t.index);
   let sitesDrawn = false;
   ch.onReset(() => applyGrowth(true));
   p.on(key => { if (key === 'growth' || key === 'farmHa' || (key == null && (grown !== p.get('growth') || haSeen !== (p.get('farmHa') ?? HA_PER_PERSON)))) applyGrowth(false); });
@@ -374,8 +410,18 @@ export default async function init(album) {
       let made = 0, n = 0; const allow = madeAllowed(siteList, d, villSeen), dv = album.division;
       for (let s = siteList.first[d]; s < siteList.first[d + 1]; s++) if (siteList.kind[s] !== SITE.made || made++ < allow) n++;
       if (!farmPer && farmShown && dv) farmPer = farmOfDistricts(farmShown, dv.data.cells, dv.data.count);
-      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, tracksKm: tracksReady() ? tracksOf(d).km : 0, ...perDistrict.get(d) };
+      const q = perDistrict.get(d), list = (q?.list || []).map(t => (t.part ? { index: t.index, name: places[t.index].name || '', partOf: t.part.name || 'соседнего города', town: true, people: 0, areaKm2: 0, cls: 0, rank: 0 } : rowOf(t)));
+      // the town of the district first, then its villages, the most populous first
+      list.sort((a, b) => (b.town ? 1 : 0) - (a.town ? 1 : 0) || (a.partOf ? 1 : 0) - (b.partOf ? 1 : 0) || b.people - a.people || a.index - b.index);
+      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, tracksKm: tracksReady() ? tracksOf(d).km : 0, ...q, list };
     },
+    // the settlements that stand now, as the marks of the map need them: [{ index, name, cls, rank, capital, town,
+    // people, areaKm2, radius, lat, lon }]; version() changes whenever they do
+    marks: () => model.towns.map(rowOf), version: () => grownN,
+    // «чанк города такого-то»: the settlement chunk c of 1 km² is built up by (the number of the chunk: division/km.js),
+    // or null; chunksOfTown(index of the place) → the numbers of its chunks
+    townOfChunk: c => { const n = own.owner.get(c); return n === undefined ? null : rowOf(model.towns[n]); },
+    chunksOfTown: index => { const n = model.towns.findIndex(t => t.index === index), out = []; if (n >= 0) for (const [c, o] of own.owner) if (o === n) out.push(c); return out; },
     update(dt, t, cam) {
       // the land has been divided (or divided anew): a settlement stands at the centre of every district
       const dv = album.division, vk = p.get('villages') ?? 1;
@@ -385,7 +431,8 @@ export default async function init(album) {
         if (dv.version !== divSeen || !siteList) { siteList = districtSites(dv.data, dv.chunkFacts(), dv.sites, { base: nb, at, swamp: (x, y) => { const q = llOf(x, y), k = ch.at(q.lat, q.lon); return k < 0 ? 0 : ch.getNatural('swamp', k); } }); siteOfBase = siteNumbers(siteList); }
         divSeen = dv.version; villSeen = vk;
         const t1 = performance.now();
-        places = [...centrePlaces(album.data.vectors.places, dv.data, dv.sites), ...villagePlaces(siteList, dv.sites, { base: nb, density: vk })];
+        // one town to a district: a place of the album that is not the centre of its district is a village of it
+        places = townsOfDistricts([...centrePlaces(album.data.vectors.places, dv.data, dv.sites), ...villagePlaces(siteList, dv.sites, { base: nb, density: vk })], (pl, i) => (i < nb ? siteOfBase.get(i) || null : null));
         indexRivers(); applyGrowth(false);
         console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages, ${model.farm.area.toFixed(0)} km² of fields in ${model.farm.list.length} chunks (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
       spts.visible = !!p.get('sitesShow') && !!siteList;

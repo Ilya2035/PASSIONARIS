@@ -5,8 +5,8 @@
 //
 // Everything is at its real size. The state comes from the chunks: p.cC = (built, fields, building manner, burnt).
 // A built chunk has a patch of settlement (town/rules.js, town/state.js). Near the camera blocks stand on the patch
-// (layers/towns.js) and this shader paints only the ground under them: streets, yards, gardens, the shade of the
-// houses, the lanes that run out between the fields. From afar there are no blocks: the same cells are painted as
+// (layers/towns.js) and this shader paints only the ground under them: streets, yards, gardens, the lanes that run
+// out between the fields. Houses throw no shade on the ground: shade comes from the relief alone. From afar there are no blocks: the same cells are painted as
 // roofs, then melt into one tone, and at last the settlement is a mark of a pixel or two.
 // There are two sorts of patches (town/state.js): the towns — the places of the album and the centres of districts —
 // in a grid of squares of 10 km, and the villages between them (town/villages.js) in a grid of 2.5 km. A village has
@@ -248,14 +248,9 @@ void aspSettle(Px p, inout Land L) {
       col = mix(col, mix(rc, earth * .62, court), paint);
       col += vec3(1.5, .9, .4) * night * paint * step(.45, rnd.y) * (1. - court);           // a light in the window
     }
-    col = mix(col, earth * .8, cover * blocks);                            // under a standing block the ground is in its shade
   }
-  if (p.day > .05 && cover < .99) {                                        // the shade of the houses toward the sun
-    vec2 sl = vec2(cs * p.sd.x + sn * p.sd.y, -sn * p.sd.x + cs * p.sd.y);
-    float len = .1 * uSettle.z / max(uSun.z / max(length(uSun.xy), 1e-3), .35), c2, a2, e2; vec2 f2; vec4 r2;
-    float sh = setRoof(q + sl * len * .6, site, r, cs, sn, cul, ck, S, aa + .03, c2, f2, a2, r2, e2);
-    if (c2 > .5 && c2 < 3.5) col *= 1. - .36 * sh * (1. - cover) * p.day * seam;
-  }
+  // (no shade of the houses on the ground, neither under a block nor beside it — the owner, 13.11.2026: «тени только
+  // от гор и рельефа, у домов теней нет»)
   if (night > 0.) col += vec3(1.4, .9, .45) * night * blocks * (1. - cover) * (1. - smoothstep(-.02, .3, edge)) * step(cls, 3.5) * step(.5, cls) * step(.4, rnd.y) * .42;   // light spills into the street
   // cells of a pixel or two melt into one tone; from high up, where a whole settlement is a few pixels, the tone is
   // that of its roofs, so the mark stands out from the land
@@ -265,6 +260,17 @@ void aspSettle(Px p, inout Land L) {
 }`;
 
 const ZAR = { lat: 41.65, lon: -.89 }, G = 'Города и дороги';
+// the views the owner's scheme of marks is checked on: over Madrid and over the coast from Barcelona to Valencia
+const MAD = { lat: 40.4168, lon: -3.7038 }, TAR = { lat: 41.118, lon: 1.245 }, COAST = { lat: 40.55, lon: .95 };
+const MARK_NOTES = {
+  20: 'С 20 км смотрят на сам город: ни отметок, ни названий. Дома в настоящую величину; внизу слева линейка масштаба.',
+  50: 'Около 50 км стоят названия: у города района — отметка по классу и имя сбоку, у деревень отметок уже нет (они пропадают первыми, выше 45 км).',
+  100: 'Со 100 км отметки — точки: города районов и всё, что крупнее. Названия остались только у городов покрупнее.',
+  200: 'С 200 км: города от тысячи жителей и главные города провинций. Названий нет.',
+  500: 'С 500 км: точки главных городов провинций и самых крупных городов. У главного города земли и региона — кольцо.',
+  1000: 'С 1000 км на карте нет ни одной отметки: совсем далеко — ничего.',
+};
+const markPages = (id, where, far, title) => [20, 50, 100, 200, 500, 1000].map(h => ({ id: `${id}-${h}`, group: G, title: `Отметки по высоте: ${title} с ${h} км`, note: MARK_NOTES[h], p: {}, cam: { ...(h >= 200 ? far : where), h, tilt: 15, heading: 0 } }));
 const zar = (h, tilt = 35, heading = 30) => ({ ...ZAR, h, tilt, heading });
 export default {
   id: 'settle', title: 'Поселения', glsl: GLSL, uniforms: settleUniforms,
@@ -276,6 +282,7 @@ export default {
     { key: 'villages', label: 'Деревни между центрами', group: 'scale', min: 0, max: 2, step: .05, value: 1, unit: '×', zero: 'нет' },
     { key: 'farmHa', label: 'Угодья на жителя', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: ' га', zero: 'нет полей' },
     { key: 'towns', label: 'Поселения', group: 'layers', type: 'toggle', value: 1 },
+    { key: 'labelsFar', label: 'Названия столиц издалека', group: 'layers', type: 'toggle', value: 0, map: 'Имена столиц' },
     { key: 'sitesShow', label: 'Места поселений (проверка)', group: 'layers', type: 'toggle', value: 0 },
     { key: 'showcase', label: 'Витрина построек', group: 'layers', type: 'toggle', value: 0 },
   ],
@@ -289,8 +296,11 @@ export default {
     { id: 'town-50', group: G, title: 'Город с 50 км', note: 'Тот же город, тот же план. Кварталы стали мельче пары пикселей, поэтому вместо объектов город нарисован на земле.', p: { forest3d: 0 }, cam: zar(50, 30) },
     { id: 'town-200', group: G, title: 'Город с 200 км', note: 'Обычная игровая высота: город — небольшое пятно застройки среди полей.', p: {}, cam: zar(200, 25, 10) },
     { id: 'town-500', group: G, title: 'Город с 500 км', note: 'Высота больших держав: поселение читается как отметка в пиксель-другой, заметнее пятно полей и вырубки вокруг.', p: {}, cam: zar(500, 15, 0) },
-    { id: 'town-marks', group: G, title: 'Отметки: класс поселения по форме', note: 'Издалека поселение — пятнышко застройки в настоящую величину, а поверх него отметка. По её форме виден класс: кружок — деревня (до 1 000 жителей), треугольник — малый городок (до 20 000), ромб — средний город (до 60 000), квадрат — город (до миллиона), пятиугольник — мегаполис. Чем выше камера, тем меньше классов отмечено: деревни видны только вблизи.', p: { growth: 1.6 }, cam: { lat: 40.9, lon: -1.2, h: 400, tilt: 12, heading: 0 } },
-    { id: 'town-marks-near', group: G, title: 'Отметки вблизи: имя рядом с домами', note: 'Когда дома уже различимы, отметка гаснет, а имя стоит сбоку и поселение не закрывает. Деревня отмечена точкой и малой подписью.', p: { growth: .33, forest3d: 0 }, cam: zar(24, 30, 0) },
+    ...markPages('marks', MAD, MAD, 'Мадрид'),
+    ...markPages('marks-coast', TAR, COAST, 'берег от Барселоны до Валенсии'),
+    { id: 'town-marks', group: G, title: 'Отметки: класс поселения по форме', note: 'Ниже 85 км отметка — фигура, по ней виден класс: кружок — деревня (до 1 000 жителей), треугольник — малый городок (до 20 000), ромб — средний город (до 60 000), квадрат — город (до миллиона), пятиугольник — мегаполис. У главного города провинции в середине тёмная точка, у главного города земли и региона ещё и кольцо. Здесь «Рост городов» на 1,6.', p: { growth: 1.6 }, cam: { lat: 40.9, lon: -1.2, h: 70, tilt: 12, heading: 0 } },
+    { id: 'town-marks-near', group: G, title: 'Отметки вблизи: имя рядом с домами', note: 'Между 25 и 45 км: дома уже различимы, отметка гаснет, а имя стоит сбоку и поселение не закрывает. Деревня отмечена точкой и малой подписью. Ниже 25 км названий нет.', p: { forest3d: 0 }, cam: zar(34, 30, 0) },
+    { id: 'marks-names-far', group: G, title: 'Отметки: названия столиц издалека', note: 'Переключатель «Названия столиц издалека» (на панели карты и в слоях): главные города провинций, земель и регионов подписаны, пока видны их точки. По умолчанию выключен: названия стоят только около 50 км.', p: { labelsFar: 1 }, cam: { ...MAD, h: 500, tilt: 15, heading: 0 } },
     { id: 'town-districts', group: G, title: 'Поселение в каждом районе', note: 'В центре каждого района стоит поселение: настоящий город или село этого места, а где их нет — хутор в низине у воды. К нему сходятся дороги. Размер взят из сегодняшнего числа жителей: большинство — деревни в несколько дворов. Двигайте «Рост городов»: на малом росте стоят только большие места, деревни появляются позже.', p: {}, cam: { lat: 41.3, lon: -1.6, h: 45, tilt: 25, heading: 0 } },
     { id: 'town-districts-map', group: G, title: 'Поселения, дороги и районы', note: 'То же поверх границ районов: поселение в центре района, дороги от центра к центру.', p: { division: 1, look: 'paper', forest3d: 0 }, cam: { lat: 41.4, lon: -1.4, h: 110, tilt: 10, heading: 0 } },
     { id: 'villages', group: G, title: 'Деревни между центрами районов', note: 'В районе, кроме центра, есть места под деревни: сначала настоящие сёла этой земли, потом лучшие свободные места — ровная земля у реки или моря, внизу. Деревня — несколько дворов на сотню-другую метров, вокруг её поля и отдельные дворы. Всё в настоящую величину. Ручка «Деревни между центрами» меняет густоту, «Рост городов» поднимает деревни по очереди: лучшие места заселяются первыми.', p: { forest3d: 0 }, cam: { lat: 41.79, lon: -1.13, h: 22, tilt: 35, heading: 20 } },
