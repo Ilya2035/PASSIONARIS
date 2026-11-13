@@ -15,7 +15,9 @@ import { KN as RASTER, KKM, cellsOfChunks } from '../src/album/division/km.js';
 import { districtCells, riverRaster, cellStats, RIVER_TOLL, SMOOTH_KM } from '../src/album/division/cells.js';
 import { borderLines } from '../src/album/division/lines.js';
 import { nearestPiece, districtByLines, outlineOf, NEAR_KM, PIECE_KM } from '../src/album/division/border.js';
-import { seedOf } from '../src/album/division/km.js';
+import { seedOf, chunkSettle, kmFacts, SETTLE_WHY, SETTLE_CAN } from '../src/album/division/km.js';
+import { districtCentres, MERGE_KM, SEAT } from '../src/album/division/centres.js';
+import { nameDistricts, sideName, genderOf, splitBySides } from '../src/album/division/names.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import division, { STATES } from '../src/album/aspects/division.js';
 import { PAGES } from '../src/album/pages.js';
@@ -402,4 +404,78 @@ test('division of the album: the seas are real seas, divided into zones and dist
     assert.ok(p.name === LANDS.seas[s].name || (p.name.startsWith(`${LANDS.seas[s].name}, зона `) && /\d$/.test(p.name)), p.name);
   }
   for (let k = 0; k < ch.count; k++) if (div.kind[k] !== SEA) assert.equal(div.seaOf[k], -1, 'land and lakes have no sea');
+});
+
+// ---- the places of towns, where nobody can settle, the names (13.11.2026, the owner's review of the new map)
+test('division: the names by the rule of the sides of the world — gender, nesting', () => {
+  assert.equal(sideName(['N'], 'Дакота', 'f'), 'Северная Дакота');
+  assert.equal(sideName(['N', 'SE'], 'Дакота', 'f'), 'Юго-Восточно-Северная Дакота', 'the example of the owner');
+  assert.equal(sideName(['C'], 'Арагон', genderOf('Арагон')), 'Центральный Арагон');
+  assert.equal(sideName(['S'], 'Толедо', genderOf('Толедо')), 'Южное Толедо');
+  assert.equal(sideName(['W'], 'Урхель и Пальярс', genderOf('Урхель и Пальярс')), 'Западные Урхель и Пальярс');
+  assert.equal(genderOf('Ла-Манча'), 'f'); assert.equal(genderOf('Сердань', 'cerdanya'), 'f'); assert.equal(genderOf('Ланды', 'landes'), 'p');
+  // a part that holds several is split again from its own middle; every point gets a way of its own
+  const pts = Array.from({ length: 40 }, (_, i) => ({ d: i, x: Math.cos(i * 2.4) * (5 + i), y: Math.sin(i * 2.4) * (5 + i) })), m = splitBySides(pts, 0, 0, 25);
+  assert.equal(new Set([...m.values()].map(s => s.join('-'))).size, 40, 'forty different names');
+});
+
+const settleOf = real ? (() => {
+  const wetlands = JSON.parse(readFileSync(join(ROOT, 'public/assets/album/swamp/wetlands.json'), 'utf8')).wetlands;
+  return chunkSettle(real.div, kmFacts(real.div, data.base.at), { wetlands });
+})() : null;
+const squareAt = (div, lat, lon) => { const [x, y] = kmOf(lat, lon); return Math.floor(y - 3880) * RASTER + Math.floor(x + 880); };
+
+test('division of the album: where nobody can settle — the sea, mountains, high ground, bogs; with the reason', { skip }, () => {
+  const { div } = real, why = (lat, lon) => SETTLE_WHY[settleOf.why[squareAt(div, lat, lon)]];
+  assert.equal(why(40.0, 1.5), 'вода');
+  assert.equal(why(42.631, .657), 'высокогорье: скалы, снег и лёд', 'Aneto');
+  assert.equal(why(37.0, -6.3), 'болото', 'the marshes of the Guadalquivir');
+  for (const [lat, lon, name] of [[41.65, -.88, 'Zaragoza'], [39.47, -.376, 'Valencia'], [40.0, -3.4, 'La Mancha'], [37.39, -5.98, 'Seville']]) assert.equal(settleOf.can[squareAt(div, lat, lon)], 2, name);
+  // the high Pyrenees: most of it nobody can live on
+  let no = 0, n = 0; for (let lat = 42.55; lat <= 42.75; lat += .02) for (let lon = 0; lon <= 1; lon += .02) { n++; if (settleOf.can[squareAt(div, lat, lon)] === 0) no++; }
+  assert.ok(no / n > .4, `the high Pyrenees: ${no} of ${n} chunks nobody can live on`);
+  for (let c = 0; c < settleOf.why.length; c += 101) assert.equal(settleOf.can[c], SETTLE_CAN[settleOf.why[c]]);
+});
+
+test('division of the album: one place of a town a district — real towns where they are, the rest by the rule; seats', { skip }, () => {
+  const { div } = real, sites = data.vectors.places.map(p => { const [x, y] = kmOf(p.lat, p.lon); return { x, y, pop: p.pop, name: p.name }; });
+  const cen = districtCentres(div, sites, { settle: settleOf }), of = (lat, lon) => div.cells[squareAt(div, lat, lon)];
+  for (const [lat, lon, name] of [[39.47, -.376, 'Валенсия'], [41.385, 2.18, 'Барселона'], [36.72, -4.42, 'Малага'], [41.65, -.88, 'Сарагоса'], [37.39, -5.98, 'Севилья']])
+    assert.equal(sites[cen.site[of(lat, lon)]]?.name, name, `the town of the district of ${name}`);
+  // every land district has its place, on a chunk of its own, where people can live
+  let n = 0, onOwn = 0, close = 0; const pts = [];
+  for (let d = 0; d < div.count; d++) {
+    if (div.kinds[d] !== LAND) { assert.equal(cen.texel[d], -1); continue; }
+    n++; assert.ok(cen.texel[d] >= 0, 'district ' + d + ' has a place'); if (div.cells[cen.texel[d]] === d) onOwn++;
+    if (cen.site[d] < 0 && cen.why[d] < 7) assert.ok(settleOf.can[cen.texel[d]] > 0, 'a place by the rule stands where people can live');
+    pts.push([cen.x[d], cen.y[d]]);
+  }
+  assert.equal(onOwn, n, 'every place on a chunk of its district');
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) if (Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) < MERGE_KM) close++;
+  assert.ok(close <= 3, `towns of neighbouring districts do not stand together: ${close} pairs closer than ${MERGE_KM} km`);
+  assert.deepEqual(districtCentres(div, sites, { settle: settleOf }).texel, cen.texel, 'the same places every time');
+  // the districts with no real town: low in the district, never on a top (this division has no rivers: the place by the
+  // water and the river is looked at in scripts/album/division-check.mjs)
+  const hs = Array.from({ length: div.count }, () => []); for (let t = 0; t < div.cells.length; t++) { const d = div.cells[t]; if (d >= 0 && div.kinds[d] === LAND) hs[d].push(div.raster.hgt[t]); }
+  let rule = 0, low = 0; for (let d = 0; d < div.count; d++) if (cen.texel[d] >= 0 && cen.why[d] > 0) { rule++; const h = hs[d].sort((a, b) => a - b); if (div.raster.hgt[cen.texel[d]] <= h[h.length >> 1]) low++; }
+  assert.ok(rule > 100 && low / rule > .8, `${low} of ${rule} places by the rule lie in the lower half of their district`);
+  // seats: the biggest town of a region, a historical land, a province
+  const name = d => sites[cen.site[d]]?.name;
+  assert.equal(name(cen.seats.region[LANDS.regions.findIndex(r => r.id === 'iberia')]), 'Мадрид');
+  assert.equal(name(cen.seats.land.get('Каталония')), 'Барселона');
+  assert.ok(cen.seat[of(41.65, -.88)] & SEAT.province, 'Zaragoza holds the seat of its province');
+  for (let p = 0; p < LANDS.provinces.length; p++) assert.ok(cen.seats.province[p] >= 0, 'a seat for ' + LANDS.provinces[p].name);
+});
+
+test('division of the album: every district and province has a name; historical first, then the sides of the world', { skip }, () => {
+  const { div } = real, sites = data.vectors.places.map(p => { const [x, y] = kmOf(p.lat, p.lon); return { x, y, pop: p.pop, name: p.name }; });
+  const d0 = { ...div, centres: districtCentres(div, sites, { settle: settleOf }) }, nm = nameDistricts(d0, sites, LANDS);
+  for (let d = 0; d < div.count; d++) { assert.ok(nm.names[d] && !/№/.test(nm.names[d]), 'district ' + d + ': ' + nm.names[d]); assert.ok(['history', 'place', 'village', 'shore', 'rule'].includes(nm.kind[d])); }
+  for (let p = 0; p < div.provinceCount; p++) assert.ok(div.provinces[p].name, 'province ' + p);
+  const key = new Map(); nm.names.forEach((nmd, d) => { const k = div.province[d] + '|' + nmd; assert.ok(!key.has(k), 'one name once in a province: ' + nmd); key.set(k, d); });
+  // a rule name is a side of the world and the name of its province
+  for (let d = 0; d < div.count; d++) if (nm.kind[d] === 'rule' && div.kinds[d] === LAND) assert.ok(nm.names[d].includes(div.provinces[div.province[d]].name), nm.names[d]);
+  const of = (lat, lon) => div.cells[squareAt(div, lat, lon)];
+  assert.equal(nm.names[of(41.55, -.25)], 'Монегрос'); assert.equal(nm.kind[of(41.55, -.25)], 'history');
+  assert.equal(nm.names[of(39.47, -.376)], 'Валенсия', 'a district of a big city is called after it');
 });

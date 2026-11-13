@@ -19,7 +19,7 @@ import { NEAR_KM, MAX_FOURS, PIECE_KM, TIE_KM } from '../division/border.js';
 import { startDivision } from '../division/runtime.js';
 
 const GLSL = /* glsl */`
-uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm;
+uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm, uDivSettle;
 uniform ivec2 uDivGeo;                          // the first rows of the lists of border pieces and of the pieces in tDiv (division/gpu.js); 0 none
 uniform vec3 uDivSize;                          // district, province, region size, km
 uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
@@ -51,6 +51,9 @@ vec3 kmChunk(vec2 pk, int d) {
   return vec3(vec2(best), e * ${FKM.toFixed(4)});
 }
 // what a chunk is like (division/gpu.js): the class of its ground 1..5 (0 water, or not worked out), who can live there
+// where people cannot settle and why (km.js chunkSettle: 0 they can, 1 water, 2 mountain, 3 high mountain, 4 bog,
+// 5 steep slope — a hamlet at most, 6 wet hollow — a hamlet at most), while it is shown
+int kmWhy(ivec2 q) { return int((texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g >> 16u) & 7u); }
 ivec3 kmFacts(ivec2 q) { uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; return ivec3(int(g & 7u), int((g >> 3u) & 3u), int((g >> 8u) & 255u)); }   // z: its share under fields, a byte
 // the five classes of ground, as seen on screen: level, rolling, hilly, steep, mountain
 const vec3 KM_CLASS[6] = vec3[6](vec3(.55, .66, .82), vec3(.30, .62, .30), vec3(.62, .78, .36), vec3(.96, .85, .36), vec3(.93, .56, .22), vec3(.62, .24, .22));
@@ -208,6 +211,16 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
     vec3 ink = uStyle == 0 ? vec3(1., .98, .9) : vec3(.12, .10, .12);
     col = mix(col, ink, (1. - smoothstep(w - .5, w + .6, e)) * (wet ? .3 : uDivKm == 1 ? .55 : .2) * seen * smoothstep(.2, .09, px));
   }
+  // where people cannot settle (knob «Где нельзя селиться»): every chunk by its reason — red mountains, violet high
+  // mountains, sea-green bogs; amber where a hamlet at most may stand. The chunk outlines up close, the squares far off.
+  if (uDivSettle > 0 && !wet) {
+    int why = kmWhy(ivec2(floor((pk - uChunkRect.xy) / ${FKM.toFixed(4)})));
+    if (px < .2) { vec3 kc = kmChunk(pk, a.d); why = kmWhy(ivec2(kc.xy)); }
+    if (why >= 2) {
+      vec3 sc = why == 2 ? vec3(.80, .24, .20) : why == 3 ? vec3(.64, .42, .82) : why == 4 ? vec3(.14, .60, .60) : vec3(.97, .74, .22);
+      col = mix(col, sc * (.72 + .34 * lum), why >= 5 ? .42 : .66);
+    }
+  }
   // the district under the cursor and the chosen one: lighter inside; their outline is a line on the ground drawn
   // over the very same border (division/lines.js), at any height
   if (uDivHover >= 0 && a.d == uDivHover) col = mix(col, vec3(1.), .16);
@@ -230,7 +243,7 @@ vec3 districtAt(vec2 pk) {
 }
 
 void aspDivision(Px p, inout vec3 col, float landA) {
-  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0)) return;
+  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0 && uDivSettle == 0)) return;
   float inR = inRegion(p.ll);                     // nothing is divided beyond the album's region
   if (inR < .002) return;
   vec3 cl = landA > .02 ? divLook(col, p.pk, p.px, false) : col;
@@ -247,7 +260,7 @@ export const STATES = [['', 'нет'], ['aragon', 'Королевство Ара
 export default {
   id: 'division', title: 'Деление', glsl: GLSL,
   uniforms: {
-    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 },
+    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 }, uDivSettle: { value: 0 },
     uDivSize: { value: new Vector3(20, 100, 900) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() }, uDivGeo: { value: new Vector2(0, 0) },
   },
   params: [
@@ -256,6 +269,9 @@ export default {
     { key: 'divState', label: 'Деление: собрать государство', group: 'modes', type: 'select', options: STATES, value: '' },
     { key: 'divLabels', label: 'Деление: названия земель', group: 'modes', type: 'toggle', value: 1 },
     { key: 'divPick', label: 'Район под курсором', group: 'modes', type: 'toggle', value: 0 },
+    // (map: the switch on the panel of the map, mapview.js)
+    { key: 'divPlaces', label: 'Деление: места городов районов', group: 'modes', type: 'toggle', value: 0, map: 'Места городов районов' },
+    { key: 'noSettle', label: 'Где нельзя селиться', group: 'modes', type: 'toggle', value: 0, uniform: 'uDivSettle', map: 'Где нельзя селиться' },
     { key: 'km', label: 'Чанки 1 км² (проверка)', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'очертания'], [2, 'класс земли'], [3, 'жилые и нежилые'], [4, 'угодья']], value: 0, uniform: 'uDivKm' },
   ],
   pages: [
@@ -280,6 +296,10 @@ export default {
     { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек около 100 км²: по ним пока считаются лес, лёд и болота. Тёмные — границы районов. Район состоит из чанков по 1 км², а не из этих ячеек, поэтому линии совпадают не везде. Числа района суммируются по его чанкам; число ячейки делится между районами по тому, сколько её чанков в каждом.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
     { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, число чанков по 1 км², доля леса, болот, застройки и полей, сколько чанков какого класса земли и сколько жилых, суммы ресурсов. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
     { id: 'division-sea', group: 'Режимы карты', title: 'Деление: море и острова', note: 'Моря названы: Бискайский залив, Атлантика, Кадисский залив, море Альборан, Балеарское море, Лионский залив. Прибрежное море поделено на куски напротив прибрежных районов, чтобы высадиться можно было везде.', p: { ...PAPER, division: 3 }, cam: { lat: 39.6, lon: 0.6, h: 900, tilt: 0, heading: 0 } },
+    { id: 'division-places', group: 'Режимы карты', title: 'Деление: места городов районов', note: 'У каждого района одно место под город, всегда одно и то же. Если в районе есть настоящий город, место — на самом большом из них (белая точка); город ближе 5 км к большему соседу — часть его. Иначе — лучшее место по правилу: у берега (голубая точка; бухта — синяя, устье реки — бирюзовая), у слияния рек (лиловая), у реки (синяя), на ровном (зелёная); не на вершине, не в болоте, не на крутом склоне. Кольцо — главный город провинции, красное кольцо — исторической земли или региона. Здесь берег Каталонии и Валенсии, долина Эбро, край Месеты.', p: { ...PAPER, division: 1, divPlaces: 1, divLabels: 0 }, cam: { lat: 40.9, lon: -0.4, h: 700, tilt: 0, heading: 0 } },
+    { id: 'division-places-pyrenees', group: 'Режимы карты', title: 'Деление: места городов в Пиренеях', note: 'В горах город района стоит в долине, у реки или слияния рек, на ровном дне: не на вершине и не на склоне.', p: { ...NATURAL, division: 1, divPlaces: 1, divLabels: 0 }, cam: { lat: 42.45, lon: 0.9, h: 260, tilt: 30, heading: 0 } },
+    { id: 'division-nosettle', group: 'Режимы карты', title: 'Где нельзя селиться: Пиренеи', note: 'Чанки, где жить нельзя, с причиной: красные — горы (круто везде в чанке), лиловые — высокогорье выше 2400 м (скалы, снег, лёд), бирюзовые — болота, жёлтые — крутой склон или сырая низина: только хутор. Переключатель «Где нельзя селиться» на панели карты.', p: { ...NATURAL, noSettle: 1, divLabels: 0 }, cam: { lat: 42.6, lon: 0.9, h: 200, tilt: 25, heading: 0 } },
+    { id: 'division-nosettle-donana', group: 'Режимы карты', title: 'Где нельзя селиться: болота Гвадалквивира', note: 'Низовья Гвадалквивира (Доньяна): болото — место, где город не встанет.', p: { ...NATURAL, noSettle: 1, divLabels: 0 }, cam: { lat: 37.0, lon: -6.3, h: 160, tilt: 20, heading: 0 } },
     { id: 'division-50', group: 'Режимы карты', title: 'Деление: районы около 50 км', note: 'Тот же способ с районом крупнее. Провинции и регионы — те же исторические земли.', p: { ...PAPER, division: 1, divSize: 50 }, cam: { lat: 41.4, lon: -1.0, h: 560, tilt: 10, heading: 0 } },
   ],
   async init(album) { return startDivision(album, this.uniforms); },

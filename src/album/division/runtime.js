@@ -3,17 +3,20 @@
 // the cursor (hover lights a district up, a click opens what it holds) and serves the other aspects:
 //   album.division = { districtOf(k), chunksOf(d), provinceOf(d), regionOf(p), neighbours(d), kind(d), name(d), … }
 //   album.districts = { count, of(k), name(i) } — the same, in the form the resources work asked for
-import { buildDivision, districtSummary, districtNames, stateMask, KIND_ID, LAND, levelSizes } from './build.js';
+import { buildDivision, districtSummary, stateMask, KIND_ID, LAND, levelSizes } from './build.js';
 import { divisionTexture, districtOfTexel } from './gpu.js';
 import { districtCentres } from './centres.js';
 import { loadSites } from '../town/sites.js';
 import { createPanel } from './panel.js';
 import { createLabels } from './labels.js';
 import { createLines } from './lines.js';
+import { createPlaces } from './places.js';
+import { nameDistricts } from './names.js';
 import { districtByLines } from './border.js';
 import { pickGround } from '../pick.js';
 import { kmOf } from '../chunks.js';
-import { KN as FN, KKM as FKM, kmFacts, kmOrder, kmData, chunkAt, seedOf, CLASS_TITLE, livingOf } from './km.js';
+import { KN as FN, KKM as FKM, kmFacts, kmOrder, kmData, kmSettle, chunkAt, seedOf, cellsOfChunks, CLASS_TITLE, SETTLE_WHY, livingOf } from './km.js';
+import { PLACE_WHY, SEAT } from './centres.js';
 import { BBOX } from '../geo.js';
 
 const inside = (lat, lon) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
@@ -32,9 +35,12 @@ export async function startDivision(album, U) {
   const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [] };
   const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
   const listeners = [], labels = createLabels(album);
-  let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null, farmShown = -1, pinned = -1;
+  let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null, farmShown = -1, pinned = -1, places = null;
 
   const active = () => p.get('division') > 0 || !!p.get('divPick');
+  // the bogs for chunkSettle: the share of the natural cell under bog, and the named wetlands (aspects/swamp.js)
+  const settleOpts = () => { const cell = cellsOfChunks(ch).cell; return { swampOf: c => (cell[c] < ch.count ? ch.getNatural('swamp', cell[c]) : 0), wetlands: album.swamp?.wetlands || [] }; };
+  let settleShown = false;
   // ---- the chunk of 1 km² under the cursor, while the chunks are shown (knob «Чанки 1 км²»)
   const kmInfo = document.createElement('div'); kmInfo.className = 'S km-info';
   kmInfo.style.cssText = 'position:fixed;left:50%;bottom:104px;transform:translateX(-50%);padding:6px 14px;background:rgba(12,16,24,.88);color:#fff;border-radius:3px;pointer-events:none;white-space:nowrap;display:none;z-index:5';
@@ -47,21 +53,26 @@ export async function startDivision(album, U) {
     if (land) {
       const f = kmFacts(dv, data.base.at), o = kmOrder(dv, data.base.at), k = f.cls[c], lv = livingOf(k), farm = album.layers.towns?.farm?.()?.km[c] || 0;
       parts.push(`высота ${Math.round(dv.raster.hgt[c])} м`, `класс ${k} — ${CLASS_TITLE[k]}`, lv === 2 ? 'жилой' : lv === 1 ? 'едва жилой' : 'нежилой', `в порядке освоения района № ${o.rank[c] + 1}`, farm ? `под полями ${Math.max(1, Math.round(farm / 2.55))} %` : 'полей нет');
+      const w = dv.settle.why[c]; parts.push(w ? `селиться: ${dv.settle.can[c] ? 'только хутор' : 'нельзя'} — ${SETTLE_WHY[w]}` : 'селиться можно');
+      const town = album.layers.towns?.townOfChunk?.(c); if (town?.name) parts.push(`чанк ${town.town ? 'города' : 'поселения'} ${town.name}`);
+      if (dv.centres.texel[d] === c) parts.push(`место города района: ${PLACE_WHY[dv.centres.why[d]]}`);
     } else parts.push('вода');
     return parts.join(' · ');
   }
   function use(size) {
     if (!cache.has(size)) {
       const div = buildDivision(ch, { ...opts, size });
-      div.names = districtNames(ch, div, data.vectors.places || []);
-      // the centre of every land district (centres.js); a district is called after the settlement at its centre
-      div.centres = districtCentres(div, sites);
-      for (let d = 0; d < div.count; d++) { const s = div.centres.site[d]; if (s >= 0 && sites[s].name) div.names[d] = sites[s].name; }
+      // where nobody can settle, chunk by chunk (km.js; the bogs of the swamp work); the place of the town of every land
+      // district (centres.js); the names: a historical land, the town, or the sides of the world (names.js)
+      div.settle = kmSettle(div, data.base.at, settleOpts());
+      div.centres = districtCentres(div, sites, { settle: div.settle });
+      const nm = nameDistricts(div, sites, lands); div.names = nm.names; div.nameKind = nm.kind;
       cache.set(size, { div, tex: null, state: null });
     }
     const next = cache.get(size);
     if (next === cur) return;
     cur = next; cur.lines = undefined; hover = -1; select(-1); api.version++;
+    places?.dispose(); places = createPlaces(album, cur.div);
     const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
     paintState(true);
     console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions, ${cur.div.moved.length} slopes moved to their valleys (${cur.div.ms.toFixed(0)} ms)`);
@@ -77,7 +88,9 @@ export async function startDivision(album, U) {
     cur.facts = p.get('km') > 1 || cur.facts ? kmFacts(cur.div, data.base.at) : null;
     // the fields of the chunks (the settlement work keeps them: layers/towns.js) only while they are the thing shown
     const towns = album.layers.towns, farm = p.get('km') === 4 ? towns?.farm?.() : null; farmShown = farm ? towns.farmVersion() : -1;
-    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null); cur.state = id;
+    // where nobody can settle, while that is shown
+    settleShown = !!p.get('noSettle');
+    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null, settleShown ? cur.div.settle.why : null); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
     const rows = cur.tex.userData.rows; U.uDivGeo.value.set(cur.div.geo ? rows.L0 : 0, cur.div.geo ? rows.S0 : 0);
     if (cur.lines !== id) { cur.lines = id; lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers); lines.mark(hover, sel); }
@@ -105,7 +118,10 @@ export async function startDivision(album, U) {
   const panel = createPanel(() => select(-1));
   // what a district holds, with its settlements (the settlement work counts them: layers/towns.js)
   // (the fields of a district are those of its own chunks of 1 km², not the share of the natural cells it lies over)
-  const summaryOf = d => { const s = districtSummary(cur.div, d, ch), t = album.layers?.towns?.districtInfo?.(d); if (t) { s.settle = t; if (s.chunks) s.share.fields = t.fieldsKm2 / s.chunks; } return s; };
+  // (s.seat: the district holds the seat of its province, land, region; s.place: why its town stands where it stands)
+  const summaryOf = d => { const s = districtSummary(cur.div, d, ch), t = album.layers?.towns?.districtInfo?.(d), c = cur.div.centres; if (t) { s.settle = t; if (s.chunks) s.share.fields = t.fieldsKm2 / s.chunks; }
+    s.seat = seatOf(d); s.place = c && c.texel[d] >= 0 ? PLACE_WHY[c.why[d]] : ''; return s; };
+  const seatOf = d => { const b = cur.div.centres?.seat[d] || 0; return { province: !!(b & SEAT.province), land: !!(b & SEAT.land), region: !!(b & SEAT.region) }; };
   function select(d) {
     sel = d; U.uDivSel.value = d; lines?.mark(hover, sel);
     panel.show(d >= 0 ? summaryOf(d) : null);
@@ -142,6 +158,7 @@ export async function startDivision(album, U) {
     if (key == null || key === 'divSize') use(+p.get('divSize') || 20);
     if (key == null || key === 'divState') paintState(false);
     if ((key == null || key === 'km') && ((p.get('km') > 1 && !cur.facts) || (p.get('km') === 4) !== (farmShown >= 0))) paintState(true);
+    if ((key == null || key === 'noSettle') && !!p.get('noSettle') !== settleShown) paintState(true);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
     syncLabels();
@@ -170,8 +187,12 @@ export async function startDivision(album, U) {
     neighbours: d => cur.div.neighbours[d] || [],
     kind: d => KIND_ID[cur.div.kinds[d]],
     districtName: d => cur.div.names[d],
+    // how the district got its name: 'history' (a historical land of its own, lands.json comarcas), 'place' (its town or
+    // the village its town stands at), 'rule' (the sides of the world inside its province: not a name for a town)
+    nameKind: d => cur.div.nameKind?.[d] ?? 'rule',
     // the centre of a land district: where its town stands and its roads meet → { x, y (flat km), site } or null
-    centre: d => (cur.div.centres && cur.div.centres.texel[d] >= 0 ? { x: cur.div.centres.x[d], y: cur.div.centres.y[d], site: cur.div.centres.site[d] >= 0 ? sites[cur.div.centres.site[d]] : null } : null),
+    // (why: why the town stands there, centres.js PLACE_WHY; seat: SEAT bits — the seat of its province, land, region)
+    centre: d => (cur.div.centres && cur.div.centres.texel[d] >= 0 ? { x: cur.div.centres.x[d], y: cur.div.centres.y[d], site: cur.div.centres.site[d] >= 0 ? sites[cur.div.centres.site[d]] : null, chunk: cur.div.centres.texel[d], why: PLACE_WHY[cur.div.centres.why[d]], seat: cur.div.centres.seat[d] } : null),
     sites,
     districtAt,
     // the chunk of 1 km² at a point (its number: square j · KN + i of division/km.js), −1 outside the album
@@ -186,6 +207,16 @@ export async function startDivision(album, U) {
     select, get selected() { return sel; },
     // light a district up as if it were under the cursor while the cursor is away (pictures for the notes), −1 none
     hover: d => { pinned = d; },
+    // ---- where people can settle (km.js chunkSettle): 2 a town or a village, 1 a hamlet at most, 0 nobody
+    canSettle: c => cur.div.settle.can[c] ?? 0,
+    // → { chunk, can, why: the reason in words ('' when people can settle) } or null outside the album
+    settleAt: (lat, lon) => { const c = api.chunkAt(lat, lon); if (c < 0) return null; const w = cur.div.settle.why[c]; return { chunk: c, can: cur.div.settle.can[c], why: SETTLE_WHY[w] }; },
+    settleFacts: () => cur.div.settle,            // { can, why } a chunk each; the reasons: settleWhy
+    settleWhy: SETTLE_WHY,
+    // ---- the seats: the district whose town is the biggest of a province (id: its number), a historical land (id: its
+    // name, provinces[p].land) or a region (id: its number) → { district, index: the place in sites, −1 none } or null
+    capitalOf: (level, id) => { const sts = cur.div.centres?.seats; if (!sts) return null; const d = level === 'land' ? sts.land.get(id) : sts[level]?.[id]; return d === undefined ? null : { district: d, index: cur.div.centres.site[d] }; },
+    seatOf,
     onChange: fn => listeners.push(fn),
     get data() { return cur.div; },
     lands,
@@ -212,13 +243,13 @@ export async function startDivision(album, U) {
   }
 
   return { id: 'division', update(dt, t, cam) {
-    drawLines(cam);
+    drawLines(cam); places?.update(p.get('divPlaces'));
     if (p.get('division') && p.get('divLabels')) labels.update(cam, p.get('look'));
     if (tick++ % 3) return;
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : active() ? pinned : -1;
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; lines?.mark(hover, sel); }
     if (p.get('km') === 4 && tick % 15 === 1 && (album.layers.towns?.farmVersion?.() ?? -1) !== farmShown) paintState(true);   // the fields have changed
-    const text = p.get('km') > 0 && last ? chunkUnder(last) : null;
+    const text = (p.get('km') > 0 || p.get('noSettle')) && last ? chunkUnder(last) : null;
     kmInfo.textContent = text || ''; kmInfo.style.display = text && !album.shot ? 'block' : 'none';
     if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(summaryOf(sel)); shownVersion = ch.version; }
   } };

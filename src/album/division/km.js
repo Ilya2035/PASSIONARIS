@@ -141,6 +141,47 @@ export function chunkFacts(div, heightAt = null) {
   return { cls, slope, steep, num };
 }
 
+// ---- Where people cannot settle (the owner, 13.11.2026: «отметить все места, где поселиться нельзя»), chunk by
+// chunk, with the reason. can: 2 — a town or a village may stand here; 1 — a hamlet at most; 0 — nobody.
+//   why 1  water: the sea, a lake;
+//       2  mountain: ground too steep everywhere in the chunk (class 5 of chunkFacts);
+//       3  high mountain: above HIGH_M, bare rock, snow and ice;
+//       4  bog: a named wetland, or a natural cell mostly under bog (the swamp work keeps it cell by cell);
+//       5  steep slope: class 4 — a hamlet at most;
+//       6  wet hollow: a cell partly under bog — a hamlet at most.
+// Sand and desert: there is no map of them yet (none in Iberia worth the name; they come with the Sahara).
+export const SETTLE_WHY = ['', 'вода', 'горы: крутые склоны', 'высокогорье: скалы, снег и лёд', 'болото', 'крутой склон: только хутор', 'сырая низина: только хутор'];
+export const SETTLE_CAN = [2, 0, 0, 0, 0, 1, 1];
+// div with div.cells; facts: chunkFacts(); swampOf(c): the share of the chunk's natural cell under bog (0..1), or
+// null; wetlands: [{ lat, lon, km2 }] (the swamp work's list) — a disc of that area around its point
+// → { can: Uint8Array, why: Uint8Array } a chunk each (water: can 0, why 1)
+export function chunkSettle(div, facts, { swampOf = null, wetlands = [] } = {}) {
+  const n = KN * KN, cells = div.cells, can = new Uint8Array(n), why = new Uint8Array(n), hgt = div.raster.hgt;
+  const bog = new Uint8Array(n);
+  for (const w of wetlands) {
+    if (!(w.km2 > 0)) continue;
+    const x = w.lon * KM_PER_DEG * COS_REF, y = w.lat * KM_PER_DEG, r = Math.sqrt(w.km2 / Math.PI);
+    for (let j = Math.max(0, Math.floor((y - r - KY0) / KKM)); j <= Math.min(KN - 1, Math.floor((y + r - KY0) / KKM)); j++)
+      for (let i = Math.max(0, Math.floor((x - r - KX0) / KKM)); i <= Math.min(KN - 1, Math.floor((x + r - KX0) / KKM)); i++)
+        if (Math.hypot(KX0 + (i + .5) * KKM - x, KY0 + (j + .5) * KKM - y) <= r) bog[j * KN + i] = 1;
+  }
+  for (let c = 0; c < n; c++) {
+    const d = cells[c]; if (d < 0) continue;
+    let w = 0;
+    if (div.kinds[d] !== LAND) w = 1;
+    else if (hgt[c] >= HIGH_M) w = 3;
+    else if (facts.cls[c] >= 5) w = 2;
+    else {
+      const s = swampOf ? swampOf(c) : 0;
+      if ((bog[c] && facts.cls[c] <= 2) || s >= .6) w = 4;
+      else if (facts.cls[c] === 4) w = 5;
+      else if (s >= .3) w = 6;
+    }
+    why[c] = w; can[c] = SETTLE_CAN[w];
+  }
+  return { can, why };
+}
+
 // How many chunks every district has and the box of squares they lie in.
 export function districtBoxes(div) {
   const count = div.count, cells = div.cells, num = new Uint32Array(count), x0 = new Uint16Array(count).fill(KN), x1 = new Uint16Array(count), y0 = new Uint16Array(count).fill(KN), y1 = new Uint16Array(count);
@@ -191,6 +232,8 @@ export function districtOrder(div, facts) {
 
 // Everything about the chunks of a division, worked out when first asked for: div.km.box at once, the rest by
 // kmFacts() and kmOrder().
-export function kmData(div) { if (!div.km) div.km = { box: districtBoxes(div), facts: null, order: null }; return div.km; }
+export function kmData(div) { if (!div.km) div.km = { box: districtBoxes(div), facts: null, order: null, settle: null }; return div.km; }
+// opts as for chunkSettle; worked out once a division
+export function kmSettle(div, heightAt = null, opts = {}) { const k = kmData(div); if (!k.settle) k.settle = chunkSettle(div, kmFacts(div, heightAt), opts); return k.settle; }
 export function kmFacts(div, heightAt = null) { const k = kmData(div); if (!k.facts) k.facts = chunkFacts(div, heightAt); return k.facts; }
 export function kmOrder(div, heightAt = null) { const k = kmData(div); if (!k.order) k.order = districtOrder(div, kmFacts(div, heightAt)); return k.order; }
