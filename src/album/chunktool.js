@@ -91,7 +91,7 @@ export default async function init(album) {
     const ll = on && last ? pickGround(album, last.clientX, last.clientY) : null, k = ll ? ch.at(ll.lat, ll.lon) : -1;
     ch.uniforms.uChunkHoverId.value = k;
     if (k < 0) { info.style.display = 'none'; return; }
-    const parts = [`Чанк № ${k}`, ch.kind[k] ? 'суша' : ch.lake[k] >= 0 ? (ch.lakes[ch.lake[k]].name || 'озеро') : 'море', `${Math.round(ch.area[k])} км²`, `соседей ${ch.links[k].length}`];
+    const parts = [`Природная ячейка № ${k}`, ch.kind[k] ? 'суша' : ch.lake[k] >= 0 ? (ch.lakes[ch.lake[k]].name || 'озеро') : 'море', `${Math.round(ch.area[k])} км²`, `соседей ${ch.links[k].length}`];
     if (ch.kind[k] && ch.links[k].some(l => l.river)) parts.push('граница по реке');
     for (const name of ['forest', 'conifer', 'swamp', 'fields', 'built', 'ice', 'snow']) { const v = ch.get(name, k); if (v > .004 || (name === 'forest' && ch.kind[k])) parts.push(`${CHANNELS[name][2]} ${pct(v)}`); }
     for (const l of ch.layers.values()) if (l.data[k]) parts.push(`${l.title} ${Math.round(l.data[k] * 10) / 10}${l.unit ? ' ' + l.unit : ''}`);

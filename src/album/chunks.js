@@ -1,3 +1,7 @@
+// NOTE (v0.6.40): what this file calls a chunk is now the NATURAL CELL of about 100 km². Since the owner's decision of
+// 12.11.2026 the chunk of the division is one square kilometre: src/album/division/km.js. A district is made of those;
+// the cells here still hold the state the picture is drawn from, until it moves to the chunks of 1 km².
+//
 // The chunk system (docs/ALBUM-CHUNKS.md). The land and the sea are divided into chunks — the smallest unit of the
 // game world: chunk → district → province → region. A chunk is a small natural cell about 10 km across (around
 // 100 km²), NOT a square: its outline is rounded and follows the lie of the land — a river, the foot of a range, the

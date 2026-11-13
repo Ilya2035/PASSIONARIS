@@ -206,8 +206,8 @@ export async function startDivision(album, U) {
     if (tick++ % 3) return;
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : -1;
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; }
-    const text = p.get('km') > 0 && last && !album.shot ? chunkUnder(last) : null;
-    if (text) { kmInfo.textContent = text; kmInfo.style.display = 'block'; } else kmInfo.style.display = 'none';
+    const text = p.get('km') > 0 && last ? chunkUnder(last) : null;
+    kmInfo.textContent = text || ''; kmInfo.style.display = text && !album.shot ? 'block' : 'none';
     if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(districtSummary(cur.div, sel, ch)); shownVersion = ch.version; }
   } };
 }
