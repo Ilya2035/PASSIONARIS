@@ -23,7 +23,7 @@ export const SHOW = [.035, .1];        // a river is left out when its water is 
 //   • the least width falls from MIN_PX to FAR_PX pixels: a river does not grow fatter with height;
 //   • fewer rivers are drawn: the widths SHOW are multiplied by up to FAR_SHOW, the small tributaries go first;
 //   • the thin line turns a paler blue, FAR_TINT of it, so that it can be told in a dark forest.
-// Between about 60 and 300 km (the lead, 14.11.2026, on the new light land: реки «стали тяжёлыми: тёмно-синяя толстая
+// Between about 40 and 300 km — it comes in between 30 and 70 km — (the lead, 14.11.2026, on the new light land: реки «стали тяжёлыми: тёмно-синяя толстая
 // линия с тёмной каймой… Мансанарес и Харама читаются как большие реки»):
 //   • a thin river is its water alone: the sheet no longer keeps room for banks that cannot be seen (MID.lean);
 //   • a small river is far thinner than a great one: the least width goes by the width itself, from MID.least[0] of
@@ -35,7 +35,7 @@ export const SHOW = [.035, .1];        // a river is left out when its water is 
 // And at no height does a river write its depth: the finishing pass shaded the step in depth as a dark rim.
 export const GEN = { w: [.7, 3.5], t: [[.03, .1], [.16, .5]], range: 12 };
 export const FAR_PX = 1.6, FAR_SHOW = 2, FAR_TINT = .7;
-export const MID = { lean: [.03, .06], back: [.2, .32], least: [.42, 1.3], clear: .85, tint: .85, tintAt: [.03, .07] };
+export const MID = { lean: [.02, .045], back: [.2, .32], least: [.42, 1.3], clear: .85, tint: .85, tintAt: [.02, .05] };
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // how a river is drawn when a pixel is px km: its least width in pixels, the widths it shows from, how far its line
 // has slid toward the two smoother shapes

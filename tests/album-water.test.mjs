@@ -283,10 +283,11 @@ test('water: rivers from the middle heights — a small river is thin and soft, 
   const before = (real, px) => Math.max(real, px * riverFar(px).minPx * (.42 + .58 * Math.sqrt(Math.min(1, real / .16))));   // the least width as it was
   const MANZANARES = .02, JARAMA = .035, TAGUS = .09, EBRO = .14;
   // near the ground the rule of the middle heights is off: the water is as wide as it was, the colour is the water's own
-  for (const h of [20, 30, 45]) { const f = riverFar(pxOf(h)); assert.ok(f.lean === 0 && f.tint[0] === 0 && f.tint[1] === 0 && f.tint[2] === 0, 'from ' + h + ' km a river is as it was');
+  for (const h of [20, 25, 30]) { const f = riverFar(pxOf(h)); assert.ok(f.lean === 0 && f.tint[0] === 0 && f.tint[1] === 0 && f.tint[2] === 0, 'from ' + h + ' km a river is as it was');
     for (const w of [.004, MANZANARES, TAGUS, EBRO, .3]) assert.equal(riverDrawn(w, pxOf(h)), before(w, pxOf(h))); }
   // from 100 to 300 km it is in force: the thin line is a soft blue
-  for (const h of [100, 200, 300]) { const f = riverFar(pxOf(h)); assert.ok(f.lean > .99 && f.tint[0] > .75 && f.tint[2] < .01, 'from ' + h + ' km'); }
+  for (const h of [75, 100, 200, 300]) { const f = riverFar(pxOf(h)); assert.ok(f.lean > .99 && f.tint[0] > .75 && f.tint[2] < .01, 'from ' + h + ' km'); }
+  assert.ok(riverFar(pxOf(50)).lean > .3 && riverFar(pxOf(50)).lean < .7, 'it comes in by degrees: half-way at 50 km');
   // … a small river is a pixel wide, a great one three, and they can be told apart (they could not: 1.8 against 2.9 pixels of water, and half as much again of banks on both)
   assert.ok(pixels(MANZANARES, 100) < 1.7 && pixels(MANZANARES, 100) > 1.2 && pixels(JARAMA, 100) < 2, `the Manzanares from 100 km: ${pixels(MANZANARES, 100).toFixed(2)} px`);
   assert.ok(pixels(EBRO, 100) > 2.9 && pixels(TAGUS, 100) > 2.1 && pixels(EBRO, 100) < 3.6, `the Ebro from 100 km: ${pixels(EBRO, 100).toFixed(2)} px`);
