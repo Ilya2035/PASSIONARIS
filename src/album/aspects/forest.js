@@ -325,9 +325,11 @@ void aspForest(Px p, inout Land L) {
     }
   }
   float kind = mix(mix(con, k2, f2 * .75), k1, f1);                  // the kind of the crown itself where crowns can be told apart
-  // brush, young growth and the open woodland of dry country: small crowns one by one; older and closer: large ones
-  float open = 1. - smoothstep(.5, .85, albumClosure(p.wet));
-  float mask = mix(dens, mix(m2, m1, max(1. - ya, open) * f1), smoothstep(.07, .03, px));
+  // Where the canopy is not closed the crowns stand one by one, and near the ground they are always the small ones
+  // (45 m). The large tufts (140 m) used to take over in old forest: a thinned old stand then stood as a handful of
+  // round balls, which read as the 3D trees that are gone (the lead, on the coast below Barcelona, v0.6.67). The
+  // large ones remain where the small can no longer be told, between 40 and 70 km.
+  float mask = mix(dens, mix(m2, m1, f1), smoothstep(.07, .03, px));
   vec3 tint = albumForestTint(kind, age, p.wet, p.hl, p.ll.x, tree, uSeason * (.55 + .45 * p.n3));
   tint = mix(tint, vec3(.50, .44, .16), smoothstep(.93, .99, tone) * .4 * (1. - kind) * ya);       // a crown gone yellow here and there
   float ta = mix(.2, .46, ya) * (1. + .25 * oa);                     // how much one crown differs from the next
