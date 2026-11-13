@@ -16,12 +16,15 @@
 // chunks of the land around are ploughed, the fields are drawn only where their furlongs can be told.
 // A chunk has one state: a chunk of bog (the division marks them) is never ploughed (town/farmland.js), and no field
 // is drawn where the swamp is painted (the swamp aspect says where: fSwampW).
-// THE SPEED OF THIS SHADER. On built-in graphics the ground shader stands at a cliff, and what pushes it over is the
-// number of smoothstep(number, number, x) with thresholds written in the code (the ground work found it, 13.11.2026):
-// two or three dozen of them more make the whole frame 40 % slower, even in code that never runs. v0.6.56 called the
-// rules of the swamp here a second time (land-20: 297 → 419 ms). So: nothing of another aspect is worked out here
-// again — its result is read; no new smoothstep with numbers — a clamp does; and land-20 and land-far are timed
-// before and after every change.
+// THE SPEED OF THIS SHADER (docs/album/ground.md, «Скорость»). On built-in graphics the ground shader has a fast
+// mode and one 40 % slower, with nothing between. What tips it over is how many values the shader holds at once at
+// its tightest spot: a noise takes a dozen and a half registers while it is worked out, so a noise called in the
+// middle of a function, among the values that function already holds, slows the whole frame — even in code that never
+// runs. v0.6.56 called the rules of the swamp here, noises and all, among the values of the fields (land-20:
+// 297 → 419 ms). So: nothing of another aspect is worked out here again — its result is read (fSwampW); a noise, if
+// one must be added, is called at the very head of aspSettle; and land-20 and land-far are timed before and after
+// every change. (Thresholds of smoothstep written in the code were a second, lesser cause; the build of the shader
+// now moves them into a table.)
 import { RULES_GLSL, PALETTE_GLSL } from '../town/rules.js';
 import { settleUniforms } from '../town/state.js';
 
@@ -220,7 +223,7 @@ void aspSettle(Px p, inout Land L) {
       if (p.h < 2. || p.cA.a > .3 || p.slope > .42 || p.hl > 1300. || tm > 0.) fm *= smoothstep(.4, 2., p.h) * (1. - smoothstep(.3, .5, p.cA.a)) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(1300., 1700., p.hl)) * (1. - tm);
       // No field on a bog (the owner: «важно, чтобы чанки не перемешивались»): the swamp aspect, painted before this
       // one, leaves in fSwampW how much of the pixel it has painted; where half the pixel and more is bog there is no
-      // field. A clamp, not a smoothstep: see the note on the speed of this shader at the head of the file.
+      // field. Nothing is worked out for it here: see the note on the speed of this shader at the head of the file.
       fm *= seen * clamp(1. - fSwampW * 2., 0., 1.);
       if (fm > .003) {
         vec3 fc = L.col;
