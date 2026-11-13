@@ -196,6 +196,8 @@ ch.onReset(fn);                       // своя модель накладыв�
 | Деление | `aspects/division.js`, новая папка `division/` | `void aspDivision(Px p, inout vec3 col, float landA)`, `vec3 districtAt(vec2 pk)` |
 | Ресурсы | `aspects/resources.js` | ничего; работает через слои и `ch.show()` |
 
+(Так было во второй волне. Хозяева файлов с 13.11.2026 — раздел «Третья волна: чьи файлы» ниже.)
+
 Остальное в `src/album/` принадлежит ведущей сессии: `terrain.js`, `glsl.js`, `chunks.js`, `chunktool.js`,
 `main.js`, `params.js`, `pages.js`, `layers.js`, `post.js`, `camera.js`, `pick.js`, `layers/ribbon.js`,
 `layers/roads.js`, `layers/hazards.js`, `layers/labels.js`. Интерфейс альбома (`ui.js`, `ui.css`, `feedback.js`) —
@@ -298,6 +300,39 @@ export default {
 7. Выпуск: `node scripts/release.mjs "<заголовок>" <запись.md> --trailer "<строка соавторства>"`. Флаг `--update`
    не ставить: он повышает среднее число версии (большое обновление). Установленную игру скрипт обновляет всегда.
    Скрипт сам переносит ветку на `main`; конфликт решить у себя и запустить снова.
+
+## Третья волна: чьи файлы (с 13.11.2026)
+
+Вторая волна закрыта, её заметки лежат в `docs/album/notes/`. Таблица «Части графики» выше описывает, что вызывает
+шейдер земли; **хозяева файлов теперь такие** (всё внутри `src/album/`):
+
+| Часть | Файлы хозяина | Свой документ |
+|---|---|---|
+| Деление | `aspects/division.js`, `division/*` кроме `division/panel.js` | `docs/album/division.md` |
+| Дороги и реки | `aspects/roads.js`, `roads/*`, `layers/roads.js`, `layers/ribbon.js`, `aspects/water.js`, `water/*`, `layers/rivers.js`, `layers/lakes.js`, `layers/freeze.js` | `docs/album/roads.md`, `docs/album/water.md` |
+| Поселения | `aspects/settle.js`, `town/*`, `layers/towns.js`, `layers/labels.js`, `division/panel.js`, `save/*` | `docs/album/settle.md`, `docs/album/map-rework.md`, `docs/SAVE-LAND.md` |
+| Небо, свет и камера | `aspects/sky.js`, `light.js`, `camera.js`, `post.js`, `main.js`, `layers/clouds.js`, `layers/hazards.js`, новая папка `sky/` | `docs/album/sky.md` |
+| Земля и лес | `aspects/ground.js`, `terrain.js`, `glsl.js`, `data.js`, `aspects/forest.js`, `layers/forest.js`, `aspects/swamp.js` | `docs/album/ground.md`, `docs/album/forest.md`, `docs/album/swamp.md` |
+| Ведущая сессия | `chunks.js`, `chunktool.js`, `params.js`, `pages.js`, `layers.js`, `mapview.js`, `ui.js`, `ui.css`, `pick.js`, `geo.js`, `feedback.js`, `aspects/index.js`, `aspects/resources.js`; `scripts/harness.sh`, `scripts/release.mjs`, `scripts/worktree-setup.mjs`; `CLAUDE.md`, `docs/BACKLOG.md`, `docs/ALBUM.md`, этот файл | — |
+
+Правила третьей волны, сверх раздела «Как работать параллельно»:
+
+- **Свои ручки и страницы — в своём файле части** (`params`, `pages`), не в `params.js` и не в `pages.js`. У дорог,
+  неба и земли для этого есть свои файлы: `aspects/roads.js`, `aspects/sky.js`, `aspects/ground.js`.
+- **Переключатель на панели карты** (вид «Играть») появляется сам: ручке-переключателю дать поле `map: 'Подпись'`.
+  `mapview.js` править не нужно.
+- **Общий свет** — `light.js` (`LIGHT`, `lightUniforms`, `sunAt`); `glsl.js` и `params.js` отдают те же имена, как
+  раньше. Имена и параметры функций света не менять: ими пользуются все части. Добавлять новые можно.
+- **Правка в чужом файле** — только если без неё работа стоит: одна-две строки, и сразу строка хозяину (сессии этой
+  части или ведущей). Переписывать чужой файл нельзя.
+- **Что одна часть даёт другой** — через объект `album`: `album.division` (районы, их точки городов, названия),
+  `album.roadNet` (дороги), `album.layers.towns.model()` (поселения), `album.layers.forest` (лес). Если меняется
+  то, чем пользуется другая часть, — старое имя оставить работать и написать той части.
+- **Сборки и снимки идут по очереди** на весь компьютер (`harness.sh` ждёт своей очереди сам). Вызову давать запас
+  времени до 10 минут; снимки по одному, без фоновых циклов.
+- **Проверять на глаз словами владельца**: у каждой задачи есть его фраза о том, что не так. Снимок «до» и «после»
+  с одной и той же точки — в свой документ не класть, а назвать ведущей сессии в итоговом сообщении.
+- Деньги на картинки не тратить; сторонние данные — только открытые, строкой в `data/ATTRIBUTION.md`.
 
 ## Временное в основе
 

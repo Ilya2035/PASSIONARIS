@@ -11,8 +11,12 @@ import forest from './forest.js';
 import water from './water.js';
 import division from './division.js';
 import resources from './resources.js';
+import roads from './roads.js';
+import sky from './sky.js';
+import ground from './ground.js';
 
-export const ASPECTS = [swamp, settle, forest, water, division, resources];
+// (roads, sky and ground paint nothing through the contract functions: they are here for their knobs, pages and layers)
+export const ASPECTS = [swamp, settle, forest, water, division, resources, roads, sky, ground];
 export const ASPECT_GLSL = ASPECTS.map(a => `// ---- aspect: ${a.id}\n${a.glsl || ''}`).join('\n');
 export const ASPECT_UNIFORMS = Object.assign({}, ...ASPECTS.map(a => a.uniforms || {}));
 export const ASPECT_PARAMS = ASPECTS.flatMap(a => a.params || []);

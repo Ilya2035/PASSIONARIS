@@ -17,7 +17,9 @@ if (resolve(HERE) === resolve(MAIN)) { console.log('this is the main checkout â€
 console.log(`worktree ${HERE}\nmain     ${MAIN}`);
 
 // 1. gitignored data the game needs (skip build output, secrets, logs, raw downloads, tools, drafts)
-const SKIP = /^(dist\/|node_modules\/|tools\/|data\/raw\/|art\/drafts\/|\.env|\.claude\/)|\.log$/;
+// (data/album/ is the raw material of the album's bakes â€” OpenStreetMap extracts, height tiles: gigabytes that only
+// a session that bakes needs; it copies the piece it needs itself)
+const SKIP = /^(dist\/|node_modules\/|tools\/|data\/raw\/|data\/album\/|art\/drafts\/|\.env|\.claude\/)|\.log$/;
 const ignored = git(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'], MAIN)
   .split('\n').filter(p => p && !SKIP.test(p));
 let files = 0, bytes = 0;

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Passionaris check harness: builds and runs the game in isolation so checks never touch the player's own
 # %APPDATA%/Passionaris (settings and saves go to <A>/userdata). Several sessions can run it at once: each one
-# passes its OWN folder A (any empty folder outside the repo, e.g. a temp/scratchpad dir).
+# passes its OWN folder A (any empty folder outside the repo, e.g. a temp/scratchpad dir). Builds and windows take
+# turns (see `turn` below), so a check may wait for another session's check: give the call a long timeout.
 #   scripts/harness.sh build <A>                                  build the pages into <A>/dist
 #   scripts/harness.sh cap   <A> <name> "<query>" [W H] [eval.js] one frame of game.html?shot=1&<query> → <A>/<name>.png + .jpg
 #   scripts/harness.sh capl  <A> <name> [W H] [eval.js]           the launcher page → <A>/<name>.png + .jpg
@@ -28,11 +29,28 @@ cmd="$1"; shift || true
 abs() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 evjson() { node -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(process.argv[1],"utf8")))' "$1"; }
 jpg() { node -e "require('sharp')(process.argv[1]).resize(1000).jpeg({quality:84}).toFile(process.argv[2]).then(()=>console.log('jpg', process.argv[2]))" "$1" "$2"; }
+# One build or one window at a time on this computer, whatever the number of sessions: several of them building and
+# taking pictures at once made the owner's laptop lag (11.11.2026). A check waits for its turn here; a turn left
+# behind by a killed check is taken over after six minutes (no check runs longer).
+TURN="$(cygpath -u "${LOCALAPPDATA:-}" 2>/dev/null || echo /tmp)/Temp/passionaris-harness.turn"
+[ -d "$(dirname "$TURN")" ] || TURN="/tmp/passionaris-harness.turn"
+turn() {
+  local waited=0 age
+  until mkdir "$TURN" 2>/dev/null; do
+    age=$(( $(date +%s) - $(stat -c %Y "$TURN" 2>/dev/null || date +%s) ))
+    if [ "$age" -gt 360 ]; then rmdir "$TURN" 2>/dev/null || true; continue; fi
+    [ $((waited % 30)) -eq 0 ] && echo "harness: another check is running, waiting for the turn…" >&2
+    sleep 2; waited=$((waited + 2))
+  done
+  trap 'rmdir "$TURN" 2>/dev/null || true' EXIT
+}
 case "$cmd" in
   build)
+    turn
     A="$1"; mkdir -p "$A"
     node node_modules/vite/bin/vite.js build --outDir "$(abs "$A")/dist" --emptyOutDir --logLevel error && echo "build ok → $A/dist" ;;
   cap)
+    turn
     A="$1"; NAME="$2"; Q="$3"; W="${4:-1600}"; H="${5:-900}"; EV="$6"
     mkdir -p "$A/userdata"; OUT="$(abs "$A/$NAME.png")"
     EVJ=""; [ -n "$EV" ] && EVJ=",\"evaluate\":$(evjson "$EV")"
@@ -40,6 +58,7 @@ case "$cmd" in
       timeout 180 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -8
     jpg "$OUT" "$(abs "$A/$NAME.jpg")" ;;
   capl)
+    turn
     A="$1"; NAME="$2"; W="${3:-1240}"; H="${4:-740}"; EV="$5"
     mkdir -p "$A/userdata"; OUT="$(abs "$A/$NAME.png")"
     EVJ=""; [ -n "$EV" ] && EVJ=",\"evaluate\":$(evjson "$EV")"
@@ -47,6 +66,7 @@ case "$cmd" in
       timeout 120 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -8
     jpg "$OUT" "$(abs "$A/$NAME.jpg")" ;;
   acap)
+    turn
     A="$1"; NAME="$2"; Q="$3"; W="${4:-1600}"; H="${5:-900}"; EV="$6"
     mkdir -p "$A/userdata"; OUT="$(abs "$A/$NAME.png")"
     EVJ=""; [ -n "$EV" ] && EVJ=",\"evaluate\":$(evjson "$EV")"
@@ -66,6 +86,7 @@ case "$cmd" in
     A="$1"; Q="${2:-page=land-20&ui=0}"
     "$0" acap "$A" "acheck" "$Q" 800 450 "$ROOT/scripts/album/shadercheck.js" | grep "eval:" ;;
   smoke)
+    turn
     A="$1"; EV="$2"; mkdir -p "$A/userdata" "$A/smoke"
     EVP=""; [ -n "$EV" ] && EVP="$(abs "$EV")"
     PASSIONARIS_USERDATA="$(abs "$A/userdata")" PASSIONARIS_DIST="$(abs "$A/dist")" PASSIONARIS_SMOKE="$(abs "$A/smoke")" PASSIONARIS_EVAL="$EVP" \

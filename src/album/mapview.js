@@ -80,7 +80,9 @@ export function initMapView(album, q) {
   const over = el('label'), overBox = Object.assign(el('input', 'toggle'), { type: 'checkbox' }); over.append(overBox, el('span', null, 'Деление поверх натуральной карты'));
   over.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font:400 var(--fs-s)/1.3 var(--font-ui)';
   overBox.onchange = () => { natural = overBox.checked; const id = modeOf(p.get); if (MAP_MODES.find(m => m.id === id).set.division) p.setMany(modeParams(id, natural)); };
-  const sBoxes = MAP_SWITCHES.filter(([k]) => p.get(k) !== undefined).map(([k, name]) => {
+  // a part of the album adds its own switch without touching this file: a knob with `map: 'Подпись'` (params of its aspect)
+  const switches = [...MAP_SWITCHES, ...p.defs.filter(d => d.map && !MAP_SWITCHES.some(([k]) => k === d.key)).map(d => [d.key, d.map])];
+  const sBoxes = switches.filter(([k]) => p.get(k) !== undefined).map(([k, name]) => {
     const l = el('label'), c = Object.assign(el('input', 'toggle'), { type: 'checkbox' }); c.onchange = () => p.set(k, c.checked ? 1 : 0); l.append(c, el('span', null, name)); sw.append(l); return [k, c];
   });
   const toAlbum = button('mv-album', 'Альбом: страницы и настройки'); toAlbum.title = 'Все страницы альбома, отметки «Подходит» и «Не то», ручки вида';

@@ -1,6 +1,6 @@
 // Every knob of the album in one place: its Russian label, range and what it drives. Pages (pages.js) are just sets
 // of these values; the UI builds its sliders from the same list; URL keys p.<name>=<value> override them.
-import { Vector3 } from 'three';
+import { sunAt } from './light.js';
 import { ASPECT_PARAMS } from './aspects/index.js';
 
 export const LOOKS = {
@@ -46,12 +46,8 @@ const BASE = [
 // the aspects bring their own knobs (aspects/*.js)
 export const DEFS = [...BASE, ...ASPECT_PARAMS];
 
-// sun direction as (east, north, up). hour 0 = the cartographer's light from the north-west.
-export function sunAt(hour) {
-  if (!hour) return new Vector3(-.5, .45, .74).normalize();
-  const a = (hour - 12) * 15 * Math.PI / 180, el = Math.max(-.2, Math.sin((hour - 6) / 12 * Math.PI)) * 62 * Math.PI / 180;
-  return new Vector3(-Math.sin(a) * Math.cos(el), -Math.cos(a) * Math.cos(el) * .85, Math.sin(el)).normalize();
-}
+// the sun of the album lives in light.js
+export { sunAt };
 
 export function createParams(album) {
   const v = Object.fromEntries(DEFS.map(d => [d.key, d.value])), subs = [], u = album.terrain.u;
