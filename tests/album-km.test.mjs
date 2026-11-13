@@ -150,10 +150,10 @@ test('km of the album: a district is about four hundred whole chunks; the plains
 });
 
 test('km in the album: the chunks are shown only for checking — a knob and its pages', () => {
-  const knob = DEFS.find(d => d.key === 'km'); assert.ok(knob && knob.value === 0 && knob.uniform === 'uDivKm' && knob.options.length === 4);
+  const knob = DEFS.find(d => d.key === 'km'); assert.ok(knob && knob.value === 0 && knob.uniform === 'uDivKm' && knob.options.length === 5);   // outlines, class, living, fields
   assert.equal(division.uniforms.uDivKm.value, 0);
   for (const fn of ['kmHash(', 'kmSeed(', 'kmChunk(', 'kmFacts(']) assert.ok(division.glsl.includes(fn), fn);
-  const ids = division.pages.map(p => p.id); for (const id of ['km-chunks', 'km-chunks-natural', 'km-class', 'km-class-plain', 'km-living']) assert.ok(ids.includes(id), id);
+  const ids = division.pages.map(p => p.id); for (const id of ['km-chunks', 'km-chunks-natural', 'km-class', 'km-class-plain', 'km-living', 'km-farm', 'km-farm-natural']) assert.ok(ids.includes(id), id);
   for (const p of division.pages.filter(p => p.id.startsWith('km-'))) { assert.ok(p.p.km >= 1 && p.cam.h <= 140, 'a chunk is a few pixels wide on its pages'); assert.match(p.note, /чанк/i); }
   // the tools that show the natural cells of 100 km² no longer call them chunks
   for (const key of ['grid', 'chunkInfo', 'chunkData']) assert.match(DEFS.find(d => d.key === key).label, /яче[йе]к/);

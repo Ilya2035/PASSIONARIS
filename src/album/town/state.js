@@ -1,8 +1,16 @@
-// What the settlement work keeps for the shaders: its one texture, which says which patch of settlement lies where
-// (rules.js). It holds two grids laid from the same corner of the map: the COARSE one, squares of 10 km, for the towns
-// (the places of the album and the centres of districts), and the FINE one, squares of 2.5 km, for the villages
-// between them (villages.js). The fine grid fills the first VN rows of the texture, the coarse one the GN rows after
-// them (their first GN columns). Four bytes per square, the same in both grids:
+// What the settlement work keeps for the shaders: its one texture (the ground shader may read sixteen, and every
+// aspect has one). It holds three things.
+//
+// THE CHUNKS OF 1 km² (division/km.js) — the first KN rows, a texel a chunk, chunk (i, j) at (i, j):
+//   R     how much of the chunk is under fields (farmland.js)
+//   G, B  where the seed of the chunk stands in its square, so that the shader finds the chunk of a point as the
+//         division does: the nearest seed
+//   A     what the nine chunks around hold: 0 no fields at all · 255 all the same as this one · 128 a mix. The first
+//         two are by far the commonest, and then the shader reads this one texel and no more
+// THE PATCHES OF SETTLEMENT (rules.js) — two grids laid from the same corner of the map, below the chunks: the FINE
+// one, squares of 2.5 km, for the villages between the centres of districts (villages.js), at FINE_AT; the COARSE one,
+// squares of 10 km, for the towns (the places of the album and the centres of districts), at COARSE_AT beside it.
+// Four bytes per square, the same in both grids:
 //   R, G  where in the square the site of its patch lies
 //   B     radius of the patch (radiusByte(); 0 = no patch)
 //   A     which of the 3 × 3 squares around hold a patch whose houses or fields reach into this square (their places
@@ -13,15 +21,68 @@
 // `built` > 0 has a patch: at the site and of the size the model of growth gave it, or, for a chunk built up by
 // anything else (a brush), in the middle of the chunk and of the area of its built share.
 import { DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
-import { CELL, GN, GK, GX0, GY0, VN, VK, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, CULTURES } from './rules.js';
+import { CELL, GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, CULTURES } from './rules.js';
+import { KN, KKM, KX0, KY0, JITTER, kmHash } from '../division/km.js';
 
 export const settleBytes = new Uint8Array(GN * GN * 4);              // the coarse grid
-export const atlasBytes = new Uint8Array(VN * (VN + GN) * 4);        // the texture: the fine grid, then the coarse one
-export const villageBytes = atlasBytes.subarray(0, VN * VN * 4);     // the fine grid, in its place in the texture
-export const settleTex = new DataTexture(atlasBytes, VN, VN + GN, RGBAFormat, UnsignedByteType);
-// the coarse grid into its rows of the texture
-export function packAtlas(coarse = settleBytes, out = atlasBytes) { for (let r = 0; r < GN; r++) out.set(coarse.subarray(r * GN * 4, (r + 1) * GN * 4), (VN + r) * VN * 4); }
+export const villageBytes = new Uint8Array(VN * VN * 4);             // the fine grid
+export const atlasBytes = new Uint8Array(TEX_W * TEX_H * 4);         // the texture: the chunks, then the two grids
+export const farmBytes = atlasBytes.subarray(0, KN * KN * 4);        // the chunks of 1 km², in their place in the texture
+export const settleTex = new DataTexture(atlasBytes, TEX_W, TEX_H, RGBAFormat, UnsignedByteType);
+// the two grids into their places in the texture
+export function packAtlas(coarse = settleBytes, fine = villageBytes, out = atlasBytes) {
+  for (let r = 0; r < VN; r++) out.set(fine.subarray(r * VN * 4, (r + 1) * VN * 4), ((FINE_AT[1] + r) * TEX_W + FINE_AT[0]) * 4);
+  for (let r = 0; r < GN; r++) out.set(coarse.subarray(r * GN * 4, (r + 1) * GN * 4), ((COARSE_AT[1] + r) * TEX_W + COARSE_AT[0]) * 4);
+}
 settleTex.magFilter = settleTex.minFilter = NearestFilter; settleTex.wrapS = settleTex.wrapT = ClampToEdgeWrapping; settleTex.needsUpdate = true;
+
+// ---- the chunks of 1 km²
+// where the seed of every chunk stands in its square, as two bytes: written once, the first time the chunks are asked for
+let seeded = null;
+function seedBytes(out) {
+  if (seeded === out) return; seeded = out;
+  for (let j = 0, o = 0; j < KN; j++) for (let i = 0; i < KN; i++, o += 4) {
+    out[o + 1] = Math.round((.5 + (kmHash(i, j, 1) - .5) * 2 * JITTER) * 255); out[o + 2] = Math.round((.5 + (kmHash(i, j, 2) - .5) * 2 * JITTER) * 255);
+  }
+}
+// The fields of the chunks into the texture. farm: { km (a byte a chunk), list (the chunks that have fields) } of
+// farmland.js; null — no fields anywhere. Only the chunks that had fields or have them now are touched.
+let farmed = new Int32Array(0), farmedIn = null;
+export function mirrorFarm(farm, out = farmBytes) {
+  seedBytes(out);
+  const list = farm ? farm.list : new Int32Array(0), km = farm ? farm.km : null, old = farmedIn === out ? farmed : new Int32Array(0);
+  for (const c of old) out[c * 4] = 0;
+  for (const c of list) out[c * 4] = km[c];
+  // what the nine chunks around every chunk touched hold
+  const mark = c => {
+    const i = c % KN, j = (c - i) / KN;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const u = i + di, v = j + dj; if (u < 0 || v < 0 || u >= KN || v >= KN) continue;
+      const q = v * KN + u, own = out[q * 4]; let any = own > 0, same = true;
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
+        const x = u + a, y = v + b, f = x < 0 || y < 0 || x >= KN || y >= KN ? 0 : out[(y * KN + x) * 4];
+        if (f) any = true; if (f !== own) same = false;
+      }
+      out[q * 4 + 3] = !any ? 0 : same ? 255 : 128;
+    }
+  };
+  for (const c of old) mark(c);
+  for (const c of list) mark(c);
+  farmed = list; farmedIn = out;
+  return { changed: old.length > 0 || list.length > 0 };
+}
+// The share of fields at a point of the flat km plane, 0..1, as the ground shader reads it (setFarm in
+// aspects/settle.js): the chunk whose seed is nearest, the step to the chunks around softened.
+export function farmAt(x, y, bytes = farmBytes) {
+  const tx = (x - KX0) / KKM, ty = (y - KY0) / KKM, i = Math.floor(tx), j = Math.floor(ty); if (i < 0 || j < 0 || i >= KN || j >= KN) return 0;
+  const o = (j * KN + i) * 4, code = bytes[o + 3]; if (code === 0 || code === 255) return bytes[o] / 255;
+  const fx = tx - i, fy = ty - j; let sum = 0, all = 0;
+  for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
+    const q = (Math.max(0, Math.min(KN - 1, j + b)) * KN + Math.max(0, Math.min(KN - 1, i + a))) * 4, vx = a + bytes[q + 1] / 255 - fx, vy = b + bytes[q + 2] / 255 - fy, w = Math.exp(-FARM_SOFT * (vx * vx + vy * vy));
+    sum += w * bytes[q] / 255; all += w;
+  }
+  return sum / all;
+}
 // uSettle: x cell of the lattice, km · y how present the blocks are (1 near .. 0 the ground alone paints the roofs) ·
 // z height of the houses, × · w 1 settlements shown, 0 hidden
 export const settleUniforms = { tSettle: { value: settleTex }, uSettle: { value: new Vector4(CELL, 1, 1.25, 0) } };

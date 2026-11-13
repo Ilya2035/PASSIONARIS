@@ -49,7 +49,7 @@ vec3 kmChunk(vec2 pk, int d) {
   return vec3(vec2(best), e * ${FKM.toFixed(4)});
 }
 // what a chunk is like (division/gpu.js): the class of its ground 1..5 (0 water, or not worked out), who can live there
-ivec2 kmFacts(ivec2 q) { uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; return ivec2(int(g & 7u), int((g >> 3u) & 3u)); }
+ivec3 kmFacts(ivec2 q) { uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; return ivec3(int(g & 7u), int((g >> 3u) & 3u), int((g >> 8u) & 255u)); }   // z: its share under fields, a byte
 // the five classes of ground, as seen on screen: level, rolling, hilly, steep, mountain
 const vec3 KM_CLASS[6] = vec3[6](vec3(.55, .66, .82), vec3(.30, .62, .30), vec3(.62, .78, .36), vec3(.96, .85, .36), vec3(.93, .56, .22), vec3(.62, .24, .22));
 // A vote among the chunks around a point, the way chunkCell() of glsl.js weighs them: the nine cells of the chunk
@@ -142,10 +142,12 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
   }
   // the chunks of 1 km², for checking: what each is like and its outline. Shown while a chunk is a few pixels wide.
   if (uDivKm > 0 && px < .2) {
-    vec3 kc = kmChunk(pk, a.d); ivec2 kf = kmFacts(ivec2(kc.xy));
+    vec3 kc = kmChunk(pk, a.d); ivec3 kf = kmFacts(ivec2(kc.xy));
     float seen = 1. - smoothstep(.1, .2, px);
     if (!wet && uDivKm == 2 && kf.x > 0) col = mix(col, KM_CLASS[kf.x] * (.72 + .34 * lum), .82 * seen);
     if (!wet && uDivKm == 3 && kf.x > 0) col = mix(col, (kf.y == 2 ? vec3(.34, .66, .34) : kf.y == 1 ? vec3(.96, .82, .34) : vec3(.78, .28, .24)) * (.72 + .34 * lum), .82 * seen);
+    // by its fields: the more of the chunk is ploughed, the deeper the colour (town/farmland.js)
+    if (!wet && uDivKm == 4 && kf.z > 0) col = mix(col, mix(vec3(.98, .90, .52), vec3(.86, .50, .12), float(kf.z) / 255.) * (.72 + .34 * lum), (.35 + .5 * float(kf.z) / 255.) * seen);
     float e = min(kc.z, a.eD) / px, w = .5 * zoom;                                    // the side of a chunk, or the edge of its district
     vec3 ink = uStyle == 0 ? vec3(1., .98, .9) : vec3(.12, .10, .12);
     col = mix(col, ink, (1. - smoothstep(w - .5, w + .6, e)) * (wet ? .3 : uDivKm == 1 ? .55 : .2) * seen * smoothstep(.2, .09, px));
@@ -203,7 +205,7 @@ export default {
     { key: 'divState', label: 'Деление: собрать государство', group: 'modes', type: 'select', options: STATES, value: '' },
     { key: 'divLabels', label: 'Деление: названия земель', group: 'modes', type: 'toggle', value: 1 },
     { key: 'divPick', label: 'Район под курсором', group: 'modes', type: 'toggle', value: 0 },
-    { key: 'km', label: 'Чанки 1 км² (проверка)', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'очертания'], [2, 'класс земли'], [3, 'жилые и нежилые']], value: 0, uniform: 'uDivKm' },
+    { key: 'km', label: 'Чанки 1 км² (проверка)', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'очертания'], [2, 'класс земли'], [3, 'жилые и нежилые'], [4, 'угодья']], value: 0, uniform: 'uDivKm' },
   ],
   pages: [
     { id: 'mode-regions', group: 'Режимы карты', title: 'Деление: регионы', note: 'Регион — большая культурно-географическая земля: Иберия (весь полуостров с Балеарскими островами), Западная Европа (в альбоме её юг, до Пиренеев), Магриб. На воде регион — настоящее море со своим именем. Границы идут по гребням и берегам.', p: { ...PAPER, division: 3 }, cam: { lat: 40.3, lon: -2.4, h: 1650, tilt: 0, heading: 0 } },
@@ -221,6 +223,8 @@ export default {
     { id: 'km-class', group: 'Режимы карты', title: 'Чанки: пять классов земли', note: 'У каждого чанка заранее посчитано, насколько ровная его земля. Зелёный — ровная земля, жёлто-зелёный — пологие холмы, жёлтый — холмы и склоны, рыжий — крутые склоны, серо-лиловый — горы. Класс берётся по самой ровной четверти чанка: дно узкой долины между крутыми стенами — место для жилья. Здесь долины Пиренеев: Валь-д’Аран, Бенаске, Рибагорса.', p: { ...PAPER, division: 1, km: 2, divLabels: 0 }, cam: { lat: 42.6, lon: 0.62, h: 110, tilt: 0, heading: 0 } },
     { id: 'km-class-plain', group: 'Режимы карты', title: 'Чанки: классы земли на равнине Эбро', note: 'Долина Эбро у Сарагосы почти вся первого класса; к краям долины — холмы второго и третьего. Границы классов не видны в игре: это числа чанков, по которым потом расселяются люди.', p: { ...PAPER, division: 1, km: 2, divLabels: 0 }, cam: { lat: 41.6, lon: -0.9, h: 110, tilt: 0, heading: 0 } },
     { id: 'km-living', group: 'Режимы карты', title: 'Чанки: жилые, едва жилые и нежилые', note: 'Зелёный — жить можно (классы 1–3), жёлтый — едва: на крутых склонах встанет разве что хутор (класс 4), красный — нежилой чанк (класс 5: горы и всё выше 2 400 м). В горах жилые чанки идут цепочками по долинам. Здесь Пиренеи от Андорры до Сердани.', p: { ...PAPER, division: 1, km: 3, divLabels: 0 }, cam: { lat: 42.5, lon: 1.7, h: 130, tilt: 0, heading: 0 } },
+    { id: 'km-farm', group: 'Режимы карты', title: 'Чанки: угодья', note: 'Проверочный вид: у каждого чанка одно число — какая его доля под полями. Чем гуще цвет, тем больше распахано: тёмно-рыжий — чанк угодий целиком, светло-жёлтый — несколько наделов. Поселение распахивает чанки вокруг себя, сколько нужно его жителям; ровную землю раньше холмов. Рисунок полей на обычной карте берётся только из этого числа. Здесь «Рост городов» на 1,6.', p: { ...PAPER, division: 1, km: 4, divLabels: 0, growth: 1.6 }, cam: { lat: 41.66, lon: -0.9, h: 60, tilt: 0, heading: 0 } },
+    { id: 'km-farm-natural', group: 'Режимы карты', title: 'Чанки: угодья на натуральной карте', note: 'Те же числа поверх обычной картины: видно, что поля нарисованы там, где чанки распаханы, а край полей идёт по наделам и не повторяет прямые стороны чанков.', p: { ...NATURAL, division: 1, km: 4, divLabels: 0, growth: 1.6, forest3d: 0 }, cam: { lat: 41.74, lon: -1.08, h: 24, tilt: 20, heading: 0 } },
     { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек около 100 км²: по ним пока считаются лес, лёд и болота. Тёмные — границы районов. Район состоит из чанков по 1 км², а не из этих ячеек, поэтому линии совпадают не везде. Числа района суммируются по его чанкам; число ячейки делится между районами по тому, сколько её чанков в каждом.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
     { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, число чанков по 1 км², доля леса, болот, застройки и полей, сколько чанков какого класса земли и сколько жилых, суммы ресурсов. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
     { id: 'division-sea', group: 'Режимы карты', title: 'Деление: море и острова', note: 'Моря названы: Бискайский залив, Атлантика, Кадисский залив, море Альборан, Балеарское море, Лионский залив. Прибрежное море поделено на куски напротив прибрежных районов, чтобы высадиться можно было везде.', p: { ...PAPER, division: 3 }, cam: { lat: 39.6, lon: 0.6, h: 900, tilt: 0, heading: 0 } },

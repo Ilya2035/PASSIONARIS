@@ -129,16 +129,18 @@ export function farmsteadsOfAlbum(yards, { cells, rank, n }) {
   return out;
 }
 
-// The world of the album as such a save sees it. div: the division; model: growTowns(), which still counts by
-// the natural cells of chunks.js; cellOf: the natural cell of every chunk of 1 km² (km.js cellsOfChunks().cell) and
-// n the side of their lattice — a district is its chunks (div.cells), and each brings the numbers of its cell;
+// The world of the album as such a save sees it. div: the division; model: growTowns(): its fields are the state of
+// the chunks of 1 km² (model.farm), its forest and houses are still counted by the natural cells of chunks.js;
+// cellOf: the natural cell of every chunk of 1 km² (km.js cellsOfChunks().cell) — a district is its chunks
+// (div.cells), and each brings the forest and the houses of its cell and its own fields;
 // places: what the model was given; legs: roadNetwork().legs (kind 0 main, 1 lesser, 2 track, 3 no road);
 // districtOf(x, y) → the district of a point; cultureOf(place) → a number; farmsteads: farmsteadsOfAlbum();
 // siteOf(town) → { district, site }: which place of the list of its district the settlement stands on
 // (town/villages.js; 0 is the centre). Without it the settlements of a district are numbered as they come.
 export function landOfAlbum({ div, model, places, legs, districtOf, cellOf, cultureOf = () => 1, farmsteads = [], siteOf = null }) {
   const D = div.count, sum = Array.from({ length: D }, () => [0, 0, 0, 0]), cells = div.cells, N = model.keep.length;
-  for (let c = 0; c < cells.length; c++) { const d = cells[c], k = cellOf[c]; if (d < 0 || k >= N) continue; const s = sum[d]; s[0]++; s[1] += model.keep[k]; s[2] += model.fields[k]; s[3] += model.built[k]; }
+  const km = model.farm ? model.farm.km : null;
+  for (let c = 0; c < cells.length; c++) { const d = cells[c], k = cellOf[c]; if (d < 0 || k >= N) continue; const s = sum[d]; s[0]++; s[1] += model.keep[k]; s[2] += km ? km[c] / 255 : model.fields[k]; s[3] += model.built[k]; }
   const districts = sum.map(s => ({ forest: s[0] ? s[1] / s[0] : 1, fields: s[0] ? s[2] / s[0] : 0, pasture: 0, built: s[0] ? s[3] / s[0] : 0, burnt: 0, age: 0 }));
   const settlements = [], taken = new Uint8Array(D);
   for (const t of model.towns) {

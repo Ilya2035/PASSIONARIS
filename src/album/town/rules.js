@@ -11,6 +11,7 @@
 // The patches live in a grid of the settlement work's own (state.js): squares of 10 km, one patch at most in each.
 // It is only a way to find the patches near a point; chunks have natural outlines and are not these squares.
 import { CHUNK_KM, CN, CI0, CJ0 } from '../chunks.js';
+import { KN, KKM, KX0, KY0 } from '../division/km.js';
 
 export const GK = CHUNK_KM, GN = CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;   // the grid of patches: GN × GN squares of GK km from (GX0, GY0)
 // The villages between the centres of districts (villages.js) lie in a finer grid of their own, laid from the same
@@ -18,6 +19,18 @@ export const GK = CHUNK_KM, GN = CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;
 // one square, so a point of the ground looks at the 3 × 3 squares around it, as in the coarse grid.
 export const VK = 2.5, VN = GN * GK / VK;
 export const VILLAGE_RMAX = .39; // km: the largest radius of a village of the fine grid (a small town begins at .4, STAGES)
+// The one texture of the settlement work (state.js) holds three things. Its first KN rows are the chunks of 1 km²
+// (division/km.js), a texel a chunk: what the chunk holds — its fields. Below them lie the fine grid of villages and,
+// beside it, the coarse grid of towns.
+export const TEX_W = KN, TEX_H = KN + VN;
+export const FINE_AT = [0, KN], COARSE_AT = [VN, KN];              // the corner of each grid in the texture: column, row
+// How soft the step from the fields of one chunk to the next is: the weight of a chunk falls as exp(−FARM_SOFT · d²)
+// with the distance d to its seed, km. At 4 the fields of a chunk thin out over some five hundred metres around its
+// side — two or three furlongs, so the edge of the fields is an edge of furlongs and no straight line.
+export const FARM_SOFT = 4;
+export const FARM_WARP = .6;      // km: how far, at most, a point is moved by a smooth noise before its chunk is looked for (half of it each way)
+export const FARM_UNEVEN = .5;    // how much the share of ploughed land wanders from place to place inside a chunk (a quarter each way)
+export const FARM_SHARP = 2;      // fields keep together: the share of furlongs ploughed runs from none to all twice as fast as the share of the chunk
 export const RMAX = 6;           // km: the largest radius a patch can have (a chunk built up from edge to edge)
 export const CELL = .085;        // km: one block with its street, as in life
 export const BEND = .35;         // how far the lattice is bent, in cells
@@ -144,6 +157,15 @@ export const RULES_GLSL = /* glsl */`
 #define SET_G0 vec2(${GX0.toFixed(1)}, ${GY0.toFixed(1)})
 #define SET_VN ${VN}
 #define SET_VK ${VK.toFixed(2)}
+#define SET_FINE ivec2(${FINE_AT[0]}, ${FINE_AT[1]})
+#define SET_COARSE ivec2(${COARSE_AT[0]}, ${COARSE_AT[1]})
+#define SET_KN ${KN}
+#define SET_KKM ${KKM.toFixed(1)}
+#define SET_K0 vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})
+#define SET_SOFT ${FARM_SOFT.toFixed(1)}
+#define SET_WARP ${(FARM_WARP / KKM).toFixed(3)}
+#define SET_UNEVEN ${FARM_UNEVEN.toFixed(3)}
+#define SET_SHARP ${FARM_SHARP.toFixed(2)}
 #define SET_BEND ${BEND.toFixed(3)}
 float setWob(vec2 pk) { return sin(pk.x * 9. + 1.3 * sin(pk.y * 7.)); }
 float setHash(ivec2 id, int k, int salt) {

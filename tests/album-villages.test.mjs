@@ -13,7 +13,7 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { decodeSites } from '../src/album/town/sites.js';
-import { GN, GK, GX0, GY0, VN, VK, VILLAGE_RMAX, CULTURES, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, RULES_GLSL } from '../src/album/town/rules.js';
+import { GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, CULTURES, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, RULES_GLSL } from '../src/album/town/rules.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE, PER, DENSE, GAP, NEAR, MOST, MADE_R, MADE_POP, GOOD, TOO_HIGH, SWAMP } from '../src/album/town/villages.js';
 import { growTowns, centrePlaces, fullRadius, FIELD_FLOOR, KEEP_OFF } from '../src/album/town/grow.js';
 import { mirrorSettle, mirrorVillages, packAtlas, settleBytes, atlasBytes, villageBytes, settleTex } from '../src/album/town/state.js';
@@ -174,10 +174,12 @@ test('villages: their patches lie in the fine grid of the one settlement texture
   const LA = v.lobes.find(l => l.fine === A.fine), LB = v.lobes.find(l => l.fine === B.fine);
   assert.ok(LA.rivals.includes(LB) && LB.rivals.includes(LA) && !LA.rivals.includes(r.lobes[0])); assert.equal(v.lobes.find(l => l.fine === C.fine).rivals.length, 0);
   assert.ok(v.lobes.find(l => l.fine === Dv.fine).rivals.includes(r.lobes[0]), 'a village knows the town beside it');
-  // the texture holds both grids: the fine one in its first rows, the coarse one after
-  assert.equal(settleTex.image.width, VN); assert.equal(settleTex.image.height, VN + GN); assert.equal(atlasBytes.length, VN * (VN + GN) * 4); assert.equal(villageBytes.length, VN * VN * 4); assert.equal(villageBytes.buffer, atlasBytes.buffer);
+  // the texture holds both grids below the rows of the chunks of 1 km²: the fine one, and the coarse one beside it
+  assert.equal(settleTex.image.width, TEX_W); assert.equal(settleTex.image.height, TEX_H); assert.equal(atlasBytes.length, TEX_W * TEX_H * 4); assert.equal(villageBytes.length, VN * VN * 4);
+  assert.deepEqual([TEX_W, TEX_H, FINE_AT, COARSE_AT], [KN, KN + VN, [0, KN], [VN, KN]]); assert.ok(COARSE_AT[0] + GN <= TEX_W && FINE_AT[1] + VN <= TEX_H, 'both grids fit beside each other');
   mirrorSettle(ch, m.towns); mirrorVillages(ch, m.towns, r.lobes); packAtlas();
-  const g = r.lobes[0].k; assert.equal(atlasBytes[((VN + Math.floor(g / GN)) * VN + g % GN) * 4 + 2], settleBytes[g * 4 + 2]); assert.equal(atlasBytes[A.fine * 4 + 2], radiusByte(A.R));
+  const g = r.lobes[0].k; assert.equal(atlasBytes[((COARSE_AT[1] + Math.floor(g / GN)) * TEX_W + COARSE_AT[0] + g % GN) * 4 + 2], settleBytes[g * 4 + 2]);
+  assert.equal(atlasBytes[((FINE_AT[1] + Math.floor(A.fine / VN)) * TEX_W + FINE_AT[0] + A.fine % VN) * 4 + 2], radiusByte(A.R));
   // the plan of a village: a few blocks around its place, on its own lattice
   const S = cellSize(20), env = { at, river: () => 1e9, swamp: () => 0 }, rows = planLobe(LA, S, env);
   assert.ok(rows.length >= ROW * 3 && rows.length < ROW * 60, `${rows.length / ROW} blocks in a village`);
@@ -187,18 +189,19 @@ test('villages: their patches lie in the fine grid of the one settlement texture
   clear();
 });
 
-test('villages: the ground shader reads both grids; the fields of a village come in only where furlongs can be told', () => {
+test('villages: the ground shader reads both grids; a village has no mark from afar', () => {
   assert.equal(VN, 512); assert.equal(VK, 2.5); assert.equal(VN * VK, GN * GK);
   assert.match(RULES_GLSL, /#define SET_VN 512/); assert.match(RULES_GLSL, /#define SET_VK 2\.50/);
   const g = settle.glsl;
-  assert.match(g, /texelFetch\(tSettle, fine \? c : ivec2\(c\.x, c\.y \+ SET_VN\), 0\)/, 'the coarse grid lies after the rows of the fine one');
+  assert.match(g, /texelFetch\(tSettle, c \+ \(fine \? SET_FINE : SET_COARSE\), 0\)/, 'each grid at its own place in the texture');
+  assert.match(RULES_GLSL, new RegExp(`#define SET_FINE ivec2\\(0, ${KN}\\)`)); assert.match(RULES_GLSL, new RegExp(`#define SET_COARSE ivec2\\(${VN}, ${KN}\\)`));
   assert.match(g, /setSquares\(code, c0, false/); assert.match(g, /setSquares\(vcode, v0, true/);
-  assert.match(g, /float setFieldsSeen\(float r, float px\)/); assert.match(g, /ck = village \? SET_GN \* SET_GN \+ bc\.y \* SET_VN \+ bc\.x/);
+  assert.match(g, /ck = village \? SET_GN \* SET_GN \+ bc\.y \* SET_VN \+ bc\.x/);
   assert.match(g, /if \(village\) tm \*= 1\. - smoothstep/, 'a village melts into the land from afar: no mark');
-  // the yards: every patch is known, and the fields of a town reach past the village beside it
+  // the yards: every patch is known
   const idx = patchIndex([{ x: -205, y: 4405, r: .9 }, { x: -203, y: 4405, r: .08 }, { x: -150, y: 4405, r: .08 }]);
   assert.equal([...idx.values()].reduce((a, l) => a + l.length, 0), 3); assert.ok([...idx.values()].some(l => l.length === 2), 'a town and a village in one square of 10 km');
-  assert.ok(ploughed(.02, -1.2, .08) < .2 && ploughed(.02, -1.2, .08, .7) > .6 && ploughed(.02, -1.2, .08, -5) === ploughed(.02, -1.2, .08));
+  assert.ok(ploughed(.3, -.02, .08) > ploughed(.3, -1.2, .08), 'in a chunk ploughed in part the land beside a village is ploughed first');
 });
 
 test('villages in the album: the knob, the check of places and the pages', () => {

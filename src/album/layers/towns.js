@@ -8,6 +8,8 @@
 // Among the fields stand single yards (town/yards.js): the same blocks in a second mesh, one more draw call.
 // Between the centres of districts stand villages (town/villages.js): every district has its list of places, and the
 // model founds a village on each as the «Рост городов» knob rises. They are patches like the towns, in a finer grid.
+// The fields are the state of the chunks of 1 km² (town/farmland.js): every settlement ploughs the chunks around it,
+// and the ground shader draws the fields from the share each chunk keeps (town/state.js, the rows of the chunks).
 import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, BufferGeometry, Points, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
 import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
@@ -15,7 +17,8 @@ import { kmOf, llOf } from '../chunks.js';
 import { smoothLine } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
 import { cellSize, cultureAt, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
-import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, packAtlas } from '../town/state.js';
+import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
+import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces } from '../town/grow.js';
@@ -138,15 +141,18 @@ export default async function init(album) {
 
   // ---- growth: the places and the knob become the state of the chunks; after a reset of the chunks, again
   const written = new Map(), byteOf = (name, k) => Math.round(ch.get(name, k) * 255);
-  let model = null, grown = -1;
+  let model = null, grown = -1, haSeen = -1, ground = null, groundOf = -2, farmN = 0;
   function applyGrowth(fresh) {
     if (!fresh) for (const [k, w] of written) {                     // take back what the model wrote, unless someone changed it since
       if (byteOf('built', k) === w.built) ch.set('built', k, ch.getNatural('built', k));
       if (byteOf('fields', k) === w.fields) ch.set('fields', k, ch.getNatural('fields', k));
       if (byteOf('forest', k) === w.forest) ch.set('forest', k, w.forest0);
     }
-    written.clear(); grown = p.get('growth');
-    model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1));
+    written.clear(); grown = p.get('growth'); haSeen = p.get('farmHa') ?? HA_PER_PERSON;
+    // what the chunks of 1 km² can give: from the division once the land is divided, from the relief before that
+    const dv = album.division, dvN = dv ? dv.version : -1;
+    if (groundOf !== dvN) { groundOf = dvN; ground = farmGround(ch, at, dv ? { cls: dv.chunkFacts().cls, hgt: dv.data.raster.hgt } : null, k => ch.getNatural('swamp', k)); }
+    model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1), { ground, ha: haSeen }); farmN++;
     for (let k = 0; k < ch.count; k++) {
       const b = model.built[k], f = model.fields[k], keep = model.keep[k];
       if (!(b > 0 || f > 0 || keep < 1)) continue;
@@ -173,14 +179,20 @@ export default async function init(album) {
   const siteOfTown = t => { const pl = places[t.index]; return pl.site !== undefined ? { district: pl.district, site: pl.site } : pl.district !== undefined ? { district: pl.district, site: 0 } : siteOfBase.get(t.index) || null; };
   let sitesDrawn = false;
   ch.onReset(() => applyGrowth(true));
-  p.on(key => { if (key === 'growth' || (key == null && grown !== p.get('growth'))) applyGrowth(false); });
+  p.on(key => { if (key === 'growth' || key === 'farmHa' || (key == null && (grown !== p.get('growth') || haSeen !== (p.get('farmHa') ?? HA_PER_PERSON)))) applyGrowth(false); });
   applyGrowth(true);
 
   // ---- the mirror of the chunk state for the shaders, and the patches for the plan
-  let lobes = [], seen = -1, mirrorN = 0;
+  let lobes = [], seen = -1, mirrorN = 0, farmSig = '', farmSeen = -1, farmShown = null, farmV = 0, farmPer = null;
   function mirror() {
     const r = mirrorSettle(ch, model.towns), v = mirrorVillages(ch, model.towns, r.lobes);
-    if (!r.changed && !v.changed && mirrorN) return;
+    // the fields of the chunks of 1 km²: what the model ploughed; a natural cell whose share of fields someone has
+    // changed since (the brush, the demonstrations of the album) gives that share to every chunk in it
+    const over = new Map();
+    for (let k = 0; k < ch.count; k++) { if (ch.kind[k] !== 1) continue; const b = byteOf('fields', k); if (b !== Math.round(model.fields[k] * 255)) over.set(k, b / 255); }
+    const sig = farmN + '|' + [...over].map(e => e[0] + ':' + Math.round(e[1] * 255)).join(','), farmNew = sig !== farmSig;
+    if (farmNew) { farmSig = sig; farmShown = farmWithCells(model.ground, model.farm, over); mirrorFarm(farmShown); farmV++; farmPer = null; yctx.farmList = farmShown.list; }
+    if (!r.changed && !v.changed && !farmNew && mirrorN) return;
     packAtlas();
     lobes = r.lobes.concat(v.lobes); mirrorN++; settleTex.needsUpdate = true; yctx.patches = patchIndex(lobes);
   }
@@ -239,7 +251,7 @@ export default async function init(album) {
     }
     return best;
   };
-  const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, fields: c => ch.get('fields', c), culture: c => Math.round(ch.get('culture', c) * 255),
+  const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y), farmList: null, culture: c => Math.round(ch.get('culture', c) * 255),
     patches: new Map(), env: { ...env, road: roadAt }, density: 1, S: CELL,
     // a yard stands at one of the sixteen places of a chunk of 1 km² of land (once the land is divided)
     landSquare: (kx, ky) => { const dv = album.division?.data; if (!dv?.cells) return true; const d = kx >= 0 && ky >= 0 && kx < KN && ky < KN ? dv.cells[ky * KN + kx] : -1; return d >= 0 && dv.kinds[d] === 0; } };
@@ -288,6 +300,7 @@ export default async function init(album) {
     // numbers for the notes of this part (docs/album/settle.md)
     stats: () => ({ blocks: town.count, triangles: town.real, slots: town.count * SLOTS / 3, drawCalls: (mesh.visible ? 1 : 0) + (yard.mesh.visible ? 1 : 0), patches: lobes.length, towns: model.towns.length,
       villages: model.towns.filter(t => t.village).length, places: places.length, sites: siteList ? siteList.x.length : 0,
+      farmChunks: farmShown ? farmShown.list.length : 0, farmKm2: farmShown ? farmShown.list.reduce((a, c) => a + farmShown.km[c] / 255, 0) : 0,
       yards: yard.mesh.visible ? yard.count : 0, yardTriangles: yard.mesh.visible ? yard.real : 0, yardCorners: yard.mesh.visible ? yard.count * ySlots : 0,
       shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: (town.cap + yard.cap) * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
     yardContext: () => yctx,
@@ -295,12 +308,16 @@ export default async function init(album) {
     places: () => places,
     // the lists of places of the districts (villages.js), which of them are settled, and where a settlement stands
     sites: () => siteList, founded: () => founded, siteOfTown,
-    // what a district holds: { places (in its list at this density), settlements, villages, people }
+    // the fields of the chunks of 1 km² as they are drawn: { km (a byte a chunk), list (the chunks that have fields) };
+    // farmVersion changes whenever they do; farmAt(x, y) → the share of fields at a point of the flat km plane
+    farm: () => farmShown, farmVersion: () => farmV, farmAt,
+    // what a district holds: { places (in its list at this density), settlements, villages, people, fieldsKm2 }
     districtInfo(d) {
       if (!siteList || !(d >= 0) || siteList.first[d + 1] === siteList.first[d]) return null;
-      let made = 0, n = 0; const allow = madeAllowed(siteList, d, villSeen);
+      let made = 0, n = 0; const allow = madeAllowed(siteList, d, villSeen), dv = album.division;
       for (let s = siteList.first[d]; s < siteList.first[d + 1]; s++) if (siteList.kind[s] !== SITE.made || made++ < allow) n++;
-      return { places: n, settlements: 0, villages: 0, people: 0, ...perDistrict.get(d) };
+      if (!farmPer && farmShown && dv) farmPer = farmOfDistricts(farmShown, dv.data.cells, dv.data.count);
+      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, ...perDistrict.get(d) };
     },
     update(dt, t, cam) {
       // the land has been divided (or divided anew): a settlement stands at the centre of every district
@@ -313,10 +330,10 @@ export default async function init(album) {
         const t1 = performance.now();
         places = [...centrePlaces(album.data.vectors.places, dv.data, dv.sites), ...villagePlaces(siteList, dv.sites, { base: nb, density: vk })];
         indexRivers(); applyGrowth(false);
-        console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
+        console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages, ${model.farm.area.toFixed(0)} km² of fields in ${model.farm.list.length} chunks (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
       spts.visible = !!p.get('sitesShow') && !!siteList;
       if (spts.visible) { if (!sitesDrawn) drawSites(); smat.uniforms.uPx.value = Math.max(5, Math.min(13, 900 / cam.s.h)) * (album.renderer.getPixelRatio?.() || 1); }
-      if (ch.version !== seen) { seen = ch.version; mirror(); }
+      if (ch.version !== seen || farmN !== farmSeen) { seen = ch.version; farmSeen = farmN; mirror(); }
       const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look')), dom = album.renderer.domElement;
       const S = cellSize(h, kH || 1), view = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360), cells = S / (view / Math.max(1, dom.height));   // a block in pixels of the picture
       // blocks stand while a block is a few pixels wide; smaller than that the ground alone shows the settlement
@@ -347,7 +364,7 @@ export default async function init(album) {
       if ((album.roadNet || null) !== roadSeen) indexRoads();
       const D = Math.min(72, Math.max(20, 4 * Math.ceil(h * 1.5 / 4))), ax = Math.round(tx / 4) * 4, ay = Math.round(ty / 4) * 4;
       yctx.density = yk; yctx.S = S;
-      const yck = `${ck}|${seen}|${yk}|${roadN}|${divSeen}`, ykey = `${yck}|${ax},${ay}|${D}`;
+      const yck = `${ck}|${seen}|${farmV}|${yk}|${roadN}|${divSeen}`, ykey = `${yck}|${ax},${ay}|${D}`;
       if (ykey !== yKey) { yKey = ykey; rebuildYards(ax, ay, D, yck); }
       ymat.uniforms.uYard.value.set(tx, ty, D - 5.7, U.y);
     } };

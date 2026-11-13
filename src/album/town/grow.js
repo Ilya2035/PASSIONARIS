@@ -1,18 +1,22 @@
 // How settlements grow, as numbers of chunks. A place has a size; the size times the «Рост городов» knob is the radius
 // of its settlement, at its real size: хутор → деревня → село → городок → город (STAGES in rules.js). From the radius
-// the model works out what the chunks around hold: the share under houses (`built`), under fields (`fields`), and
-// how much of the natural forest still stands. It only returns numbers — the layer writes them into the chunks.
+// come its people, and from the people the fields they live from: the settlement ploughs the chunks of 1 km² around
+// it (farmland.js), the nearest and most level first. The model returns numbers only — the layer writes them into
+// the chunks: the share of every chunk of 1 km² under fields (`farm`), and for the natural cells of about 100 km²
+// (docs/ALBUM-CHUNKS.md) the share under houses (`built`), under fields (`fields`, the sum of their chunks) and how
+// much of the natural forest still stands.
 //
-// Chunks have natural outlines (docs/ALBUM-CHUNKS.md), so the model walks from chunk to chunk by their links: fields
-// and felling spread from the chunk of the settlement to its neighbours over land, and a great river stops them.
+// Fields and felling spread over land: the natural cells have outlines along the rivers, the model walks from cell
+// to cell by their links, and a great river stops it.
 // A settlement by a river stands on one bank: its site is moved off the water until its houses touch the bank.
 //
 // Two sorts of places are grown. A TOWN — a place of the album or the centre of a district — may grow into a city;
 // there is one to a natural cell, and its patch lies in the coarse grid (state.js). A VILLAGE — a place between the
 // centres (villages.js; place.village) — stays a village: its radius stops at VILLAGE_RMAX, there is one to a square
 // of the fine grid, and where a town has grown over its place it is not founded at all.
-import { FKM, FN, kmOf, llOf } from '../chunks.js';
-import { GX0, GY0, GK, VK, VN, VILLAGE_RMAX, stageOf, fieldsBeyond, peopleOf, classOf } from './rules.js';
+import { kmOf, llOf } from '../chunks.js';
+import { GX0, GY0, GK, VK, VN, VILLAGE_RMAX, stageOf, peopleOf, classOf } from './rules.js';
+import { farmGround, farmRun, HA_PER_PERSON, FARM_REACH } from './farmland.js';
 
 export const RCAP = 2.2;                                            // km: the largest settlement the album founds
 // radius of a place at full growth, km, from the people who live there today: a hamlet of a few yards (300 people
@@ -38,13 +42,12 @@ export function centrePlaces(base, div, sites = []) {
   }
   return out;
 }
-// how far the felling reaches beyond the fields, km
-export const fellBeyond = r => .3 + .5 * r;
 // A hamlet and a village clear only the ground of their houses and fields (the picture of the fields does that); from
-// this radius on a settlement also thins the forest of the chunks around it
-export const FELL_FROM = .15;
-// a natural cell the fields of a settlement reach holds at least this share of fields: enough for the ground shader
-// to draw the fields beside the houses on both sides of the outline of the cell
+// this radius on a settlement also thins the forest of the natural cells its fields lie in: for every km² it ploughs
+// it fells FELL km² of the forest around
+export const FELL_FROM = .15, FELL = 1.2;
+// a natural cell that holds any fields holds at least this share of them: the forest and the far view read the share
+// of the cell, and a byte must not round a few fields down to none
 export const FIELD_FLOOR = .006;
 export const KEEP_OFF = .25;                                        // km of open ground between the last houses of a town and a village
 
@@ -68,11 +71,16 @@ export function reachOf(ch, home, steps, ford) {
 }
 
 // places: [{ lat, lon, pop, village (true for a village), r (its radius at full growth, km, when not from pop) }];
-// growth: the knob; at(xKm, yKm) → metres; river(xKm, yKm) → km to the nearest river bank
-// → { built, fields, keep (share of the forest left),
-//     towns: [{ index, x, y, R, stage, home, byte, people, cls, village, fine (its square of the fine grid) }] }
-export function growTowns(ch, places, growth, at, river = () => 1e9) {
+// growth: the knob; at(xKm, yKm) → metres; river(xKm, yKm) → km to the nearest river bank;
+// farm: { ground (farmland.js farmGround(): what the chunks of 1 km² can give; made here when left out),
+//         ha (hectares of fields a person lives from) }
+// → { built, fields, keep (share of the forest left) — for the natural cells;
+//     farm: { km (the share of every chunk of 1 km² under fields, a byte), list, area, … } (farmland.js),
+//     towns: [{ index, x, y, R, stage, home, byte, people, cls, ploughed (km² of its fields), village,
+//               fine (its square of the fine grid) }] }
+export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) {
   const n = ch.count, built = new Float32Array(n), fields = new Float32Array(n), keep = new Float32Array(n).fill(1), taken = new Set(), takenFine = new Set(), byGrid = new Map(), towns = [];
+  const ground = farm.ground || farmGround(ch, at), run = farmRun(ground), perPerson = (farm.ha ?? HA_PER_PERSON) / 100;
   const order = places.map((_, i) => i).sort((a, b) => places[b].pop - places[a].pop);
   for (const index of order) {
     const pl = places[index], vil = !!pl.village, R = Math.min(vil ? VILLAGE_RMAX : RCAP, (pl.r ?? fullRadius(pl.pop)) * growth);
@@ -101,24 +109,20 @@ export function growTowns(ch, places, growth, at, river = () => 1e9) {
     }
     const byte = vil ? 1 : Math.max(1, Math.min(255, Math.round(Math.PI * R * R / ch.area[home] * 255)));
     built[home] = Math.max(built[home], byte / 255);
-    // fields around the houses, the forest felled a little further out: over land, from chunk to chunk, not across a great river
-    const Rf = R + fieldsBeyond(R), Rc = Rf + fellBeyond(R), far = Rc * 1.5, ok = reachOf(ch, home, vil ? 2 : 4, 1), sum = new Map();
-    const tx0 = Math.max(0, Math.floor((x - far - GX0) / FKM)), tx1 = Math.min(FN - 1, Math.floor((x + far - GX0) / FKM)), ty0 = Math.max(0, Math.floor((y - far - GY0) / FKM)), ty1 = Math.min(FN - 1, Math.floor((y + far - GY0) / FKM));
-    const part = (rad, d) => Math.max(0, Math.min(1, (rad - d) / FKM + .5));   // how much of a texel of the fine raster lies within a radius
-    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-      const c = ch.cell[ty * FN + tx]; if (!ok.has(c)) continue;
-      const cx = GX0 + (tx + .5) * FKM, cy = GY0 + (ty + .5) * FKM, d = Math.hypot(cx - x, cy - y); if (d > far + FKM) continue;
-      const h = at(cx, cy); if (h <= 1) continue;
-      const s = sum.get(c) || sum.set(c, [0, 0]).get(c);
-      const flat = h < 1500 && Math.hypot(at(cx + .5, cy) - at(cx - .5, cy), at(cx, cy + .5) - at(cx, cy - .5)) / 1000 < .2;
-      if (flat) s[0] += FKM * FKM * (part(Rf, d) - part(R, d));
-      if (R >= FELL_FROM) s[1] += FKM * FKM * (part(Rc, d) + .5 * (part(far, d) - part(Rc, d)));
-    }
-    for (const [c, s] of sum) { fields[c] = Math.max(fields[c], Math.min(1, s[0] / ch.area[c]) * .95, s[0] > 0 ? FIELD_FLOOR : 0); keep[c] = Math.min(keep[c], Math.max(0, 1 - s[1] / ch.area[c])); }
-    const people = peopleOf(R), town = { index, x, y, R, stage: stageOf(R), home, byte, people, cls: classOf(people, Math.PI * R * R) };
+    // its fields: the chunks of 1 km² nearest to the houses, over land, not across a great river
+    const people = peopleOf(R), ploughed = perPerson > 0 ? run.claim(x, y, people * perPerson, FARM_REACH[vil ? 0 : 1], reachOf(ch, home, vil ? 2 : 4, 1), R >= FELL_FROM ? FELL : 0) : 0;
+    const town = { index, x, y, R, stage: stageOf(R), home, byte, people, cls: classOf(people, Math.PI * R * R), ploughed };
     if (vil) { town.village = true; town.fine = fine; }
     else { const key = gj * 4096 + gi; (byGrid.get(key) || byGrid.set(key, []).get(key)).push(town); }
     towns.push(town);
   }
-  return { built, fields, keep, towns };
+  // what the natural cells hold: the fields of their chunks, and the forest that had to make room
+  const state = run.done();
+  for (let k = 0; k < n; k++) {
+    const a = state.cellArea[k]; if (!(a > 0)) continue;
+    const all = Math.max(1, ground.count[k]);                       // chunks of 1 km² in the cell
+    fields[k] = Math.max(FIELD_FLOOR, Math.min(1, a / all));
+    keep[k] = Math.max(0, 1 - state.cellFelled[k] / all);
+  }
+  return { built, fields, keep, towns, farm: state, ground };
 }

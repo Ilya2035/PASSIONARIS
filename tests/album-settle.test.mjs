@@ -11,7 +11,7 @@ import { RMAX, CELL, GN, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cell
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
 import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.js';
-import { mirrorSettle, settleUniforms } from '../src/album/town/state.js';
+import { mirrorSettle, mirrorFarm, farmAt, settleUniforms } from '../src/album/town/state.js';
 import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2 } from '../src/album/town/yards.js';
 import { farmsteadsOfAlbum, packLand, unpackLand, landBytes } from '../src/album/save/land.js';
 import { KN, squareOf, districtOrder } from '../src/album/division/km.js';
@@ -92,7 +92,7 @@ test('settle growth: a place grows from a hamlet to a city and writes houses, fi
   const home = stages[4].towns[0].home; assert.equal(home, ch.at(pl[0].lat, pl[0].lon)); assert.equal(ch.kind[home], 1);
   for (let i = 1; i < stages.length; i++) {
     assert.ok(stages[i].towns[0].R > stages[i - 1].towns[0].R && stages[i].built[home] >= stages[i - 1].built[home], 'more growth, more houses');
-    assert.ok(stages[i].fields.reduce((a, b) => a + b) > stages[i - 1].fields.reduce((a, b) => a + b), 'and more fields');
+    assert.ok(stages[i].fields.reduce((a, b) => a + b) > stages[i - 1].fields.reduce((a, b) => a + b) && stages[i].farm.area > stages[i - 1].farm.area, 'and more fields');
     // a hamlet and a village clear only their own ground; from FELL_FROM on a settlement thins the forest of its chunks
     const k1 = stages[i].keep.reduce((a, b) => a + b), k0 = stages[i - 1].keep.reduce((a, b) => a + b);
     if (stages[i].towns[0].R >= FELL_FROM) assert.ok(k1 < k0, 'and less forest'); else assert.equal(k1, k0, 'a village leaves the forest of its chunk alone');
@@ -100,7 +100,8 @@ test('settle growth: a place grows from a hamlet to a city and writes houses, fi
   const m = stages[4], t = m.towns[0];
   assert.ok(t.R < 1 && t.R > .7, `a city of its time is under two km across: ${t.R}`);
   assert.equal(t.byte, Math.max(1, Math.round(Math.PI * t.R ** 2 / ch.area[home] * 255))); assert.ok(Math.abs(m.built[home] - t.byte / 255) < 1e-6);
-  assert.ok(m.fields[home] > .15 && m.keep[home] < .6, 'around the houses the land is ploughed and the forest felled');
+  assert.ok(m.fields[home] > .15 && m.keep[home] < .85 && m.keep[home] < 1 - m.fields[home], 'around the houses the land is ploughed and the forest felled');
+  assert.ok(Math.abs(t.ploughed - t.people / 100) < .05 && Math.abs(m.farm.area - t.ploughed) < 1e-3, `a hectare a person: ${t.people} people plough ${t.ploughed.toFixed(1)} km²`);
   const far = ch.at(...Object.values(llOf(-145, 4405)).slice(0, 2)); assert.equal(m.keep[far], 1, 'far away the forest stands untouched'); assert.equal(m.fields[far], 0);
   assert.equal(growTowns(ch, pl, 0, at).towns.length, 0, 'no growth, no settlement');
   assert.ok(fullRadius(15000) < .2 && fullRadius(5.6e6) > 1.4 && fullRadius(5.6e6) <= RCAP);
@@ -112,9 +113,10 @@ test('settle growth: natural chunks — nothing is founded on water, one settlem
   assert.equal(coast.towns.length, 1); assert.ok(coast.towns[0].x <= 100 && at(coast.towns[0].x, coast.towns[0].y) > 0 && ch.kind[coast.towns[0].home] === 1);
   const two = growTowns(ch, [place(-205.3, 4405, 20000), place(-204.7, 4405, 900000)], 1, at);
   assert.equal(two.towns.length, 1); assert.equal(two.towns[0].index, 1, 'the larger place takes the chunk');
-  // on the steep ridge nothing is ploughed
-  const acres = m => m.fields.reduce((a, v, k) => a + v * ch.area[k], 0), hill = growTowns(ch, [place(-401, 4405, 650000)], 1, at), flat = growTowns(ch, [place(-205, 4405, 650000)], 1, at);
-  assert.ok(acres(hill) > 0 && acres(hill) < acres(flat) * .8, `fields by the ridge ${acres(hill).toFixed(1)} km², on the plain ${acres(flat).toFixed(1)} km²`);
+  // on the steep ridge nothing is ploughed: a town at its foot has all its fields on the level side
+  const hill = growTowns(ch, [place(-399, 4405, 650000)], 1, at), flat = growTowns(ch, [place(-205, 4405, 650000)], 1, at);
+  assert.ok(hill.farm.area > 50 && Math.abs(hill.farm.area - flat.farm.area) < 1, `fields by the ridge ${hill.farm.area.toFixed(1)} km², on the plain ${flat.farm.area.toFixed(1)} km²`);
+  assert.ok([...hill.farm.list].every(c => c % KN >= 480), 'no chunk of the ridge is ploughed'); assert.ok([...flat.farm.list].some(c => c % KN < 675) && [...flat.farm.list].some(c => c % KN > 675), 'on the plain the fields lie on every side');
   // a river runs north–south at x = −205.2: the settlement is moved off it until its houses touch the bank
   const river = (x, y) => Math.abs(x + 205.2) - .1, m = growTowns(ch, [place(-205, 4405, 650000)], 1, at, river), t = m.towns[0];
   assert.ok(river(t.x, t.y) >= t.R * 1.05, `the site stands ${river(t.x, t.y).toFixed(2)} km from the bank, the houses reach ${t.R.toFixed(2)} km`);
@@ -261,18 +263,24 @@ const yardsAround = (ctx, x, y, km = 8) => {
   for (let tj = Math.floor((y - km - GY0) / T); tj <= Math.floor((y + km - GY0) / T); tj++) for (let ti = Math.floor((x - km - GX0) / T); ti <= Math.floor((x + km - GX0) / T); ti++) out.push(...rows(planYards(ctx, ti, tj)));
   return out;
 };
-const yardCtx = (list, extra = {}) => ({ cell: ch.cell, land: c => ch.kind[c] === 1, fields: () => .05, culture: () => CULTURES.med, patches: patchIndex(list), env, density: 1, S: CELL, ...extra });
+// a world where every chunk is ploughed from edge to edge, unless a test says otherwise
+const yardCtx = (list, extra = {}) => ({ cell: ch.cell, land: c => ch.kind[c] === 1, farm: () => 1, culture: () => CULTURES.med, patches: patchIndex(list), env, density: 1, S: CELL, ...extra });
+// a town as the model founds it, with the fields it ploughs: its patch and what a yard must know of its chunks
+function ploughedTown(x, y, pop = 650000) {
+  const m = growTowns(ch, [place(x, y, pop)], 1, at), t = m.towns[0], bytes = new Uint8Array(KN * KN * 4); mirrorFarm(m.farm, bytes);
+  return { L: { x: t.x, y: t.y, r: t.R, th: .4 }, m, farm: (px, py) => farmAt(px, py, bytes), farmList: m.farm.list };
+}
 
-test('yards: sixteen places a square kilometre; a yard stands only on ploughed land near a settlement, and never among its houses', () => {
-  const L = { x: -205.3, y: 4405.2, r: .9, th: .4 }, W = fieldsBeyond(L.r), ctx = yardCtx([L]);
-  const yards = yardsAround(ctx, L.x, L.y);
-  assert.ok(yards.length > 12 && yards.length < 90, `${yards.length} yards around a town of ${L.r} km`);
-  assert.deepEqual(yardsAround(ctx, L.x, L.y), yards, 'the same every time');
+test('yards: sixteen places a square kilometre; a yard stands only in a chunk of farmland, and never among the houses of a settlement', () => {
+  const town = ploughedTown(-205.3, 4405.2), L = town.L, W = fieldsBeyond(L.r), ctx = yardCtx([L], { farm: town.farm, farmList: town.farmList });
+  const yards = yardsAround(ctx, L.x, L.y, 12);
+  assert.ok(yards.length > town.m.farm.area * 1.5 && yards.length < town.m.farm.area * 3, `${yards.length} yards on ${town.m.farm.area.toFixed(0)} km² of fields`);
+  assert.deepEqual(yardsAround(ctx, L.x, L.y, 12), yards, 'the same every time');
   const names = new Set(yards.map(r => KINDS[r[3]])); assert.deepEqual([...names].sort(), [...YARD_KINDS].sort(), 'every kind of yard is there, and nothing else');
   for (const r of yards) {
     const d = Math.hypot(r[0] - L.x, r[1] - L.y);
     assert.ok(d > L.r + .4, `a yard ${(d - L.r).toFixed(2)} km from the last houses`);
-    assert.ok(d < L.r + .56 * W, 'a yard far outside the fields');
+    assert.ok(town.farm(r[0], r[1]) > .3, 'a yard outside the fields');
     const i = Math.floor((r[0] - GX0) / YARD_STEP), j = Math.floor((r[1] - GY0) / YARD_STEP);
     assert.ok(Math.abs(r[0] - (GX0 + (i + .5) * YARD_STEP)) <= .0701 && Math.abs(r[1] - (GY0 + (j + .5) * YARD_STEP)) <= .0701, 'a yard stands by the middle of its place');
     assert.deepEqual(yardAt(ctx, i, j), r, 'the place of a yard gives the yard back');
@@ -284,22 +292,24 @@ test('yards: sixteen places a square kilometre; a yard stands only on ploughed l
   // no two yards closer than a hundred metres: their plots never overlap
   for (let a = 0; a < yards.length; a++) for (let b = a + 1; b < yards.length; b++) assert.ok(Math.hypot(yards[a][0] - yards[b][0], yards[a][1] - yards[b][1]) > .1);
   // the knob: more yards, and those that stood stay where they were; none at zero
-  const key = r => `${r[0]},${r[1]}`, thick = yardsAround(yardCtx([L], { density: 3 }), L.x, L.y), thickSet = new Set(thick.map(key));
+  const key = r => `${r[0]},${r[1]}`, thick = yardsAround({ ...ctx, density: 3 }, L.x, L.y, 12), thickSet = new Set(thick.map(key));
   assert.ok(thick.length > yards.length * 2 && yards.every(r => thickSet.has(key(r))));
-  assert.equal(yardsAround(yardCtx([L], { density: 0 }), L.x, L.y).length, 0);
+  assert.equal(yardsAround({ ...ctx, density: 0 }, L.x, L.y, 12).length, 0);
   // the Atlantic manner: about twice as many, turned any way, under dark roofs
-  const atl = yardsAround(yardCtx([L], { culture: () => CULTURES.atl }), L.x, L.y);
+  const atl = yardsAround({ ...ctx, culture: () => CULTURES.atl }, L.x, L.y, 12);
   assert.ok(atl.length > yards.length * 1.4 && atl.length < yards.length * 2.8, `${atl.length} Atlantic yards against ${yards.length}`);
   assert.ok(atl.every(r => r[7] === 1) && new Set(atl.map(r => Math.round(r[2] * 4))).size > 12, 'Atlantic yards stand any way');
-  assert.ok(new Set(yards.map(r => Math.round(((r[2] - .5236) % 1.5707963 + 1.5707963) % 1.5707963 * 10))).size <= 4, 'Mediterranean yards stand along the furlongs');
+  assert.ok(new Set(yards.map(r => Math.round(((r[2] - .5236) % 1.5707963 + 1.5707963) % 1.5707963 * 10))).size <= 6, 'Mediterranean yards stand along the furlongs');
   assert.equal(YARDS_PER_KM2[CULTURES.atl], 2 * YARDS_PER_KM2[CULTURES.med]);
-  // no settlement and little ploughed: no yards; a chunk ploughed from edge to edge has them without a settlement
-  assert.equal(yardsAround(yardCtx([]), L.x, L.y).length, 0);
-  const open = yardsAround(yardCtx([], { fields: () => .95 }), L.x, L.y, 4);
+  // nothing ploughed: no yards; a land ploughed from edge to edge has them without a settlement; the less of a
+  // chunk is ploughed, the fewer
+  assert.equal(yardsAround(yardCtx([], { farm: () => 0 }), L.x, L.y).length, 0);
+  const open = yardsAround(yardCtx([]), L.x, L.y, 4), part = yardsAround(yardCtx([], { farm: () => .5 }), L.x, L.y, 4);
   assert.ok(open.length > 300 && open.length < 520, `${open.length} yards on 144 km² ploughed from edge to edge`);
-  // how surely the land is ploughed: all of it by the houses, none of it at the end of the fields
-  assert.equal(ploughed(.05, 0, .9), 1); assert.equal(ploughed(.05, -W, .9), 0); assert.equal(ploughed(0, -1e3, 0), 0); assert.ok(ploughed(.95, -1e3, 0) > .9);
-  assert.ok(ploughed(.05, -.3 * W, .9) > ploughed(.05, -.5 * W, .9));
+  assert.ok(part.length > open.length * .05 && part.length < open.length * .6, `${part.length} yards where half the land is ploughed`); assert.equal(yardsAround(yardCtx([], { farm: () => .2 }), L.x, L.y, 4).length, 0);
+  // how surely the land is ploughed: by the share of its chunk; in a chunk ploughed in part, more beside the houses
+  assert.equal(ploughed(0), 0); assert.equal(ploughed(1), 1); assert.equal(ploughed(.5), .5); assert.ok(ploughed(.8) === 1 && ploughed(.2) === 0, 'fields keep together');
+  assert.ok(ploughed(.4, 0, .9) > ploughed(.4, -.5 * fieldsBeyond(.9), .9) && ploughed(.4, -.5 * fieldsBeyond(.9), .9) > ploughed(.4, -fieldsBeyond(.9), .9)); assert.equal(ploughed(.4, -fieldsBeyond(.9), .9), ploughed(.4)); assert.equal(ploughed(0, 0, .9), 0);
 });
 
 test('yards: never on water, a river, a swamp, a steep slope or a road', () => {
@@ -335,10 +345,10 @@ test('yards in the save: a chunk of 1 km² and one of its sixteen places; the ch
   // sixteen places in a chunk, each with its own number
   const seen = new Set(); for (let j = 8; j < 12; j++) for (let i = 4; i < 8; i++) { const p = yardPlace(i, j); assert.deepEqual([p.kx, p.ky], [1, 2]); seen.add(p.slot); }
   assert.equal(seen.size, 16); assert.deepEqual(yardPlace(4, 8), { kx: 1, ky: 2, slot: 0 }); assert.deepEqual(yardPlace(7, 11), { kx: 1, ky: 2, slot: 15 });
-  const L = { x: -205.3, y: 4405.2, r: .9 }, ctx = yardCtx([L]);
+  const town = ploughedTown(-205.3, 4405.2), L = town.L, ctx = yardCtx([L], { farm: town.farm, farmList: town.farmList });
   // every yard of the map is found, the same as tile by tile
-  const all = allYards(ctx), around = yardsAround(ctx, L.x, L.y);
-  assert.equal(all.length, around.length); assert.ok(all.every(y => Math.hypot(y.x - L.x, y.y - L.y) < 4));
+  const all = allYards(ctx), around = yardsAround(ctx, L.x, L.y, 16);
+  assert.equal(all.length, around.length); assert.ok(all.length > 100 && all.every(y => Math.hypot(y.x - L.x, y.y - L.y) < 12));
   // two districts of land, west and east of the line x = −205 (column 675 of the lattice of chunks), each with its
   // centre 3 km from the line; east of column 980 the sea
   const cells = new Int32Array(KN * KN), cls = new Uint8Array(KN * KN).fill(1);
@@ -356,7 +366,7 @@ test('yards in the save: a chunk of 1 km² and one of its sixteen places; the ch
   assert.equal(farms.length, all.length);
   const west = farms.filter(f => f.district === 0), east = farms.filter(f => f.district === 1); assert.ok(west.length > 5 && east.length > 5 && west.length + east.length === farms.length);
   // the land near the centre is taken up first: no yard lies further out than the chunks the fields reach
-  const most = Math.max(...farms.map(f => f.chunk)); assert.ok(most < 150, `the last chunk with a yard is number ${most} of its district`);
+  const most = Math.max(...farms.map(f => f.chunk)); assert.ok(most < 400, `the last chunk with a yard is number ${most} of its district`);
   const world = { districts: [{}, {}, {}].map(() => ({ forest: 1, fields: .2, pasture: 0, built: 0, burnt: 0, age: 0 })), settlements: [], farmsteads: farms, roads: [], exceptions: [] };
   const sections = packLand(world), back = unpackLand(sections);
   assert.equal(back.farmsteads.length, farms.length); assert.ok(landBytes(sections).farmsteads <= (most + 1) * 2 * 2, 'two bytes a chunk, in two districts');

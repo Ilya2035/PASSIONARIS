@@ -31,7 +31,8 @@ export function createPanel(onClose) {
       if (s.kind === 'land') row('из них суша', `${num(s.landArea)} км²`);
       row('Чанков', num(s.chunks));
       if (s.kind === 'land') {
-        row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built)); row('Поля', pct(s.share.fields));
+        row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built));
+        row('Поля', s.settle ? `${num(s.settle.fieldsKm2)} км² · ${pct(s.share.fields)}` : pct(s.share.fields));
         if (s.classes) {                                            // how level the ground is, chunk by chunk
           for (let k = 1; k <= 5; k++) if (s.classes[k]) row(`Земля ${k} класса`, `${num(s.classes[k])} · ${pct(s.classes[k] / s.chunks)}`);
           row('Жилых чанков', num(s.living[2])); if (s.living[1]) row('Едва жилых', num(s.living[1])); if (s.living[0]) row('Нежилых', num(s.living[0]));

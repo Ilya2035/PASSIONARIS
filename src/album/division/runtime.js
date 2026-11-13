@@ -31,7 +31,7 @@ export async function startDivision(album, U) {
   const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [] };
   const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
   const listeners = [], labels = createLabels(album);
-  let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null;
+  let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null, farmShown = -1;
 
   const active = () => p.get('division') > 0 || !!p.get('divPick');
   // ---- the chunk of 1 km² under the cursor, while the chunks are shown (knob «Чанки 1 км²»)
@@ -44,8 +44,8 @@ export async function startDivision(album, U) {
     const [x, y] = kmOf(ll.lat, ll.lon), c = chunkAt(cur.div.cells, x, y, d); if (c < 0) return null;
     const dv = cur.div, land = dv.kinds[d] === LAND, parts = [`Чанк ${c % FN} · ${Math.floor(c / FN)}`, `район «${dv.names[d]}», чанков в нём ${kmData(dv).box.num[d]}`];
     if (land) {
-      const f = kmFacts(dv, data.base.at), o = kmOrder(dv, data.base.at), k = f.cls[c], lv = livingOf(k);
-      parts.push(`высота ${Math.round(dv.raster.hgt[c])} м`, `класс ${k} — ${CLASS_TITLE[k]}`, lv === 2 ? 'жилой' : lv === 1 ? 'едва жилой' : 'нежилой', `в порядке освоения района № ${o.rank[c] + 1}`);
+      const f = kmFacts(dv, data.base.at), o = kmOrder(dv, data.base.at), k = f.cls[c], lv = livingOf(k), farm = album.layers.towns?.farm?.()?.km[c] || 0;
+      parts.push(`высота ${Math.round(dv.raster.hgt[c])} м`, `класс ${k} — ${CLASS_TITLE[k]}`, lv === 2 ? 'жилой' : lv === 1 ? 'едва жилой' : 'нежилой', `в порядке освоения района № ${o.rank[c] + 1}`, farm ? `под полями ${Math.max(1, Math.round(farm / 2.55))} %` : 'полей нет');
     } else parts.push('вода');
     return parts.join(' · ');
   }
@@ -60,7 +60,7 @@ export async function startDivision(album, U) {
     }
     const next = cache.get(size);
     if (next === cur) return;
-    cur = next; hover = -1; select(-1); api.version++;
+    cur = next; cur.lines = undefined; hover = -1; select(-1); api.version++;
     const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
     paintState(true);
     console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions, ${cur.div.moved.length} slopes moved to their valleys (${cur.div.ms.toFixed(0)} ms)`);
@@ -74,9 +74,11 @@ export async function startDivision(album, U) {
     const mask = id ? stateMask(cur.div, lands, id) : null;
     // what every chunk is like goes into the texture only when the chunks are shown: working it out takes a moment
     cur.facts = p.get('km') > 1 || cur.facts ? kmFacts(cur.div, data.base.at) : null;
-    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts); cur.state = id;
+    // the fields of the chunks (the settlement work keeps them: layers/towns.js) only while they are the thing shown
+    const towns = album.layers.towns, farm = p.get('km') === 4 ? towns?.farm?.() : null; farmShown = farm ? towns.farmVersion() : -1;
+    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
-    lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers);
+    if (cur.lines !== id) { cur.lines = id; lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers); }
   }
   // the district at a point of the ground, as the shader draws it: the district of the texel of the fine raster
   // there (division/cells.js); a point of land in a texel of water (or the other way round, at the shore) takes the
@@ -98,7 +100,8 @@ export async function startDivision(album, U) {
 
   const panel = createPanel(() => select(-1));
   // what a district holds, with its settlements (the settlement work counts them: layers/towns.js)
-  const summaryOf = d => { const s = districtSummary(cur.div, d, ch), t = album.layers?.towns?.districtInfo?.(d); if (t) s.settle = t; return s; };
+  // (the fields of a district are those of its own chunks of 1 km², not the share of the natural cells it lies over)
+  const summaryOf = d => { const s = districtSummary(cur.div, d, ch), t = album.layers?.towns?.districtInfo?.(d); if (t) { s.settle = t; if (s.chunks) s.share.fields = t.fieldsKm2 / s.chunks; } return s; };
   function select(d) {
     sel = d; U.uDivSel.value = d;
     panel.show(d >= 0 ? summaryOf(d) : null);
@@ -134,7 +137,7 @@ export async function startDivision(album, U) {
   p.on(key => {
     if (key == null || key === 'divSize') use(+p.get('divSize') || 20);
     if (key == null || key === 'divState') paintState(false);
-    if ((key == null || key === 'km') && p.get('km') > 1 && !cur.facts) paintState(true);
+    if ((key == null || key === 'km') && ((p.get('km') > 1 && !cur.facts) || (p.get('km') === 4) !== (farmShown >= 0))) paintState(true);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
     syncLabels();
@@ -208,6 +211,7 @@ export async function startDivision(album, U) {
     if (tick++ % 3) return;
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : -1;
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; }
+    if (p.get('km') === 4 && tick % 15 === 1 && (album.layers.towns?.farmVersion?.() ?? -1) !== farmShown) paintState(true);   // the fields have changed
     const text = p.get('km') > 0 && last ? chunkUnder(last) : null;
     kmInfo.textContent = text || ''; kmInfo.style.display = text && !album.shot ? 'block' : 'none';
     if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(summaryOf(sel)); shownVersion = ch.version; }

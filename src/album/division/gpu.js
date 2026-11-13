@@ -5,6 +5,8 @@
 //                      outlines of districts run chunk by chunk, along rivers and crests);
 //                      g = what the chunk is like, once that is worked out (km.js chunkFacts): the class of its
 //                      ground 1..5 (0 water or not known) | who can live there (0 nobody, 1 barely, 2 freely) << 3
+//                      | how much of it is under fields, a byte (town/farmland.js) << 8 — only while the chunks are
+//                      shown by their fields
 //   rows FN ..         a texel for every district, district d at (d % FN, FN + floor(d / FN)):
 //     r  district | province << 16
 //     g  region | look << 16; look = colour of the district (3 bits) | of the province << 3 | of the region << 6 | kind << 9
@@ -30,11 +32,13 @@ export const districtOfTexel = (ch, div, t) => { const d = div.cells ? div.cells
 
 // state: a byte a chunk, 1 inside the state shown (build.js stateMask); a state is made of whole provinces, so a
 // district is inside it when its first chunk is
-// facts: km.js chunkFacts(), when the chunks are to be shown
-export function packDivision(ch, div, state = null, facts = null) {
+// facts: km.js chunkFacts(), when the chunks are to be shown; farm: the share of every chunk under fields, a byte
+// (town/farmland.js), when they are to be shown by their fields
+export function packDivision(ch, div, state = null, facts = null, farm = null) {
   const rows = Math.ceil(div.count / FN), a = new Uint32Array(FN * (FN + rows) * 4), c = div.colour;
   for (let t = 0; t < FN * FN; t++) a[t * 4] = districtOfTexel(ch, div, t);
   if (facts) for (let t = 0; t < FN * FN; t++) { const k = facts.cls[t]; a[t * 4 + 1] = k | livingOf(k) << 3; }
+  if (farm) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= farm[t] << 8;
   for (let d = 0; d < div.count; d++) {
     const p = div.province[d], r = div.region[p], o = (FN * FN + d) * 4, first = div.chunks[d][0];
     const look = c.district[d] | c.province[p] << 3 | c.region[r] << 6 | div.kinds[d] << 9;
@@ -44,4 +48,4 @@ export function packDivision(ch, div, state = null, facts = null) {
   }
   return a;
 }
-export const divisionTexture = (ch, div, state, facts = null) => { const a = packDivision(ch, div, state, facts); return utex(a, FN, a.length / 4 / FN); };
+export const divisionTexture = (ch, div, state, facts = null, farm = null) => { const a = packDivision(ch, div, state, facts, farm); return utex(a, FN, a.length / 4 / FN); };
