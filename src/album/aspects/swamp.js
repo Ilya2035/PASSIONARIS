@@ -193,14 +193,6 @@ void aspSwamp(Px p, inout Land L) {
   if (s < .004 || p.h < -1.) return;
   vec2 pk = p.pk; float px = p.px, far = smoothstep(1.5, 4.5, px), f = swampField(pk, p.n2, p.n3, px);
   if (s * 1.05 - f + .3 < -.07 && far <= 0.) return;                                  // dry even in the lowest hollow
-  // The one noise of the open water is counted here, first, while the function holds next to nothing. A noise needs
-  // many registers of the video card at once; called further down, among the two dozen numbers the swamp keeps by
-  // then, it pushed the whole ground shader past the limit after which a weak card runs it 40 % slower (measured
-  // 14.11.2026 on «land-200»: this noise at the end of the function 436 ms, here 307 ms). For the same reason the swamp
-  // has one creek noise and takes its pools from the shared noises: with the side creeks, the three sizes of pools and
-  // the round bog pools it had before — eight numbers held from here — the limit was passed again (450 ms).
-  // docs/album/ground.md, «Скорость».
-  float nArm = swampNoise(pk / 7.5 + 11.);
   float hs = swampHeight(p.ll), slope = swampSlope(p.ll, hs);
   float hk = hs + (p.n2 - .5) * 3. + (p.n3 - .5) * 1.5;                               // a little unevenness, so the kinds do not change along the cells of the height data
   vec4 kind = swampKind(p.ll, hk, p.wet);
@@ -215,12 +207,16 @@ void aspSwamp(Px p, inout Land L) {
   float cw = dot(kind, vec4(.3, 1., 1.3, .8)) * lvl * (1. + flats * .5);              // how wide the creeks are
   float pa = dot(kind, vec4(.10, .30, .16 - .08 * tide, .20));                        // how much water stands in pools
 
-  // ---- open water: creeks (the level lines of a noise) and pools (the low places of the shared noises of 1 and 7 km)
+  // ---- open water: pools, the low places of the shared noises of 1 and 7 km. The swamp asks for no noise of its own
+  // here, and that is on purpose. A noise needs many registers of the video card at once; called in the middle of this
+  // function, among the two dozen numbers it keeps by then, one creek noise pushed the whole ground shader past the
+  // limit after which a weak card runs it 40 % slower (14.11.2026, «land-200»: 436 ms against 307 ms with the same
+  // noise counted first — docs/album/ground.md, «Скорость»). The creeks themselves are gone as well: a single net of
+  // arms showed as dark blue blades and crescents across the green (w3-roads on v0.6.65), and the bright blue streaks
+  // of the richer water before it looked false beside dry land (the lead on v0.6.52).
   float near = 1. - smoothstep(.5, 1.5, px), A = pa * z * lvl, e = clamp(px * .9, .012, .3), P = p.n3 * .6 + p.n2 * .4;
-  float a1 = abs(nArm - .5 - (p.n2 - .47) * .3) * 6.3, w1 = max((.015 + .05 * z) * cw, px * .6 * smoothstep(0., .3, z));   // ≈ km to the nearest arm; its half-width
-  float eP = ((1. - A) - P) * .6, edge = min(a1 - w1, eP);
-  float water = max(swampLine(a1, w1, px), clamp((P - (1. - A)) / e * .5 + .5, 0., 1.));
-  float wdeep = max(clamp(1. - a1 / max(w1, 1e-3), 0., 1.) * 1.2, clamp(-eP * 6., 0., 1.));
+  float eP = ((1. - A) - P) * .6, edge = eP;
+  float water = clamp((P - (1. - A)) / e * .5 + .5, 0., 1.), wdeep = clamp(-eP * 6., 0., 1.);
   water = mix(z * (pa * .5 + .05 * cw) * lvl, water, near);                           // what is left of the water when it is smaller than a pixel
 
   // ---- what grows
@@ -231,6 +227,7 @@ void aspSwamp(Px p, inout Land L) {
   vec3 vFen = mix(vec3(.24, .35, .15), vec3(.38, .43, .19), mott * .6 + fine * .4);   // reed beds
   vFen = mix(vFen, vec3(.56, .51, .27), smoothstep(.55, .8, P * .5 + p.n2 * .5) * .45);     // stands of last year's straw
   vFen = mix(vec3(.47, .45, .22), vFen, smoothstep(0., .35, z));                      // sedge and wet grass at the dry edge
+  vFen = mix(vFen, vec3(.46, .45, .25), smoothstep(.45, .2, p.wet) * .55);            // in a dry land the reed is straw and olive, not fresh green
   vec3 vSalt = mix(vec3(.38, .46, .24), vec3(.52, .53, .30), mott * .6 + fine * .4);  // cord grass, sea purslane
   vSalt = mix(vSalt, vec3(.47, .33, .26), smoothstep(.5, .8, p.n2) * (1. - z * .5) * .45);  // red glasswort on the high marsh
   vSalt = mix(vSalt, vFen, (1. - tide) * .35);                                        // a tideless shore is half reed
