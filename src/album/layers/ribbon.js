@@ -80,7 +80,9 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T),
     uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: minPx }, uColour: { value: new Color(colour) }, uDash: { value: dash }, uLift: { value: lift }, uAlpha: { value: 1 },
-    uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uWoods: { value: ground ? woods : 0 }, ...(ground ? album.chunks.uniforms : {}) };
+    uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uWoods: { value: ground ? woods : 0 }, ...(ground ? album.chunks.uniforms : {}),
+    // (albumWet() of glsl.js may read the baked climate: the ground shader brings these two for it, when it has them)
+    ...(ground && T.tClimate ? { tClimate: T.tClimate, uClimRect: T.uClimRect } : {}) };
   const mat = ground ? new ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, side: DoubleSide,
     vertexShader: `${COMMON}
