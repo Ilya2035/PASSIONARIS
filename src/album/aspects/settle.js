@@ -15,7 +15,13 @@
 // the fields are drawn from that number alone, the same furlongs running on from chunk to chunk. Where only a few
 // chunks of the land around are ploughed, the fields are drawn only where their furlongs can be told.
 // A chunk has one state: a chunk of bog (the division marks them) is never ploughed (town/farmland.js), and no field
-// is drawn where the swamp is painted.
+// is drawn where the swamp is painted (the swamp aspect says where: fSwampW).
+// THE SPEED OF THIS SHADER. On built-in graphics the ground shader stands at a cliff, and what pushes it over is the
+// number of smoothstep(number, number, x) with thresholds written in the code (the ground work found it, 13.11.2026):
+// two or three dozen of them more make the whole frame 40 % slower, even in code that never runs. v0.6.56 called the
+// rules of the swamp here a second time (land-20: 297 → 419 ms). So: nothing of another aspect is worked out here
+// again — its result is read; no new smoothstep with numbers — a clamp does; and land-20 and land-far are timed
+// before and after every change.
 import { RULES_GLSL, PALETTE_GLSL } from '../town/rules.js';
 import { settleUniforms } from '../town/state.js';
 
@@ -212,15 +218,10 @@ void aspSettle(Px p, inout Land L) {
       }
       // the common case, good level land, costs nothing more; only shores, swamps, slopes and heights are weighed
       if (p.h < 2. || p.cA.a > .3 || p.slope > .42 || p.hl > 1300. || tm > 0.) fm *= smoothstep(.4, 2., p.h) * (1. - smoothstep(.3, .5, p.cA.a)) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(1300., 1700., p.hl)) * (1. - tm);
-      fm *= seen;
-      // No field on a bog (the owner: «важно, чтобы чанки не перемешивались»): where the swamp is painted — by the
-      // very rule the swamp aspect paints it by (aspects/swamp.js, SWAMP_RULES) — the land is not ploughed.
-      if (fm > .003 && p.cA.a > .004) {
-        float hs = swampHeight(p.ll), bslope = swampSlope(p.ll, hs);
-        vec4 kind = swampKind(p.ll, hs + (p.n2 - .5) * 3. + (p.n3 - .5) * 1.5, p.wet);
-        float bd = swampDepth(p.cA.a, swampField(p.pk, p.n2, p.n3, px), p.ll, hs, bslope, kind.x);
-        fm *= 1. - mix(smoothstep(-.12, .02, bd), clamp(p.cA.a * 1.05, 0., 1.) * step(bslope, .05), smoothstep(1.5, 4.5, px));
-      }
+      // No field on a bog (the owner: «важно, чтобы чанки не перемешивались»): the swamp aspect, painted before this
+      // one, leaves in fSwampW how much of the pixel it has painted; where half the pixel and more is bog there is no
+      // field. A clamp, not a smoothstep: see the note on the speed of this shader at the head of the file.
+      fm *= seen * clamp(1. - fSwampW * 2., 0., 1.);
       if (fm > .003) {
         vec3 fc = L.col;
         if (near > 0.) fc = setFields(p, L.col, atlF, cid, ff, border, fs);

@@ -190,6 +190,7 @@ ${SWAMP_RULES}
 // a line of water of half-width w km, a km away from the middle of a pixel px km wide: the share of the pixel it covers
 float swampLine(float a, float w, float px) { return clamp((min(w, a + .5 * px) - max(-w, a - .5 * px)) / px, 0., 1.); }
 
+float fSwampW = 0.;   // how much of this pixel the swamp has painted, 0..1: for the aspects painted after it (the fields keep off it — aspects/settle.js)
 void aspSwamp(Px p, inout Land L) {
   float s = p.cA.a;
   if (s < .004 || p.h < -1.) return;
@@ -200,7 +201,7 @@ void aspSwamp(Px p, inout Land L) {
   vec4 kind = swampKind(p.ll, hk, p.wet);
   float d = swampDepth(s, f, p.ll, hs, slope, kind.x);
   float m = mix(smoothstep(-.07, .07, d), clamp(s * 1.05, 0., 1.) * step(slope, .05), far);
-  if (m < .004) return;
+  fSwampW = m; if (m < .004) return;
   float z = clamp(d * 2., 0., 1.);                                                    // 0 the edge of the swamp .. 1 its heart
   float glade = kind.w * smoothstep(.15, .5, z) * .85; kind.w -= glade; kind.y += glade;   // the heart of a flooded forest is open reed and water
   float tide = swampTide(p.ll), ice = p.cB.r, snow = p.cB.g, cold = max(ice, snow), mott = p.n3;

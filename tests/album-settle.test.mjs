@@ -637,7 +637,15 @@ test('settle and the swamp: a chunk has one state — a chunk of bog is never pl
   const world = new Chunks(() => 300), g = farmGround(world, () => 300, { cls, hgt, bog });
   assert.equal(g.room(c0), 0, 'nothing of a bog chunk can be ploughed'); assert.equal(g.room(c0 + 1), 1, 'the chunk beside it — all of it');
   assert.equal(farmGround(world, () => 300, { cls, hgt }).room(c0), 1, 'without the marks of the division the ground is as before');
-  const gsl = settle.glsl; assert.match(gsl, /swampDepth\(p\.cA\.a, swampField\(p\.pk, p\.n2, p\.n3, px\)/, 'the fields are cut by the very rule the swamp is painted by');
-  const { default: swamp } = await import('../src/album/aspects/swamp.js');
-  for (const fn of ['swampHeight', 'swampSlope', 'swampKind', 'swampField', 'swampDepth']) assert.match(swamp.glsl, new RegExp(`(float|vec4) ${fn}\\(`), `${fn} of the swamp aspect is there for the fields to ask`);
+  // the swamp aspect, painted first, leaves what it has painted; the fields read it — by a clamp, not a smoothstep —
+  // and work nothing of the swamp out again: smoothsteps with numbers written in the code are what slows the whole
+  // frame on built-in graphics (v0.6.56: land-20 297 → 419 ms)
+  const gsl = settle.glsl, { default: swamp } = await import('../src/album/aspects/swamp.js');
+  assert.match(swamp.glsl, /float fSwampW = 0\.;/); assert.match(swamp.glsl, /fSwampW = m; if \(m < \.004\) return;/);
+  assert.match(gsl, /fm \*= seen \* clamp\(1\. - fSwampW \* 2\., 0\., 1\.\);/);
+  assert.doesNotMatch(gsl, /swamp(Depth|Kind|Field|Slope|Height)\(/, 'no rule of the swamp is run a second time for the fields');
+  assert.doesNotMatch(gsl, /smoothstep\([^;]*fSwampW/, 'and no smoothstep is spent on it');
+  const { ASPECTS } = await import('../src/album/aspects/index.js'); assert.ok(ASPECTS.findIndex(a => a.id === 'swamp') < ASPECTS.findIndex(a => a.id === 'settle'), 'the swamp is painted before the settlements');
+  // the number of smoothsteps with thresholds in the code of this aspect must not grow (it was 31 in v0.6.53)
+  const pairs = gsl.match(/smoothstep\(\s*-?[.0-9]+\s*,\s*-?[.0-9]+\s*,/g) || []; assert.ok(pairs.length <= 31, `${pairs.length} smoothsteps with numbers in the shader of the settlements`);
 });
