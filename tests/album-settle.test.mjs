@@ -585,3 +585,59 @@ test('settle and the land nobody can live on: no village is founded there; where
   const cramped = m.towns.find(t => t.index === 2), free = m.towns.find(t => t.index === 3);
   assert.ok(cramped.R <= HAMLET_ONLY_R && stageOf(cramped.R) === 0 && free.R > HAMLET_ONLY_R && stageOf(free.R) === 1, 'where only a hamlet can stand, the village is a hamlet');
 });
+
+test('settle names: every name of a settlement is Russian — transcribed by rule when the data was prepared, the name of the data kept', async () => {
+  const T = await import('../src/album/town/translit.js');
+  const { decodeSites, namePlaces } = await import('../src/album/town/sites.js');
+  const { readFileSync, existsSync } = await import('node:fs'); const { gunzipSync } = await import('node:zlib');
+  const { join, dirname } = await import('node:path'), ROOT = join(dirname((await import('node:url')).fileURLToPath(import.meta.url)), '..');
+  // the rules, a few names of every language
+  const want = { es: { 'Majadahonda': 'Махадаонда', 'La Puebla de Alfindén': 'Ла-Пуэбла-де-Альфинден', 'Zuera': 'Суэра', 'Alcalá de Henares': 'Алькала-де-Энарес', 'Valladolid': 'Вальядолид', 'Huelva': 'Уэльва', 'Oviedo': 'Овьедо',
+      'Soria': 'Сория', 'Gijón': 'Хихон', 'Ciudad Real': 'Сьюдад-Реаль', 'Logroño': 'Логроньо', 'Villanueva de la Cañada': 'Вильянуэва-де-ла-Каньяда', 'Los Palacios y Villafranca': 'Лос-Паласиос-и-Вильяфранка', 'Lahiguera': 'Лаигера' },
+    gl: { 'Sanxenxo': 'Саншеншо', 'O Grove': 'О-Грове', 'Friol': 'Фриоль' }, nav: { 'Getxo': 'Гечо', 'Zarautz': 'Сарауц', 'Tudela': 'Тудела', 'Estella': 'Эстелья' },
+    ca: { 'Vilanova i la Geltrú': 'Виланова-и-ла-Жельтру', 'el Vendrell': 'Эль-Вендрель', 'Sabadell': 'Сабадель', 'Puigcerdà': 'Пучсерда', "L'Hospitalet de Llobregat": 'Л’Оспиталет-де-Льобрегат', 'Sant Cugat del Vallès': 'Сан-Кугат-дель-Вальес',
+      'Sant Andreu de la Barca': 'Сант-Андреу-де-ла-Барка', 'Montcada i Reixac': 'Монкада-и-Решак', 'Xàtiva': 'Шатива', "Vilobí d'Onyar": 'Вилоби-д’Оньяр' },
+    pt: { 'Porto': 'Порту', 'Matosinhos': 'Матозиньюш', 'Cascais': 'Кашкайш', 'Coimbra': 'Коимбра', 'Guimarães': 'Гимарайнш', 'Santarém': 'Сантарен', 'Covilhã': 'Ковильян', 'Torres Vedras': 'Торриш-Ведраш',
+      'Póvoa de Varzim': 'Повуа-ди-Варзин', 'Vila Nova de Gaia': 'Вила-Нова-ди-Гая', 'São João da Madeira': 'Сан-Жуан-да-Мадейра', 'Lagoa': 'Лагоа' },
+    fr: { 'Montauban': 'Монтобан', 'Montpellier': 'Монпелье', 'Béziers': 'Безье', 'Carcassonne': 'Каркасон', 'Avignon': 'Авиньон', 'Tarbes': 'Тарб', 'Agen': 'Ажен', 'Auch': 'Ош', 'Millau': 'Мийо', 'Muret': 'Мюре', 'Blagnac': 'Бланьяк',
+      "L'Isle-Jourdain": 'Л’Иль-Журден', 'Villeneuve-sur-Lot': 'Вильнёв-сюр-Ло', 'Saint-Étienne': 'Сент-Этьен', 'Saint-Girons': 'Сен-Жирон', 'Orange': 'Оранж', 'Alès': 'Алес', 'Perpignan': 'Перпиньян' },
+    ar: { 'Tlemcen': 'Тлемсен', 'Chefchaouen': 'Шефшауэн', 'Sidi Bel Abbès': 'Сиди-Бель-Аббес', 'Ouled Brahim ⴰⵜ ⴱⵔⴰⵀⵉⵎ أولاد إبراهيم': 'Улед-Брахим', 'Algiers': 'Алжир', 'عزيز': 'Азиз' } };
+  for (const [lang, list] of Object.entries(want)) for (const [name, ru] of Object.entries(list)) assert.equal(T.toRussian(name, lang), ru, `${lang}: ${name}`);
+  assert.equal(T.toRussian('Мадрид', 'es'), 'Мадрид', 'a Russian name stays'); assert.equal(T.toRussian('A Корунья', 'gl'), 'Ла-Корунья'); assert.equal(T.toRussian('Puerto de Vega / Veiga', 'ast'), 'Пуэрто-де-Вега', 'the first of two names');
+  assert.equal(T.toRussian('', 'es'), ''); assert.ok(!T.hasLatin(T.toRussian('Abanto y Ciérvana-Abanto Zierbena', 'nav')));
+  // the language of a place: by its modern unit; the Valencian and the Basque lands by the spelling of the name
+  assert.deepEqual(['ESP-5833', 'ESP-5827', 'ESP-5809', 'PRT-746', 'FRA-5298', 'AND-4876', 'DZA-2195', 'MAR-1445', 'ESP-5805'].map(T.langOfUnit), ['es', 'gl', 'ca', 'pt', 'fr', 'ca', 'ar', 'ar', 'ast']);
+  assert.equal(T.guessLang('va', 'Xàtiva'), 'ca'); assert.equal(T.guessLang('va', 'Orihuela'), 'es'); assert.equal(T.guessLang('nav', 'Getxo'), 'eu'); assert.equal(T.guessLang('nav', 'Tudela'), 'es'); assert.equal(T.guessLang('pt', 'x'), 'pt');
+  const unitAt = T.unitFinder({ 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } });
+  assert.equal(unitAt(1, 1), 'ESP-1'); assert.equal(unitAt(-2, 1), 'PRT-2'); assert.equal(unitAt(-.8, 1), 'PRT-2', 'a place on the shore takes the nearest unit');
+  // records: the Russian name, and the name of the data as the sixth number
+  const two = { 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } };
+  const [recs, st] = T.russifySites([[10000, 10000, 5000, 1, 'Zuera'], [10000, 10000, 9000, 0, 'Мадрид'], [-20000, 10000, 700, 2, 'Aveiro']], two);
+  assert.deepEqual(recs, [[10000, 10000, 5000, 1, 'Суэра', 'Zuera'], [10000, 10000, 9000, 0, 'Мадрид'], [-20000, 10000, 700, 2, 'Авейру', 'Aveiro']]); assert.equal(st.kept, 1); assert.deepEqual(st.byLang, { es: 1, pt: 1 });
+  assert.deepEqual(decodeSites({ sites: recs }).map(s => [s.name, s.orig]), [['Суэра', 'Zuera'], ['Мадрид', 'Мадрид'], ['Авейру', 'Aveiro']]);
+  assert.deepEqual(T.russifySites(recs, two)[0], recs, 'done twice, nothing changes');
+  // the data of the album: not one name in Latin letters
+  const sites = decodeSites(JSON.parse(gunzipSync(readFileSync(join(ROOT, 'public/assets/album/town/sites.json.gz')))));
+  assert.ok(sites.length > 9000); const latin = sites.filter(s => T.hasLatin(s.name) || !s.name);
+  assert.equal(latin.length, 0, `names in Latin letters: ${latin.slice(0, 5).map(s => s.name).join(', ')}`);
+  assert.ok(sites.filter(s => s.orig !== s.name).length > 8000 && sites.every(s => s.orig), 'the name of the data is kept');
+  for (const [orig, ru] of [['Majadahonda', 'Махадаонда'], ['Zuera', 'Суэра'], ['La Puebla de Alfindén', 'Ла-Пуэбла-де-Альфинден']]) assert.equal(sites.find(s => s.orig === orig)?.name, ru);
+  // the places of the album: a list of Russian names beside them
+  const names = JSON.parse(readFileSync(join(ROOT, 'public/assets/album/town/places-ru.json'), 'utf8')).names;
+  assert.ok(Object.keys(names).length >= 40 && Object.values(names).every(v => v && !T.hasLatin(v)) && names.Guadalajara === 'Гвадалахара' && names.Algiers === 'Алжир');
+  const pls = [{ name: 'Guadalajara' }, { name: 'Мадрид' }, { name: 'Granada‎' }]; assert.equal(namePlaces(pls, names), 2);
+  assert.deepEqual(pls, [{ name: 'Гвадалахара', orig: 'Guadalajara' }, { name: 'Мадрид' }, { name: 'Гранада', orig: 'Granada' }]); assert.equal(namePlaces(pls, names), 0, 'done twice, nothing changes');
+  const vec = join(ROOT, 'public/album-data/vectors.json');
+  if (existsSync(vec)) { const own = JSON.parse(readFileSync(vec, 'utf8')).places; namePlaces(own, names); assert.deepEqual(own.filter(p => T.hasLatin(p.name)).map(p => p.name), [], 'every place of the album has a Russian name'); }
+});
+
+test('settle and the swamp: a chunk has one state — a chunk of bog is never ploughed, and no field is painted where the swamp is', async () => {
+  const { farmGround } = await import('../src/album/town/farmland.js'); const { KN: N } = await import('../src/album/division/km.js');
+  const n = N * N, cls = new Uint8Array(n).fill(1), hgt = new Float32Array(n).fill(300), bog = new Uint8Array(n), c0 = 600 * N + 600; bog[c0] = 1;
+  const world = new Chunks(() => 300), g = farmGround(world, () => 300, { cls, hgt, bog });
+  assert.equal(g.room(c0), 0, 'nothing of a bog chunk can be ploughed'); assert.equal(g.room(c0 + 1), 1, 'the chunk beside it — all of it');
+  assert.equal(farmGround(world, () => 300, { cls, hgt }).room(c0), 1, 'without the marks of the division the ground is as before');
+  const gsl = settle.glsl; assert.match(gsl, /swampDepth\(p\.cA\.a, swampField\(p\.pk, p\.n2, p\.n3, px\)/, 'the fields are cut by the very rule the swamp is painted by');
+  const { default: swamp } = await import('../src/album/aspects/swamp.js');
+  for (const fn of ['swampHeight', 'swampSlope', 'swampKind', 'swampField', 'swampDepth']) assert.match(swamp.glsl, new RegExp(`(float|vec4) ${fn}\\(`), `${fn} of the swamp aspect is there for the fields to ask`);
+});

@@ -22,6 +22,7 @@ import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY
 import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
+import { loadPlaceNames, namePlaces } from '../town/sites.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
@@ -105,6 +106,9 @@ const SITES_FRAG = /* glsl */`
 
 export default async function init(album) {
   const T = album.terrain.u, p = album.params, ch = album.chunks, base = album.data.base;
+  // Every name on the map is Russian: the places of the album the data names in Latin letters get their Russian names
+  // here, before the division and the marks read them (the list was made when the data was prepared: town/translit.js)
+  namePlaces(album.data.vectors.places, await loadPlaceNames());
   // the places the model founds: the places of the album to begin with; once the land is divided into districts, also
   // the centre of every other district (grow.js, centrePlaces) and the villages between them (villages.js)
   let places = album.data.vectors.places, divSeen = -1, villSeen = -1, siteList = null, siteOfBase = new Map(), founded = new Uint8Array(0), perDistrict = new Map();
@@ -160,7 +164,8 @@ export default async function init(album) {
     written.clear(); grown = p.get('growth'); haSeen = p.get('farmHa') ?? HA_PER_PERSON;
     // what the chunks of 1 km² can give: from the division once the land is divided, from the relief before that
     const dv = album.division, dvN = dv ? dv.version : -1;
-    if (groundOf !== dvN) { groundOf = dvN; ground = farmGround(ch, at, dv ? { cls: dv.chunkFacts().cls, hgt: dv.data.raster.hgt } : null, k => ch.getNatural('swamp', k)); }
+    // (the chunks the division marks as bog are never ploughed: its reason № 4, km.js SETTLE_WHY)
+    if (groundOf !== dvN) { groundOf = dvN; const why = dv?.settleFacts?.()?.why; ground = farmGround(ch, at, dv ? { cls: dv.chunkFacts().cls, hgt: dv.data.raster.hgt, bog: why ? why.map(w => (w === 4 ? 1 : 0)) : null } : null, k => ch.getNatural('swamp', k)); }
     model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1), { ground, ha: haSeen }); farmN++;
     for (let k = 0; k < ch.count; k++) {
       const b = model.built[k], f = model.fields[k], keep = model.keep[k];

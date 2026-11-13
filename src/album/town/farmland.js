@@ -36,8 +36,10 @@ function roughClass(at, i, j) {
 // What the chunks can give: how much of each can be ploughed, km². It depends on the land alone, so it is kept
 // between the calls of the model (the caller keeps the object while the division stands).
 //   at(x, y) → metres at a point of the flat km plane
-//   land     { cls: Uint8Array (km.js chunkFacts), hgt: Float32Array (div.raster.hgt) } once the land is divided;
-//            without it the class of a chunk is read off the relief as the chunk is asked for
+//   land     { cls: Uint8Array (km.js chunkFacts), hgt: Float32Array (div.raster.hgt), bog: Uint8Array or nothing
+//            (1: the chunk is a bog — the division says so, km.js chunkSettle — and is never ploughed: a chunk has
+//            one state, bog or fields) } once the land is divided; without it the class of a chunk is read off the
+//            relief as the chunk is asked for
 //   swamp(k) the share of swamp of natural cell k by nature, 0..1 (may be left out)
 export function farmGround(ch, at, land = null, swamp = null) {
   const n = KN * KN, room = new Float32Array(n).fill(-1), cls = land ? land.cls : new Uint8Array(n), cellOf = cellsOfChunks(ch);
@@ -51,7 +53,7 @@ export function farmGround(ch, at, land = null, swamp = null) {
       let k = cls[c], h = land ? land.hgt[c] : 0;
       if (!land) { const i = c % KN; [k, h] = roughClass(at, i, (c - i) / KN); cls[c] = k; }
       const cell = cellOf.cell[c];
-      v = FARM_CAP[k] * (1 - step(FARM_HIGH[0], FARM_HIGH[1], h)) * (cell < ch.count ? dry[cell] : 1) * KKM * KKM;
+      v = land?.bog?.[c] ? 0 : FARM_CAP[k] * (1 - step(FARM_HIGH[0], FARM_HIGH[1], h)) * (cell < ch.count ? dry[cell] : 1) * KKM * KKM;
       return room[c] = v < FARM_LEAST ? 0 : v;
     } };
   return g;

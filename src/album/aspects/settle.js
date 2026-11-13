@@ -14,6 +14,8 @@
 // The fields are the state of the chunks of 1 km² (town/farmland.js): a chunk keeps how much of it is ploughed, and
 // the fields are drawn from that number alone, the same furlongs running on from chunk to chunk. Where only a few
 // chunks of the land around are ploughed, the fields are drawn only where their furlongs can be told.
+// A chunk has one state: a chunk of bog (the division marks them) is never ploughed (town/farmland.js), and no field
+// is drawn where the swamp is painted.
 import { RULES_GLSL, PALETTE_GLSL } from '../town/rules.js';
 import { settleUniforms } from '../town/state.js';
 
@@ -211,6 +213,14 @@ void aspSettle(Px p, inout Land L) {
       // the common case, good level land, costs nothing more; only shores, swamps, slopes and heights are weighed
       if (p.h < 2. || p.cA.a > .3 || p.slope > .42 || p.hl > 1300. || tm > 0.) fm *= smoothstep(.4, 2., p.h) * (1. - smoothstep(.3, .5, p.cA.a)) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(1300., 1700., p.hl)) * (1. - tm);
       fm *= seen;
+      // No field on a bog (the owner: «важно, чтобы чанки не перемешивались»): where the swamp is painted — by the
+      // very rule the swamp aspect paints it by (aspects/swamp.js, SWAMP_RULES) — the land is not ploughed.
+      if (fm > .003 && p.cA.a > .004) {
+        float hs = swampHeight(p.ll), bslope = swampSlope(p.ll, hs);
+        vec4 kind = swampKind(p.ll, hs + (p.n2 - .5) * 3. + (p.n3 - .5) * 1.5, p.wet);
+        float bd = swampDepth(p.cA.a, swampField(p.pk, p.n2, p.n3, px), p.ll, hs, bslope, kind.x);
+        fm *= 1. - mix(smoothstep(-.12, .02, bd), clamp(p.cA.a * 1.05, 0., 1.) * step(bslope, .05), smoothstep(1.5, 4.5, px));
+      }
       if (fm > .003) {
         vec3 fc = L.col;
         if (near > 0.) fc = setFields(p, L.col, atlF, cid, ff, border, fs);
