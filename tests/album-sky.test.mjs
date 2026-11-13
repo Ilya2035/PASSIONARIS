@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, sunLongitude, equatorial } from '../src/album/sky/astro.js';
-import { LIGHT, lightUniforms, sunAt, HAZE_KM } from '../src/album/light.js';
+import { LIGHT, lightUniforms, lightNumbers, lightFrame, FRAME, sunAt, HAZE_KM } from '../src/album/light.js';
 import { AlbumCamera, edgePush, keyPush, panStep, zoomAbout, H_MIN, H_MAX, TILT_MAX, EDGE_PX, PAN_RATE } from '../src/album/camera.js';
 import { KM_PER_DEG, BBOX, R } from '../src/album/geo.js';
 import sky from '../src/album/aspects/sky.js';
@@ -81,6 +81,35 @@ test('sky: the shared light keeps its contract', () => {
   const own = { ...T, ...sky.uniforms }; assert.equal(lightUniforms(own).uMoon, sky.uniforms.uMoon); assert.equal(lightUniforms(own).uCloud, sky.uniforms.uCloud); assert.equal(lightUniforms(own).uSunW, sky.uniforms.uSunW);
   for (const name of Object.keys(u)) assert.match(LIGHT, new RegExp(`\\b${name}\\b`), name);
   assert.ok(HAZE_KM > .5 && HAZE_KM < 4);
+});
+
+test('sky: the light of a frame is counted once, on the processor', () => {
+  const day = lightNumbers({ sun: sunAt(0) });
+  // the light of the map (hour 0) is what the shaders counted before: these are the colours every picture was taken with
+  for (const [got, want] of [[day.A, [1.22, 1.15, 1.02, 1]], [day.B.slice(0, 3), [.46 * .62, .58 * .62, .78 * .62]], [day.C, [.55, .70, .92, 0]], [day.D, [0, 0, 0]]]) got.forEach((v, i) => near(v, want[i], 1e-9));
+  // the thin air of one km of the way: the knob of the haze over the height of the eye
+  near(lightNumbers({ sun: sunAt(0), haze: .09, alt: 500 }).B[3], .09 / (500 * 2.2 + 25), 1e-12); assert.ok(lightNumbers({ sun: sunAt(0), alt: 20 }).B[3] > lightNumbers({ sun: sunAt(0), alt: 2000 }).B[3]);
+  // night: no sunlight; the sky keeps the light of the stars, and the Moon adds to it and gives a light of its own
+  const dark = lightNumbers({ sun: sunAt(24), moon: 0 }), moonlit = lightNumbers({ sun: sunAt(24), moon: 1 });
+  assert.deepEqual(dark.A, [0, 0, 0, 0]); assert.deepEqual(dark.D, [0, 0, 0]); assert.ok(moonlit.D[2] > moonlit.D[0] && moonlit.D[2] > .1, 'moonlight is cold');
+  near(dark.B[2], .52 * .5 * .62, 1e-9); near(moonlit.B[2], .52 * .84 * .62, 1e-9); assert.ok(dark.B[2] < day.B[2] / 2 && dark.C[2] < day.C[2] / 5, 'night is dark');
+  // a low Sun: orange sunlight, a warmer haze, the glow of sunset at full strength; none of it at noon or deep in the night
+  const low = lightNumbers({ sun: { x: -1, y: 0, z: .02 } }); assert.ok(low.A[0] > 2 * low.A[2] && low.A[3] > .4 && low.A[3] < .8, `${low.A}`);
+  assert.ok(low.C[3] > .95 && low.C[0] / low.C[2] > day.C[0] / day.C[2]); assert.equal(lightNumbers({ sun: sunAt(12) }).C[3], 0); assert.equal(lightNumbers({ sun: sunAt(24) }).C[3], 0);
+  assert.ok(low.E[0] > low.E[1] && low.E[1] > low.E[2], 'the glow is orange');
+  // a warm look reddens the sunlight; the paper and the night slate have their own air and no glow
+  const warm = lightNumbers({ sun: sunAt(0), warm: 1 }); near(warm.A[0], 1.22 * 1.06, 1e-9); near(warm.A[2], 1.02 * .9, 1e-9);
+  assert.deepEqual(lightNumbers({ sun: { x: -1, y: 0, z: .02 }, style: 3 }).C, [.84, .86, .86, 0]); assert.deepEqual(lightNumbers({ sun: sunAt(0), style: 6 }).C, [.05, .07, .11, 0]);
+  // the uniforms: one set for every material, already holding the light of the map before the first frame
+  const u = lightUniforms({ uSun: {}, uHaze: {}, uExposure: {}, uSat: {}, uWarm: {}, uStyle: {} });
+  for (const k of ['uLightA', 'uLightB', 'uLightC', 'uLightD', 'uLightE']) { assert.equal(u[k], FRAME[k], k); assert.equal(sky.uniforms[k], FRAME[k], `${k}: the ground gets it with the sky's uniforms`); }
+  lightFrame({ sun: sunAt(0) }); near(FRAME.uLightA.value.w, 1, 1e-9); near(FRAME.uLightC.value.z, .92, 1e-6);
+  lightFrame({ sun: sunAt(24), moon: 1 }); assert.equal(FRAME.uLightA.value.w, 0); assert.ok(FRAME.uLightD.value.z > .1);
+  lightFrame({ sun: sunAt(0) });
+  // the ground shader is at a cliff of speed: what it calls from the light stays a hand of operations, nothing counted per pixel that a frame can count once
+  for (const fn of ['albumDay', 'albumSunCol', 'albumSkyCol', 'albumHazeCol', 'albumMoonCol']) assert.match(LIGHT, new RegExp(`${fn}\\(\\) \\{ return uLight[A-E](\\.\\w+)?; \\}`), fn);
+  const haze = LIGHT.match(/float albumHaze\(vec3 wpos\) \{([\s\S]*?)\n\}/)[1]; assert.ok(!/smoothstep|sqrt|pow|vnoise/.test(haze) && (haze.match(/exp\(/g) || []).length === 1, 'albumHaze: one exp, no more');
+  const air = LIGHT.match(/vec3 albumAir\(vec3 col, vec3 wpos\) \{([^\n]*)\}/)[1]; assert.ok(!/Cloud/.test(air), 'the shadows of the clouds are not laid in albumAir');
 });
 
 test('sky: knobs and pages of the part', () => {

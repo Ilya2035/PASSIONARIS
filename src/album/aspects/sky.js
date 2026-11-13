@@ -7,13 +7,14 @@
 // hour, the day of the year and the latitude under the camera; the Moon and how strong its light is; the clouds.
 import { Vector3, Vector4, BackSide } from 'three';
 import { frame } from '../geo.js';
-import { sunAt } from '../light.js';
+import { sunAt, lightFrame, FRAME } from '../light.js';
 import { sunDir, moonDir, moonLit, moonStrength } from '../sky/astro.js';
 
 const MAP_LIGHT = sunAt(0);
 
-// uniforms of LIGHT that the sky owns; through the ground's uniforms they reach every material (lightUniforms)
-const U = { uSunW: { value: new Vector3(0, 1, 0) }, uMoon: { value: new Vector4(0, 0, 1, 0) }, uCloud: { value: new Vector4(0, 0, 0, 9) } };
+// uniforms of LIGHT that the sky owns; through the ground's uniforms they reach every material (lightUniforms).
+// FRAME is the light of the frame, counted once a frame on the processor (lightFrame in light.js).
+const U = { uSunW: { value: new Vector3(0, 1, 0) }, uMoon: { value: new Vector4(0, 0, 1, 0) }, uCloud: { value: new Vector4(0, 0, 0, 9) }, ...FRAME };
 const P = { pyr: [42.63, .66], zar: [41.65, -.89], all: [40.2, -3.4] };
 const cam = (ll, h, tilt = 0, heading = 0) => ({ lat: ll[0], lon: ll[1], h, tilt, heading });
 
@@ -61,6 +62,8 @@ export default {
         const m = moonDir(hour, yday, s.lat, phase);
         moon.set(m[0], m[1], m[2], moonStrength(sun.z, m[2], phase)); world(m[0], m[1], m[2], f, moonW); dome.u.uSkyK.value.y = moonLit(phase);
       } else { moon.set(0, 0, 1, 0); moonW.copy(sunW).negate(); dome.u.uSkyK.value.y = 0; }
+      // the light of this frame for every shader: colours of the Sun, the sky and the haze, the day, the thin air
+      lightFrame({ sun, moon: moon.w, style: T.uStyle.value, warm: T.uWarm.value, haze: T.uHaze.value, alt: c.alt ?? s.h });
       // clouds: how much of the sky, how far the wind (toward the east-north-east) has carried them
       drift += album.shot ? 0 : dt * p.get('play') * .9;
       cloud.set(p.get('clouds') && T.uStyle.value === 0 ? p.get('cloudCover') : 0, -drift * .92 - 37, drift * .38 + 11, 4 + 3 * T.uExag.value);
