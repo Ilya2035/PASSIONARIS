@@ -6,7 +6,7 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 import settle from '../src/album/aspects/settle.js';
-import { RMAX, CELL, GN, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond,
+import { RMAX, CELL, GN, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
   RULES_GLSL, PALETTE_GLSL, MAT } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
@@ -285,10 +285,11 @@ test('yards: sixteen places a square kilometre; a yard stands only in a chunk of
     assert.ok(Math.abs(r[0] - (GX0 + (i + .5) * YARD_STEP)) <= .0701 && Math.abs(r[1] - (GY0 + (j + .5) * YARD_STEP)) <= .0701, 'a yard stands by the middle of its place');
     assert.deepEqual(yardAt(ctx, i, j), r, 'the place of a yard gives the yard back');
     assert.ok(r[8] > .5 && r[8] < 1 && r[9] > .5 && r[9] < 1 && r[10] >= 0 && r[10] < 1 && r[7] === 0);
-    // not on the lanes that run out of the settlement
+    // not on the lanes that run out of the settlement — they end a little way past its last houses
     const cs = Math.cos(L.th), sn = Math.sin(L.th), q = bend(L, (cs * (r[0] - L.x) + sn * (r[1] - L.y)) / CELL, (-sn * (r[0] - L.x) + cs * (r[1] - L.y)) / CELL);
-    assert.ok(Math.min(Math.abs(q[0] - .5), Math.abs(q[1] - .5)) * CELL >= Math.max(r[8], r[9]) * .5 * CELL, 'a yard on a lane');
+    if (d < L.r + lanesBeyond(L.r)) assert.ok(Math.min(Math.abs(q[0] - .5), Math.abs(q[1] - .5)) * CELL >= Math.max(r[8], r[9]) * .5 * CELL, 'a yard on a lane');
   }
+  assert.ok(lanesBeyond(.1) < .2 && lanesBeyond(1) < fieldsBeyond(1) / 4, 'the lanes end by the houses; the tracks and the roads lead on');
   // no two yards closer than a hundred metres: their plots never overlap
   for (let a = 0; a < yards.length; a++) for (let b = a + 1; b < yards.length; b++) assert.ok(Math.hypot(yards[a][0] - yards[b][0], yards[a][1] - yards[b][1]) > .1);
   // the knob: more yards, and those that stood stay where they were; none at zero

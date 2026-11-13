@@ -58,6 +58,9 @@ export const peopleOf = r => Math.round(Math.PI * r * r * DENSITY);
 export const classOf = (people, areaKm2 = 0) => { let c = 0; for (let i = 0; i < CLASSES.length; i++) if (people >= CLASSES[i].people || areaKm2 >= CLASSES[i].area) c = i; return c; };
 // how far the fields reach beyond the last houses, km
 export const fieldsBeyond = r => .5 + 2.5 * r;
+// how far the lanes of a settlement run on past its last houses, km (twin of laneOut in aspects/settle.js): beyond
+// that the tracks to the villages and the roads lead on
+export const lanesBeyond = r => .1 + .45 * r;
 
 // ---- numbers shared with the shader
 export const wob = (x, y) => Math.sin(x * 9 + 1.3 * Math.sin(y * 7));

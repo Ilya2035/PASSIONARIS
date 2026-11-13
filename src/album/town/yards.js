@@ -13,7 +13,7 @@
 // here, and now and then a yard stands on the rough pasture beside a field instead of on the field.
 import { FKM, FN } from '../chunks.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
-import { GK, GN, GX0, GY0, CELL, CULTURES, FARM_SHARP, cellHash, fieldsBeyond, bend } from './rules.js';
+import { GK, GN, GX0, GY0, CELL, CULTURES, FARM_SHARP, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
 import { KIND } from './shapes.js';
 import { FLAG_ATL } from './plan.js';
 
@@ -105,7 +105,7 @@ export function yardAt(ctx, i, j) {
   else { kind = KIND.longyard; sx = .82 + .14 * s; sy = .62 + .12 * s2; }               // people and cattle under one long roof
   const half = Math.max(sx, sy) * .5 * S;
   if (!soundGround(ctx.env, x, y, half)) return null;
-  if (L && L.th != null) {                                          // not on the lanes that run out of the settlement between the fields
+  if (L && L.th != null && m > -lanesBeyond(L.r) - half - .02) {   // not on the lanes that run out of the settlement a little way
     const cs = Math.cos(L.th), sn = Math.sin(L.th), dx = x - L.x, dy = y - L.y, q = bend(L, (cs * dx + sn * dy) / S, (-sn * dx + cs * dy) / S);
     if (Math.min(Math.abs(q[0] - .5), Math.abs(q[1] - .5)) * S < half + .012) return null;
   }
