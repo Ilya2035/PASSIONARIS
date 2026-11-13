@@ -15,14 +15,27 @@ import { kmOf, llOf } from '../chunks.js';
 
 // What a kind of road looks like: width on the ground km (a little wider than life, as the owner allows: «совсем
 // незначительно… то же самое и с дорогами»), least width in pixels near and from high up, colour on the natural land
-// (as seen on screen) and on paper, how strong, and between which sizes of a pixel (km) it fades out as the camera
-// rises. A great road of history, a main road between provinces, a lesser road, a track.
+// (as seen on screen) and on paper, and between which sizes of a pixel (km) it fades as the camera rises. A great
+// road of history, a main road between provinces, a lesser road, a track.
 export const LOOK = [
-  { id: 'trunk', key: 'roadMain', w: .012, px: [2.3, 1.3], light: 0xc9b58c, ink: 0x5e4022, alpha: .95, fade: null },
-  { id: 'main', key: 'roadMain', w: .011, px: [2.1, 1.1], light: 0xc4b088, ink: 0x6b4a2a, alpha: .92, fade: [.38, .72] },
-  { id: 'lesser', key: 'roadMinor', w: .008, px: [1.6, .9], light: 0xb9a680, ink: 0x7a5a38, alpha: .88, fade: [.08, .18] },
-  { id: 'track', key: 'roadTracks', w: .005, px: [1.2, .8], light: 0xab9974, ink: 0x8a6c4a, alpha: .8, fade: [.04, .085] },
+  { id: 'trunk', key: 'roadMain', w: .012, px: [2.3, 1.2], light: 0xc9b58c, ink: 0x5e4022, fade: [.19, .42], keep: .2 },
+  { id: 'main', key: 'roadMain', w: .011, px: [2.1, 1.1], light: 0xc4b088, ink: 0x6b4a2a, fade: [.19, .38], keep: 0 },
+  { id: 'lesser', key: 'roadMinor', w: .008, px: [1.6, 1.2], light: 0xb9a680, ink: 0x7a5a38, fade: [.14, .19], keep: 0 },
+  { id: 'track', key: 'roadTracks', w: .005, px: [1.2, 1.0], light: 0xab9974, ink: 0x8a6c4a, fade: [.065, .085], keep: 0 },
 ];
+// From high up the roads must not argue with the land (the owner: дороги «слишком выделены»; the lead, 13.11.2026: above
+// some 400 km the main roads fade, by 800 km they can hardly be told; below 300 km they stay as they are). A pixel is
+// .19 km from 300 km, .26 from 400, .32 from 500, .52 from 820 (the height the game opens at).
+//   • a track goes between 100 and 130 km, a lesser road between 220 and 300 km;
+//   • a main road between provinces fades from 300 km and is gone by 600 km;
+//   • a great road of history fades from 300 km to a fifth of its strength by 660 km and stays so: a faint thread;
+//   • every road thins from its near width to its far one between 300 and 600 km.
+export const THIN = [.19, .38];
+// how set `set` of LOOK is drawn when a pixel is px km: its least width in pixels and how strong it is (0: not drawn)
+export function roadFar(set, px) {
+  const L = LOOK[set];
+  return { minPx: L.px[0] + (L.px[1] - L.px[0]) * ss(THIN[0], THIN[1], px), alpha: 1 - (1 - L.keep) * ss(L.fade[0], L.fade[1], px) };
+}
 const VERGE = { verge: 2.8, vergeColour: 0x77714a, vergeAlpha: .42 };          // the cleared strip: both sides and the road, in widths of the road
 // a bridge by the kind of its road: stone on a main road, timber on a lesser one (a track has none)
 const DECK = [{ light: 0xa2957f, ink: 0x3a2a1c, look: 1 }, { light: 0x8a6f4c, ink: 0x4a3622, look: 2 }];
@@ -108,13 +121,20 @@ export default async function init(album) {
     update(dt, t, cam) {
       if (towns() !== modelSeen) draw();                           // settlements grew or went: the roads stop at their new edges
       const dom = album.renderer.domElement, px = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, dom.clientHeight);
-      const on = !!p.get('roadsOn') && p.get('roads') > 0, high = ss(.03, .15, px);
+      const on = !!p.get('roadsOn') && p.get('roads') > 0;
       // a road is seen through what stands on the ground: its depth is pulled toward the eye over the tallest crown
       const crown = typeof album.layers.forest?.top === 'number' ? album.layers.forest.top : 0, pull = crown > 0 ? crown * 1.04 + .002 : 0;
       for (const r of ribbons) {
-        const L = LOOK[r.set], fade = L.fade ? 1 - ss(L.fade[0], L.fade[1], px) : 1;
-        r.mesh.visible = on && fade > 0 && p.get(L.key) !== 0; if (!r.mesh.visible) continue;
-        r.setPx(cam, dom); r.u.uLift.value = pull; r.u.uVergeA.value = VERGE.vergeAlpha * (1 - ss(.02, .05, px)); r.u.uVerge.value = px < .05 ? VERGE.verge : 1;   // the cleared strip is a thing of the near view r.u.uMinPx.value = L.px[0] + (L.px[1] - L.px[0]) * high; r.u.uAlpha.value = L.alpha * fade * (1 - (r.set ? .5 : .42) * ss(.03, .2, px));   // from high up a road is a faint thread: it must not argue with the land
+        const far = roadFar(r.set, px);
+        r.mesh.visible = on && far.alpha > 0 && p.get(LOOK[r.set].key) !== 0;
+        if (!r.mesh.visible) continue;
+        r.setPx(cam, dom);
+        r.u.uLift.value = pull;
+        r.u.uMinPx.value = far.minPx;
+        r.u.uAlpha.value = far.alpha;
+        // the cleared strip beside a road is a thing of the near view
+        r.u.uVergeA.value = VERGE.vergeAlpha * (1 - ss(.02, .05, px));
+        r.u.uVerge.value = px < .05 ? VERGE.verge : 1;
       }
       // a bridge is seen while it is a few pixels long; it lies over the water, which itself is pulled over the crowns
       const bf = 1 - ss(BRIDGE.fade[0], BRIDGE.fade[1], px), kr = p.get('riversOn') ? p.get('rivers') ?? 1 : 0, over = sheetPull(album, cam) + .006;
