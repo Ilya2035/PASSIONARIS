@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import forest, { naturalForest, wetAt, Regrowth, applyDemo, DEMO, DEMOS, FOREST_RULES, CLOSE_RATE, OLD_AFTER } from '../src/album/aspects/forest.js';
-import { treeTop } from '../src/album/layers/forest.js';
+import { existsSync, readFileSync } from 'node:fs';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 
@@ -127,12 +127,9 @@ test('forest aspect: pages of the group «Лес», knobs, and the rules in GLSL
   for (const [o, c] of ['()', '{}', '[]']) assert.equal(code.split(o).length, code.split(c).length, `balanced ${o}${c}`);
 });
 
-test('no trees stand on the land: the forest is painted, and those who asked how high the crowns stand are still answered', async () => {
-  // the layer file answers the old question of the sheets of water with the old rule; nothing else is left in it
-  const layer = await import('../src/album/layers/forest.js');
-  assert.deepEqual(Object.keys(layer).sort(), ['CROWN', 'K0', 'treeTop']);
-  assert.ok(treeTop(40) > .1 && near(treeTop(40, 2), 2 * treeTop(40), 1e-9) && treeTop(170) === 0 && treeTop(400) === 0);
-  // the aspect has no 3D layer to load, and what it publishes says that nothing stands: top is 0
-  const src = (await import('node:fs')).readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
-  assert.ok(!src.includes("import('../layers/forest.js')") && /id: 'forest', top: 0/.test(src));
+test('no trees stand on the land: the forest is painted, and the height of the crowns it publishes is 0', () => {
+  // the layer of 3D trees is gone with its file; nothing in the album asks it for anything any more
+  assert.ok(!existsSync(new URL('../src/album/layers/forest.js', import.meta.url)), 'src/album/layers/forest.js is removed');
+  const src = readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
+  assert.ok(!src.includes('layers/forest.js') && /id: 'forest', top: 0/.test(src), 'album.layers.forest.top stays, and is 0');
 });

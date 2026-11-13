@@ -135,7 +135,7 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
   return out;
 }
 
-// ---- rules in GLSL, shared with anything that must know what a swamp is at a point (the trees of layers/forest.js).
+// ---- rules in GLSL, shared with anything that must know what a swamp is at a point.
 // They need COMMON of glsl.js (heightLod, vnoise) and nothing else: no uniforms, no screen derivatives.
 export const SWAMP_RULES = /* glsl */`
 // smooth gradient noise, 0..1 (about .5 ± .3): its level lines wander freely, without the square grain of vnoise
