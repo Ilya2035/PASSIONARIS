@@ -283,13 +283,16 @@ vec3 waterLit(Wtr w) {
 
 // ---- water that lies on the land: lakes and rivers. A sheet is a mesh drawn right after the ground and before the
 // things that stand on it, with the same water (WATER_CORE), the same light and air. Its depth is written a little
-// toward the eye (uPull, km), so the trees, houses and roads that the land layers put where the water is stay hidden.
+// toward the eye (uPull, km; more where the eye looks at it aslant), so the trees, houses and roads that the land
+// layers put where the water is stay hidden.
 export const SHEET_VERT = /* glsl */`
 uniform float uPull; varying vec2 vLL; varying vec3 vPos; varying vec2 vZW;
 void sheetVertex(vec2 ll, float hKm) {
   vLL = ll; vPos = worldOf(ll, hKm);
   gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.);
-  vZW = (projectionMatrix * viewMatrix * vec4(vPos + normalize(cameraPosition - vPos) * uPull, 1.)).zw;
+  // (a crown of height H hides the ground behind it for H / cos of the angle the eye looks down at: seen aslant, more)
+  vec3 eye = normalize(cameraPosition - vPos); float aslant = 1. / max(dot(eye, normalize(vPos + vec3(0., RKM, 0.))), .3);
+  vZW = (projectionMatrix * viewMatrix * vec4(vPos + eye * uPull * aslant, 1.)).zw;
 }`;
 export const SHEET_FRAG = /* glsl */`
 uniform float uTime; varying vec2 vLL; varying vec3 vPos; varying vec2 vZW;

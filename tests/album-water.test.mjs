@@ -7,7 +7,7 @@ import { Chunks, CHANNELS, CHUNK_KM, CI0, llOf } from '../src/album/chunks.js';
 import water, { WATER_CORE, SHEET_FRAG, sheetPull, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
-import { riverSheets, MIN_PX, SHOW } from '../src/album/layers/rivers.js';
+import { riverSheets, riverGeneral, riverFar, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT } from '../src/album/layers/rivers.js';
 import { decodeCourses, encodeCourses, mainRivers, rankOf, widthCode, widthOf } from '../src/album/water/courses.js';
 import { statSync } from 'node:fs';
 import { fillHollows } from '../src/album/water/hollows.js';
@@ -248,4 +248,32 @@ test('water: the album shows it — pages for every state, from 20, 200 and 500 
   assert.ok(sheetPull(...album(500)) > .2 && sheetPull(...album(500)) < .4, 'above the trees a small pull remains, for houses and roads');
   assert.ok(sheetPull(...album(60, { layers: { forest: { top: 0 } } })) < .06, 'no trees drawn (a paper map): no pull for them');
   assert.ok(sheetPull(...album(60, { layers: { forest: { top: .5 } } })) > .5, 'the running forest layer has the last word');
+});
+
+test('water: rivers from high up — near the ground nothing changes; higher the line is smoother, thinner, and the small rivers go', () => {
+  // near the ground (20–45 km) a river is drawn exactly as it was approved
+  for (const h of [20, 30, 45]) { const px = 2 * h * Math.tan(16 * Math.PI / 180) / 900, f = riverFar(px); assert.ok(f.minPx === MIN_PX && f.show[0] === SHOW[0] && f.show[1] === SHOW[1] && f.gen[0] === 0 && f.gen[1] === 0, 'from ' + h + ' km a river is as it was'); }
+  // higher: never wider in pixels, fewer rivers, a smoother line — step by step, without a jump
+  let last = riverFar(.02);
+  for (let px = .03; px < 1.4; px *= 1.15) { const f = riverFar(px); assert.ok(f.minPx <= last.minPx + 1e-9 && f.show[0] >= last.show[0] - 1e-9 && f.gen[0] >= last.gen[0] - 1e-9 && f.gen[1] >= last.gen[1] - 1e-9 && f.gen[1] <= f.gen[0] + 1e-9);
+    assert.ok(last.minPx - f.minPx < .5 && f.gen[0] - last.gen[0] < .45 && f.gen[1] - last.gen[1] < .45, 'no jump at ' + px.toFixed(3)); last = f; }
+  const top = riverFar(.7); assert.ok(Math.abs(top.minPx - FAR_PX) < 1e-9 && FAR_PX < MIN_PX && FAR_PX >= 1 && top.gen[0] === 1 && top.gen[1] === 1 && Math.abs(top.show[1] - SHOW[1] * FAR_SHOW) < 1e-9 && FAR_SHOW > 1 && FAR_TINT > 0 && FAR_TINT <= 1);
+  assert.ok(.16 / .64 > top.show[1] * .9, 'from 1000 km a river 160 m wide is still drawn whole');
+  // a made-up river: it runs east for 60 km and winds — bends of 400 m every kilometre and a half; a straight
+  // tributary comes down from the north and meets it in the middle
+  const KM = 111.195, c40 = Math.cos(40 * Math.PI / 180), N = 601, ll = new Float64Array(N * 2);
+  for (let i = 0; i < N; i++) { ll[i * 2] = -4 + i * .1 / (KM * c40); ll[i * 2 + 1] = 40 + Math.sin(i * .1 * 2 * Math.PI / 1.5) * .4 / KM; }
+  const M = 201, tl = new Float64Array(M * 2); for (let i = 0; i < M; i++) { tl[i * 2] = ll[300 * 2]; tl[i * 2 + 1] = ll[300 * 2 + 1] + (M - 1 - i) * .1 / KM; }
+  const lines = riverGeneral(riverSheets({ rivers: [{ name: 'Большая', ru: '', n: N, ll, w: new Float32Array(N).fill(.12), acc: 900 }, { name: 'Приток', ru: '', n: M, ll: tl, w: new Float32Array(M).fill(.03), acc: 60, joins: true }] }, () => 300));
+  const [big, trib] = lines; assert.equal(big.off.length, N * 4); assert.equal(trib.off.length, M * 4);
+  for (let k = 0; k < 4; k++) { assert.ok(Math.abs(big.off[k]) < 1e-6 && Math.abs(big.off[(N - 1) * 4 + k]) < 1e-6, 'the ends of a river stay where they are'); }
+  // how long the line is at each shape, and how far it swings from side to side
+  const shape = k => { let len = 0, swing = 0, px = 0, py = 0; for (let i = 0; i < N; i++) { const x = i * .1 + (k < 0 ? 0 : big.off[i * 4 + k * 2]), y = Math.sin(i * .1 * 2 * Math.PI / 1.5) * .4 + (k < 0 ? 0 : big.off[i * 4 + k * 2 + 1]); if (i) len += Math.hypot(x - px, y - py); if (i > 60 && i < N - 60) swing = Math.max(swing, Math.abs(y)); px = x; py = y; } return { len, swing }; };
+  const real = shape(-1), s1 = shape(0), s2 = shape(1);
+  assert.ok(real.swing > .39 && s1.swing < real.swing * .45 && s2.swing < .05, `the bends are evened out: ${real.swing.toFixed(2)} → ${s1.swing.toFixed(2)} → ${s2.swing.toFixed(3)} km`);
+  assert.ok(s1.len < real.len * .85 && s2.len < s1.len && s2.len < 60.6, `and the line is shorter: ${real.len.toFixed(1)} → ${s1.len.toFixed(1)} → ${s2.len.toFixed(1)} km`);
+  for (let i = 0; i < N * 4; i++) assert.ok(Math.abs(big.off[i]) <= GEN.range, 'a point never slides farther than the attribute can say');
+  // the tributary still ends on the river: its last point slides with the point of the river it lies on
+  for (let k = 0; k < 4; k++) assert.ok(Math.abs(trib.off[(M - 1) * 4 + k] - big.off[300 * 4 + k]) < .02, 'the tributary follows the smoother line of its river');
+  assert.ok(Math.abs(trib.off[0]) < 1e-6 && Math.abs(trib.off[1]) < 1e-6 && Math.abs(trib.off[100 * 4 + 1]) < .02, 'and far from the mouth it runs as it ran');
 });

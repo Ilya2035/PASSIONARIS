@@ -48,6 +48,13 @@
 | Русла рек с шириной (`public/assets/album/water/rivers.bin.gz`) и пляжи (`public/assets/album/water/coast.bin.gz`), оба файла в репозитории | © участники [OpenStreetMap](https://www.openstreetmap.org/copyright); выгрузки по странам с [download.geofabrik.de](https://download.geofabrik.de). Собраны скриптами `scripts/album/fetch-osm.mjs`, `osm-extract.mjs`, `bake-rivers.mjs`, `bake-coast.mjs` | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/): нужно указание авторства; производная база данных распространяется на тех же условиях — оба файла открыто лежат в репозитории |
 | Места настоящих городов, городков и сёл (`public/assets/album/town/sites.json.gz`, в репозитории): по ним стоят центры районов | © участники [OpenStreetMap](https://www.openstreetmap.org/copyright); те же выгрузки; `scripts/album/bake-sites.mjs` | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) |
 
+### Альбом: дороги
+
+| Данные | Источник | Лицензия |
+|---|---|---|
+| Большие дороги истории (`src/album/roads/historic.js`): какие города и в каком порядке соединяла дорога | Перечень свой, по общеизвестным сведениям о римских дорогах Испании, южной Галлии и Тингитаны (Итинерарий Антонина) и средневековых трактах. Ни одна карта не копировалась: путь между городами находит рельеф альбома | Свой перечень; исторические факты авторским правом не охраняются |
+| Сеть дорог (`public/assets/album/roads/roads.bin.gz`, в репозитории) | Проложена кодом альбома по его же высотам, рекам и делению: `src/album/roads/routes.js`, `scripts/album/bake-roads.mjs` | Своя; высоты и реки — см. выше |
+
 ## Ресурсы
 
 Таблица ресурсов `public/assets/resources/` собрана из открытых данных скриптами `scripts/resources/download.mjs` и

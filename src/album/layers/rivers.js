@@ -15,6 +15,23 @@ const D = Math.PI / 180;
 const FLAT = { atlas: 0x3d78b8, paper: 0x5f8fb5, night: 0x6f8fb0 };          // looks that draw rivers as plain lines
 export const MIN_PX = 3;               // a great river is never thinner than this on the screen; a small one .42 of it
 export const SHOW = [.035, .1];        // a river is left out when its water is under SHOW[0] of a pixel, whole from SHOW[1]
+// From high up (the owner, 13.11.2026: реки издалека «слишком жирные, потому что изогнутые… чтобы реки всё же
+// выпрямлялись, когда мы отдалялись»). Near the ground nothing changes. As the camera rises:
+//   • the line of a river is drawn smoother: its bends are evened out over GEN.w[0] km on each side, higher up over
+//     GEN.w[1] km — the corners of every sheet slide toward the smoother line (GEN.t: between which sizes of a
+//     pixel, km), so a river straightens without a jump and still meets the river it runs into;
+//   • the least width falls from MIN_PX to FAR_PX pixels: a river does not grow fatter with height;
+//   • fewer rivers are drawn: the widths SHOW are multiplied by up to FAR_SHOW, the small tributaries go first;
+//   • the thin line turns a paler blue, FAR_TINT of it, so that it can be told in a dark forest.
+export const GEN = { w: [.7, 3.5], t: [[.03, .1], [.16, .5]], range: 12 };
+export const FAR_PX = 1.6, FAR_SHOW = 2, FAR_TINT = .7;
+const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// how a river is drawn when a pixel is px km: its least width in pixels, the widths it shows from, how far its line
+// has slid toward the two smoother shapes
+export function riverFar(px) {
+  const k = 1 + (FAR_SHOW - 1) * ss(.05, .55, px);
+  return { minPx: MIN_PX - (MIN_PX - FAR_PX) * ss(.03, .35, px), show: [SHOW[0] * k, SHOW[1] * k], gen: [ss(GEN.t[0][0], GEN.t[0][1], px), ss(GEN.t[1][0], GEN.t[1][1], px)] };
+}
 
 // The rivers as the sheets are built from them: [{ name, dry, n, ll (lon, lat pairs), w (km), dist (km from the
 // source), curv (1/km, + bends to the left), fade (0 at an end in the sea .. 1), mouth }].
@@ -37,30 +54,78 @@ export function riverSheets(courses, heightAt) {
     const sm = new Float32Array(n);
     for (let i = 0, a = 0, b = 0, sum = 0; i < n; i++) { const span = Math.max(.08, r.w[i] * 1.5); while (b < n && dist[b] <= dist[i] + span) sum += curv[b++]; while (dist[a] < dist[i] - span) sum -= curv[a++]; sm[i] = sum / (b - a); }
     for (let i = 0; i < n; i++) fade[i] = (r.arm ? 1 : Math.min(1, dist[i] / .15 + .15)) * (mouth ? Math.min(1, (len - dist[i]) / 1) : 1);   // a source tapers in; an arm of a river does not
-    out.push({ name: r.ru || r.name, dry: r.dry, n, ll: r.ll.subarray(0, n * 2), w: r.w.subarray(0, n), dist, curv: sm, fade, mouth });
+    out.push({ name: r.ru || r.name, dry: r.dry, n, ll: r.ll.subarray(0, n * 2), w: r.w.subarray(0, n), dist, curv: sm, fade, mouth, joins: !!r.joins && !mouth, arm: !!r.arm, acc: r.acc || 0 });
   }
   return out;
 }
 
+// The average of v(s) over w km on each side of every point of a line (dist: km along it). Past its ends the line is
+// carried on by reflection through them, so an end stays where it is.
+function boxed(v, dist, n, W, out) {
+  const L = dist[n - 1], w = Math.min(W, L / 2), pre = new Float64Array(n);
+  for (let i = 1; i < n; i++) pre[i] = pre[i - 1] + (dist[i] - dist[i - 1]) * (v[i] + v[i - 1]) / 2;
+  const I = s => {
+    let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (dist[m] <= s) lo = m; else hi = m; }
+    const seg = dist[hi] - dist[lo], vs = v[lo] + (v[hi] - v[lo]) * (seg > 0 ? (s - dist[lo]) / seg : 0);
+    return pre[lo] + (s - dist[lo]) * (v[lo] + vs) / 2;
+  };
+  const J = s => (s < 0 ? I(-s) + 2 * v[0] * s : s > L ? 2 * v[n - 1] * (s - L) + I(2 * L - s) : I(s));
+  if (!(w > 0)) { for (let i = 0; i < n; i++) out[i] = v[i]; return; }
+  for (let i = 0; i < n; i++) out[i] = (J(dist[i] + w) - J(dist[i] - w)) / (2 * w);
+}
+// The two smoother shapes of every river (GEN), for the far view. Adds to each line of riverSheets():
+//   off     Float32Array, four numbers a point: how far (km east, north) the point lies from its place on the first
+//           smoother line, and on the second
+// A river that ends on another (or an arm that leaves one) follows the smoother line of that river with its end, so
+// the two still meet.
+export function riverGeneral(lines, widths = GEN.w) {
+  const KM = KM_PER_DEG;
+  for (const l of lines) {
+    const n = l.n, lon = new Float64Array(n), lat = new Float64Array(n), sl = new Float64Array(n), sa = new Float64Array(n), off = l.off = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { lon[i] = l.ll[i * 2]; lat[i] = l.ll[i * 2 + 1]; }
+    widths.forEach((W, k) => {
+      boxed(lon, l.dist, n, W, sl); boxed(lat, l.dist, n, W, sa);
+      for (let i = 0; i < n; i++) { off[i * 4 + k * 2] = (sl[i] - lon[i]) * KM * Math.cos(lat[i] * D); off[i * 4 + k * 2 + 1] = (sa[i] - lat[i]) * KM; }
+    });
+  }
+  // ends that lie on another river: which point of which river
+  const C = .3, grid = new Map(), ends = [], xy = (l, i) => [l.ll[i * 2] * KM * Math.cos(l.ll[i * 2 + 1] * D), l.ll[i * 2 + 1] * KM];
+  lines.forEach((l, li) => { for (const [flag, i] of [[l.joins, l.n - 1], [l.arm, 0]]) if (flag) { const [x, y] = xy(l, i), e = { li, i, x, y, d: .25, to: -1, at: 0 }; ends.push(e);
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const k = (Math.floor(x / C) + di) * 100003 + Math.floor(y / C) + dj; (grid.get(k) || grid.set(k, []).get(k)).push(e); } } });
+  if (ends.length) lines.forEach((l, li) => { for (let i = 0; i < l.n; i++) { const [x, y] = xy(l, i), list = grid.get(Math.floor(x / C) * 100003 + Math.floor(y / C)); if (!list) continue;
+    for (const e of list) { if (e.li === li) continue; const d = Math.hypot(x - e.x, y - e.y); if (d < e.d) { e.d = d; e.to = li; e.at = i; } } } });
+  // the greater rivers first: an end takes the shift of the river it lies on and hands it on, fading, up its own line
+  for (const e of ends.filter(e => e.to >= 0).sort((p, q) => lines[q.li].acc - lines[p.li].acc || p.li - q.li)) {
+    const l = lines[e.li], par = lines[e.to].off, s0 = l.dist[e.i];
+    for (let k = 0; k < widths.length; k++) {
+      const px = par[e.at * 4 + k * 2] - l.off[e.i * 4 + k * 2], py = par[e.at * 4 + k * 2 + 1] - l.off[e.i * 4 + k * 2 + 1], R = widths[k] * 2.5;
+      for (let i = 0; i < l.n; i++) { const g = 1 - ss(0, R, Math.abs(l.dist[i] - s0)); if (g <= 0) continue; l.off[i * 4 + k * 2] += px * g; l.off[i * 4 + k * 2 + 1] += py * g; }
+    }
+  }
+  return lines;
+}
+
 const VERT = /* glsl */`${COMMON}
   ${SHEET_VERT}
-  attribute vec2 aLL; attribute vec4 aW, aMisc; uniform float uPx, uK, uMinPx; uniform vec2 uShow;   // aMisc: the way the river runs (east, north), side −1 | 1, fade
+  attribute vec2 aLL; attribute vec4 aW, aMisc, aGen, aGenDir; uniform float uPx, uK, uMinPx; uniform vec2 uShow, uGen;   // aMisc: the way the river runs (east, north), side −1 | 1, fade · aGen, aGenDir: where the two smoother lines lie and how they run
   varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;
   void main() {
     float real = aW.x * uK, size = sqrt(clamp(real / .16, 0., 1.));                 // the water from bank to bank, km
     float water = max(real, uPx * uMinPx * mix(.42, 1., size));                     // never thinner than a pixel or three
     float show = smoothstep(uShow.x, uShow.y, real / max(uPx, 1e-5));               // brooks far thinner than a pixel are left out
     float bed = water * 1.5 + min(water * .8, .03);                                 // the banks stand beside the water
-    float sd = sign(aMisc.z); vec2 across = normalize(vec2(-aMisc.y, aMisc.x)) * sd, off = across * bed * .5;
+    vec2 slide = mix(aGen.xy * uGen.x, aGen.zw, uGen.y) * ${GEN.range.toFixed(1)}, way = mix(mix(aMisc.xy, aGenDir.xy, uGen.x), aGenDir.zw, uGen.y);   // from high up the line is smoother
+    vec2 at = aLL + vec2(slide.y / KM, slide.x / (KM * cos(radians(aLL.x))));
+    float sd = sign(aMisc.z); vec2 across = normalize(vec2(-way.y, way.x) + 1e-6) * sd, off = across * bed * .5;
     vSide = sd; vEnd = vec2(aMisc.w * show, step(aW.z, 0.)); vRiv = vec4(bed, aW.y, abs(aW.z), aW.w); vAcross = across; vWater = water / bed;
-    sheetVertex(aLL + vec2(off.y / KM, off.x / (KM * cos(radians(aLL.x)))), max(heightLod(aLL, 0.), 0.) * uExag / 1000. + .002);
+    sheetVertex(at + vec2(off.y / KM, off.x / (KM * cos(radians(at.x)))), max(heightLod(at, 0.), 0.) * uExag / 1000. + .002);
     if (show <= 0.) gl_Position = vec4(0., 0., 2., 1.);
   }`;
 const FRAG = /* glsl */`${COMMON}
   ${CHUNK_GLSL}
   ${LIGHT}
   ${SHEET_FRAG}
-  uniform vec3 uFlat; uniform float uPass; varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;   // uPass: 0 the banks · 1 the water
+  uniform vec3 uFlat; uniform float uPass, uTint; varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;   // uPass: 0 the banks · 1 the water
   void main() {
     vec2 pk = sheetPk(); float px = sheetPx(pk);
     float bed = vRiv.x, s = vSide, wpx = bed / max(px, 1e-6), dry = step(.5, vEnd.y);
@@ -99,6 +164,7 @@ const FRAG = /* glsl */`${COMMON}
       w.depth = mix(deep, deep * clamp(1. - t * t * .85, .05, 1.) * smoothstep(0., .45, edge), far);
       w.cB.r = clamp(w.cB.r * 1.25 - .25, 0., 1.);                                    // running water freezes later than still water
       col = waterLit(w);
+      col = mix(col, vec3(.05, .15, .36) * (.2 + .8 * albumDay()), uTint * (1. - far) * (1. - w.cB.r));   // from high up: a thin line that can be told from a dark forest
       float foot = far * (1. - dry) * (1. - inner) * smoothstep(.35, 0., edge) * clamp(dot(vAcross, uSun.xy) * 1.5, 0., 1.) * .5;   // a steep bank shades the water at its foot
       col *= 1. - foot;
     }
@@ -107,32 +173,39 @@ const FRAG = /* glsl */`${COMMON}
 
 function build(lines) {
   let n = 0; for (const l of lines) n += l.n;
-  const ll = new Float32Array(n * 4), misc = new Int8Array(n * 8), wk = new Float32Array(n * 8), idx = new Uint32Array(Math.max(0, n - lines.length) * 6);
+  const ll = new Float32Array(n * 4), misc = new Int8Array(n * 8), wk = new Float32Array(n * 8), gen = new Int16Array(n * 8), gdir = new Int8Array(n * 8), idx = new Uint32Array(Math.max(0, n - lines.length) * 6);
+  const pack = v => Math.round(Math.max(-1, Math.min(1, v / GEN.range)) * 32767);
   let v = 0, q = 0;
   lines.forEach((l, li) => {
     const seed = ((li * 3.7 + 1.3) % 97 + 1) * (l.dry ? -1 : 1);     // a dry river says so by the sign of its seed
+    const o = l.off;
     for (let i = 0; i < l.n; i++) {
       const a = Math.max(0, i - 1), b = Math.min(l.n - 1, i + 1), lat = l.ll[i * 2 + 1], c = Math.cos(lat * D);
       let dx = (l.ll[b * 2] - l.ll[a * 2]) * c, dy = l.ll[b * 2 + 1] - l.ll[a * 2 + 1]; const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+      // the way each smoother line runs here (km east, north between its neighbours)
+      const ex = (l.ll[b * 2] - l.ll[a * 2]) * KM_PER_DEG * c, ey = (l.ll[b * 2 + 1] - l.ll[a * 2 + 1]) * KM_PER_DEG, way = [dx, dy, dx, dy];
+      if (o) for (let k = 0; k < 2; k++) { const gx = ex + o[b * 4 + k * 2] - o[a * 4 + k * 2], gy = ey + o[b * 4 + k * 2 + 1] - o[a * 4 + k * 2 + 1], gl = Math.hypot(gx, gy); if (gl > 1e-6) { way[k * 2] = gx / gl; way[k * 2 + 1] = gy / gl; } }
       for (let s = 0; s < 2; s++, v++) {
         ll[v * 2] = lat; ll[v * 2 + 1] = l.ll[i * 2]; misc[v * 4] = Math.round(dx * 127); misc[v * 4 + 1] = Math.round(dy * 127); misc[v * 4 + 2] = s ? 127 : -127; misc[v * 4 + 3] = Math.round(l.fade[i] * 127);
         wk[v * 4] = l.w[i]; wk[v * 4 + 1] = l.dist[i]; wk[v * 4 + 2] = seed; wk[v * 4 + 3] = l.curv[i];
+        for (let k = 0; k < 4; k++) { gen[v * 4 + k] = o ? pack(o[i * 4 + k]) : 0; gdir[v * 4 + k] = Math.round(way[k] * 127); }
       }
       if (i) { const k = v - 4; idx[q++] = k; idx[q++] = k + 1; idx[q++] = k + 2; idx[q++] = k + 1; idx[q++] = k + 3; idx[q++] = k + 2; }
     }
   });
   const geo = new BufferGeometry();
-  geo.setAttribute('aLL', new BufferAttribute(ll, 2)); geo.setAttribute('aW', new BufferAttribute(wk, 4)); geo.setAttribute('aMisc', new BufferAttribute(misc, 4, true)); geo.setIndex(new BufferAttribute(idx, 1));   // 28 bytes a corner
+  geo.setAttribute('aLL', new BufferAttribute(ll, 2)); geo.setAttribute('aW', new BufferAttribute(wk, 4)); geo.setAttribute('aMisc', new BufferAttribute(misc, 4, true));
+  geo.setAttribute('aGen', new BufferAttribute(gen, 4, true)); geo.setAttribute('aGenDir', new BufferAttribute(gdir, 4, true)); geo.setIndex(new BufferAttribute(idx, 1));   // 40 bytes a corner
   return { geo, points: n };
 }
 
 export default async function init(album) {
   const courses = album.data.courses; if (!courses) { console.warn('[album] no river courses: assets/album/water/rivers.bin.gz'); return null; }
-  const lines = riverSheets(courses, album.data.base.at);
+  const t0 = performance.now(), lines = riverGeneral(riverSheets(courses, album.data.base.at)), tGen = performance.now() - t0;
   // two meshes of one material: the brooks, which only show from low down, can be switched off whole
   const widest = l => { let m = 0; for (let i = 0; i < l.n; i++) if (l.w[i] > m) m = l.w[i]; return m; };
   const BROOK = .012, sets = [lines.filter(l => widest(l) >= BROOK), lines.filter(l => widest(l) < BROOK)];
-  const u = { ...sheetUniforms(album), uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: MIN_PX }, uShow: { value: [SHOW[0], SHOW[1]] }, uFlat: { value: new Color(FLAT.atlas) } };
+  const u = { ...sheetUniforms(album), uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: MIN_PX }, uShow: { value: [SHOW[0], SHOW[1]] }, uGen: { value: [0, 0] }, uTint: { value: 0 }, uFlat: { value: new Color(FLAT.atlas) } };
   const material = pass => new ShaderMaterial({ uniforms: { ...u, uPass: { value: pass } }, depthWrite: pass === 1,
     transparent: false, blending: CustomBlending, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, side: DoubleSide, vertexShader: VERT, fragmentShader: FRAG });
   const banksMat = material(0), waterMat = material(1);
@@ -142,11 +215,13 @@ export default async function init(album) {
   const p = album.params; let on = true;
   const sync = () => { on = !!p.get('riversOn') && p.get('rivers') > 0; u.uK.value = p.get('rivers'); u.uFlat.value.set(FLAT[p.get('look')] || FLAT.atlas); };
   p.on(sync); sync();
+  console.log(`[album] rivers: ${lines.length} rivers, ${meshes[0].points + meshes[1].points} points, sheets and their smoother lines in ${tGen.toFixed(0)} ms`);
   return { id: 'rivers', lines, stats: () => ({ rivers: lines.length, points: meshes[0].points + meshes[1].points, brooks: sets[1].length }),
     update(dt, t, cam) {
-      u.uPx.value = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, album.renderer.domElement.clientHeight);
+      const px = u.uPx.value = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, album.renderer.domElement.clientHeight), far = riverFar(px);
       u.uPull.value = sheetPull(album, cam);
-      meshes[0].mesh.visible = on; meshes[1].mesh.visible = on && BROOK * u.uK.value / u.uPx.value > SHOW[0];
+      u.uMinPx.value = far.minPx; u.uShow.value[0] = far.show[0]; u.uShow.value[1] = far.show[1]; u.uGen.value[0] = far.gen[0]; u.uGen.value[1] = far.gen[1]; u.uTint.value = FAR_TINT * ss(.03, .2, px);
+      meshes[0].mesh.visible = on; meshes[1].mesh.visible = on && BROOK * u.uK.value / px > far.show[0];
       meshes[0].banks.visible = on && u.uPx.value < .12;            // banks are drawn only while a great river is a few pixels wide
     } };
 }
