@@ -8,6 +8,9 @@
 // (layers/towns.js) and this shader paints only the ground under them: streets, yards, gardens, the shade of the
 // houses, the lanes that run out between the fields. From afar there are no blocks: the same cells are painted as
 // roofs, then melt into one tone, and at last the settlement is a mark of a pixel or two.
+// There are two sorts of patches (town/state.js): the towns — the places of the album and the centres of districts —
+// in a grid of squares of 10 km, and the villages between them (town/villages.js) in a grid of 2.5 km. A village has
+// no mark: from afar it melts into the land, and its few fields are drawn only where their furlongs can be told.
 import { RULES_GLSL, PALETTE_GLSL } from '../town/rules.js';
 import { settleUniforms } from '../town/state.js';
 
@@ -136,8 +139,10 @@ void aspSettle(Px p, inout Land L) {
   // pixel is nowhere near either
   if (fieldsV < .03 && (code == 0 || (code > 200 && code < 210)) && (vcode == 0 || (vcode > 200 && vcode < 210))) {
     bool away = true;
-    if (code != 0) { float r0 = t0.b * t0.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > 3.5 * r0 + 1.4; }
-    if (away && vcode != 0) { float r0 = tv.b * tv.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(v0) + (tv.rg * 255. + .5) / 256.) * SET_VK) > 3.5 * r0 + 1.4; }
+    // (the fields and the lanes of a patch end 3.5 r + 0.8 km from its site; from very high up the mark of a town, a
+    // couple of pixels wide, reaches farther than that)
+    if (code != 0) { float r0 = t0.b * t0.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > max(3.5 * r0 + .85, 2.3 * p.px + .1); }
+    if (away && vcode != 0) { float r0 = tv.b * tv.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(v0) + (tv.rg * 255. + .5) / 256.) * SET_VK) > 3.5 * r0 + .85; }
     if (away) return;
   }
   // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 squares around, in

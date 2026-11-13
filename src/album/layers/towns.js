@@ -24,6 +24,13 @@ import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town
 import { KN } from '../division/km.js';
 
 const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
+// How far from the point the camera looks at the ground is in the picture, km: out to the far corners. h: the
+// distance of the camera from that point, tilt: from straight down, degrees, fov: of the picture's height, degrees.
+// With villages everywhere, the blocks are planned no farther than this: what lies outside the picture costs nothing.
+export function viewReach(h, tilt, fov, aspect) {
+  const ti = tilt * Math.PI / 180, vf = fov * Math.PI / 360, up = h * Math.cos(ti), far = Math.min(ti + vf, 1.45);
+  return Math.hypot(up * (Math.tan(far) - Math.tan(ti)), up / Math.cos(far) * Math.tan(vf) * aspect);
+}
 const VERT = /* glsl */`${COMMON}
   attribute vec4 aA, aB, aC;        // site x, y (flat km), turn of the lattice, kind · cell i, j, own turn, flags · size x, y, tint, height
   uniform sampler2D tShapes; uniform float uS, uH, u3D, uLod;
@@ -329,8 +336,11 @@ export default async function init(album) {
       mesh.visible = blocks; yard.mesh.visible = yards; if (!blocks) return;
       u.uS.value = S; u.u3D.value = U.y;
       riverK = p.get('riversOn') === 0 ? 0 : p.get('rivers') ?? 1; riverMin = 1.5 * view / Math.max(1, dom.clientHeight);
-      const ck = `${S}|${mirrorN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${Math.round(h / 8)}`;
-      if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.max(25, h * 2.5), S, ck); }
+      // the blocks are planned as far as the picture reaches (and a little farther: until the camera has moved 8 km
+      // or risen or tilted a step, the plan stays)
+      const hb = Math.ceil(h / 8) * 8, tb = Math.min(78, Math.ceil(cam.s.tilt / 6) * 6);
+      const ck = `${S}|${mirrorN}|${riverK}|${Math.round(Math.max(0, riverMin - .07) * 40)}`, key = `${ck}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${hb}|${tb}`;
+      if (key !== planKey) { planKey = key; rebuild(tx, ty, Math.min(Math.max(25, hb * 2.5), viewReach(hb, tb, cam.cam.fov, dom.width / Math.max(1, dom.height)) + 14), S, ck); }
       if (!yards) return;
       // yards stand around the point the camera looks at, as far as they can be told from the ground; as the camera
       // rises they shrink to nothing together with the blocks of the settlements

@@ -85,7 +85,7 @@ export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes) 
   }
   // which of the 3 × 3 squares around a square hold a village whose houses or fields reach into it
   for (const [v, q] of at) {
-    const vx = v % VN, vy = (v / VN) | 0, reach = q.r + fieldsBeyond(q.r) + .7;
+    const vx = v % VN, vy = (v / VN) | 0, reach = q.r + fieldsBeyond(q.r) + .32;   // nothing of a village is drawn farther from its site (aspSettle)
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const xx = vx + dx, yy = vy + dy; if (!(dx || dy) || xx < 0 || yy < 0 || xx >= VN || yy >= VN) continue;
       const x0 = GX0 + xx * VK, y0 = GY0 + yy * VK, ex = Math.max(x0 - q.x, 0, q.x - x0 - VK), ey = Math.max(y0 - q.y, 0, q.y - y0 - VK);
