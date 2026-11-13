@@ -39,10 +39,30 @@ test('map view: the album opens on the map; the address and the last choice can 
   const q = s => new URLSearchParams(s);
   assert.equal(startView(q(''), null), 'map'); assert.equal(startView(q(''), 'album'), 'album'); assert.equal(startView(q(''), 'map'), 'map');
   assert.equal(startView(q('view=album'), 'map'), 'album'); assert.equal(startView(q('view=map'), 'album'), 'map'); assert.equal(startView(q('view=nonsense'), null), 'map');
+  // opened as the game it is the game whatever was open last
+  assert.equal(startView(q('view=game'), 'album'), 'game'); assert.equal(startView(q('view=game'), null, true), 'game');
   // a capture, and an address that names a page, keep to the album: the pictures of the notes stay as they were
   assert.equal(startView(q('shot=1'), null, true), 'album'); assert.equal(startView(q('page=land-20'), 'map'), 'album'); assert.equal(startView(q('shot=1&view=map'), null, true), 'map');
   assert.ok(VIEW_KEY.startsWith('passionaris.'));
   // the page the map opens on, and the hook in the album
   const pg = PAGES.find(p => p.id === 'map'); assert.ok(pg && pg.cam.h > 500 && Object.keys(pg.p).length === 0, 'the whole map, as it is');
   const main = readFileSync(join(ROOT, 'src/album/main.js'), 'utf8'); assert.match(main, /initMapView\(album, q\)/);
+});
+
+test('map view in the game: «Играть» opens the new map, the game on the globe keeps a button of its own', () => {
+  const read = f => readFileSync(join(ROOT, f), 'utf8'), html = read('index.html'), launcher = read('src/launcher/launcher.js'), preload = read('electron/preload.cjs'), main = read('electron/main.cjs');
+  // the launcher: two buttons, each with its own action
+  assert.match(html, /<button class="btn big" id="play"[^>]*>Играть<\/button>/); assert.match(html, /<button class="btn" id="play-globe"[^>]*>Глобус: прежняя игра<\/button>/);
+  assert.ok(html.indexOf('id="play"') < html.indexOf('id="play-globe"') && html.indexOf('id="play-globe"') < html.indexOf('id="open-album"'));
+  assert.match(launcher, /\$\('play'\)\.onclick = \(\) => launchMap\(\);/); assert.match(launcher, /\$\('play-globe'\)\.onclick = \(\) => launchGame\(null\);/);
+  assert.match(launcher, /window\.passionaris\.openAlbum\('game'\)/); assert.match(launcher, /album\.html\?view=game/);
+  assert.match(launcher, /window\.passionaris\.openAlbum\('album'\)/, 'the album button opens the album itself');
+  // the app: the view goes with the request; the page is the album's
+  assert.match(preload, /openAlbum: view => ipcRenderer\.send\('album:open', view\)/);
+  assert.match(main, /ipcMain\.on\('album:open', \(_e, view\) =>/); assert.match(main, /\['game', 'album', 'map'\]\.includes\(view\) \? `album\.html\?view=\$\{view\}` : 'album\.html'/);
+  // the smoke check still starts the game on the globe
+  assert.match(main, /getElementById\('play-globe'\) \|\| document\.getElementById\('play'\)/);
+  // the page itself: its name while it loads, and no way into the album from the game
+  const albumMain = read('src/album/main.js'), view = read('src/album/mapview.js');
+  assert.match(albumMain, /q\.get\('view'\) === 'game'/); assert.match(view, /body\.gameview #ui > \.mv \.mv-album \{ display: none; \}/); assert.match(view, /if \(view !== 'game'\) store\.set\(view\);/);
 });

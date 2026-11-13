@@ -158,7 +158,8 @@ app.whenReady().then(() => {
     game?.close();
   });
   // the graphics album opens in the game window's place; its marks go to a text file next to the settings
-  ipcMain.on('album:open', () => { if (!game) createGame(readSettings(), 'album.html'); launcher?.close(); });
+  // («Играть» opens the same page as the map on its own: album.html?view=game — src/album/mapview.js)
+  ipcMain.on('album:open', (_e, view) => { if (!game) createGame(readSettings(), ['game', 'album', 'map'].includes(view) ? `album.html?view=${view}` : 'album.html'); launcher?.close(); });
   ipcMain.handle('album:feedback', (_e, text) => { const f = path.join(app.getPath('userData'), 'album-feedback.txt'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, String(text).slice(0, 200000)); return f; });
   ipcMain.on('app:quit', () => app.quit());
   // screens for the resolution list: logical size, scale factor (Windows display scaling), refresh rate
@@ -242,7 +243,8 @@ async function smokeTest() {
     await wait(2500);
     await shot(launcher, 'smoke-launcher.png');
     log('launcher ok');
-    await launcher.webContents.executeJavaScript("document.getElementById('play').click()");
+    // (the game on the globe: «Играть» itself opens the new map, which has no window.__game to wait for)
+    await launcher.webContents.executeJavaScript("(document.getElementById('play-globe') || document.getElementById('play')).click()");
     for (let i = 0; i < 60 && !game; i++) await wait(250);
     game.webContents.on('console-message', (e, level, msg) => log('game console:', e.message ?? msg));
     game.webContents.on('did-fail-load', (_e, code, desc, url) => log('load failed', code, desc, url));

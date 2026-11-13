@@ -108,7 +108,7 @@ async function launchGame(saveId = null) {
   document.body.classList.add('launching');
   try {
     if (saveId) localStorage.setItem(CONTINUE_KEY, saveId);
-    else localStorage.removeItem(CONTINUE_KEY); // «Играть» = a new world, never a stale pick
+    else localStorage.removeItem(CONTINUE_KEY); // «Глобус: прежняя игра» = a new world, never a stale pick
   } catch { /* storage unavailable: the game starts fresh */ }
   await saveSettings(settings);
   if (isElectron) window.passionaris.launch(settings);
@@ -142,9 +142,22 @@ const settingsPanel = createSettingsPanel({
 });
 $('open-settings').onclick = () => settingsPanel.open();
 // the graphics album (album.html, docs/ALBUM.md): its own window in the app, a plain page in a browser
-$('open-album').onclick = () => { if (isElectron) window.passionaris.openAlbum(); else location.href = 'album.html'; };
+$('open-album').onclick = () => { if (isElectron) window.passionaris.openAlbum('album'); else location.href = 'album.html?view=album'; };
 
-$('play').onclick = () => launchGame(null);
+// «Играть» — the first version of the game on the new map (the owner, 13.11.2026: «собрать первую версию, хотя бы
+// какая есть, чтобы можно было просто карту посмотреть… нужна в игре»): the map of the album on its own, with its
+// map modes (src/album/mapview.js, view=game). The game on the globe — the world from 5000 BC, time, weather, saves —
+// keeps its own button, and «Продолжить» and the saves still open it.
+async function launchMap() {
+  if (launching) return;
+  launching = true;
+  document.body.classList.add('launching');
+  await saveSettings(settings);
+  if (isElectron) window.passionaris.openAlbum('game');
+  else location.href = './album.html?view=game';
+}
+$('play').onclick = () => launchMap();
+$('play-globe').onclick = () => launchGame(null);
 $('quit').onclick = () => { if (isElectron) window.passionaris.quit(); else window.close(); };
 $('win-close').onclick = () => window.passionaris?.quit();
 $('win-min').onclick = () => window.passionaris?.minimize();

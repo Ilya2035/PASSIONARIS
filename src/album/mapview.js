@@ -2,10 +2,16 @@
 // какая есть, чтобы можно было просто карту посмотреть… не забудь добавить возможность просмотра провинций, районов,
 // регионов и так далее. Как раз посмотрю оптимизацию и все остальные изменения»).
 //
-// The album opens in this view. One small panel: the map modes (the natural map; districts, provinces, regions; the
-// chunks of 1 km² for checking; temperature and heights), a few switches, and how fast the picture is drawn. The
-// camera panel of the album stays. A button brings the whole album back — its pages, marks and knobs — and another
-// returns here. Which of the two was open is remembered.
+// One small panel: the map modes (the natural map; districts, provinces, regions; the chunks of 1 km² for checking;
+// temperature and heights), a few switches, and how fast the picture is drawn. The camera panel of the album stays.
+//
+// The page opens in one of three ways:
+//   game   «Играть» in the launcher: the first version of the game on the new map (the owner, 13.11.2026, asked
+//          whether the map view in the album was that first version: «Нужна в игре»). The map on its own and
+//          nothing of the album.
+//   map    the same from inside the album: a button brings the whole album back — its pages, marks and knobs — and
+//          another returns here. Which of the two was open is remembered.
+//   album  the album as it was.
 // Nothing here draws the map: the modes are sets of the album's own parameters (params.js).
 
 // a map mode: its name, what it sets, and how to tell that it is on
@@ -37,7 +43,7 @@ export const VIEW_KEY = 'passionaris.album.view';
 // which view to open: the address says (view=map / view=album), else what was open last, else the map. A capture
 // (shot=1) keeps to the album unless told otherwise, so that the pictures taken for the notes stay as they were.
 export function startView(q, stored, shot = false) {
-  const v = q.get('view'); if (v === 'map' || v === 'album') return v;
+  const v = q.get('view'); if (v === 'map' || v === 'album' || v === 'game') return v;
   if (shot || q.get('page')) return 'album';
   return stored === 'album' ? 'album' : 'map';
 }
@@ -49,6 +55,7 @@ body.mapview #ui > .back { right: 20px; }
 body.mapview #ui > .hint { left: 392px; right: 20px; bottom: 20px; }
 body:not(.mapview) #ui > .mv { display: none; }
 body.mapview #ui > .mv-open { display: none; }
+body.gameview #ui > .mv .mv-album { display: none; }
 #ui > .mv { left: 20px; top: 20px; width: 352px; gap: 8px; }
 .mv .mv-modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .mv .mv-modes .btn { justify-content: center; }
@@ -76,13 +83,18 @@ export function initMapView(album, q) {
   const sBoxes = MAP_SWITCHES.filter(([k]) => p.get(k) !== undefined).map(([k, name]) => {
     const l = el('label'), c = Object.assign(el('input', 'toggle'), { type: 'checkbox' }); c.onchange = () => p.set(k, c.checked ? 1 : 0); l.append(c, el('span', null, name)); sw.append(l); return [k, c];
   });
-  const toAlbum = button('', 'Альбом: страницы и настройки'); toAlbum.title = 'Все страницы альбома, отметки «Подходит» и «Не то», ручки вида';
-  box.append(Object.assign(el('div', 'hd2'), { innerHTML: '<span class="cap">Passionaris</span><span class="L">Карта</span>' }), modes, over, hint, sw, fps, toAlbum);
+  const toAlbum = button('mv-album', 'Альбом: страницы и настройки'); toAlbum.title = 'Все страницы альбома, отметки «Подходит» и «Не то», ручки вида';
+  const name = el('span', 'cap', 'Passionaris'), head = el('div', 'hd2'); head.append(name, el('span', 'L', 'Карта'));
+  box.append(head, modes, over, hint, sw, fps, toAlbum);
+  // the version beside the name (the owner's rule), where the app can tell it
+  window.passionaris?.appInfo?.().then(i => { if (i?.version) name.textContent = `Passionaris · версия ${i.version}`; }).catch(() => {});
   const toMap = button('mv-open', 'Просто карта'); toMap.title = 'Убрать страницы и ручки альбома, оставить карту и её режимы';
   root.append(box, toMap);
 
   function show(view) {
-    document.body.classList.toggle('mapview', view === 'map'); store.set(view); sync();
+    document.body.classList.toggle('mapview', view !== 'album'); document.body.classList.toggle('gameview', view === 'game');
+    if (view !== 'game') store.set(view);                            // the game does not change how the album opens
+    sync();
   }
   toAlbum.onclick = () => show('album'); toMap.onclick = () => show('map');
   function sync() {
@@ -104,7 +116,7 @@ export function initMapView(album, q) {
   fps.textContent = 'Скорость: считаю…';
 
   const first = startView(q, store.get(), album.shot);
-  if (first === 'map' && !q.get('page') && album.pages?.some(pg => pg.id === 'map')) album.openPage('map');
+  if (first !== 'album' && !q.get('page') && album.pages?.some(pg => pg.id === 'map')) album.openPage('map');
   show(first);
-  return { show, mode: () => modeOf(p.get), view: () => (document.body.classList.contains('mapview') ? 'map' : 'album') };
+  return { show, mode: () => modeOf(p.get), view: () => (document.body.classList.contains('gameview') ? 'game' : document.body.classList.contains('mapview') ? 'map' : 'album') };
 }

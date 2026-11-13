@@ -171,7 +171,7 @@ export function createSavesPanel({ getSettings, onLoad, onLatest }) {
     const box = document.createElement('div');
     box.className = 'saves-empty';
     box.innerHTML = `${GLOBE_SVG}<b>Сохранений пока нет</b><span></span>`;
-    box.querySelector('span').innerHTML = `Нажмите «Играть» — мир начнётся в 5000 г. до н.э. `
+    box.querySelector('span').innerHTML = `Сохранения есть у прежней игры на глобусе: нажмите «Глобус: прежняя игра» — мир начнётся в 5000 г. до н.э. `
       + (minutes > 0 ? `Автосохранение — каждые ${minutes} мин` : 'Автосохранение выключено (Настройки → Игра)')
       + ', быстрое сохранение&nbsp;—&nbsp;<kbd>F5</kbd>.';
     return box;

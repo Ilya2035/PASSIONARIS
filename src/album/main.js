@@ -14,6 +14,8 @@ const q = new URLSearchParams(location.search);
 const SHOT = q.get('shot') === '1';
 const canvas = document.getElementById('view');
 const step = t => { document.getElementById('ld-step').textContent = t; };
+// opened as the game («Играть» in the launcher: view=game, mapview.js) the page is the game, not the album
+if (q.get('view') === 'game') { document.title = 'Passionaris'; const t = document.querySelector('#loading .ld-title'); if (t) t.textContent = 'Passionaris'; }
 
 const renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 const scene = new Scene();

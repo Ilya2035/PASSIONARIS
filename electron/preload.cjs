@@ -7,7 +7,9 @@ contextBridge.exposeInMainWorld('passionaris', {
   launch: s => ipcRenderer.send('game:launch', s),
   exitToLauncher: () => ipcRenderer.send('game:exit-to-launcher'),
   quit: () => ipcRenderer.send('app:quit'),
-  openAlbum: () => ipcRenderer.send('album:open'),
+  // the map of the album in the game window: 'game' — on its own, as the first version of the game («Играть»);
+  // 'album' — the album itself, its pages and knobs; nothing — as it was open last
+  openAlbum: view => ipcRenderer.send('album:open', view),
   albumFeedback: text => ipcRenderer.invoke('album:feedback', text),
   minimize: () => ipcRenderer.send('win:minimize'),
   // game window: apply {windowMode, resolution} now (in-game settings); windowState() for checks
