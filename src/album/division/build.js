@@ -11,6 +11,7 @@ import { FKM, FN, kmOf, llOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
 import { makeGraph, partition, tidy } from './graph.js';
 import { districtCells } from './cells.js';
+import { KKM, kmData, kmFacts, cellsOfDistrict, cellsOfChunks, chunksOfDistrict, livingOf } from './km.js';
 
 export const LAND = 0, SEA = 1, LAKE = 2;
 export const KIND_ID = ['land', 'sea', 'lake'];
@@ -374,8 +375,10 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   const div = finish(ch, { district, count, kinds, kind, province, region, provinces, regions, size, sizes, nLP });
   div.landProv = landProv; div.moved = moved; div.seaOf = seaOf;
   // the outline of every land province and district, texel by texel: straightened, along the rivers and the crests
-  // (cells.js). The chunks of a district (div.chunks) stay what the district's numbers are summed from.
-  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv }; }
+  // (cells.js), chunk by chunk of 1 km² (km.js): a district is the chunks div.cells gives it, and its numbers are
+  // summed from them (districtSummary). div.chunks — the natural cells the partition gave a district — is what the
+  // district was laid out from, and what the other aspects still ask by.
+  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, heightAt }; kmData(div); }
   div.ms = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   return div;
 }
@@ -467,23 +470,29 @@ export function districtNames(ch, div, places = []) {
 }
 
 // ---- what a district holds: sums over its chunks (state read from album.chunks, layers with sum: true)
+// A district is its chunks of 1 km² (div.cells): its area is their number, and what the nature models keep cell by
+// cell (forest, swamp, resources) goes to the district by the share of each cell's chunks that lie in it. So the
+// numbers belong to the outline that is drawn.
+//   classes: how many of its chunks are of each class of ground, [—, 1 … 5] (land only);
+//   living:  how many chunks nobody can live on, people barely can, people can freely
 export function districtSummary(div, d, ch) {
-  const list = div.chunks[d] || [];
-  let area = 0, landA = 0;
-  const share = { forest: 0, swamp: 0, built: 0, fields: 0 };
-  for (const k of list) {
-    const a = ch.area[k], l = div.kind[k] === LAND ? a * ch.land[k] : 0;
-    area += a; landA += l;
-    for (const name of Object.keys(share)) share[name] += ch.get(name, k) * l;
-  }
-  for (const name of Object.keys(share)) share[name] = landA > 0 ? share[name] / landA : 0;
+  const land = div.kinds[d] === LAND, parts = cellsOfDistrict(div, ch, d), per = cellsOfChunks(ch).count, chunks = kmData(div).box.num[d];
+  const area = chunks * KKM * KKM, landA = land ? area : 0, share = { forest: 0, swamp: 0, built: 0, fields: 0 };
+  let w = 0;
+  for (const [k, n] of parts) { w += n; if (land) for (const name of Object.keys(share)) share[name] += ch.get(name, k) * n; }
+  for (const name of Object.keys(share)) share[name] = land && w > 0 ? share[name] / w : 0;
   const sums = [];
   for (const l of ch.layers.values()) {
     if (!l.sum) continue;
-    let s = 0; for (const k of list) s += l.data[k] || 0;
+    let s = 0; for (const [k, n] of parts) s += (l.data[k] || 0) * n / per[k];
     sums.push({ name: l.name, title: l.title, unit: l.unit || '', value: s });
   }
+  let classes = null, living = null;
+  if (land) {
+    const facts = kmFacts(div, div.raster.heightAt); classes = [0, 0, 0, 0, 0, 0]; living = [0, 0, 0];
+    for (const c of chunksOfDistrict(div, d)) { classes[facts.cls[c]]++; living[livingOf(facts.cls[c])]++; }
+  }
   const p = div.province[d], r = div.region[p];
-  return { id: d, name: div.names ? div.names[d] : `Район № ${d + 1}`, kind: KIND_ID[div.kinds[d]], area, landArea: landA, chunks: list.length, share, sums,
+  return { id: d, name: div.names ? div.names[d] : `Район № ${d + 1}`, kind: KIND_ID[div.kinds[d]], area, landArea: landA, chunks, cells: (div.chunks[d] || []).length, share, sums, classes, living,
     province: p, region: r, provinceName: div.provinces[p]?.name || '', regionName: div.regions[r]?.name || '', neighbours: div.neighbours[d].length };
 }

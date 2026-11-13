@@ -12,8 +12,9 @@ import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/a
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
 import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.js';
 import { mirrorSettle, settleUniforms } from '../src/album/town/state.js';
-import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, takenOrder, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2 } from '../src/album/town/yards.js';
+import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2 } from '../src/album/town/yards.js';
 import { farmsteadsOfAlbum, packLand, unpackLand, landBytes } from '../src/album/save/land.js';
+import { KN, squareOf, districtOrder } from '../src/album/division/km.js';
 
 // a flat land 300 m high with the sea east of x = 100 km and a steep ridge west of x = −400 km
 const at = (x, y) => (x > 100 ? -50 : x < -400 ? 300 + (-400 - x) * 600 : 300);
@@ -330,25 +331,37 @@ test('yards: light blocks with their own plot; the knob and the pages are in the
   assert.equal(settle.pages.find(p => p.id === 'yards-dense').p.yards, 3);
 });
 
-test('yards in the save: a square kilometre and one of its sixteen places; the squares of a district are counted from the houses outward', () => {
-  // sixteen places in a square, each with its own number
+test('yards in the save: a chunk of 1 km² and one of its sixteen places; the chunks of a district are counted from its centre outward', () => {
+  // sixteen places in a chunk, each with its own number
   const seen = new Set(); for (let j = 8; j < 12; j++) for (let i = 4; i < 8; i++) { const p = yardPlace(i, j); assert.deepEqual([p.kx, p.ky], [1, 2]); seen.add(p.slot); }
   assert.equal(seen.size, 16); assert.deepEqual(yardPlace(4, 8), { kx: 1, ky: 2, slot: 0 }); assert.deepEqual(yardPlace(7, 11), { kx: 1, ky: 2, slot: 15 });
-  const L = { x: -205.3, y: 4405.2, r: .9 }, patches = patchIndex([L]), ctx = yardCtx([L]);
-  const order = takenOrder(patches);
-  assert.equal(order(L.x + .5, L.y), 0); assert.ok(order(L.x + 2, L.y) > order(L.x + 1.2, L.y) && order(L.x + 1.2, L.y) > 0); assert.equal(order(L.x + 60, L.y), 1e3);
+  const L = { x: -205.3, y: 4405.2, r: .9 }, ctx = yardCtx([L]);
   // every yard of the map is found, the same as tile by tile
   const all = allYards(ctx), around = yardsAround(ctx, L.x, L.y);
   assert.equal(all.length, around.length); assert.ok(all.every(y => Math.hypot(y.x - L.x, y.y - L.y) < 4));
-  // two districts, west and east of x = −205; the sea east of x = 100 is no district of land
-  const districtOf = x => (x > 100 ? 2 : x < -205 ? 0 : 1), places = all.map(y => yardPlace(y.i, y.j));
-  const farms = farmsteadsOfAlbum(places, { districtOf, isLand: d => d < 2, order, x0: GX0, y0: GY0, n: 1280 });
+  // two districts of land, west and east of the line x = −205 (column 675 of the lattice of chunks), each with its
+  // centre 3 km from the line; east of column 980 the sea
+  const cells = new Int32Array(KN * KN), cls = new Uint8Array(KN * KN).fill(1);
+  for (let c = 0; c < cells.length; c++) { const i = c % KN; cells[c] = i >= 980 ? 2 : i < 675 ? 0 : 1; }
+  const div = { count: 3, cells, kinds: [0, 0, 2], cx: [L.x - 3, L.x + 3, 300], cy: [L.y, L.y, L.y] };
+  const steepOne = squareOf(L.x - 5, L.y); cls[steepOne] = 4;                       // one chunk of steep ground among the level ones
+  const order = districtOrder(div, { cls });
+  // the chunk of the centre is the first of its district; the numbers grow outward; level ground comes before steep
+  assert.equal(order.rank[squareOf(L.x - 3, L.y)], 0); assert.equal(order.rank[squareOf(L.x + 3, L.y)], 0); assert.equal(order.rank[squareOf(150, L.y)], -1, 'a chunk of water has no number');
+  assert.ok(order.rank[squareOf(L.x - 9, L.y)] > order.rank[squareOf(L.x - 5.5, L.y + 3)] && order.rank[squareOf(L.x - 5.5, L.y + 3)] > order.rank[squareOf(L.x - 4, L.y)]);
+  assert.ok(order.rank[steepOne] > order.rank[squareOf(L.x - 6.5, L.y)], 'the steep chunk 2 km from the centre is taken up after the level one 3.5 km from it');
+  { const d0 = order.list.subarray(order.first[0], order.first[1]); assert.equal(d0.length, 675 * KN); assert.equal(new Set(d0).size, d0.length); assert.ok(d0.every((c, r) => r > 2000 || (cells[c] === 0 && order.rank[c] === r))); }
+  const places = all.map(y => yardPlace(y.i, y.j));
+  const farms = farmsteadsOfAlbum(places, { cells, rank: order.rank, n: KN });
   assert.equal(farms.length, all.length);
   const west = farms.filter(f => f.district === 0), east = farms.filter(f => f.district === 1); assert.ok(west.length > 5 && east.length > 5 && west.length + east.length === farms.length);
-  // the land next to the houses is taken up first: no yard lies further out than the squares the fields reach
-  const most = Math.max(...farms.map(f => f.chunk)); assert.ok(most < 40, `the last square with a yard is number ${most} of its district`);
+  // the land near the centre is taken up first: no yard lies further out than the chunks the fields reach
+  const most = Math.max(...farms.map(f => f.chunk)); assert.ok(most < 150, `the last chunk with a yard is number ${most} of its district`);
   const world = { districts: [{}, {}, {}].map(() => ({ forest: 1, fields: .2, pasture: 0, built: 0, burnt: 0, age: 0 })), settlements: [], farmsteads: farms, roads: [], exceptions: [] };
   const sections = packLand(world), back = unpackLand(sections);
-  assert.equal(back.farmsteads.length, farms.length); assert.ok(landBytes(sections).farmsteads <= (most + 1) * 2 * 2, 'two bytes a square, in two districts');
+  assert.equal(back.farmsteads.length, farms.length); assert.ok(landBytes(sections).farmsteads <= (most + 1) * 2 * 2, 'two bytes a chunk, in two districts');
   const k = f => `${f.district},${f.chunk},${f.slot}`, sent = new Set(farms.map(k)); assert.equal(sent.size, farms.length, 'no two yards share a place'); assert.ok(back.farmsteads.every(f => sent.has(k(f))));
+  // no yard in a chunk of water: with the squares east of the settlement taken for the sea, the yards there are gone
+  const dry = allYards({ ...ctx, landSquare: kx => kx < 675 });
+  assert.ok(dry.length > 5 && dry.length < all.length && dry.every(y => yardPlace(y.i, y.j).kx < 675));
 });

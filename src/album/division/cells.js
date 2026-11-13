@@ -1,4 +1,5 @@
-// The outlines of the land districts, texel by texel of the fine raster (1.25 km).
+// The outlines of the land districts, chunk by chunk: a texel here is a chunk of 1 km² (division/km.js), so a
+// district is made of whole chunks and its border is a border of chunks.
 // The partition of the chunk graph (build.js) says how many districts a province has and about where each lies. Here
 // every district gets its real outline (the owner, 12.11.2026: districts «должны быть по рекам в основном… более
 // овальными»). From the heart of each district the land is claimed along the cheapest way: a river is dear to cross,
@@ -7,7 +8,7 @@
 // and evens the sizes. A district never leaves its province. Water keeps the districts of its chunks.
 // The borders of the provinces are straightened first (provinceCells), and the districts are laid inside them.
 // Plain JavaScript without the GPU: the same chunks, heights and rivers always give the same outlines.
-import { FN, FKM } from '../chunks.js';
+import { KN as FN, KKM as FKM, cellsOfChunks } from './km.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { Heap } from './graph.js';
 
@@ -48,7 +49,7 @@ const stepCost = (q, t, u, hgt, riv, crest) => (q < 8 ? FKM : FKM * 1.4142) * (r
 // (a lesser crest, which costs little) or by 320 m (a great one). A crest is paid for like a river, so a border settles on it. Paying
 // only for the climb would not do: whoever reached the top first would run down the far side for nothing.
 export function crestRaster(hgt, land) {
-  const n = FN * FN, out = new Uint8Array(n), R = 3, D = [1, 0, 0, 1, 1, 1, 1, -1];
+  const n = FN * FN, out = new Uint8Array(n), R = Math.round(3.75 / FKM), D = [1, 0, 0, 1, 1, 1, 1, -1];
   for (let ty = R; ty < FN - R; ty++) for (let tx = R; tx < FN - R; tx++) {
     const t = ty * FN + tx; if (land[t] < 0) continue;
     let best = 0;
@@ -133,7 +134,7 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
 // → { cells: Int32Array FN × FN, the district of every texel (−1 none); prov: the province of every land texel;
 //     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land }
 export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
-  const n = FN * FN, cell = ch.cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
+  const n = FN * FN, cell = cellsOfChunks(ch).cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
   for (let ty = 0, t = 0; ty < FN; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG;
     for (let tx = 0; tx < FN; tx++, t++) {

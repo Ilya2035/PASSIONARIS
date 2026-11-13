@@ -11,7 +11,8 @@
 //     then every remaining district gets a track to its nearest neighbour that already has a road. Roads meet and
 //     part only at centres.
 // Plain JavaScript without the GPU: the same division always gives the same roads.
-import { FN, FKM, kmOf, llOf } from '../chunks.js';
+import { kmOf, llOf } from '../chunks.js';
+import { KN as FN, KKM as FKM } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 
 const X0 = -880, Y0 = 3880, LAND = 0;

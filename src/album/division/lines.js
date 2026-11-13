@@ -2,11 +2,12 @@
 // and of steady width in pixels at any height, with no grain. Up close the ground shader draws the borders itself,
 // exactly on the outline of the chunks; from higher up these lines take over (division/runtime.js fades one into the
 // other).
-// Every border is taken from the fine raster of chunks (ch.cell, cells of 1.25 km): the sides of cells whose chunks
+// Every border is taken from the lattice of chunks of 1 km² (division/km.js): the sides of squares whose chunks
 // lie in different districts, chained into lines, evened out (a running mean over a few km takes the steps of the
-// cells away), rounded off (Chaikin) and thinned (Douglas–Peucker). A side gets
+// squares away), rounded off (Chaikin) and thinned (Douglas–Peucker). A side gets
 // the highest level it divides: a region border is not drawn again as a province border. The shore is not a border.
-import { FN, FKM, llOf } from '../chunks.js';
+import { llOf } from '../chunks.js';
+import { KN as FN, KKM as FKM, cellsOfChunks } from './km.js';
 import { BBOX, KM_PER_DEG, COS_REF } from '../geo.js';
 import { makeRibbons } from '../layers/ribbon.js';
 import { LAND } from './build.js';
@@ -16,7 +17,7 @@ const X0 = -880, Y0 = 3880;
 // → { [level * 2 + water]: [[x, y] km …][] }
 // rivers: [{ pts: [[lon, lat], …] }] — a border that runs beside a river is laid on the river itself
 export function borderLines(ch, div, state = null, rivers = null) {
-  const n = FN * FN, cell = ch.cell, out = {}, cells = div.cells, snap = riverSnapper(rivers);
+  const n = FN * FN, cell = cellsOfChunks(ch).cell, out = {}, cells = div.cells, snap = riverSnapper(rivers);
   const d = new Int32Array(n), wet = new Uint8Array(n), st = new Uint8Array(n);
   for (let t = 0; t < n; t++) { const k = cell[t]; d[t] = cells && cells[t] >= 0 ? cells[t] : div.district[k]; wet[t] = div.kind[k] === LAND ? 0 : 1; st[t] = state && state[cells && d[t] >= 0 ? div.chunks[d[t]][0] : k] ? 1 : 0; }
   const P = div.province, R = div.region;
@@ -37,7 +38,7 @@ export function borderLines(ch, div, state = null, rivers = null) {
     }
   }
   // the higher the level, the farther it is seen from and the more its line is evened out: regions as neat as provinces
-  const reach = { 0: 2, 1: 2, 2: 3, 3: 3, 4: 4, 5: 4, 6: 4 };
+  const reach = { 0: 3, 1: 3, 2: 4, 3: 4, 4: 5, 5: 5, 6: 5 };       // corners either way, a kilometre apart
   for (const [key, segs] of groups) out[key] = chain(segs).map(line => thin(smooth(line.map(v => [X0 + (v % V) * FKM, Y0 + Math.floor(v / V) * FKM]), reach[key], key % 2 === 0 ? snap : null), .1));
   return out;
 }
@@ -81,7 +82,7 @@ function chain(segs) {
   for (const [v, nb] of [...adj].sort((p, q) => p[0] - q[0])) for (const w of nb) if (!used.has(key(v, w))) lines.push(walk(v, w));
   return lines;
 }
-// a running mean over ±r corners (1.25 km apart), twice, then Chaikin corner cutting; the ends stay (they meet other
+// a running mean over ±r corners (1 km apart), twice, then Chaikin corner cutting; the ends stay (they meet other
 // lines)
 // snap: after the mean, every point goes where snap sends it (onto a river), before the corners are cut
 function smooth(p, r = 2, snap = null) {

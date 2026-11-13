@@ -11,7 +11,8 @@ import { createPanel } from './panel.js';
 import { createLabels } from './labels.js';
 import { createLines } from './lines.js';
 import { pickGround } from '../pick.js';
-import { FN, FKM, kmOf } from '../chunks.js';
+import { kmOf } from '../chunks.js';
+import { KN as FN, KKM as FKM, kmFacts, kmOrder, kmData, chunkAt, seedOf, CLASS_TITLE, livingOf } from './km.js';
 import { BBOX } from '../geo.js';
 
 const inside = (lat, lon) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
@@ -33,6 +34,21 @@ export async function startDivision(album, U) {
   let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null;
 
   const active = () => p.get('division') > 0 || !!p.get('divPick');
+  // ---- the chunk of 1 km² under the cursor, while the chunks are shown (knob «Чанки 1 км²»)
+  const kmInfo = document.createElement('div'); kmInfo.className = 'S km-info';
+  kmInfo.style.cssText = 'position:fixed;left:50%;bottom:104px;transform:translateX(-50%);padding:6px 14px;background:rgba(12,16,24,.88);color:#fff;border-radius:3px;pointer-events:none;white-space:nowrap;display:none;z-index:5';
+  document.body.appendChild(kmInfo);
+  function chunkUnder(e) {
+    const ll = e ? pickGround(album, e.clientX, e.clientY) : null; if (!ll || !inside(ll.lat, ll.lon)) return null;
+    const d = districtAt(ll.lat, ll.lon); if (d < 0) return null;
+    const [x, y] = kmOf(ll.lat, ll.lon), c = chunkAt(cur.div.cells, x, y, d); if (c < 0) return null;
+    const dv = cur.div, land = dv.kinds[d] === LAND, parts = [`Чанк ${c % FN} · ${Math.floor(c / FN)}`, `район «${dv.names[d]}», чанков в нём ${kmData(dv).box.num[d]}`];
+    if (land) {
+      const f = kmFacts(dv, data.base.at), o = kmOrder(dv, data.base.at), k = f.cls[c], lv = livingOf(k);
+      parts.push(`высота ${Math.round(dv.raster.hgt[c])} м`, `класс ${k} — ${CLASS_TITLE[k]}`, lv === 2 ? 'жилой' : lv === 1 ? 'едва жилой' : 'нежилой', `в порядке освоения района № ${o.rank[c] + 1}`);
+    } else parts.push('вода');
+    return parts.join(' · ');
+  }
   function use(size) {
     if (!cache.has(size)) {
       const div = buildDivision(ch, { ...opts, size });
@@ -56,7 +72,9 @@ export async function startDivision(album, U) {
     if (!force && cur.state === id) return;
     cur.tex?.dispose();
     const mask = id ? stateMask(cur.div, lands, id) : null;
-    cur.tex = divisionTexture(ch, cur.div, mask); cur.state = id;
+    // what every chunk is like goes into the texture only when the chunks are shown: working it out takes a moment
+    cur.facts = p.get('km') > 1 || cur.facts ? kmFacts(cur.div, data.base.at) : null;
+    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
     lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers);
   }
@@ -114,6 +132,7 @@ export async function startDivision(album, U) {
   p.on(key => {
     if (key == null || key === 'divSize') use(+p.get('divSize') || 20);
     if (key == null || key === 'divState') paintState(false);
+    if ((key == null || key === 'km') && p.get('km') > 1 && !cur.facts) paintState(true);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
     syncLabels();
@@ -146,6 +165,14 @@ export async function startDivision(album, U) {
     centre: d => (cur.div.centres && cur.div.centres.texel[d] >= 0 ? { x: cur.div.centres.x[d], y: cur.div.centres.y[d], site: cur.div.centres.site[d] >= 0 ? sites[cur.div.centres.site[d]] : null } : null),
     sites,
     districtAt,
+    // the chunk of 1 km² at a point (its number: square j · KN + i of division/km.js), −1 outside the album
+    chunkAt: (lat, lon) => { const d = districtAt(lat, lon); return d < 0 ? -1 : chunkAt(cur.div.cells, ...kmOf(lat, lon), d); },
+    districtOfChunk: c => cur.div.cells[c] ?? -1,
+    chunkSeed: c => seedOf(c % FN, Math.floor(c / FN)),
+    // what the chunks are like: { cls (0 water, 1..5), slope, steep, num } and the order a district takes them up in
+    chunkFacts: () => kmFacts(cur.div, data.base.at),
+    chunkOrder: () => kmOrder(cur.div, data.base.at),
+    chunkCount: d => kmData(cur.div).box.num[d] ?? 0,
     summary: d => districtSummary(cur.div, d, ch),
     select, get selected() { return sel; },
     onChange: fn => listeners.push(fn),
@@ -179,6 +206,8 @@ export async function startDivision(album, U) {
     if (tick++ % 3) return;
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : -1;
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; }
+    const text = p.get('km') > 0 && last && !album.shot ? chunkUnder(last) : null;
+    if (text) { kmInfo.textContent = text; kmInfo.style.display = 'block'; } else kmInfo.style.display = 'none';
     if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(districtSummary(cur.div, sel, ch)); shownVersion = ch.version; }
   } };
 }

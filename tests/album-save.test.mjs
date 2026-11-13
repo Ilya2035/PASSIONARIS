@@ -6,16 +6,17 @@ import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packLand, unpackLand, landBytes, landOfAlbum, farmsteadsOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS } from '../src/album/save/land.js';
+import { packLand, unpackLand, landBytes, landOfAlbum, farmsteadsOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS, YARD_LIST, YARD_LIST_CHUNKS } from '../src/album/save/land.js';
 import { encodeSave, decodeSave } from '../src/save/saveSystem.js';
-import { Chunks, kmOf, FN, FKM } from '../src/album/chunks.js';
+import { Chunks, kmOf } from '../src/album/chunks.js';
+import { KN as FN, KKM as FKM, kmOrder, kmData, cellsOfChunks } from '../src/album/division/km.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { roadNetwork } from '../src/album/roads/routes.js';
 import { decodeSites } from '../src/album/town/sites.js';
 import { growTowns, centrePlaces } from '../src/album/town/grow.js';
-import { cultureAt, GX0, GY0 } from '../src/album/town/rules.js';
-import { allYards, patchIndex, yardPlace, takenOrder } from '../src/album/town/yards.js';
+import { cultureAt } from '../src/album/town/rules.js';
+import { allYards, patchIndex, yardPlace } from '../src/album/town/yards.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +44,8 @@ test('save of the land: districts, settlements, roads and exceptions come back f
     roads: [0, 1, 2, 3, 3, 0, 1], exceptions: [{ district: 2, chunk: 317, kind: 0, value: 200 }, { district: 1, chunk: 12, kind: 2, value: 1 }],
   };
   const sections = packLand(world), b = landBytes(sections);
-  assert.deepEqual(b, { districts: 3 * 9, settlements: 4 * 8, farmsteads: (3 + 6) * 2, roads: 2, exceptions: 2 * 8 }, 'nine bytes a district, eight a settlement, two for every chunk that carries farmsteads (three in one district, six in the other), two bits a road, eight an exception');
+  assert.deepEqual(b, { districts: 3 * 9, settlements: 4 * 8, farmsteads: (2 + 4) * 2, roads: 2, exceptions: 2 * 8 }, 'nine bytes a district, eight a settlement, two for every farmstead where they stand thinly (two in one district, four in the other: the map of their chunks would be three and six), two bits a road, eight an exception');
+  assert.deepEqual([...sections['land/yardChunks']], [0, YARD_LIST | 2, YARD_LIST | 4], 'both districts keep their yards as a list');
   const file = await encodeSave({ meta: { t: 0, name: 'trial' }, sections }), back = unpackLand((await decodeSave(file)).sections);
   assert.equal(back.format, LAND_FORMAT); assert.equal(back.generator, GENERATOR);
   assert.deepEqual(back.districts, world.districts); assert.deepEqual(back.roads, world.roads); assert.deepEqual(back.exceptions, world.exceptions);
@@ -54,7 +56,14 @@ test('save of the land: districts, settlements, roads and exceptions come back f
   // however thickly the farmsteads stand, the cost is the land they stand on: a chunk full of sixteen is two bytes too
   { const full = Array.from({ length: 16 }, (_, slot) => ({ district: 0, chunk: 0, slot })), one = [{ district: 0, chunk: 0, slot: 4 }];
     assert.equal(landBytes(packLand({ ...world, farmsteads: full })).farmsteads, 2); assert.equal(landBytes(packLand({ ...world, farmsteads: one })).farmsteads, 2);
-    assert.equal(unpackLand(packLand({ ...world, farmsteads: full })).farmsteads.length, 16); }
+    assert.equal(unpackLand(packLand({ ...world, farmsteads: full })).farmsteads.length, 16);
+    assert.deepEqual([...packLand({ ...world, farmsteads: full })['land/yardChunks']], [1, 0, 0], 'a chunk full of yards is kept as the map of its places');
+    // a lone yard far from the centre of its district is two bytes, not the map of every chunk before it
+    const far = [{ district: 0, chunk: 900, slot: 2 }], fs = packLand({ ...world, farmsteads: far });
+    assert.equal(landBytes(fs).farmsteads, 2); assert.deepEqual(unpackLand(fs).farmsteads, far);
+    // … beyond what the list can number the map is used again
+    const out = [{ district: 0, chunk: YARD_LIST_CHUNKS + 3, slot: 2 }], os = packLand({ ...world, farmsteads: out });
+    assert.equal(landBytes(os).farmsteads, (YARD_LIST_CHUNKS + 4) * 2); assert.deepEqual(unpackLand(os).farmsteads, out); }
   assert.deepEqual(unpackLand(packLand({ ...world, farmsteads: undefined })).farmsteads, [], 'a world without farmsteads is a valid one');
   // a district holds no more settlements than its one byte counts, and none lies outside the districts
   const crowd = Array.from({ length: MAX_IN_DISTRICT + 1 }, (_, i) => ({ district: 1, site: i % 256, people: 50, structures: 0, culture: 1, founded: 0 }));
@@ -83,9 +92,13 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   // the yards among the fields, as the album draws them (town/yards.js), each at its place in a square kilometre of its district
   const patches = patchIndex(model.towns.map(t => ({ x: t.x, y: t.y, r: t.R }))), manner = new Uint8Array(ch.count);
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); manner[k] = cultureAt(c.lat, c.lon); }
-  const yards = allYards({ cell: ch.cell, land: c => ch.kind[c] === 1, fields: c => model.fields[c], culture: c => manner[c], patches, density: 1, env: { at, river: () => 1e9, swamp: () => 0 } });
-  const farmsteads = farmsteadsOfAlbum(yards.map(y => yardPlace(y.i, y.j)), { districtOf, isLand: d => div.kinds[d] === LAND, order: takenOrder(patches), x0: GX0, y0: GY0, n: 1280 });
-  const world = landOfAlbum({ ch, div, model, places, legs: net.legs, districtOf, farmsteads });
+  const landSquare = (kx, ky) => { const d = div.cells[ky * FN + kx]; return d >= 0 && div.kinds[d] === LAND; };
+  const yards = allYards({ cell: ch.cell, land: c => ch.kind[c] === 1, fields: c => model.fields[c], culture: c => manner[c], patches, density: 1, landSquare, env: { at, river: () => 1e9, swamp: () => 0 } });
+  // every yard is one of the sixteen places of a chunk of 1 km²; the chunks of a district are numbered from its centre outward
+  const order = kmOrder(div, data.base.at);
+  const farmsteads = farmsteadsOfAlbum(yards.map(y => yardPlace(y.i, y.j)), { cells: div.cells, rank: order.rank, n: FN });
+  const world = landOfAlbum({ div, model, places, legs: net.legs, districtOf, farmsteads, cellOf: cellsOfChunks(ch).cell });
+  { let chunks = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) chunks += kmData(div).box.num[d]; assert.equal(order.list.length, chunks, 'every chunk of land has its number in its district'); }
   assert.equal(world.districts.length, div.count); assert.equal(world.roads.length, net.legs.length);
   const villages = world.settlements.filter(s => s.people < 1000).length;
   assert.equal(world.settlements.length, model.towns.length, 'every settlement has a record of its own, a hamlet as much as a city');

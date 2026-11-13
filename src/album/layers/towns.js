@@ -18,6 +18,7 @@ import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
+import { KN } from '../division/km.js';
 
 const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
 const VERT = /* glsl */`${COMMON}
@@ -194,7 +195,9 @@ export default async function init(album) {
     return best;
   };
   const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, fields: c => ch.get('fields', c), culture: c => Math.round(ch.get('culture', c) * 255),
-    patches: new Map(), env: { ...env, road: roadAt }, density: 1, S: CELL };
+    patches: new Map(), env: { ...env, road: roadAt }, density: 1, S: CELL,
+    // a yard stands at one of the sixteen places of a chunk of 1 km² of land (once the land is divided)
+    landSquare: (kx, ky) => { const dv = album.division?.data; if (!dv?.cells) return true; const d = kx >= 0 && ky >= 0 && kx < KN && ky < KN ? dv.cells[ky * KN + kx] : -1; return d >= 0 && dv.kinds[d] === 0; } };
   let yKey = '', yCacheKey = ''; const yCache = new Map(), TKM = YARD_TILE * YARD_STEP;
   function rebuildYards(tx, ty, D, ck) {
     if (ck !== yCacheKey) { yCache.clear(); yCacheKey = ck; }
@@ -266,7 +269,7 @@ export default async function init(album) {
       if ((album.roadNet || null) !== roadSeen) indexRoads();
       const D = Math.min(72, Math.max(20, 4 * Math.ceil(h * 1.5 / 4))), ax = Math.round(tx / 4) * 4, ay = Math.round(ty / 4) * 4;
       yctx.density = yk; yctx.S = S;
-      const yck = `${ck}|${seen}|${yk}|${roadN}`, ykey = `${yck}|${ax},${ay}|${D}`;
+      const yck = `${ck}|${seen}|${yk}|${roadN}|${divSeen}`, ykey = `${yck}|${ax},${ay}|${D}`;
       if (ykey !== yKey) { yKey = ykey; rebuildYards(ax, ay, D, yck); }
       ymat.uniforms.uYard.value.set(tx, ty, D - 5.7, U.y);
     } };

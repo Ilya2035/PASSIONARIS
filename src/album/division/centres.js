@@ -6,7 +6,8 @@
 //   • A district with none takes the best ground it has: near its middle, low and level, beside a river or the sea,
 //     never in the water.
 // Plain JavaScript without the GPU; the same division always gives the same centres.
-import { FN, FKM, kmOf } from '../chunks.js';
+import { kmOf } from '../chunks.js';
+import { KN as FN, KKM as FKM } from './km.js';
 
 const X0 = -880, Y0 = 3880, LAND = 0;
 const texelOf = (x, y) => { const tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FN ? -1 : ty * FN + tx; };

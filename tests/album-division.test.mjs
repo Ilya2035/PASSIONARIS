@@ -11,7 +11,7 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { BBOX } from '../src/album/geo.js';
 import { buildDivision, districtSummary, districtNames, stateMask, linkRelief, LAND, SEA, LAKE } from '../src/album/division/build.js';
 import { packDivision } from '../src/album/division/gpu.js';
-import { FN as RASTER } from '../src/album/chunks.js';
+import { KN as RASTER, KKM, cellsOfChunks } from '../src/album/division/km.js';
 import { districtCells, riverRaster, cellStats, RIVER_TOLL, SMOOTH_KM } from '../src/album/division/cells.js';
 import { borderLines } from '../src/album/division/lines.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
@@ -93,13 +93,23 @@ test('division: what a district holds; the texture with the state of history', (
   const k0 = ch.at(...madeLands.provinces[0].at[0]), d = div.district[k0], list = div.chunks[d];
   const iron = ch.layer('iron', { title: 'Железо', unit: 'т', sum: true }), quiet = ch.layer('note', { sum: false });
   for (const k of list) { iron.data[k] = 2; quiet.data[k] = 9; ch.set('forest', k, .5); }
-  const s = districtSummary(div, d, ch);
-  assert.equal(s.chunks, list.length); assert.equal(s.kind, 'land'); assert.equal(s.provinceName, 'Запад'); assert.equal(s.regionName, 'Западная земля');
-  assert.ok(Math.abs(s.share.forest - .5) < .01);
-  assert.deepEqual(s.sums.map(x => [x.name, x.value]), [['iron', 2 * list.length]], 'only layers with sum: true are summed');
+  const s = districtSummary(div, d, ch), TN = RASTER * RASTER;
+  // a district is its chunks of 1 km²: its area is their number; what the natural cells keep goes to it by the share
+  // of each cell's chunks that lie in it
+  let own = 0; for (let t = 0; t < TN; t++) if (div.cells[t] === d) own++;
+  assert.equal(s.chunks, own); assert.equal(s.area, own); assert.equal(s.landArea, own); assert.equal(s.cells, list.length);
+  assert.ok(own > 400 && own < 1500, 'a district of 30 km has ' + own + ' chunks');
+  assert.equal(s.kind, 'land'); assert.equal(s.provinceName, 'Запад'); assert.equal(s.regionName, 'Западная земля');
+  assert.ok(s.share.forest >= .5 - .01 && s.share.forest < .75, 'half of the forest of its cells stands, all of it in the neighbours\' cells its outline takes in: ' + s.share.forest.toFixed(2));
+  assert.deepEqual(s.sums.map(x => x.name), ['iron'], 'only layers with sum: true are summed');
+  assert.ok(s.sums[0].value > 2 * list.length * .6 && s.sums[0].value <= 2 * list.length + 1e-6, 'iron of the district: ' + s.sums[0].value.toFixed(1) + ' of ' + 2 * list.length);
+  let all = 0; for (let dd = 0; dd < div.count; dd++) all += districtSummary(div, dd, ch).sums[0].value;
+  assert.ok(Math.abs(all - 2 * list.length) < 1e-6, 'nothing is lost between districts: ' + all);
+  assert.equal(s.classes.reduce((x, y) => x + y, 0), own); assert.equal(s.living.reduce((x, y) => x + y, 0), own); assert.equal(s.classes[0], 0, 'a land district has no chunk of water');
+  const sea = districtSummary(div, div.district[ch.at(38.5, -8)], ch); assert.equal(sea.kind, 'sea'); assert.equal(sea.classes, null); assert.equal(sea.landArea, 0); assert.ok(sea.chunks > 100);
   ch.reset();
-  // the texture: the district of every texel of the fine raster, then a texel per district
-  const mask = stateMask(div, madeLands, 'x'), a = packDivision(ch, div, mask), TN = RASTER * RASTER;
+  // the texture: the district of every chunk of 1 km², then a texel per district
+  const mask = stateMask(div, madeLands, 'x'), a = packDivision(ch, div, mask);
   assert.equal(a.length, RASTER * (RASTER + Math.ceil(div.count / RASTER)) * 4);
   for (let t = 0; t < TN; t += 4999) assert.equal(a[t * 4], Math.max(0, div.cells[t]));
   for (let dd = 0; dd < div.count; dd++) {
@@ -119,8 +129,9 @@ test('division: the outlines of districts — texel by texel, inside their provi
   assert.equal(div.cells.length, TN); assert.deepEqual(buildDivision(ch, { ...opts, size: 30, rivers: river }).cells, div.cells, 'the same land gives the same outlines');
   // every texel lies in a district of the kind and of the province of its chunk; every district has texels
   const texels = new Int32Array(div.count);
+  const kc = cellsOfChunks(ch).cell;
   for (let t = 0; t < TN; t++) {
-    const k = ch.cell[t]; if (k >= ch.count) continue;
+    const k = kc[t]; if (k >= ch.count) continue;
     const d = div.cells[t], dk = div.district[k];
     assert.ok(d >= 0 && d < div.count); texels[d]++;
     if (d !== dk) { assert.equal(div.kinds[d], LAND); assert.equal(div.kinds[dk], LAND, 'water keeps the districts of its chunks'); }
@@ -140,7 +151,7 @@ test('division: the outlines of districts — texel by texel, inside their provi
     assert.ok(SMOOTH_KM >= 3 && SMOOTH_KM <= 7); }
   for (let d = 0; d < div.count; d++) assert.ok(texels[d] > 0, 'district ' + d + ' has land of its own');
   // sizes stay close to those of the chunk partition
-  const land = []; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) land.push(texels[d] * 1.5625); land.sort((a, b) => a - b);
+  const land = []; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) land.push(texels[d] * KKM * KKM); land.sort((a, b) => a - b);
   assert.ok(land[land.length >> 1] > 500 && land[land.length >> 1] < 1400, 'a district of 30 km is ' + Math.round(land[land.length >> 1]) + ' km² in the middle');
   // the river is a border: far more of it runs along the outlines than without it, and the outlines are rounded
   const riv = riverRaster(river), along = lab => { let on = 0, all = 0;
@@ -249,7 +260,7 @@ test('division of the album: places lie in their historical lands; mountains div
     [42.43, 1.93, 'cerdanya'], [43.60, 1.44, 'toulousain'], [43.11, 0.72, 'comminges'], [38.72, -9.14, 'lisboa'], [37.02, -7.93, 'algarve'], [37.39, -5.98, 'sevilla'],
     [42.51, 1.52, 'andorra'], [39.72, 2.91, 'mallorca'], [35.77, -5.80, 'tangier'], [36.75, 3.06, 'alger']]) {
     assert.equal(provAt(lat, lon), id, `${lat}, ${lon}`);
-    const [x, y] = kmOf(lat, lon), t = Math.floor((y - 3880) / 1.25) * RASTER + Math.floor((x + 880) / 1.25);      // … and as the province is drawn, texel by texel
+    const [x, y] = kmOf(lat, lon), t = Math.floor((y - 3880) / KKM) * RASTER + Math.floor((x + 880) / KKM);      // … and as the province is drawn, chunk by chunk
     assert.equal(LANDS.provinces[real.div.provCells[t]]?.id, id, `${lat}, ${lon}: the straightened border keeps the place`);
   }
   // across the crests: Gavarnie (north) and Torla (south) of the Pyrenees, Covadonga and Riaño of the Cantabrian

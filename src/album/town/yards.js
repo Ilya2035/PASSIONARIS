@@ -69,6 +69,8 @@ function soundGround(env, x, y, half) {
 //   land(c)   is chunk c land · fields(c) its share under fields 0..1 · culture(c) its manner of building
 //   patches   patchIndex() of the settlements · env  the ground (see soundGround)
 //   density   the «Дворы среди полей» knob, × · S  the cell of the lattice of blocks, km
+//   landSquare(kx, ky)  is the chunk of 1 km² of that square land (division/km.js)? When given, no yard stands in a
+//             chunk of water: its sixteen places are those of a chunk of some district of land
 // The yard at place (i, j) of the lattice of 250 m: a row for the blocks (plan.js, ROW numbers), or null
 export function yardAt(ctx, i, j) {
   const K = ctx.density ?? 1, h0 = cellHash(i, j, 0, 21);
@@ -76,6 +78,7 @@ export function yardAt(ctx, i, j) {
   const x = GX0 + (i + .5) * YARD_STEP + (cellHash(i, j, 0, 22) - .5) * JITTER, y = GY0 + (j + .5) * YARD_STEP + (cellHash(i, j, 0, 23) - .5) * JITTER;
   const tx = Math.floor((x - GX0) / FKM), ty = Math.floor((y - GY0) / FKM); if (tx < 0 || ty < 0 || tx >= FN || ty >= FN) return null;
   const c = ctx.cell[ty * FN + tx]; if (!ctx.land(c)) return null;
+  if (ctx.landSquare && !ctx.landSquare(Math.floor(i / YARD_SIDE), Math.floor(j / YARD_SIDE))) return null;
   const atl = ctx.culture(c) === CULTURES.atl, p = K * YARDS_PER_KM2[atl ? CULTURES.atl : CULTURES.med] / 16;
   if (h0 >= p) return null;
   const n = nearest(ctx.patches, x, y), L = n ? n.L : null, m = n ? n.m : -1e3;
@@ -117,10 +120,6 @@ export function allYards(ctx) {
   }
   return out;
 }
-// the place of a yard as the save keeps it: its square kilometre (whole numbers on the lattice that begins at the
-// corner of the map) and one of the sixteen places in it
+// the place of a yard as the save keeps it: its chunk of 1 km² — the square (kx, ky) of the lattice that begins at
+// the corner of the map (division/km.js) — and one of the sixteen places in it
 export const yardPlace = (i, j) => ({ kx: Math.floor(i / YARD_SIDE), ky: Math.floor(j / YARD_SIDE), slot: (j % YARD_SIDE) * YARD_SIDE + i % YARD_SIDE });
-// The order the land is taken up, for the save: the land next to the houses first. The number of a point is how far
-// it lies beyond the last houses of the nearest settlement, counted in the reach of that settlement's fields; land no
-// settlement is near comes last.
-export const takenOrder = patches => (x, y) => { const n = nearest(patches, x, y); return n ? Math.max(0, -n.m) / fieldsBeyond(n.L.r) : 1e3; };

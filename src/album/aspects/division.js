@@ -6,17 +6,19 @@
 //                                (map mode «Деление»), lights up the district under the cursor and the chosen one
 //   districtAt(pk)             → the district of a point: xy = its middle in flat km, z = a random number of its own
 //                                (the earthquake asks it to show what every district felt)
-// Every texel of the fine raster (1.25 km) belongs to one district (division/cells.js: the outlines run along rivers
-// and crests, rounded, inside their province). The shader reads the nine texels around a point, each with a smooth
-// bell, as chunkCell() of glsl.js does with chunks; it turns each texel into its district, province and region
+// Every chunk of 1 km² (division/km.js) belongs to one district (division/cells.js: the outlines run along rivers
+// and crests, rounded, inside their province). The shader reads the nine chunks around a point, each with a smooth
+// bell, as chunkCell() of glsl.js does with the natural cells; it turns each into its district, province and region
 // through the one texture of this aspect (division/gpu.js) and draws the line where two of them weigh the same.
+// The chunks themselves are never seen on the map (the owner: «чанки не видим сами по себе… только в dev-режиме»):
+// the knob «Чанки 1 км²» draws their outlines and what each is like, for checking.
 import { Vector3 } from 'three';
-import { FKM, FN } from '../chunks.js';
+import { KKM as FKM, KN as FN, KM_GLSL } from '../division/km.js';
 import { emptyTexture } from '../division/gpu.js';
 import { startDivision } from '../division/runtime.js';
 
 const GLSL = /* glsl */`
-uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState;
+uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm;
 uniform vec3 uDivSize;                          // district, province, region size, km
 uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
 uniform highp usampler2D tDiv;                  // the district of every texel of the fine raster, then a texel per district: see division/gpu.js
@@ -25,8 +27,31 @@ const vec3 DIV_LAND[8] = vec3[8](vec3(.93, .80, .62), vec3(.72, .86, .62), vec3(
 const vec3 DIV_WATER[8] = vec3[8](vec3(.55, .70, .90), vec3(.45, .62, .86), vec3(.62, .78, .92), vec3(.50, .74, .86), vec3(.42, .56, .82), vec3(.58, .66, .90), vec3(.66, .80, .94), vec3(.48, .68, .80));
 
 uvec4 divOf(float d) { int i = int(d + .5); return texelFetch(tDiv, ivec2(i % ${FN}, ${FN} + i / ${FN}), 0); }
-// the district of a texel of the fine raster (its outline is drawn texel by texel: division/cells.js)
+// the district of a chunk of 1 km² (the outline of a district runs chunk by chunk: division/cells.js)
 float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).r); }
+${KM_GLSL}
+// The chunk of 1 km² a point of district d lies in (twin of chunkAt() in division/km.js): among the nine squares
+// around the point, those of the district; the nearest seed wins. xy = the square of the chunk, z = km to the nearest
+// side it shares with another chunk of the district (1e4 when it has none near).
+vec3 kmChunk(vec2 pk, int d) {
+  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t), v1 = vec2(0.); ivec2 c = ivec2(floor(t)), best = c; float d1 = 1e9;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    ivec2 q = c + ivec2(i, j); if (int(divTexel(q) + .5) != d) continue;
+    vec2 v = vec2(float(i), float(j)) + kmSeed(q) - f; float dd = dot(v, v);
+    if (dd < d1) { d1 = dd; v1 = v; best = q; }
+  }
+  float e = 1e4;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    ivec2 q = c + ivec2(i, j); if (q == best || int(divTexel(q) + .5) != d) continue;
+    vec2 v = vec2(float(i), float(j)) + kmSeed(q) - f, w = v - v1;
+    e = min(e, dot(.5 * (v1 + v), w) / max(length(w), 1e-4));
+  }
+  return vec3(vec2(best), e * ${FKM.toFixed(4)});
+}
+// what a chunk is like (division/gpu.js): the class of its ground 1..5 (0 water, or not worked out), who can live there
+ivec2 kmFacts(ivec2 q) { uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; return ivec2(int(g & 7u), int((g >> 3u) & 3u)); }
+// the five classes of ground, as seen on screen: level, rolling, hilly, steep, mountain
+const vec3 KM_CLASS[6] = vec3[6](vec3(.55, .66, .82), vec3(.30, .62, .30), vec3(.62, .78, .36), vec3(.96, .85, .36), vec3(.93, .56, .22), vec3(.62, .24, .22));
 // A vote among the chunks around a point, the way chunkCell() of glsl.js weighs them: the nine cells of the chunk
 // raster around the point, each with a smooth bell (a quadratic B-spline). Up to four keys (districts, provinces or
 // regions) with their weights; no arrays (on some GPUs an array read at a varying place goes through slow memory).
@@ -73,7 +98,7 @@ DivAt divAt(vec2 pk, float px, bool water) {
   }
   if (ad.k.x < 0) { ad.k.x = int(u.x & 65535u); ad.w.x = 1.; u0 = u; foreign = 0.; ap = DivAcc(ivec4(int(u.x >> 16u), -1, -1, -1), vec4(1., 0., 0., 0.)); ar = DivAcc(ivec4(int(u.y & 65535u), -1, -1, -1), vec4(1., 0., 0., 0.)); }
   int o = 0;
-  float km = 1. / 1.6;
+  float km = ${(FKM / 2).toFixed(4)};                                             // the margin grows by two for every chunk crossed
   r.eD = one ? 1e4 : divWin(ad, foreign, r.d, r.d2) * km;
   if (one) r.d = ad.k.x;
   r.u = r.d == ad.k.x ? u0 : r.d == ad.k.y ? u1 : r.d == ad.k.z ? u2 : u3;
@@ -92,7 +117,8 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
   if (uDivision > 0) {
     int ci = uDivision == 1 ? a.look & 7 : uDivision == 2 ? (a.look >> 3) & 7 : (a.look >> 6) & 7;
     vec3 tint = wet ? DIV_WATER[ci] : DIV_LAND[ci];
-    col = mix(col, tint * (.55 + .5 * lum), (wet ? .42 : .6) * (uStyle == 0 ? .5 : 1.));   // on the natural map the land shows through
+    // (on the natural map the land shows through; where the chunks are coloured by what they are, the land keeps no tint of its district)
+    col = mix(col, tint * (.55 + .5 * lum), (wet ? .42 : .6) * (uStyle == 0 ? .5 : 1.) * (uDivKm >= 2 && !wet ? 0. : 1.));
     // borders: the higher the level, the thicker (half widths in pixels); the level of the mode is the boldest; a
     // level is shown only while its pieces are big enough on screen
     vec3 ink = wet ? vec3(.04, .09, .20) : vec3(.10, .06, .07);
@@ -113,6 +139,16 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
     else col = mix(col, vec3(.98, .80, .42) * (.6 + .5 * lum), .35);
     float e = a.eS / px, w = 2.2 * zoom;
     col = mix(col, vec3(.42, .05, .04), (1. - smoothstep(w - .6, w + .6, e)) * (1. - uDivFar));
+  }
+  // the chunks of 1 km², for checking: what each is like and its outline. Shown while a chunk is a few pixels wide.
+  if (uDivKm > 0 && px < .2) {
+    vec3 kc = kmChunk(pk, a.d); ivec2 kf = kmFacts(ivec2(kc.xy));
+    float seen = 1. - smoothstep(.1, .2, px);
+    if (!wet && uDivKm == 2 && kf.x > 0) col = mix(col, KM_CLASS[kf.x] * (.72 + .34 * lum), .82 * seen);
+    if (!wet && uDivKm == 3 && kf.x > 0) col = mix(col, (kf.y == 2 ? vec3(.34, .66, .34) : kf.y == 1 ? vec3(.96, .82, .34) : vec3(.78, .28, .24)) * (.72 + .34 * lum), .82 * seen);
+    float e = min(kc.z, a.eD) / px, w = .5 * zoom;                                    // the side of a chunk, or the edge of its district
+    vec3 ink = uStyle == 0 ? vec3(1., .98, .9) : vec3(.12, .10, .12);
+    col = mix(col, ink, (1. - smoothstep(w - .5, w + .6, e)) * (wet ? .3 : uDivKm == 1 ? .55 : .2) * seen * smoothstep(.2, .09, px));
   }
   // the district under the cursor and the chosen one
   if (uDivHover >= 0 && a.d == uDivHover) col = mix(col, vec3(1.), .16);
@@ -141,7 +177,7 @@ vec3 districtAt(vec2 pk) {
 }
 
 void aspDivision(Px p, inout vec3 col, float landA) {
-  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0)) return;
+  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0)) return;
   float inR = inRegion(p.ll);                     // nothing is divided beyond the album's region
   if (inR < .002) return;
   vec3 cl = landA > .02 ? divLook(col, p.pk, p.px, false) : col;
@@ -158,7 +194,7 @@ export const STATES = [['', 'нет'], ['aragon', 'Королевство Ара
 export default {
   id: 'division', title: 'Деление', glsl: GLSL,
   uniforms: {
-    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 },
+    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 },
     uDivSize: { value: new Vector3(20, 100, 900) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() },
   },
   params: [
@@ -167,11 +203,12 @@ export default {
     { key: 'divState', label: 'Деление: собрать государство', group: 'modes', type: 'select', options: STATES, value: '' },
     { key: 'divLabels', label: 'Деление: названия земель', group: 'modes', type: 'toggle', value: 1 },
     { key: 'divPick', label: 'Район под курсором', group: 'modes', type: 'toggle', value: 0 },
+    { key: 'km', label: 'Чанки 1 км² (проверка)', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'очертания'], [2, 'класс земли'], [3, 'жилые и нежилые']], value: 0, uniform: 'uDivKm' },
   ],
   pages: [
     { id: 'mode-regions', group: 'Режимы карты', title: 'Деление: регионы', note: 'Регион — большая культурно-географическая земля: Иберия (весь полуостров с Балеарскими островами), Западная Европа (в альбоме её юг, до Пиренеев), Магриб. На воде регион — настоящее море со своим именем. Границы идут по гребням и берегам.', p: { ...PAPER, division: 3 }, cam: { lat: 40.3, lon: -2.4, h: 1650, tilt: 0, heading: 0 } },
     { id: 'mode-provinces', group: 'Режимы карты', title: 'Деление: провинции', note: 'Провинция — политическая и историческая единица: Риоха, Ла-Манча, Бьерсо, Сердань, Беарн, Алгарве… Она тянется к нынешним провинциям, округам и департаментам. Граница ровная, без мелких изгибов, и идёт по реке или гребню, если они рядом. Из провинций собираются государства.', p: { ...PAPER, division: 2 }, cam: { lat: 40.9, lon: -2.6, h: 950, tilt: 0, heading: 0 } },
-    { id: 'mode-districts', group: 'Режимы карты', title: 'Деление: районы около 20 км', note: 'Район — около 20 км в поперечнике, 400–500 км². Его граница идёт по реке или по гребню: река чаще всего край района, а не его середина. Очертания округлые и считаются по клеткам в 1,25 км. Район не выходит за свою провинцию. С районом работает игрок; ручка «Деление: размер района» показывает и прежние размеры.', p: { ...PAPER, division: 1 }, cam: { lat: 41.5, lon: -0.9, h: 380, tilt: 10, heading: 0 } },
+    { id: 'mode-districts', group: 'Режимы карты', title: 'Деление: районы около 20 км', note: 'Район — около 20 км в поперечнике, 400–500 км². Его граница идёт по реке или по гребню: река чаще всего край района, а не его середина. Очертания округлые. Район состоит из целых чанков по 1 км², их в нём около четырёхсот. Район не выходит за свою провинцию. С районом работает игрок; ручка «Деление: размер района» показывает и прежние размеры.', p: { ...PAPER, division: 1 }, cam: { lat: 41.5, lon: -0.9, h: 380, tilt: 10, heading: 0 } },
     { id: 'division-pyrenees', group: 'Режимы карты', title: 'Деление: Пиренеи — гребень как граница', note: 'Пиренеи не провинция: по гребню идёт граница. Южные склоны принадлежат Верхнему Арагону, Урхелю, Андорре, Сердани, северные — Беарну, Бигорру, Комменжу, Фуа, Руссильону. Каждая долина — свой район и целиком на своей стороне.', p: { ...NATURAL, division: 1 }, cam: { lat: 42.15, lon: 0.6, h: 300, tilt: 48, heading: 0 } },
     { id: 'division-cantabrian', group: 'Режимы карты', title: 'Деление: Кантабрийские горы', note: 'Гребень делит Астурию и Кантабрию на севере и Леон с Паленсией на юге. Северные склоны Пикос-де-Эуропа отошли к Астурии и Кантабрии: туда они стекают.', p: { ...NATURAL, division: 1 }, cam: { lat: 42.55, lon: -5.0, h: 260, tilt: 48, heading: 0 } },
     { id: 'division-central', group: 'Режимы карты', title: 'Деление: Центральная Кордильера', note: 'Сьерра-де-Гвадаррама и Гредос — граница Старой и Новой Кастилии: к северу Сеговия и Авила (бассейн Дуэро), к югу Мадрид и Толедо (бассейн Тахо).', p: { ...NATURAL, division: 1 }, cam: { lat: 40.05, lon: -4.3, h: 260, tilt: 48, heading: 330 } },
@@ -179,8 +216,13 @@ export default {
     { id: 'division-guadalquivir', group: 'Режимы карты', title: 'Деление: Гвадалквивир — ось Андалусии', note: 'Севилья, Кордова и Хаэн лежат вдоль Гвадалквивира по обоим берегам; с севера Андалусию закрывает Сьерра-Морена, с юга — Бетские горы.', p: { ...PAPER, division: 2 }, cam: { lat: 37.6, lon: -4.6, h: 620, tilt: 10, heading: 0 } },
     { id: 'division-state', group: 'Режимы карты', title: 'Деление: собрано государство — Арагон', note: 'Королевство Арагон XIII века собрано из районов: Верхний Арагон, Сарагоса, Теруэль. Другие государства — ручка «Деление: собрать государство».', p: { ...PAPER, division: 2, divState: 'aragon' }, cam: { lat: 41.3, lon: -0.6, h: 720, tilt: 0, heading: 0 } },
     { id: 'division-crown', group: 'Режимы карты', title: 'Деление: собрано государство — Арагонская корона', note: 'Арагон, Каталония, Валенсия, Балеарские острова и Руссильон XIV века — из тех же районов.', p: { ...PAPER, division: 3, divState: 'crown' }, cam: { lat: 40.6, lon: 0.6, h: 1250, tilt: 0, heading: 0 } },
-    { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек, в которых хранится состояние леса, льда и застройки; тёмные — границы районов. Очертание района считается по клеткам в 1,25 км и идёт по рекам и гребням, поэтому с ячейками оно совпадает не везде. Числа района (площадь, лес, ресурсы) пока суммируются по ячейкам.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
-    { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, чанки, доля леса, болот, застройки и полей, суммы ресурсов по чанкам. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
+    { id: 'km-chunks', group: 'Режимы карты', title: 'Чанки 1 км²: район делится на чанки', note: 'Проверочный вид: в игре чанки не видны. Тонкие линии — чанки по одному квадратному километру, толстые — границы районов. Чанк не квадрат: внутри района его стороны идут посередине между соседними чанками, у края района его очертание — край района (река, гребень, берег). Район состоит из целых чанков; у Сарагосы их 511. Суша и вода в одном чанке не лежат.', p: { ...PAPER, division: 1, km: 1, divLabels: 0 }, cam: { lat: 41.66, lon: -0.9, h: 36, tilt: 0, heading: 0 } },
+    { id: 'km-chunks-natural', group: 'Режимы карты', title: 'Чанки 1 км² на натуральной карте', note: 'Те же чанки поверх обычной картины, с 20 км: видно, что чанк — это несколько полей или квартал города. Наведите курсор: внизу написано, что это за чанк.', p: { ...NATURAL, division: 1, km: 1, divLabels: 0, growth: 1.6 }, cam: { lat: 41.66, lon: -0.9, h: 20, tilt: 25, heading: 0 } },
+    { id: 'km-class', group: 'Режимы карты', title: 'Чанки: пять классов земли', note: 'У каждого чанка заранее посчитано, насколько ровная его земля. Зелёный — ровная земля, жёлто-зелёный — пологие холмы, жёлтый — холмы и склоны, рыжий — крутые склоны, серо-лиловый — горы. Класс берётся по самой ровной четверти чанка: дно узкой долины между крутыми стенами — место для жилья. Здесь долины Пиренеев: Валь-д’Аран, Бенаске, Рибагорса.', p: { ...PAPER, division: 1, km: 2, divLabels: 0 }, cam: { lat: 42.6, lon: 0.62, h: 110, tilt: 0, heading: 0 } },
+    { id: 'km-class-plain', group: 'Режимы карты', title: 'Чанки: классы земли на равнине Эбро', note: 'Долина Эбро у Сарагосы почти вся первого класса; к краям долины — холмы второго и третьего. Границы классов не видны в игре: это числа чанков, по которым потом расселяются люди.', p: { ...PAPER, division: 1, km: 2, divLabels: 0 }, cam: { lat: 41.6, lon: -0.9, h: 110, tilt: 0, heading: 0 } },
+    { id: 'km-living', group: 'Режимы карты', title: 'Чанки: жилые, едва жилые и нежилые', note: 'Зелёный — жить можно (классы 1–3), жёлтый — едва: на крутых склонах встанет разве что хутор (класс 4), красный — нежилой чанк (класс 5: горы и всё выше 2 400 м). В горах жилые чанки идут цепочками по долинам. Здесь Пиренеи от Андорры до Сердани.', p: { ...PAPER, division: 1, km: 3, divLabels: 0 }, cam: { lat: 42.5, lon: 1.7, h: 130, tilt: 0, heading: 0 } },
+    { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек около 100 км²: по ним пока считаются лес, лёд и болота. Тёмные — границы районов. Район состоит из чанков по 1 км², а не из этих ячеек, поэтому линии совпадают не везде. Числа района суммируются по его чанкам; число ячейки делится между районами по тому, сколько её чанков в каждом.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
+    { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, число чанков по 1 км², доля леса, болот, застройки и полей, сколько чанков какого класса земли и сколько жилых, суммы ресурсов. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
     { id: 'division-sea', group: 'Режимы карты', title: 'Деление: море и острова', note: 'Моря названы: Бискайский залив, Атлантика, Кадисский залив, море Альборан, Балеарское море, Лионский залив. Прибрежное море поделено на куски напротив прибрежных районов, чтобы высадиться можно было везде.', p: { ...PAPER, division: 3 }, cam: { lat: 39.6, lon: 0.6, h: 900, tilt: 0, heading: 0 } },
     { id: 'division-50', group: 'Режимы карты', title: 'Деление: районы около 50 км', note: 'Тот же способ с районом крупнее. Провинции и регионы — те же исторические земли.', p: { ...PAPER, division: 1, divSize: 50 }, cam: { lat: 41.4, lon: -1.0, h: 560, tilt: 10, heading: 0 } },
   ],

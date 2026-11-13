@@ -2,6 +2,7 @@
 // (docs/UI.md): flat fill and frame from src/shared/theme.css (.panel, .close), the album's text sizes (.L, .M, .S,
 // .cap). Only its place on the screen is set here: right of the album's top panel.
 import { KIND_TITLE, KIND_ID } from './build.js';
+import { CLASS_TITLE } from './km.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const pct = v => `${Math.round(v * 100)} %`;
@@ -29,8 +30,14 @@ export function createPanel(onClose) {
       rows.textContent = '';
       row('Площадь', `${num(s.area)} км²`);
       if (s.kind === 'land') row('из них суша', `${num(s.landArea)} км²`);
-      row('Чанков', String(s.chunks));
-      if (s.kind === 'land') { row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built)); row('Поля', pct(s.share.fields)); }
+      row('Чанков по 1 км²', num(s.chunks));
+      if (s.kind === 'land') {
+        row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built)); row('Поля', pct(s.share.fields));
+        if (s.classes) {                                            // how level the ground is, chunk by chunk
+          for (let k = 1; k <= 5; k++) if (s.classes[k]) row(`${k} · ${CLASS_TITLE[k]}`, `${num(s.classes[k])} · ${pct(s.classes[k] / s.chunks)}`);
+          row('Жилых чанков', `${num(s.living[2])}, едва жилых ${num(s.living[1])}, нежилых ${num(s.living[0])}`);
+        }
+      }
       res.textContent = '';
       const some = s.sums.filter(r => r.value >= .5);
       if (some.length) {
