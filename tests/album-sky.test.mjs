@@ -70,8 +70,9 @@ test('sky: the shared light keeps its contract', () => {
   // the names and arguments every other part calls
   for (const sig of ['float albumDay()', 'vec3 albumSunCol()', 'vec3 albumSkyCol()', 'vec3 albumLit(vec3 seen, vec3 n, float open)', 'float albumHaze(vec3 wpos)',
     'vec3 albumHazeCol()', 'vec3 albumAir(vec3 col, vec3 wpos)', 'vec3 albumFinish(vec3 col)']) assert.ok(LIGHT.includes(sig), sig);
-  // what the sky adds: the Moon, the horizon, the shade of the clouds
-  for (const sig of ['vec3 albumMoonCol()', 'vec3 albumMoonLit(vec3 n)', 'vec3 albumHorizon(vec3 dir)', 'float albumCloudField(vec3 wpos)', 'float albumCloudShade(vec3 wpos)']) assert.ok(LIGHT.includes(sig), sig);
+  // what the sky adds: the Moon, the horizon. (The clouds, the rain and the fog are not in the light: tests/album-sky-weather.test.mjs.)
+  for (const sig of ['vec3 albumMoonCol()', 'vec3 albumMoonLit(vec3 n)', 'vec3 albumHorizon(vec3 dir)']) assert.ok(LIGHT.includes(sig), sig);
+  assert.ok(!/albumCloud|vnoise|wx[A-Z]/.test(LIGHT), 'no weather and no noise in LIGHT');
   // the ground shader is at its limit of 16 textures: the light brings none
   assert.ok(!/sampler/.test(LIGHT), 'no texture in LIGHT');
   // the uniforms: the old ones as they were, and those of the sky — from the ground's uniforms, or harmless ones
@@ -117,12 +118,12 @@ test('sky: knobs and pages of the part', () => {
   // the hour knob stays, with the light of the map as its rest; the sky adds the day, the Moon, the clouds
   assert.equal(def('hour').value, 0); assert.equal(def('yday').value, 172); assert.equal(def('moon').value, .5);
   // nothing new is on until asked for: the pictures taken before stay as they were
-  assert.equal(def('clouds').value, 0); assert.equal(def('dayRun').value, 0);
+  assert.equal(def('clouds').value, 0); assert.equal(def('dayRun').value, 0); assert.equal(def('rain').value, 0); assert.equal(def('fog').value, 0);
   // switches on the panel of the map
-  for (const k of ['clouds', 'dayRun', 'edgePan']) { assert.equal(def(k).type, 'toggle', k); assert.ok(def(k).map.length > 3, k); }
+  for (const k of ['clouds', 'dayRun', 'edgePan', 'rain', 'fog']) { assert.equal(def(k).type, 'toggle', k); assert.ok(def(k).map.length > 3, k); }
   assert.equal(def('edgePan').value, 1);
   const ids = sky.pages.map(p => p.id); assert.equal(new Set(ids).size, ids.length);
-  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-clouds']) {
+  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-fog', 'sky-fog-late', 'sky-fog-far']) {
     const pg = PAGES.find(p => p.id === id); assert.ok(pg, id); assert.ok(pg.title.length > 5 && pg.note.length > 20);
     assert.ok(pg.cam.h >= H_MIN && pg.cam.h <= H_MAX && pg.cam.tilt <= TILT_MAX && pg.cam.lat > BBOX.lat0 && pg.cam.lat < BBOX.lat1, id);
     for (const k of Object.keys(pg.p)) assert.ok(def(k), `${id}: no knob ${k}`);

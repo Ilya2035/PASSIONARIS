@@ -9,7 +9,8 @@
 // operations in it and the whole frame is 40–50 % slower, at once, whatever those operations are (measured
 // 13.11.2026, docs/album/sky.md). So everything that is the same for the whole frame — the colour of the Sun, of the
 // sky, of the haze, how much day there is — is counted once a frame on the processor (lightFrame below) and comes to
-// the shaders ready; albumHaze and albumAir are a few operations; the shadows of the clouds are laid by post.js.
+// the shaders ready; albumHaze and albumAir are a few operations; the weather (clouds and their shadows, rain, fog)
+// is laid over the finished picture by post.js, with the GLSL of sky/weather.js.
 import { Vector3, Vector4 } from 'three';
 import { sunDir } from './sky/astro.js';
 
@@ -58,23 +59,8 @@ vec3 albumHorizon(vec3 dir) {
   return mix(uLightC.rgb, uLightE, uLightC.w * (.24 * s + .46 * s * s * s));
 }
 vec3 albumAir(vec3 col, vec3 wpos) { return mix(col, albumHorizon(normalize(wpos - cameraPosition)), albumHaze(wpos)); }
-// ---- clouds (layers/clouds.js draws them; their shadows are laid over the finished picture by post.js — not in
-// albumAir(): the noise below is what would push the ground shader off its cliff)
-// the cloud field over a point of the world, 0 clear sky .. 1 thick cloud: soft, without the small curls
-float albumCloudField(vec3 wpos) {
-  vec3 P = wpos + vec3(0., RKM, 0.); vec2 q = P.xz / max(P.y, 1.) * RKM + uCloud.yz;   // km on the plane touching the middle of the map
-  float n = vnoise(q / 310.) * .46 + vnoise(q / 118. + 7.3) * .32 + vnoise(q / 47. + 3.1) * .22, thr = mix(.80, .30, uCloud.x);
-  return smoothstep(thr - .05, thr + .14, n);
-}
-// how much sunlight the clouds leave at a point of the ground: 1 open .. about .5 under a thick cloud
-float albumCloudShade(vec3 wpos) {
-  if (uCloud.x <= 0.) return 1.;
-  vec3 up = normalize(wpos + vec3(0., RKM, 0.));
-  float rise = max(uCloud.w - (length(wpos + vec3(0., RKM, 0.)) - RKM), 0.);
-  vec3 L = uSun.z > -.03 ? uSunW : normalize(up + vec3(.3, 0., .2));                   // by night the shade lies under the cloud
-  float sh = albumCloudField(wpos + L * rise / max(dot(L, up), .22));
-  return 1. - sh * mix(.22, .5, albumDay());
-}
+// (The clouds, the rain and the fog are not here: sky/weather.js. They are laid over the finished picture by post.js
+// and never counted in the shaders of the land.)
 // exposure, tone curve, saturation, display gamma: the last step of every pixel
 vec3 albumFinish(vec3 col) {
   col *= uExposure;
