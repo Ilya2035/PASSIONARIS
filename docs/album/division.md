@@ -577,6 +577,7 @@ dv.nameKind(d);        // откуда имя: 'history' | 'place' (город �
 dv.centre(d);          // { x, y, site, chunk, why, seat } — место города района (centres.js); dv.data.centres — все сразу
 dv.capitalOf(level, id); // главный город: level 'province' (номер), 'land' (имя земли), 'region' (номер) → { district, index } или null
 dv.seatOf(d);          // { province, land, region }: стоит ли в районе главный город провинции, земли, региона
+dv.data.capitals;      // Int32Array: провинция → район её главного города (−1 нет); по нему идут главные дороги (roads/routes.js)
 dv.canSettle(c);       // чанк 1 км²: 2 — город или деревня, 1 — только хутор, 0 — нельзя (km.js chunkSettle)
 dv.settleAt(lat, lon); // { chunk, can, why: причина словами } или null; dv.settleFacts() — { can, why } по всем чанкам
 dv.districtAt(lat, lon); dv.summary(d); dv.select(d); dv.count; dv.provinces; dv.regions; dv.lands;

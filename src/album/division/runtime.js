@@ -67,6 +67,8 @@ export async function startDivision(album, U) {
       div.settle = kmSettle(div, data.base.at, settleOpts());
       div.centres = districtCentres(div, sites, { settle: div.settle });
       const nm = nameDistricts(div, sites, lands); div.names = nm.names; div.nameKind = nm.kind;
+      // the district of the seat of every province (−1 none): the main roads run from it (roads/routes.js)
+      div.capitals = Int32Array.from({ length: div.provinceCount }, (_, pv) => div.centres.seats.province[pv] ?? -1);
       cache.set(size, { div, tex: null, state: null });
     }
     const next = cache.get(size);
