@@ -15,7 +15,7 @@ import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns, encodeNet, decodeNet, netHead, netSignature,
   STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO } from '../src/album/roads/routes.js';
 import { HISTORIC } from '../src/album/roads/historic.js';
-import { riverCrossings, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
+import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS } from '../src/album/params.js';
@@ -159,6 +159,18 @@ test('roads: where a road meets a river — a bridge, a ford or a ferry by the r
   const bend = { n: 5, ll: Float64Array.from([[10, -3], [10, -.2], [10.6, .4], [10, 1], [10, 4]].flatMap(([x, y]) => { const p = llOf(X + 10 + (x - 10) * 1, Y + y); return [p.lon, p.lat]; })), w: new Float32Array(5).fill(.05), name: 'Излучина', ru: '' };
   const beside = { kind: 0, km: Array.from({ length: 41 }, (_, i) => [X + 10.3, Y - 4 + i * .2]) }, w = riverCrossings([beside], { rivers: [bend] });
   assert.equal(w.length, 2); assert.ok(w.every(c => c.type === 'ford' && c.weave), 'no bridge where the road only touches a bend');
+  // a bridge stands square across its river and the road turns to it: a road that meets two rivers aslant
+  const slant = (x, w0, name) => { const n = 9, l2 = new Float64Array(n * 2); for (let i = 0; i < n; i++) { const p = llOf(X + x + (i - 4) * .5, Y - 2 + i * .5); l2[i * 2] = p.lon; l2[i * 2 + 1] = p.lat; } return { n, ll: l2, w: new Float32Array(n).fill(w0), name, ru: '' }; };
+  const way = road(0), before = way.km.length, first = way.km[0].slice(), end = way.km[before - 1].slice();
+  const two = squareBridges([way], riverCrossings([way], { rivers: [slant(8, .08, 'Первая'), slant(21, .05, 'Вторая')] }));
+  assert.equal(two.filter(c => c.type === 'bridge' && c.square).length, 2);
+  assert.deepEqual(way.km[0], first); assert.deepEqual(way.km[way.km.length - 1], end); assert.ok(Math.abs(way.km.length - before) <= 4, 'the road keeps its points but those at the bridges');
+  for (let i = 1; i < way.km.length; i++) assert.ok(Math.hypot(way.km[i][0] - way.km[i - 1][0], way.km[i][1] - way.km[i - 1][1]) < 1.2, 'no stretch of the road is thrown away');
+  for (const c of two) {
+    assert.ok(Math.abs(c.dx * c.rx + c.dy * c.ry) < 1e-9 && c.sin === 1 && Math.abs(c.span - (c.width + 2 * BRIDGE.abut)) < 1e-9, 'the deck is square to the river');
+    const ends = [-1, 1].map(s => [c.x + s * c.dx * c.span / 2, c.y + s * c.dy * c.span / 2]);
+    for (const e of ends) assert.ok(way.km.some(q => Math.hypot(q[0] - e[0], q[1] - e[1]) < 1e-9), 'the road comes to each end of the deck');
+  }
 });
 
 test('roads: a road stops at the first houses of a settlement, and whoever asks is told how near a road is', () => {

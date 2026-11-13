@@ -20,8 +20,8 @@ import { kmOf, llOf } from '../chunks.js';
 export const LOOK = [
   { id: 'trunk', key: 'roadMain', w: .012, px: [2.3, 1.3], light: 0xc9b58c, ink: 0x5e4022, alpha: .95, fade: null },
   { id: 'main', key: 'roadMain', w: .011, px: [2.1, 1.1], light: 0xc4b088, ink: 0x6b4a2a, alpha: .92, fade: [.38, .72] },
-  { id: 'lesser', key: 'roadMinor', w: .008, px: [1.6, .9], light: 0xb9a680, ink: 0x7a5a38, alpha: .88, fade: [.11, .24] },
-  { id: 'track', key: 'roadTracks', w: .005, px: [1.2, .8], light: 0xab9974, ink: 0x8a6c4a, alpha: .8, fade: [.045, .1] },
+  { id: 'lesser', key: 'roadMinor', w: .008, px: [1.6, .9], light: 0xb9a680, ink: 0x7a5a38, alpha: .88, fade: [.08, .18] },
+  { id: 'track', key: 'roadTracks', w: .005, px: [1.2, .8], light: 0xab9974, ink: 0x8a6c4a, alpha: .8, fade: [.04, .085] },
 ];
 const VERGE = { verge: 2.8, vergeColour: 0x77714a, vergeAlpha: .42 };          // the cleared strip: both sides and the road, in widths of the road
 // a bridge by the kind of its road: stone on a main road, timber on a lesser one (a track has none)
@@ -54,7 +54,7 @@ export default async function init(album) {
     ribbons = sets.map((lines, k) => ({ ...makeRibbons(album, lines, { colour: LOOK[k].light, minPx: LOOK[k].px[0], lift: .005, ground: true, ...VERGE }), set: k }));
     decks = DECK.map((d, kind) => {
       const list = fords.filter(f => f.type === 'bridge' && f.road === kind); if (!list.length) return null;
-      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * BRIDGE.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * BRIDGE.wide, lift: .005, ground: true, ...DECK_RIM });
+      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * BRIDGE.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * BRIDGE.wide, lift: .005, ground: true, sea: false, ...DECK_RIM });
       rib.mesh.renderOrder = 6;
       return { ...rib, kind, list };
     }).filter(Boolean);
@@ -107,13 +107,13 @@ export default async function init(album) {
     update(dt, t, cam) {
       if (towns() !== modelSeen) draw();                           // settlements grew or went: the roads stop at their new edges
       const dom = album.renderer.domElement, px = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, dom.clientHeight);
-      const on = !!p.get('roadsOn') && p.get('roads') > 0, high = ss(.04, .35, px);
+      const on = !!p.get('roadsOn') && p.get('roads') > 0, high = ss(.03, .15, px);
       // a road is seen through what stands on the ground: its depth is pulled toward the eye over the tallest crown
       const crown = typeof album.layers.forest?.top === 'number' ? album.layers.forest.top : 0, pull = crown > 0 ? crown * 1.04 + .002 : 0;
       for (const r of ribbons) {
         const L = LOOK[r.set], fade = L.fade ? 1 - ss(L.fade[0], L.fade[1], px) : 1;
         r.mesh.visible = on && fade > 0 && p.get(L.key) !== 0; if (!r.mesh.visible) continue;
-        r.setPx(cam, dom); r.u.uLift.value = pull; r.u.uMinPx.value = L.px[0] + (L.px[1] - L.px[0]) * high; r.u.uAlpha.value = L.alpha * fade * (1 - .4 * ss(.04, .3, px));   // from high up a road is a faint thread: it must not argue with the land
+        r.setPx(cam, dom); r.u.uLift.value = pull; r.u.uVergeA.value = VERGE.vergeAlpha * (1 - ss(.02, .05, px));   // the cleared strip is a thing of the near view r.u.uMinPx.value = L.px[0] + (L.px[1] - L.px[0]) * high; r.u.uAlpha.value = L.alpha * fade * (1 - (r.set ? .5 : .42) * ss(.03, .2, px));   // from high up a road is a faint thread: it must not argue with the land
       }
       // a bridge is seen while it is a few pixels long; it lies over the water, which itself is pulled over the crowns
       const bf = 1 - ss(BRIDGE.fade[0], BRIDGE.fade[1], px), kr = p.get('riversOn') ? p.get('rivers') ?? 1 : 0, over = sheetPull(album, cam) + .006;

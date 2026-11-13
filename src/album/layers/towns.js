@@ -483,7 +483,7 @@ export default async function init(album) {
       // ---- the tracks to the villages: laid as far as the picture reaches, shown with the roads, gone from high up
       {
         const pxKm = view / Math.max(1, dom.clientHeight), fade = 1 - Math.max(0, Math.min(1, (pxKm - TRACK_FADE[0]) / (TRACK_FADE[1] - TRACK_FADE[0])));
-        const want = on && !!p.get('roadsOn') && p.get('roads') > 0 && fade > 0 && tracksReady();
+        const want = on && !!p.get('roadsOn') && p.get('roadTracks') !== 0 && p.get('roads') > 0 && fade > 0 && tracksReady();   // (roadTracks: the «Тропы» switch of the part «Дороги и реки», aspects/roads.js)
         if (want) {
           const hb = Math.ceil(h / 8) * 8, tb = Math.min(78, Math.ceil(cam.s.tilt / 6) * 6), all = !!p.get('sitesShow');
           const key = `${grownN}|${villSeen}|${all}|${roadN}|${divSeen}|${Math.round(tx / 8)},${Math.round(ty / 8)}|${hb}|${tb}`;

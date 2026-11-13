@@ -83,14 +83,15 @@ export function squareBridges(lines, fords) {
   for (const [li, list] of by) {
     const pts = lines[li].km, at = new Float64Array(pts.length); for (let i = 1; i < pts.length; i++) at[i] = at[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
     list.sort((p, q) => q.at - p.at);                                // from the far end: what lies before keeps its numbers
+    let valid = pts.length - 1;                                      // the points before this number still stand where `at` says
     list.forEach((f, k) => {
       let nx = -f.ry, ny = f.rx; if (nx * f.dx + ny * f.dy < 0) { nx = -nx; ny = -ny; }
       const half = f.width / 2 + BRIDGE.abut; let R = Math.max(.18, f.width * 1.5 + .08);
       if (list[k + 1]) R = Math.min(R, (f.at - list[k + 1].at) / 2); if (list[k - 1]) R = Math.min(R, (list[k - 1].at - f.at) / 2);
       if (R < half) return;                                         // two bridges side by side: the road stays as it runs
-      let i0 = 1; while (i0 < pts.length - 1 && at[i0] <= f.at - R) i0++;
-      let i1 = pts.length - 2; while (i1 > 0 && at[i1] >= f.at + R) i1--;
-      pts.splice(i0, Math.max(0, i1 - i0 + 1), [f.x - nx * half, f.y - ny * half], [f.x + nx * half, f.y + ny * half]);
+      let i0 = 1; while (i0 < valid && at[i0] <= f.at - R) i0++;
+      let i1 = i0 - 1; while (i1 + 1 < valid && at[i1 + 1] < f.at + R) i1++;
+      pts.splice(i0, i1 - i0 + 1, [f.x - nx * half, f.y - ny * half], [f.x + nx * half, f.y + ny * half]); valid = i0;
       f.dx = nx; f.dy = ny; f.sin = 1; f.span = 2 * half; f.square = true;
     });
   }
