@@ -48,6 +48,8 @@ async function start() {
   const { initPages } = await import('./pages.js');
   initPages(album, q);
   if (q.get('ui') !== '0') { const { initUI } = await import('./ui.js'); initUI(album); }
+  // the map on its own — the view the album opens in (mapview.js): the modes of the map without the pages and knobs
+  if (q.get('ui') !== '0') { const { initMapView } = await import('./mapview.js'); album.mapView = initMapView(album, q); }
 
   // camera from the URL wins over the page's own camera
   const num = k => (q.has(k) ? +q.get(k) : undefined), c = { lat: num('lat'), lon: num('lon'), h: num('h'), tilt: num('tilt'), heading: num('heading') };

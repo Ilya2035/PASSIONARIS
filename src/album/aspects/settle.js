@@ -178,9 +178,12 @@ void aspSettle(Px p, inout Land L) {
   // houses stand on dry, level ground only; a town too small for its pixels still shows as a mark, a village melts
   // into the land once it is a pixel or so across (the owner: «деревня не показывается на карте… при близком
   // приближении она слегка видна»)
-  float tm = 0., mt = m + (village ? 0. : max(0., 2.2 * px - r));
+  // (a village by its people — under a thousand, whichever grid it lies in: the hamlet at the centre of a district as
+  // much as a village between the centres)
+  bool small = village || r < SET_TOWN_R;
+  float tm = 0., mt = m + (small ? 0. : max(0., 2.2 * px - r));
   if (mt > -.03) tm = smoothstep(-.03, .015, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
-  if (village) tm *= 1. - smoothstep(.6, 1.6, px / max(r, .02));
+  if (small) tm *= 1. - smoothstep(.6, 1.6, px / max(r, .02));
   float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
   if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
 

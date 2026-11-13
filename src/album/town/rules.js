@@ -55,6 +55,9 @@ export const CLASSES = [
   { id: 'megapolis', title: 'мегаполис', people: 1e6, area: 1500, mark: 'pentagon' },
 ];
 export const peopleOf = r => Math.round(Math.PI * r * r * DENSITY);
+// the radius at which a settlement stops being a village by its people (CLASSES[1]): from here on it has a mark on
+// the map from afar; a village has none (the owner: «деревня до 1000 человек не показывается на карте»)
+export const TOWN_R = Math.sqrt(1000 / (Math.PI * DENSITY));
 export const classOf = (people, areaKm2 = 0) => { let c = 0; for (let i = 0; i < CLASSES.length; i++) if (people >= CLASSES[i].people || areaKm2 >= CLASSES[i].area) c = i; return c; };
 // how far the fields reach beyond the last houses, km
 export const fieldsBeyond = r => .5 + 2.5 * r;
@@ -169,6 +172,7 @@ export const RULES_GLSL = /* glsl */`
 #define SET_WARP ${(FARM_WARP / KKM).toFixed(3)}
 #define SET_UNEVEN ${FARM_UNEVEN.toFixed(3)}
 #define SET_SHARP ${FARM_SHARP.toFixed(2)}
+#define SET_TOWN_R ${TOWN_R.toFixed(4)}
 #define SET_BEND ${BEND.toFixed(3)}
 float setWob(vec2 pk) { return sin(pk.x * 9. + 1.3 * sin(pk.y * 7.)); }
 float setHash(ivec2 id, int k, int salt) {
