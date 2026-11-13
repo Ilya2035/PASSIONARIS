@@ -6,14 +6,17 @@
 // (town/grow.js) turns the places of the map and the «Рост городов» knob into the state of the chunks: houses,
 // fields, felled forest. Places are today's cities (Natural Earth) as stand-ins: the game has no peoples yet.
 // Among the fields stand single yards (town/yards.js): the same blocks in a second mesh, one more draw call.
-import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
+// Between the centres of districts stand villages (town/villages.js): every district has its list of places, and the
+// model founds a village on each as the «Рост городов» knob rises. They are patches like the towns, in a finer grid.
+import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, BufferGeometry, Points, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
 import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
 import { cellSize, cultureAt, CELL, PALETTE_GLSL, GX0, GY0 } from '../town/rules.js';
-import { settleTex, settleUniforms, mirrorSettle } from '../town/state.js';
+import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, packAtlas } from '../town/state.js';
+import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces } from '../town/grow.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
@@ -64,11 +67,29 @@ const FRAG = /* glsl */`${COMMON}
     gl_FragColor = vec4(albumFinish(albumAir(lin, vW)), 1.);
   }`;
 
+// the places of the districts, for checking (knob «Места поселений»): a dot at every place of every list
+const SITES_VERT = /* glsl */`${COMMON}
+  uniform float uPx;                // position: x, y (flat km), kind + 4 × founded
+  varying vec2 vK;
+  void main() {
+    vec2 ll = vec2(position.y / KM, position.x / (KM * COSREF));
+    gl_Position = projectionMatrix * viewMatrix * vec4(worldOf(ll, max(heightLod(ll, 2.), 0.) * uExag / 1000. + .02), 1.);
+    vK = vec2(mod(position.z, 4.), floor(position.z / 4.));
+    gl_PointSize = uPx * (vK.x < .5 ? 1.7 : 1.);
+  }`;
+const SITES_FRAG = /* glsl */`
+  varying vec2 vK;
+  void main() {
+    float r = length(gl_PointCoord - .5) * 2.; if (r > 1.) discard;
+    vec3 c = vK.x < .5 ? vec3(.86, .14, .12) : vK.x < 1.5 ? vec3(1., .82, .16) : vec3(.20, .56, .96);      // centre · real place · made place
+    gl_FragColor = vec4(mix(vK.y > .5 ? c : vec3(.97), vec3(.06, .05, .05), smoothstep(.66, .76, r)), 1.);   // founded: filled; empty: white
+  }`;
+
 export default async function init(album) {
   const T = album.terrain.u, p = album.params, ch = album.chunks, base = album.data.base;
   // the places the model founds: the places of the album to begin with; once the land is divided into districts, also
-  // the centre of every other district (grow.js, centrePlaces)
-  let places = album.data.vectors.places, divSeen = -1;
+  // the centre of every other district (grow.js, centrePlaces) and the villages between them (villages.js)
+  let places = album.data.vectors.places, divSeen = -1, villSeen = -1, siteList = null, siteOfBase = new Map(), founded = new Uint8Array(0), perDistrict = new Map();
   const at = (x, y) => base.at(y / KM_PER_DEG, x / (KM_PER_DEG * COS_REF));        // height in metres at a point of the flat km plane
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); ch.setNatural('culture', k, cultureAt(c.lat, c.lon) / 255); }
 
@@ -83,7 +104,8 @@ export default async function init(album) {
   function indexRivers() {
     segs = []; grid = new Map();
     if (album.data.courses) {                                       // the real courses, every bend of them, within reach of the places
-      const nearPlace = new Set(); for (const pl of places) { const [x, y] = kmOf(pl.lat, pl.lon); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) nearPlace.add((Math.floor(x / GC) + dx) * 100000 + Math.floor(y / GC) + dy); }
+      // (a village and its fields reach far less than a town)
+      const nearPlace = new Set(); for (const pl of places) { const [x, y] = kmOf(pl.lat, pl.lon), e = pl.village ? 1.7 : GC; for (let gy = Math.floor((y - e) / GC); gy <= Math.floor((y + e) / GC); gy++) for (let gx = Math.floor((x - e) / GC); gx <= Math.floor((x + e) / GC); gx++) nearPlace.add(gx * 100000 + gy); }
       for (const rv of album.data.courses.rivers) {
         let a = null;
         for (let i = 0; i < rv.n; i++) { const b = kmOf(rv.ll[i * 2 + 1], rv.ll[i * 2]); if (a && rv.w[i] >= .004 && nearPlace.has(Math.floor(b[0] / GC) * 100000 + Math.floor(b[1] / GC))) seg(a, b, Math.max(rv.w[i], rv.w[i - 1])); a = b; }
@@ -127,7 +149,22 @@ export default async function init(album) {
       if (keep < 1) ch.set('forest', k, Math.min(forest0, keep));   // people fell the forest around them
       written.set(k, { built: byteOf('built', k), fields: byteOf('fields', k), forest: byteOf('forest', k), forest0 });
     }
+    // which places of the lists are settled now, and what every district holds
+    perDistrict = new Map();
+    if (siteList) {
+      founded = new Uint8Array(siteList.x.length);
+      for (const t of model.towns) {
+        const s = siteOfTown(t); if (!s) continue;
+        founded[siteList.first[s.district] + s.site] = 1;
+        const q = perDistrict.get(s.district) || perDistrict.set(s.district, { settlements: 0, villages: 0, people: 0 }).get(s.district);
+        q.settlements++; q.people += t.people; if (t.village) q.villages++;
+      }
+    }
+    sitesDrawn = false;
   }
+  // which place of which district a settlement stands on: { district, site } (site 0 is the centre), or null
+  const siteOfTown = t => { const pl = places[t.index]; return pl.site !== undefined ? { district: pl.district, site: pl.site } : pl.district !== undefined ? { district: pl.district, site: 0 } : siteOfBase.get(t.index) || null; };
+  let sitesDrawn = false;
   ch.onReset(() => applyGrowth(true));
   p.on(key => { if (key === 'growth' || (key == null && grown !== p.get('growth'))) applyGrowth(false); });
   applyGrowth(true);
@@ -135,9 +172,10 @@ export default async function init(album) {
   // ---- the mirror of the chunk state for the shaders, and the patches for the plan
   let lobes = [], seen = -1, mirrorN = 0;
   function mirror() {
-    const r = mirrorSettle(ch, model.towns);
-    if (!r.changed && mirrorN) return;
-    lobes = r.lobes; mirrorN++; settleTex.needsUpdate = true; yctx.patches = patchIndex(lobes);
+    const r = mirrorSettle(ch, model.towns), v = mirrorVillages(ch, model.towns, r.lobes);
+    if (!r.changed && !v.changed && mirrorN) return;
+    packAtlas();
+    lobes = r.lobes.concat(v.lobes); mirrorN++; settleTex.needsUpdate = true; yctx.patches = patchIndex(lobes);
   }
 
   // ---- the blocks: one geometry, one material, one draw call
@@ -215,6 +253,17 @@ export default async function init(album) {
     const all = new Float32Array(total); let o = 0; for (const r of parts) { all.set(r, o); o += r.length; }
     yard.fill(all);
   }
+  // ---- the places of the districts shown for checking: one mesh of points
+  const smat = new ShaderMaterial({ vertexShader: SITES_VERT, fragmentShader: SITES_FRAG, depthTest: false, depthWrite: false,
+    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uPx: { value: 8 } } });
+  const spts = new Points(new BufferGeometry(), smat); spts.frustumCulled = false; spts.visible = false; spts.renderOrder = 7; album.scene.add(spts);
+  function drawSites() {
+    sitesDrawn = true; if (!siteList) return;
+    const L = siteList, a = new Float32Array(L.x.length * 3); let n = 0;
+    for (let d = 0; d < L.count; d++) { const allow = madeAllowed(L, d, villSeen); let made = 0;
+      for (let s = L.first[d]; s < L.first[d + 1]; s++) { if (L.kind[s] === SITE.made && made++ >= allow) continue; a[n++] = L.x[s]; a[n++] = L.y[s]; a[n++] = L.kind[s] + 4 * founded[s]; } }
+    spts.geometry.dispose(); spts.geometry = new BufferGeometry(); spts.geometry.setAttribute('position', new BufferAttribute(a.subarray(0, n), 3));
+  }
   let planKey = '', cacheKey = ''; const cache = new Map();
   function rebuild(tx, ty, D, S, ck) {
     if (ck !== cacheKey) { cache.clear(); cacheKey = ck; }           // plans of another cell size or another state are of no use
@@ -231,16 +280,35 @@ export default async function init(album) {
   const layer = { id: 'towns', kinds: KINDS,
     // numbers for the notes of this part (docs/album/settle.md)
     stats: () => ({ blocks: town.count, triangles: town.real, slots: town.count * SLOTS / 3, drawCalls: (mesh.visible ? 1 : 0) + (yard.mesh.visible ? 1 : 0), patches: lobes.length, towns: model.towns.length,
+      villages: model.towns.filter(t => t.village).length, places: places.length, sites: siteList ? siteList.x.length : 0,
       yards: yard.mesh.visible ? yard.count : 0, yardTriangles: yard.mesh.visible ? yard.real : 0, yardCorners: yard.mesh.visible ? yard.count * ySlots : 0,
       shapeTexBytes: shapes.data.length, settleTexBytes: settleTex.image.data.length, instanceBytes: (town.cap + yard.cap) * 48, trisPerKind: Object.fromEntries(KINDS.map((k, i) => [k, shapes.tris[i]])) }),
     yardContext: () => yctx,
     model: () => model,
     places: () => places,
+    // the lists of places of the districts (villages.js), which of them are settled, and where a settlement stands
+    sites: () => siteList, founded: () => founded, siteOfTown,
+    // what a district holds: { places (in its list at this density), settlements, villages, people }
+    districtInfo(d) {
+      if (!siteList || !(d >= 0) || siteList.first[d + 1] === siteList.first[d]) return null;
+      let made = 0, n = 0; const allow = madeAllowed(siteList, d, villSeen);
+      for (let s = siteList.first[d]; s < siteList.first[d + 1]; s++) if (siteList.kind[s] !== SITE.made || made++ < allow) n++;
+      return { places: n, settlements: 0, villages: 0, people: 0, ...perDistrict.get(d) };
+    },
     update(dt, t, cam) {
       // the land has been divided (or divided anew): a settlement stands at the centre of every district
-      const dv = album.division;
-      if (dv && dv.version !== divSeen) { divSeen = dv.version; const t0 = performance.now(); places = centrePlaces(album.data.vectors.places, dv.data, dv.sites); indexRivers(); applyGrowth(false);
-        console.log(`[album] settlements: ${places.length} places, ${model.towns.length} founded at growth ${grown} (${(performance.now() - t0).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
+      const dv = album.division, vk = p.get('villages') ?? 1;
+      if (dv && (dv.version !== divSeen || vk !== villSeen)) {
+        const t0 = performance.now(), nb = album.data.vectors.places.length;
+        // every district gets its list of places (the same every time), and the knob says how many of them are used
+        if (dv.version !== divSeen || !siteList) { siteList = districtSites(dv.data, dv.chunkFacts(), dv.sites, { base: nb, at, swamp: (x, y) => { const q = llOf(x, y), k = ch.at(q.lat, q.lon); return k < 0 ? 0 : ch.getNatural('swamp', k); } }); siteOfBase = siteNumbers(siteList); }
+        divSeen = dv.version; villSeen = vk;
+        const t1 = performance.now();
+        places = [...centrePlaces(album.data.vectors.places, dv.data, dv.sites), ...villagePlaces(siteList, dv.sites, { base: nb, density: vk })];
+        indexRivers(); applyGrowth(false);
+        console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
+      spts.visible = !!p.get('sitesShow') && !!siteList;
+      if (spts.visible) { if (!sitesDrawn) drawSites(); smat.uniforms.uPx.value = Math.max(5, Math.min(13, 900 / cam.s.h)) * (album.renderer.getPixelRatio?.() || 1); }
       if (ch.version !== seen) { seen = ch.version; mirror(); }
       const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look')), dom = album.renderer.domElement;
       const S = cellSize(h, kH || 1), view = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360), cells = S / (view / Math.max(1, dom.height));   // a block in pixels of the picture

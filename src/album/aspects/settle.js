@@ -92,52 +92,86 @@ vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, flo
   return c;
 }
 
-// one of the squares of the grid around a point: if it holds a patch that lies deeper over the point than the best so far, it wins
-void setTry(ivec2 c, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec2 bc) {
-  if (c.x < 0 || c.y < 0 || c.x >= SET_GN || c.y >= SET_GN) return;
-  vec4 t = texelFetch(tSettle, c, 0);
+// One of the squares of a grid around a point: if it holds a patch that lies deeper over the point than the best so
+// far, it wins. fine: the grid of villages (the first rows of the texture), else the grid of towns (the rows after).
+// How much of the fields of a patch of radius r is drawn where a pixel is px km wide. The few fields of a hamlet or
+// a village are a picture only while their furlongs can be told; from higher up they would be a pale disc on the
+// land, one for every village. So they come in as the camera comes down. A larger place keeps its fields at any height.
+float setFieldsSeen(float r, float px) { return r >= .2 ? 1. : mix(smoothstep(.075, .045, px), 1., smoothstep(.1, .2, r)); }
+// One of the squares of a grid around a point: if it holds a patch that lies deeper over the point than the best so
+// far, it wins. fine: the grid of villages (the first rows of the texture), else the grid of towns (the rows after).
+// fld gathers the fields of every patch tried — the fields of a town reach past the villages that stand around it:
+// x how deep the point lies in the deepest of them (1 at the houses .. 0 at their edge), y how far inside the edge of
+// the widest, km, z how deep in the fields of the patch that won.
+void setTry(ivec2 c, bool fine, vec2 pk, float px, inout float own, inout float riv, inout vec4 best, inout ivec3 bc, inout vec3 fld) {
+  int n = fine ? SET_VN : SET_GN;
+  if (c.x < 0 || c.y < 0 || c.x >= n || c.y >= n) return;
+  vec4 t = texelFetch(tSettle, fine ? c : ivec2(c.x, c.y + SET_VN), 0);
   if (t.b <= 0.) return;
-  float d = t.b * t.b * SET_RMAX - distance(pk, SET_G0 + (vec2(c) + (t.rg * 255. + .5) / 256.) * SET_GK);
-  if (d > own) { riv = own; own = d; best = t; bc = c; } else if (d > riv) riv = d;
+  float r = t.b * t.b * SET_RMAX, w = .5 + 2.5 * r, d = r - distance(pk, SET_G0 + (vec2(c) + (t.rg * 255. + .5) / 256.) * (fine ? SET_VK : SET_GK));
+  float seen = setFieldsSeen(r, px), deep = (1. + d / w) * seen;
+  if (seen > 0.) fld.xy = max(fld.xy, vec2(deep, d + w));
+  if (d > own) { riv = own; own = d; best = t; bc = ivec3(c, fine ? 1 : 0); fld.z = deep; } else if (d > riv) riv = d;
+}
+// the squares a code names (town/state.js): all nine around, or one or two of them
+void setSquares(int code, ivec2 c0, bool fine, vec2 pk, float px, inout float own, inout float riv, inout vec4 best, inout ivec3 bc, inout vec3 fld) {
+  if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), fine, pk, px, own, riv, best, bc, fld); }
+  else if (code > 0) {
+    int c1 = code <= 9 ? code - 1 : code < 100 ? (code - 10) / 9 : 4, c2 = code <= 9 || code >= 200 ? -1 : code < 100 ? (code - 10) % 9 : (code - 110) / 2;
+    setTry(c0 + ivec2(c1 % 3 - 1, c1 / 3 - 1), fine, pk, px, own, riv, best, bc, fld);
+    if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), fine, pk, px, own, riv, best, bc, fld);
+  }
 }
 void aspSettle(Px p, inout Land L) {
   float fieldsV = p.cC.g;
-  ivec2 c0 = ivec2(floor((p.pk - SET_G0) / SET_GK));
-  vec4 t0 = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_GN && c0.y < SET_GN ? texelFetch(tSettle, c0, 0) : vec4(0.);
-  int code = int(t0.a * 255. + .5);
+  vec2 gp = p.pk - SET_G0;
+  ivec2 c0 = ivec2(floor(gp / SET_GK)), v0 = ivec2(floor(gp / SET_VK));
+  bool in0 = uSettle.w > .5 && c0.x >= 0 && c0.y >= 0 && c0.x < SET_GN && c0.y < SET_GN;
+  vec4 t0 = in0 ? texelFetch(tSettle, ivec2(c0.x, c0.y + SET_VN), 0) : vec4(0.), tv = in0 ? texelFetch(tSettle, v0, 0) : vec4(0.);
+  int code = int(t0.a * 255. + .5), vcode = int(tv.a * 255. + .5);
   // (fields far from any houses are drawn only where a fair share of the chunk is ploughed: a hamlet's few fields lie
   // beside it, and the rest of its chunk costs nothing)
-  if ((code == 0 && fieldsV < .03) || p.h < .4) return;
-  // the commonest case by far: the only patch near is the village of this very square, and the pixel is nowhere near it
-  if (code > 200 && code < 210 && fieldsV < .03) { float r0 = t0.b * t0.b * SET_RMAX; if (distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > 3.5 * r0 + 1.4) return; }
-  // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 squares around.
-  // The code of the square says which of the nine hold a patch: most often it is one or two, and only those are read.
-  float own = -1e3, riv = -1e3, r = 0., th = 0., cul = 1.; vec2 site = vec2(0.); int ck = 0;
-  vec4 best = vec4(0.); ivec2 bc = c0;
-  if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), p.pk, own, riv, best, bc); }
-  else if (code > 0) {
-    int c1 = code <= 9 ? code - 1 : code < 100 ? (code - 10) / 9 : 4, c2 = code <= 9 || code >= 200 ? -1 : code < 100 ? (code - 10) % 9 : (code - 110) / 2;
-    setTry(c0 + ivec2(c1 % 3 - 1, c1 / 3 - 1), p.pk, own, riv, best, bc);
-    if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), p.pk, own, riv, best, bc);
+  if ((code == 0 && vcode == 0 && fieldsV < .03) || p.h < .4) return;
+  // the commonest case by far: the only patches near are the town and the village of these very squares, and the
+  // pixel is nowhere near either
+  if (fieldsV < .03 && (code == 0 || (code > 200 && code < 210)) && (vcode == 0 || (vcode > 200 && vcode < 210))) {
+    bool away = true;
+    if (code != 0) { float r0 = t0.b * t0.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(c0) + (t0.rg * 255. + .5) / 256.) * SET_GK) > 3.5 * r0 + 1.4; }
+    if (away && vcode != 0) { float r0 = tv.b * tv.b * SET_RMAX; away = distance(p.pk, SET_G0 + (vec2(v0) + (tv.rg * 255. + .5) / 256.) * SET_VK) > 3.5 * r0 + 1.4; }
+    if (away) return;
   }
+  // ---- the patch of settlement that reaches this point: the deepest of the patches of the 3 × 3 squares around, in
+  // the grid of towns and in the grid of villages. The code of a square says which of the nine hold a patch: most
+  // often it is one or two, and only those are read.
+  float own = -1e3, riv = -1e3, r = 0., th = 0., cul = 1.; vec2 site = vec2(0.); vec3 fld = vec3(-1e3); int ck = 0;
+  vec4 best = vec4(0.); ivec3 bc = ivec3(c0, 0);
+  setSquares(code, c0, false, p.pk, p.px, own, riv, best, bc, fld);
+  setSquares(vcode, v0, true, p.pk, p.px, own, riv, best, bc, fld);
+  bool village = bc.z == 1;
   if (best.b > 0.) {
     vec2 b = floor(best.rg * 255. + .5); float ca = floor(best.a * 255. + .5);
-    r = best.b * best.b * SET_RMAX; site = SET_G0 + (vec2(bc) + (b + .5) / 256.) * SET_GK;
-    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.; ck = bc.y * SET_GN + bc.x;
+    r = best.b * best.b * SET_RMAX; site = SET_G0 + (vec2(bc.xy) + (b + .5) / 256.) * (village ? SET_VK : SET_GK);
+    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.;
+    ck = village ? SET_GN * SET_GN + bc.y * SET_VN + bc.x : bc.y * SET_GN + bc.x;
   }
   float px = p.px, S = uSettle.x, W = .5 + 2.5 * r, m = r > 0. ? own : -1e3;        // W: how far the fields reach beyond the houses
-  bool close = m > -W - .3;
-  if (!close && fieldsV < .03) return;
+  bool close = m > -W - .3, tilled = fld.y > -.3;                                   // near its own patch · within the fields of any patch
+  if (!tilled && !close && fieldsV < .03) return;
   if (m > -.6) m += min(.25, .3 * r) * setWob(p.pk) * min(1., 1. + m / .6);          // the wobble of the edge fades out away from it
-  // houses stand on dry, level ground only; a settlement too small for its pixels still shows as a mark
-  float tm = 0., mt = m + max(0., 2.2 * px - r);
+  // the fields a point lies in are those of its own patch, unless another patch, a town beside this village, ploughs deeper here
+  float field = tilled ? clamp(fld.x > fld.z + .002 ? fld.x : (1. + m / W) * setFieldsSeen(r, px), 0., 1.) : 0.;
+  // houses stand on dry, level ground only; a town too small for its pixels still shows as a mark, a village melts
+  // into the land once it is a pixel or so across (the owner: «деревня не показывается на карте… при близком
+  // приближении она слегка видна»)
+  float tm = 0., mt = m + (village ? 0. : max(0., 2.2 * px - r));
   if (mt > -.03) tm = smoothstep(-.03, .015, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
+  if (village) tm *= 1. - smoothstep(.6, 1.6, px / max(r, .02));
   float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
   if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
 
   // ---- fields: the land next to the houses is ploughed first, then the best of the rest of the chunk
-  if ((close ? fieldsV > .004 : fieldsV >= .03) && tm < .997 && p.slope < .6 && p.hl < 1700.) {
-    float want = .04 + .68 * fieldsV + (close ? .75 * clamp(1. + m / W, 0., 1.) : 0.) - p.n2 * .6 - p.n3 * .4;
+  if ((tilled ? fieldsV > .004 : fieldsV >= .03) && tm < .997 && p.slope < .6 && p.hl < 1700.) {
+    float want = .04 + .68 * fieldsV + .75 * field - p.n2 * .6 - p.n3 * .4;
     if (want > -.25) {                                               // far below the threshold no furlong can be a field: nothing more to work out
       float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
       vec2 cid = vec2(0.), ff = vec2(.5);
@@ -211,7 +245,9 @@ export default {
     { key: 'houseH', label: 'Высота домов', group: 'scale', min: .5, max: 3, step: .05, value: 1.25, unit: '×' },
     { key: 'growth', label: 'Рост городов', group: 'scale', min: 0, max: 3, step: .01, value: 1, unit: '×' },
     { key: 'yards', label: 'Дворы среди полей', group: 'scale', min: 0, max: 3.2, step: .05, value: 1, unit: '×', zero: 'нет' },
+    { key: 'villages', label: 'Деревни между центрами', group: 'scale', min: 0, max: 2, step: .05, value: 1, unit: '×', zero: 'нет' },
     { key: 'towns', label: 'Поселения', group: 'layers', type: 'toggle', value: 1 },
+    { key: 'sitesShow', label: 'Места поселений (проверка)', group: 'layers', type: 'toggle', value: 0 },
     { key: 'showcase', label: 'Витрина построек', group: 'layers', type: 'toggle', value: 0 },
   ],
   pages: [
@@ -228,6 +264,14 @@ export default {
     { id: 'town-marks-near', group: G, title: 'Отметки вблизи: имя рядом с домами', note: 'Когда дома уже различимы, отметка гаснет, а имя стоит сбоку и поселение не закрывает. Деревня отмечена точкой и малой подписью.', p: { growth: .33, forest3d: 0 }, cam: zar(24, 30, 0) },
     { id: 'town-districts', group: G, title: 'Поселение в каждом районе', note: 'В центре каждого района стоит поселение: настоящий город или село этого места, а где их нет — хутор в низине у воды. К нему сходятся дороги. Размер взят из сегодняшнего числа жителей: большинство — деревни в несколько дворов. Двигайте «Рост городов»: на малом росте стоят только большие места, деревни появляются позже.', p: {}, cam: { lat: 41.3, lon: -1.6, h: 45, tilt: 25, heading: 0 } },
     { id: 'town-districts-map', group: G, title: 'Поселения, дороги и районы', note: 'То же поверх границ районов: поселение в центре района, дороги от центра к центру.', p: { division: 1, look: 'paper', forest3d: 0 }, cam: { lat: 41.4, lon: -1.4, h: 110, tilt: 10, heading: 0 } },
+    { id: 'villages', group: G, title: 'Деревни между центрами районов', note: 'В районе, кроме центра, есть места под деревни: сначала настоящие сёла этой земли, потом лучшие свободные места — ровная земля у реки или моря, внизу. Деревня — несколько дворов на сотню-другую метров, вокруг её поля и отдельные дворы. Всё в настоящую величину. Ручка «Деревни между центрами» меняет густоту, «Рост городов» поднимает деревни по очереди: лучшие места заселяются первыми.', p: { forest3d: 0 }, cam: { lat: 41.79, lon: -1.13, h: 22, tilt: 35, heading: 20 } },
+    { id: 'villages-45', group: G, title: 'Деревни с 45 км', note: 'С этой высоты деревня — несколько пикселей; у настоящих сёл появляется точка и малая подпись. Выше деревни не отмечаются и сливаются с землёй: видны только их поля.', p: { forest3d: 0 }, cam: { lat: 41.79, lon: -1.13, h: 45, tilt: 30, heading: 0 } },
+    { id: 'villages-grown', group: G, title: 'Деревни: рост 3', note: '«Рост городов» на 3: хутора стали деревнями, деревни — сёлами с храмом и мельницей. Деревня между центрами городом не становится: её радиус не больше 390 м.', p: { growth: 3, forest3d: 0, labels: 0 }, cam: { lat: 41.79, lon: -1.13, h: 22, tilt: 35, heading: 20 } },
+    { id: 'villages-dense', group: G, title: 'Деревни: густо', note: '«Деревни между центрами» на 2: мест вдвое больше, до соседней деревни около трёх километров. Прежние деревни стоят на своих местах.', p: { villages: 2, forest3d: 0, labels: 0 }, cam: { lat: 41.79, lon: -1.13, h: 30, tilt: 30, heading: 20 } },
+    { id: 'villages-atl', group: G, title: 'Деревни: атлантический северо-запад', note: 'Здесь настоящих сёл много, и почти все места района — настоящие. Дворы под тёмными крышами стоят без улиц, между деревнями — отдельные дворы.', p: { forest3d: 0 }, cam: { lat: 41.5, lon: -8.38, h: 26, tilt: 35, heading: 0 } },
+    { id: 'villages-valley', group: G, title: 'Деревни в горной долине', note: 'В горах места под деревни — только на ровных чанках долин: на крутых склонах и выше 1 800 м мест нет.', p: { forest3d: 0 }, cam: { lat: 42.62, lon: .75, h: 40, tilt: 35, heading: 0 } },
+    { id: 'villages-sites', group: G, title: 'Места поселений района (проверка)', note: 'Перечень мест каждого района, показан точками: красная — центр района, жёлтая — настоящее село, синяя — подобранное место. Закрашенная точка — место заселено, белая — пока пусто. Перечень постоянен: он считается из рельефа и деления одинаково каждый раз, и сохранение хранит только номер места в районе. В игре точек нет.', p: { sitesShow: 1, division: 1, look: 'paper', forest3d: 0, labels: 0 }, cam: { lat: 41.4, lon: -1.4, h: 110, tilt: 10, heading: 0 } },
+    { id: 'villages-sites-near', group: G, title: 'Места поселений вблизи (проверка)', note: 'Те же точки над обычной картой с 45 км: видно, что место стоит на ровной земле у воды, а деревня — на своём месте.', p: { sitesShow: 1, forest3d: 0, labels: 0 }, cam: { lat: 41.79, lon: -1.13, h: 45, tilt: 20, heading: 0 } },
     { id: 'town-med', group: G, title: 'Манера: средиземноморская', note: 'Плотные кварталы с дворами, черепица и побелка, узкие гнутые улицы, площадь и храм в середине, причал у воды.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.722, lon: -4.42, h: 20, tilt: 35, heading: 0 } },
     { id: 'town-atl', group: G, title: 'Манера: атлантическая', note: 'Разбросанные каменные дворы под тёмными крышами, без сетки улиц; дворы обнесены стенами, вокруг выгоны с живыми изгородями.', p: { forest3d: 0, labels: 0 }, cam: { lat: 43.25, lon: -2.93, h: 20, tilt: 35, heading: 160 } },
     { id: 'fields', group: G, title: 'Поля: наделы, пар, выгон, террасы', note: 'Наделы лежат рядами, в каждом полосы со своими посевами, между ними межи и тропы, пар и выгон; на склонах террасы вдоль горизонталей. От поселения к полям расходятся дорожки. Издалека всё сливается в спокойный тон.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.735, lon: -4.44, h: 20, tilt: 40, heading: 35 } },

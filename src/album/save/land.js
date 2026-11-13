@@ -133,16 +133,19 @@ export function farmsteadsOfAlbum(yards, { cells, rank, n }) {
 // the natural cells of chunks.js; cellOf: the natural cell of every chunk of 1 km² (km.js cellsOfChunks().cell) and
 // n the side of their lattice — a district is its chunks (div.cells), and each brings the numbers of its cell;
 // places: what the model was given; legs: roadNetwork().legs (kind 0 main, 1 lesser, 2 track, 3 no road);
-// districtOf(x, y) → the district of a point; cultureOf(place) → a number; farmsteads: farmsteadsOfAlbum()
-export function landOfAlbum({ div, model, places, legs, districtOf, cellOf, cultureOf = () => 1, farmsteads = [] }) {
+// districtOf(x, y) → the district of a point; cultureOf(place) → a number; farmsteads: farmsteadsOfAlbum();
+// siteOf(town) → { district, site }: which place of the list of its district the settlement stands on
+// (town/villages.js; 0 is the centre). Without it the settlements of a district are numbered as they come.
+export function landOfAlbum({ div, model, places, legs, districtOf, cellOf, cultureOf = () => 1, farmsteads = [], siteOf = null }) {
   const D = div.count, sum = Array.from({ length: D }, () => [0, 0, 0, 0]), cells = div.cells, N = model.keep.length;
   for (let c = 0; c < cells.length; c++) { const d = cells[c], k = cellOf[c]; if (d < 0 || k >= N) continue; const s = sum[d]; s[0]++; s[1] += model.keep[k]; s[2] += model.fields[k]; s[3] += model.built[k]; }
   const districts = sum.map(s => ({ forest: s[0] ? s[1] / s[0] : 1, fields: s[0] ? s[2] / s[0] : 0, pasture: 0, built: s[0] ? s[3] / s[0] : 0, burnt: 0, age: 0 }));
   const settlements = [], taken = new Uint8Array(D);
   for (const t of model.towns) {
-    const d = districtOf(t.x, t.y); if (d < 0) continue;
+    const known = siteOf ? siteOf(t) : null, d = known ? known.district : districtOf(t.x, t.y); if (d < 0) continue;
     const structures = (t.R >= .22 ? 2 : 0) | (t.R >= .4 ? 4 : 0) | (t.R >= .7 ? 8 : 0);            // a temple, a market, a fort: what the plan builds at these sizes
-    settlements.push({ district: d, site: taken[d]++, people: t.people, structures, culture: cultureOf(places[t.index]), founded: 0 });   // site 0 is the centre of the district
+    // site 0 is the centre of the district; a settlement on no place of the list is counted from the far end
+    settlements.push({ district: d, site: known ? known.site : siteOf ? MAX_IN_DISTRICT - taken[d]++ : taken[d]++, people: t.people, structures, culture: cultureOf(places[t.index]), founded: 0 });
   }
   return { districts, settlements, farmsteads, roads: legs.map(l => (l.kind === 0 ? 3 : l.kind === 1 ? 2 : l.kind === 2 ? 1 : 0)), exceptions: [] };
 }

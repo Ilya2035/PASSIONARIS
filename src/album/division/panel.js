@@ -36,6 +36,11 @@ export function createPanel(onClose) {
           for (let k = 1; k <= 5; k++) if (s.classes[k]) row(`Земля ${k} класса`, `${num(s.classes[k])} · ${pct(s.classes[k] / s.chunks)}`);
           row('Жилых чанков', num(s.living[2])); if (s.living[1]) row('Едва жилых', num(s.living[1])); if (s.living[0]) row('Нежилых', num(s.living[0]));
         }
+        if (s.settle) {                                             // the places of the district and who lives on them (town/villages.js)
+          row('Мест под поселения', num(s.settle.places)); row('Поселений', num(s.settle.settlements));
+          if (s.settle.villages) row('из них деревень', num(s.settle.villages));
+          row('Жителей', num(s.settle.people));
+        }
       }
       res.textContent = '';
       const some = s.sums.filter(r => r.value >= .5);

@@ -25,33 +25,38 @@ const JITTER = .14;                              // km: a yard stands within 70 
 const KEEP = .18;                                // km: and no nearer than this to the last houses of a settlement
 const MAX_SLOPE = .2, MAX_HEIGHT = 1500;         // metre for metre · metres above the sea
 
-// the patches of settlement by the square of the grid they lie in (one a square: the larger stays).
+// the patches of settlement, towns and villages alike, by the square of 10 km they lie in.
 // list: [{ x, y, r }] with r in km; th, the turn of the lattice, if the lanes of the patch are known
 export function patchIndex(list) {
   const at = new Map();
   for (const L of list) {
     if (!(L.r > 0)) continue;
     const gx = Math.floor((L.x - GX0) / GK), gy = Math.floor((L.y - GY0) / GK); if (gx < 0 || gy < 0 || gx >= GN || gy >= GN) continue;
-    const old = at.get(gy * GN + gx); if (!old || old.r < L.r) at.set(gy * GN + gx, L);
+    const key = gy * GN + gx; (at.get(key) || at.set(key, []).get(key)).push(L);
   }
   return at;
 }
-// the patch that lies deepest over a point and how deep (negative outside it), as the ground shader finds it
-const hit = { L: null, m: 0 };
+// the patch that lies deepest over a point and how deep (negative outside it), as the ground shader finds it; and
+// f, how deep the point lies in the fields of any patch near (1 at the houses .. 0 at the edge of the fields)
+const hit = { L: null, m: 0, f: 0 };
 function nearest(patches, x, y) {
-  const gx = Math.floor((x - GX0) / GK), gy = Math.floor((y - GY0) / GK); hit.L = null; hit.m = -1e3;
+  const gx = Math.floor((x - GX0) / GK), gy = Math.floor((y - GY0) / GK); hit.L = null; hit.m = -1e3; hit.f = -1e3;
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     const xx = gx + dx, yy = gy + dy; if (xx < 0 || yy < 0 || xx >= GN || yy >= GN) continue;
-    const L = patches.get(yy * GN + xx); if (!L) continue;
-    const d = L.r - Math.hypot(x - L.x, y - L.y); if (d > hit.m) { hit.m = d; hit.L = L; }
+    for (const L of patches.get(yy * GN + xx) || []) {
+      const d = L.r - Math.hypot(x - L.x, y - L.y), f = 1 + d / fieldsBeyond(L.r);
+      if (f > hit.f) hit.f = f;
+      if (d > hit.m) { hit.m = d; hit.L = L; }
+    }
   }
   return hit.L ? hit : null;
 }
 // How surely the land is ploughed, 0..1: the fields of aspSettle without their fine noise. fieldsV: the share of the
 // chunk under fields; m: how deep the point lies in the nearest patch (negative outside), r: the radius of that patch
-// (0 when no patch is near)
-export function ploughed(fieldsV, m, r) {
-  const W = fieldsBeyond(r), c = r > 0 && m > -W - .3 ? Math.max(0, Math.min(1, 1 + m / W)) : 0;
+// (0 when no patch is near); other: how deep it lies in the fields of any patch near — the fields of a town reach
+// past the villages around it
+export function ploughed(fieldsV, m, r, other = -1e3) {
+  const W = fieldsBeyond(r), c = Math.max(r > 0 && m > -W - .3 ? Math.max(0, Math.min(1, 1 + m / W)) : 0, Math.min(1, other));
   return Math.max(0, Math.min(1, (.04 + .68 * fieldsV + .75 * c - .5) * 2.3 + .5));
 }
 // the ground a yard can stand on. env: at(x, y) → metres · river(x, y) → km to the bank of the nearest river ·
@@ -83,7 +88,7 @@ export function yardAt(ctx, i, j) {
   if (h0 >= p) return null;
   const n = nearest(ctx.patches, x, y), L = n ? n.L : null, m = n ? n.m : -1e3;
   if (L && m > -KEEP - Math.min(.25, .3 * L.r)) return null;        // among the houses, or where the next houses are being built
-  const f = ploughed(ctx.fields(c), m, L ? L.r : 0), g = Math.max(0, Math.min(1, (f - .3) / .4));
+  const f = ploughed(ctx.fields(c), m, L ? L.r : 0, n ? n.f : -1e3), g = Math.max(0, Math.min(1, (f - .3) / .4));
   if (h0 >= p * g * g * (3 - 2 * g)) return null;                   // the less surely the land is ploughed, the fewer yards
   const v = cellHash(i, j, 0, 24), s = cellHash(i, j, 0, 25), S = ctx.S ?? CELL;
   let kind, sx, sy;
@@ -112,7 +117,7 @@ export function planYards(ctx, ti, tj) {
 export function allYards(ctx) {
   const tiles = new Set(), T = YARD_TILE * YARD_STEP, TN = Math.ceil(FN * FKM / T), out = [];
   const add = (x0, y0, x1, y1) => { for (let tj = Math.max(0, Math.floor((y0 - GY0) / T)); tj <= Math.min(TN - 1, Math.floor((y1 - GY0) / T)); tj++) for (let ti = Math.max(0, Math.floor((x0 - GX0) / T)); ti <= Math.min(TN - 1, Math.floor((x1 - GX0) / T)); ti++) tiles.add(tj * TN + ti); };
-  for (const L of ctx.patches.values()) { const reach = L.r + fieldsBeyond(L.r) + .3; add(L.x - reach, L.y - reach, L.x + reach, L.y + reach); }
+  for (const list of ctx.patches.values()) for (const L of list) { const reach = L.r + fieldsBeyond(L.r) + .3; add(L.x - reach, L.y - reach, L.x + reach, L.y + reach); }
   for (let t = 0; t < FN * FN; t++) { const c = ctx.cell[t]; if (ctx.land(c) && ctx.fields(c) >= .5) { const x = GX0 + (t % FN) * FKM, y = GY0 + Math.floor(t / FN) * FKM; add(x, y, x + FKM, y + FKM); } }
   for (const key of [...tiles].sort((a, b) => a - b)) {
     const ti = key % TN, tj = Math.floor(key / TN);

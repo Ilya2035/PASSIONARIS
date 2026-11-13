@@ -13,6 +13,11 @@
 import { CHUNK_KM, CN, CI0, CJ0 } from '../chunks.js';
 
 export const GK = CHUNK_KM, GN = CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;   // the grid of patches: GN × GN squares of GK km from (GX0, GY0)
+// The villages between the centres of districts (villages.js) lie in a finer grid of their own, laid from the same
+// corner: VN × VN squares of VK km, one village at most in each. A village and its fields never reach farther than
+// one square, so a point of the ground looks at the 3 × 3 squares around it, as in the coarse grid.
+export const VK = 2.5, VN = GN * GK / VK;
+export const VILLAGE_RMAX = .39; // km: the largest radius of a village of the fine grid (a small town begins at .4, STAGES)
 export const RMAX = 6;           // km: the largest radius a patch can have (a chunk built up from edge to edge)
 export const CELL = .085;        // km: one block with its street, as in life
 export const BEND = .35;         // how far the lattice is bent, in cells
@@ -65,6 +70,18 @@ export function lobeOf(g, bx, by, rb, cul) {
   const gx = g % GN, gy = (g / GN) | 0, r = radiusOf(rb);
   return { k: g, gx, gy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
     x: GX0 + (gx + (bx + .5) / 256) * GK, y: GY0 + (gy + (by + .5) / 256) * GK, rivals: [] };
+}
+// the same for a village: the square v of the fine grid it lies in, and the patch of that square. Its number k goes
+// on from the numbers of the coarse grid, so no two patches share one.
+export const fineOf = (x, y) => { const vx = Math.floor((x - GX0) / VK), vy = Math.floor((y - GY0) / VK); return vx >= 0 && vy >= 0 && vx < VN && vy < VN ? vy * VN + vx : -1; };
+export function fineBytes(x, y) {
+  const fx = (x - GX0) / VK - Math.floor((x - GX0) / VK), fy = (y - GY0) / VK - Math.floor((y - GY0) / VK);
+  return [Math.min(255, Math.floor(fx * 256)), Math.min(255, Math.floor(fy * 256))];
+}
+export function villageLobe(v, bx, by, rb, cul) {
+  const vx = v % VN, vy = (v / VN) | 0, r = radiusOf(rb);
+  return { k: GN * GN + v, fine: v, vx, vy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
+    x: GX0 + (vx + (bx + .5) / 256) * VK, y: GY0 + (vy + (by + .5) / 256) * VK, rivals: [] };
 }
 // how deep a point lies inside a patch, km (negative outside)
 export const depthAt = (L, x, y) => L.re - Math.hypot(x - L.x, y - L.y) + L.amp * wob(x, y);
@@ -125,6 +142,8 @@ export const RULES_GLSL = /* glsl */`
 #define SET_GN ${GN}
 #define SET_GK ${GK.toFixed(1)}
 #define SET_G0 vec2(${GX0.toFixed(1)}, ${GY0.toFixed(1)})
+#define SET_VN ${VN}
+#define SET_VK ${VK.toFixed(2)}
 #define SET_BEND ${BEND.toFixed(3)}
 float setWob(vec2 pk) { return sin(pk.x * 9. + 1.3 * sin(pk.y * 7.)); }
 float setHash(ivec2 id, int k, int salt) {

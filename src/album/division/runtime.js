@@ -97,9 +97,11 @@ export async function startDivision(album, U) {
   const atScreen = (x, y) => { const ll = pickGround(album, x, y); return ll ? districtAt(ll.lat, ll.lon) : -1; };
 
   const panel = createPanel(() => select(-1));
+  // what a district holds, with its settlements (the settlement work counts them: layers/towns.js)
+  const summaryOf = d => { const s = districtSummary(cur.div, d, ch), t = album.layers?.towns?.districtInfo?.(d); if (t) s.settle = t; return s; };
   function select(d) {
     sel = d; U.uDivSel.value = d;
-    panel.show(d >= 0 ? districtSummary(cur.div, d, ch) : null);
+    panel.show(d >= 0 ? summaryOf(d) : null);
     shownVersion = ch.version;
   }
   // which names the map carries: regions in the regions mode, provinces otherwise, the state when one is shown
@@ -173,7 +175,7 @@ export async function startDivision(album, U) {
     chunkFacts: () => kmFacts(cur.div, data.base.at),
     chunkOrder: () => kmOrder(cur.div, data.base.at),
     chunkCount: d => kmData(cur.div).box.num[d] ?? 0,
-    summary: d => districtSummary(cur.div, d, ch),
+    summary: summaryOf,
     select, get selected() { return sel; },
     onChange: fn => listeners.push(fn),
     get data() { return cur.div; },
@@ -208,6 +210,6 @@ export async function startDivision(album, U) {
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; }
     const text = p.get('km') > 0 && last ? chunkUnder(last) : null;
     kmInfo.textContent = text || ''; kmInfo.style.display = text && !album.shot ? 'block' : 'none';
-    if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(districtSummary(cur.div, sel, ch)); shownVersion = ch.version; }
+    if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(summaryOf(sel)); shownVersion = ch.version; }
   } };
 }
