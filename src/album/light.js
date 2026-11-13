@@ -55,7 +55,7 @@ vec3 albumHazeCol() { return uLightC.rgb; }
 // sunrise and sunset — orange toward the Sun, the cool colour staying on the far side of the sky.
 vec3 albumHorizon(vec3 dir) {
   float s = max(dot(dir, uSunW), 0.); s *= s;
-  return mix(uLightC.rgb, uLightE, uLightC.w * (.34 * s + .58 * s * s * s));
+  return mix(uLightC.rgb, uLightE, uLightC.w * (.24 * s + .46 * s * s * s));
 }
 vec3 albumAir(vec3 col, vec3 wpos) { return mix(col, albumHorizon(normalize(wpos - cameraPosition)), albumHaze(wpos)); }
 // ---- clouds (layers/clouds.js draws them; their shadows are laid over the finished picture by post.js — not in
@@ -104,7 +104,7 @@ export function lightNumbers({ sun, moon = 0, style = 0, warm = 0, haze = .09, a
   // the glow of sunrise and sunset, in the natural look only: strongest with the Sun at the horizon
   const glow = style === 0 && z < .4 ? (1 - ss(.04, .4, z)) * ss(-.26, -.01, z) : 0, gb = .25 + .75 * ss(-.2, .06, z);
   return { A: [mix(sr, sr * 1.06, warm), sg, mix(sb, sb * .9, warm), day], B: [...sky, haze / (alt * 2.2 + 25)], C: [...hz, glow],
-    D: [.085 * moon, .115 * moon, .185 * moon], E: [1.12 * gb, .58 * gb, .24 * gb] };
+    D: [.085 * moon, .115 * moon, .185 * moon], E: [1.10 * gb, .64 * gb, .34 * gb] };
 }
 // the uniforms themselves: one set for the whole album (the ground gets them with the uniforms of the sky aspect,
 // everything else through lightUniforms)
