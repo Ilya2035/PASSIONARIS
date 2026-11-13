@@ -29,6 +29,7 @@ ${LIGHT}
 uniform vec3 uMoonW; uniform vec4 uSkyK;        // uSkyK: x radians in one pixel, y lit share of the Moon
 varying vec3 vDir;
 #define AIR_KM ${AIR_KM.toFixed(2)}
+#define HAZE_KM ${HAZE_KM.toFixed(3)}
 const vec3 BLUE = vec3(.105, .215, .46);        // how strongly the clear air scatters red, green and blue
 const float SUN_R = ${(.00465 * SUN_SCALE).toFixed(5)}, MOON_R = ${(.00452 * MOON_SCALE).toFixed(5)};
 
