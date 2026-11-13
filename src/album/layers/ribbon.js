@@ -12,7 +12,7 @@
 // makeRibbons() takes a road for a ribbon with lift ≤ .006 unless told otherwise (`ground`): the callers that lay
 // roads and tracks pass .005, the borders .015.
 import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Color, DoubleSide } from 'three';
-import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
+import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG } from '../geo.js';
 
 const D = Math.PI / 180;
@@ -56,8 +56,9 @@ vec3 groundLight(vec2 ll, float px) {
 // lines: [{ pts: [[lon, lat], ...], width: km, fade: [0..1 for every point] (may be left out) }]
 // ground: the ribbon is a road that lies on the ground (see above); verge: how many widths of the road the cleared
 // strip beside it takes, both sides together with the road (1: none), vergeColour, vergeAlpha: what it looks like;
-// sea: false for a ribbon that may lie over water (the deck of a bridge) — a road is not drawn where the sea is
-export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash = 0, lift = .004, ground = lift <= .006, verge = 1, vergeColour = 0x6f6a42, vergeAlpha = .5, sea = true } = {}) {
+// sea: false for a ribbon that may lie over water (the deck of a bridge) — a road is not drawn where the sea is;
+// woods: how much darker and fainter a road is where forest stands (0: not at all)
+export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash = 0, lift = .004, ground = lift <= .006, verge = 1, vergeColour = 0x6f6a42, vergeAlpha = .5, sea = true, woods = .8 } = {}) {
   let n = 0; for (const l of lines) n += l.pts.length;
   const ll = new Float32Array(n * 4), dir = new Float32Array(n * 4), side = new Float32Array(n * 2), wk = new Float32Array(n * 4), fd = new Float32Array(n * 2), pos = new Float32Array(n * 6), idx = [];
   let v = 0;
@@ -79,7 +80,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T),
     uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: minPx }, uColour: { value: new Color(colour) }, uDash: { value: dash }, uLift: { value: lift }, uAlpha: { value: 1 },
-    uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 } };
+    uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uWoods: { value: ground ? woods : 0 }, ...(ground ? album.chunks.uniforms : {}) };
   const mat = ground ? new ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, side: DoubleSide,
     vertexShader: `${COMMON}
@@ -102,9 +103,10 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         vZW = (projectionMatrix * viewMatrix * vec4(vWorld + eye * max(uLift, uMesh.w) / max(dot(eye, normalize(vWorld + vec3(0., RKM, 0.))), .3), 1.)).zw;
       }`,
     fragmentShader: `${COMMON}
+      ${CHUNK_GLSL}
       ${LIGHT}
       ${GROUND_LIGHT}
-      uniform vec3 uColour, uVergeCol; uniform float uDash, uAlpha, uVerge, uVergeA, uSea; varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
+      uniform vec3 uColour, uVergeCol; uniform float uDash, uAlpha, uVerge, uVergeA, uSea, uWoods; varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
       void main() {
         float pk = max(fwidth(vX), 1e-7), x = abs(vX) / pk, hw = vRoad / pk, px = length(fwidth(vWorld));       // this pixel across the road, km; from the middle of the road, pixels; half the road, pixels
         float core = clamp(hw + .5 - x, 0., 1.) - clamp(.5 - hw - x, 0., 1.);                                    // how much of the pixel the road covers
@@ -112,9 +114,15 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float verge = uVerge > 1.01 ? (1. - smoothstep(hw, hw * uVerge, x)) * uVergeA * smoothstep(1.5, 3., hw * uVerge) : 0.;
         float cover = core + verge * (1. - core), a = cover * uAlpha * vFade;
         if (uDash > 0.) a *= step(fract(vDist / uDash), .62);
-        if (uSea > 0.) a *= smoothstep(-2., .5, heightLod(vLL, 0.));                                             // a road is not drawn over the sea (a bridge is: uSea 0)
+        float h0 = heightLod(vLL, 0.);
+        if (uSea > 0.) a *= smoothstep(-2., .5, h0);                                                             // a road is not drawn over the sea (a bridge is: uSea 0)
+        // In the woods a road is dark earth under the trees, not a pale line across the green: darker and fainter
+        // where the land is wet enough for forest and the forest of the chunk still stands.
+        vec2 pkm = vec2(vLL.y * KM * COSREF, vLL.x * KM);
+        float woods = uWoods > 0. ? uWoods * smoothstep(.36, .58, albumWet(vLL, max(h0, 0.), fbm(pkm / 38.))) * textureLod(tChunkA, chunkUV(pkm), 0.).r : 0.;
+        a *= 1. - .22 * woods;
         if (a < .004) discard;
-        vec3 seen = mix(uVergeCol, uColour * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5))), core / max(cover, 1e-4));
+        vec3 seen = (1. - .5 * woods) * mix(uVergeCol, uColour * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5))), core / max(cover, 1e-4));
         vec3 col = uStyle == 2 || uStyle == 3 || uStyle == 6 ? mix(pow(seen * (.35 + .65 * albumDay()), vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld))
           : albumFinish(albumAir(seen * groundLight(vLL, px), vWorld));
         gl_FragColor = vec4(col, a);

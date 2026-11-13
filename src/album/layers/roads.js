@@ -54,7 +54,7 @@ export default async function init(album) {
     ribbons = sets.map((lines, k) => ({ ...makeRibbons(album, lines, { colour: LOOK[k].light, minPx: LOOK[k].px[0], lift: .005, ground: true, ...VERGE }), set: k }));
     decks = DECK.map((d, kind) => {
       const list = fords.filter(f => f.type === 'bridge' && f.road === kind); if (!list.length) return null;
-      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * BRIDGE.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * BRIDGE.wide, lift: .005, ground: true, sea: false, ...DECK_RIM });
+      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * BRIDGE.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * BRIDGE.wide, lift: .005, ground: true, sea: false, woods: 0, ...DECK_RIM });
       rib.mesh.renderOrder = 6;
       return { ...rib, kind, list };
     }).filter(Boolean);
