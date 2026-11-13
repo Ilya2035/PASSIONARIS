@@ -191,7 +191,7 @@ ch.onReset(fn);                       // своя модель накладыв�
 |---|---|---|
 | Болота | `aspects/swamp.js` | `void aspSwamp(Px p, inout Land L)` |
 | Поселения | `aspects/settle.js`, `layers/towns.js`, новая папка `town/` | `void aspSettle(Px p, inout Land L)` |
-| Лес | `aspects/forest.js`, `layers/forest.js` | `float forestCover(Px p)`, `void aspForest(Px p, inout Land L)` |
+| Лес | `aspects/forest.js` (слой объёмных деревьев `layers/forest.js` убран в v0.6.67: лес — полог в шейдере земли) | `float forestCover(Px p)`, `void aspForest(Px p, inout Land L)` |
 | Вода | `aspects/water.js`, `layers/rivers.js`, новые слои озёр | `vec3 aspWater(Px p)` |
 | Деление | `aspects/division.js`, новая папка `division/` | `void aspDivision(Px p, inout vec3 col, float landA)`, `vec3 districtAt(vec2 pk)` |
 | Ресурсы | `aspects/resources.js` | ничего; работает через слои и `ch.show()` |
@@ -329,7 +329,7 @@ export default {
 | Дороги и реки | `aspects/roads.js`, `roads/*`, `layers/roads.js`, `layers/ribbon.js`, `aspects/water.js`, `water/*`, `layers/rivers.js`, `layers/lakes.js`, `layers/freeze.js` | `docs/album/roads.md`, `docs/album/water.md` |
 | Поселения | `aspects/settle.js`, `town/*`, `layers/towns.js`, `layers/labels.js`, `division/panel.js`, `save/*` | `docs/album/settle.md`, `docs/album/map-rework.md`, `docs/SAVE-LAND.md` |
 | Небо, свет и камера | `aspects/sky.js`, `light.js`, `camera.js`, `post.js`, `main.js`, `layers/clouds.js`, `layers/hazards.js`, новая папка `sky/` | `docs/album/sky.md` |
-| Земля и лес | `aspects/ground.js`, `terrain.js`, `glsl.js`, `data.js`, `aspects/forest.js`, `layers/forest.js`, `aspects/swamp.js` | `docs/album/ground.md`, `docs/album/forest.md`, `docs/album/swamp.md` |
+| Земля и лес | `aspects/ground.js`, `terrain.js`, `glsl.js`, `data.js`, `aspects/forest.js`, `aspects/swamp.js`, папка `ground/` | `docs/album/ground.md`, `docs/album/forest.md`, `docs/album/swamp.md` |
 | Ведущая сессия | `chunks.js`, `chunktool.js`, `params.js`, `pages.js`, `layers.js`, `mapview.js`, `ui.js`, `ui.css`, `pick.js`, `geo.js`, `feedback.js`, `aspects/index.js`, `aspects/resources.js`; `scripts/harness.sh`, `scripts/release.mjs`, `scripts/worktree-setup.mjs`; `CLAUDE.md`, `docs/BACKLOG.md`, `docs/ALBUM.md`, этот файл | — |
 
 Правила третьей волны, сверх раздела «Как работать параллельно»:

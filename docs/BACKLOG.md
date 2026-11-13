@@ -179,7 +179,7 @@
 3. **Карта ресурсов по открытым данным** — рыба, лес, камень, редкий и драгоценный камень, руды, уголь, нефть,
    болотное железо; `docs/RESOURCES.md`, `scripts/resources/*`, `src/album/aspects/resources.js`.
 4. **Лес по чанкам** — хвойный и лиственный, густота, возраст, оттенки по месту, зарастание и вырубка;
-   `src/album/aspects/forest.js`, `src/album/layers/forest.js`.
+   `src/album/aspects/forest.js` (слой объёмных деревьев `src/album/layers/forest.js` убран в v0.6.67).
 5. **Вода, лёд, снег на льду, озёра** — `src/album/aspects/water.js`, `src/album/layers/rivers.js`, слой озёр.
 6. **Поселения: свои кварталы вместо готовых моделей** — реалистичные, минималистичные, лёгкие; от хутора до
    города; `src/album/aspects/settle.js`, `src/album/layers/towns.js`, `src/album/town/*`.
