@@ -193,6 +193,14 @@ void aspSwamp(Px p, inout Land L) {
   if (s < .004 || p.h < -1.) return;
   vec2 pk = p.pk; float px = p.px, far = smoothstep(1.5, 4.5, px), f = swampField(pk, p.n2, p.n3, px);
   if (s * 1.05 - f + .3 < -.07 && far <= 0.) return;                                  // dry even in the lowest hollow
+  // The one noise of the open water is counted here, first, while the function holds next to nothing. A noise needs
+  // many registers of the video card at once; called further down, among the two dozen numbers the swamp keeps by
+  // then, it pushed the whole ground shader past the limit after which a weak card runs it 40 % slower (measured
+  // 14.11.2026 on «land-200»: this noise at the end of the function 436 ms, here 307 ms). For the same reason the swamp
+  // has one creek noise and takes its pools from the shared noises: with the side creeks, the three sizes of pools and
+  // the round bog pools it had before — eight numbers held from here — the limit was passed again (450 ms).
+  // docs/album/ground.md, «Скорость».
+  float nArm = swampNoise(pk / 7.5 + 11.);
   float hs = swampHeight(p.ll), slope = swampSlope(p.ll, hs);
   float hk = hs + (p.n2 - .5) * 3. + (p.n3 - .5) * 1.5;                               // a little unevenness, so the kinds do not change along the cells of the height data
   vec4 kind = swampKind(p.ll, hk, p.wet);
@@ -207,30 +215,12 @@ void aspSwamp(Px p, inout Land L) {
   float cw = dot(kind, vec4(.3, 1., 1.3, .8)) * lvl * (1. + flats * .5);              // how wide the creeks are
   float pa = dot(kind, vec4(.10, .30, .16 - .08 * tide, .20));                        // how much water stands in pools
 
-  // ---- open water: creeks (the level lines of a noise: arms, and side creeks that taper away from them) and pools
-  float water = 0., wdeep = 0., edge = 9., eP = 9., P = .5, near = 1. - smoothstep(.5, 1.5, px);
-  if (near > 0.) {
-    vec2 q = pk + (vec2(vnoise(pk / 2.3 + 3.), vnoise(pk / 2.3 + 47.)) - .5) * 1.1;
-    float a1 = abs(swampNoise(q / 7.5 + 11.) - .5 - (p.n2 - .47) * .3) * 6.3;                     // ≈ km to the nearest arm
-    float a2 = abs(swampNoise(q / 2.0 + 29.) - .5 - (mott - .5) * .15) * 1.65, f2 = smoothstep(.45, .15, px);   // ≈ km to the nearest side creek
-    float w1 = max((.015 + .05 * z) * cw, px * .6 * smoothstep(0., .3, z)), w2 = (.005 + .02 * z) * cw * (1. - smoothstep(.1, .9, a1));
-    float line = max(swampLine(a1, w1, px), swampLine(a2, w2, px) * f2), eL = min(a1 - w1, mix(9., a2 - w2, f2));
-    wdeep = max(clamp(1. - a1 / max(w1, 1e-3), 0., 1.), clamp(1. - a2 / max(w2, 1e-3), 0., 1.) * f2) * 1.2;
-    float o2 = px < .3 ? mix(.5, swampNoise(q / .34 + 5.), smoothstep(.3, .1, px)) : .5, o3 = px < .1 ? mix(.5, vnoise(q / .11 + 71.), smoothstep(.1, .035, px)) : .5;
-    P = smoothstep(.3, .7, swampNoise(q / 1.15 + 13.) * .6 + o2 * .28 + o3 * .12 + .07 * (1. - smoothstep(0., .5, a2)) * f2);   // pools string along the creeks
-    float A = pa * z * lvl, e = clamp(px * .9, .012, .3), pool = smoothstep(-e, e, P - (1. - A));
-    eP = ((1. - A) - P) * .6;
-    if (kind.x > .03 && px < .2) {                                                    // a raised bog keeps its water in clusters of small round pools
-      vec2 wv = worley(q / .21 + 7.);
-      float r = .16 + .30 * wv.y, pe = clamp(px / .21, .02, .4);
-      float on = kind.x * smoothstep(.40, .62, P + z * .25 - .12) * step(wv.y, .25 + .6 * z * lvl) * smoothstep(.2, .1, px);
-      pool = max(pool, on * (1. - smoothstep(r - pe, r + pe, wv.x)));
-      eP = min(eP, mix(9., (wv.x - r) * .21, step(.5, on)));
-    }
-    water = max(line, pool);
-    wdeep = max(wdeep, clamp(-eP * 6., 0., 1.));
-    edge = min(eL, eP);
-  }
+  // ---- open water: creeks (the level lines of a noise) and pools (the low places of the shared noises of 1 and 7 km)
+  float near = 1. - smoothstep(.5, 1.5, px), A = pa * z * lvl, e = clamp(px * .9, .012, .3), P = p.n3 * .6 + p.n2 * .4;
+  float a1 = abs(nArm - .5 - (p.n2 - .47) * .3) * 6.3, w1 = max((.015 + .05 * z) * cw, px * .6 * smoothstep(0., .3, z));   // ≈ km to the nearest arm; its half-width
+  float eP = ((1. - A) - P) * .6, edge = min(a1 - w1, eP);
+  float water = max(swampLine(a1, w1, px), clamp((P - (1. - A)) / e * .5 + .5, 0., 1.));
+  float wdeep = max(clamp(1. - a1 / max(w1, 1e-3), 0., 1.) * 1.2, clamp(-eP * 6., 0., 1.));
   water = mix(z * (pa * .5 + .05 * cw) * lvl, water, near);                           // what is left of the water when it is smaller than a pixel
 
   // ---- what grows
@@ -238,7 +228,7 @@ void aspSwamp(Px p, inout Land L) {
   vec3 vBog = mix(vec3(.46, .37, .18), vec3(.36, .37, .16), mott);                    // ochre moss and deer grass
   vBog = mix(vBog, vec3(.33, .22, .17), smoothstep(.52, .8, fine) * .6);              // russet hummocks of heather
   vBog = mix(vBog, vec3(.49, .46, .17), smoothstep(.38, .12, fine) * z * .55);        // bright wet moss in the hollows
-  vec3 vFen = mix(vec3(.22, .38, .13), vec3(.37, .46, .16), mott * .6 + fine * .4);   // reed beds
+  vec3 vFen = mix(vec3(.24, .35, .15), vec3(.38, .43, .19), mott * .6 + fine * .4);   // reed beds
   vFen = mix(vFen, vec3(.56, .51, .27), smoothstep(.55, .8, P * .5 + p.n2 * .5) * .45);     // stands of last year's straw
   vFen = mix(vec3(.47, .45, .22), vFen, smoothstep(0., .35, z));                      // sedge and wet grass at the dry edge
   vec3 vSalt = mix(vec3(.38, .46, .24), vec3(.52, .53, .30), mott * .6 + fine * .4);  // cord grass, sea purslane
@@ -262,8 +252,9 @@ void aspSwamp(Px p, inout Land L) {
   veg = mix(veg, vec3(.62, .37, .15), fe * (1. - smoothstep(0., bankW * 1.6, edge)) * near * .6);
 
   // ---- water: pale and warm in the shallows, dark in the middle; then ice, and snow on the ice
-  vec3 wcol = mix(kind.x * vec3(.15, .12, .08) + kind.y * vec3(.20, .33, .29) + kind.z * vec3(.47, .48, .39) + kind.w * vec3(.11, .16, .12),
-    kind.x * vec3(.03, .035, .045) + kind.y * vec3(.06, .19, .29) + kind.z * vec3(.17, .34, .39) + kind.w * vec3(.05, .15, .21), smoothstep(0., .7, wdeep));
+  // (dark and dull, as standing water is from above: the sky is mirrored by L.gloss, not painted here)
+  vec3 wcol = mix(kind.x * vec3(.15, .12, .08) + kind.y * vec3(.21, .29, .23) + kind.z * vec3(.44, .45, .37) + kind.w * vec3(.11, .16, .12),
+    kind.x * vec3(.03, .035, .045) + kind.y * vec3(.07, .15, .17) + kind.z * vec3(.17, .28, .30) + kind.w * vec3(.05, .12, .13), smoothstep(0., .7, wdeep));
   float rust = fe * (1. - smoothstep(0., .35, wdeep)) * .75;                         // a rusty film in the shallowest water only
   wcol = mix(wcol, vec3(.47, .27, .11), rust);
   float pads = px < .09 ? (kind.y + kind.w * .6) * smoothstep(.62, .8, vnoise(pk / .11 + 31.)) * (1. - smoothstep(.15, .6, wdeep)) * smoothstep(.09, .03, px) : 0.;
@@ -280,7 +271,7 @@ void aspSwamp(Px p, inout Land L) {
   float keep = kind.w * .8 * (1. - .9 * gap) * (1. - .8 * water) + kind.y * .06 * (1. - water);
   L.cover *= 1. - m * (1. - keep);
   L.col = mix(L.col, mix(veg, wcol, water), m * .94);
-  L.gloss = max(L.gloss, m * (water * mix(.45 * (1. - pads * .8) * (1. - rust * .8), .10, frozen) + mud * tide * .06 * (1. - water)) * (1. - snowed) * (1. - L.cover));
+  L.gloss = max(L.gloss, m * (water * mix(.28 * (1. - pads * .8) * (1. - rust * .8), .10, frozen) + mud * tide * .06 * (1. - water)) * (1. - snowed) * (1. - L.cover));
 }`;
 
 const cam = (lat, lon, h, tilt = 0, heading = 0) => ({ lat, lon, h, tilt, heading });
