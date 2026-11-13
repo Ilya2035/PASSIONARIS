@@ -252,6 +252,7 @@ export default async function init(album) {
     return best;
   };
   const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y), farmList: null, culture: c => Math.round(ch.get('culture', c) * 255),
+    farmSquare: (kx, ky) => (farmShown && kx >= 0 && ky >= 0 && kx < KN && ky < KN ? farmShown.km[ky * KN + kx] / 255 : 0),
     patches: new Map(), env: { ...env, road: roadAt }, density: 1, S: CELL,
     // a yard stands at one of the sixteen places of a chunk of 1 km² of land (once the land is divided)
     landSquare: (kx, ky) => { const dv = album.division?.data; if (!dv?.cells) return true; const d = kx >= 0 && ky >= 0 && kx < KN && ky < KN ? dv.cells[ky * KN + kx] : -1; return d >= 0 && dv.kinds[d] === 0; } };

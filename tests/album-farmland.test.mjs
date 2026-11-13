@@ -19,7 +19,7 @@ import { farmGround, farmRun, farmWithCells, farmOfDistricts, HA_PER_PERSON, FAR
 import { growTowns, centrePlaces, reachOf, FIELD_FLOOR, FELL_FROM, FELL } from '../src/album/town/grow.js';
 import { districtSites, villagePlaces, GOOD } from '../src/album/town/villages.js';
 import { mirrorFarm, farmAt, farmBytes, atlasBytes, settleTex } from '../src/album/town/state.js';
-import { landOfAlbum } from '../src/album/save/land.js';
+import { landOfAlbum, farmRank } from '../src/album/save/land.js';
 import settle from '../src/album/aspects/settle.js';
 import division from '../src/album/aspects/division.js';
 import { DEFS } from '../src/album/params.js';
@@ -157,6 +157,10 @@ test('farmland: a cell ploughed by hand gives its share to every chunk in it; th
   // the save counts the fields of a district the same way
   const world = landOfAlbum({ div: { count: 2, cells }, model: m, places: [place(-205, 4405, 650000)], legs: [], districtOf: x => (x < -205 ? 0 : 1), cellOf });
   let n0 = 0; for (let c = 0; c < cells.length; c++) if (cells[c] === 0 && cellOf[c] < ch.count) n0++; assert.ok(Math.abs(world.districts[0].fields - per[0] / n0) < 1e-4);
+  // the chunks of farmland of a district have numbers of their own, in the order the district takes up its land:
+  // a save counts the chunks that carry yards by them
+  const order = { list: Uint32Array.of(5, 9, 2, 7, 11, 3), first: Uint32Array.of(0, 4, 6) }, some = new Uint8Array(12); some[9] = 255; some[7] = 130; some[2] = 90; some[3] = 128;
+  assert.deepEqual([...farmRank(order, some, .5)].map((v, c) => [c, v]).filter(e => e[1] >= 0), [[3, 0], [7, 1], [9, 0]]); assert.deepEqual([...farmRank(order, some)].filter(v => v >= 0).length, 4);
   // the texture of the division can carry the fields of every chunk, for the check view
   const div = { count: 2, cells, kinds: [0, 0], colour: { district: [0, 1], province: [0], region: [0] }, province: [0, 0], region: [0], cx: [-300, -100], cy: [4405, 4405], chunks: [[0], [1]] };
   const a = packDivision(ch, div, null, { cls: new Uint8Array(KN * KN).fill(1) }, f.km), home = sq(-205, 4405);

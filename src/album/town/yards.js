@@ -23,6 +23,9 @@ export const YARD_TILE = 16;                     // places along a side of a til
 // villages and yards are few; Atlantic people live in yards scattered over the land
 export const YARDS_PER_KM2 = [0, 2.5, 5];
 export const YARD_KINDS = ['cot', 'yard', 'longyard'];             // the blocks a yard may be: light ones, each with its own plot
+// A yard stands only in a chunk of farmland: a chunk of 1 km² ploughed for the greater part. So a save knows which
+// chunks can carry yards from the fields alone, and keeps its two bytes for those chunks only (save/land.js).
+export const YARD_FARM = .5;
 const JITTER = .14;                              // km: a yard stands within 70 m of the middle of its place
 const KEEP = .18;                                // km: and no nearer than this to the last houses of a settlement
 const MAX_SLOPE = .2, MAX_HEIGHT = 1500;         // metre for metre · metres above the sea
@@ -70,6 +73,8 @@ function soundGround(env, x, y, half) {
 //   cell      the natural cell of every texel of the fine raster (chunks.js)
 //   land(c)   is natural cell c land · culture(c) its manner of building
 //   farm(x, y) how much of the chunk of 1 km² at a point is under fields, 0..1 (state.js farmAt)
+//   farmSquare(kx, ky)  how much of the chunk of that square is under fields, 0..1: no yard stands in a chunk with
+//             less than YARD_FARM. When left out, any chunk will do
 //   farmList  the chunks of 1 km² that have fields (farmland.js; for allYards)
 //   patches   patchIndex() of the settlements · env  the ground (see soundGround)
 //   density   the «Дворы среди полей» knob, × · S  the cell of the lattice of blocks, km
@@ -82,7 +87,9 @@ export function yardAt(ctx, i, j) {
   const x = GX0 + (i + .5) * YARD_STEP + (cellHash(i, j, 0, 22) - .5) * JITTER, y = GY0 + (j + .5) * YARD_STEP + (cellHash(i, j, 0, 23) - .5) * JITTER;
   const tx = Math.floor((x - GX0) / FKM), ty = Math.floor((y - GY0) / FKM); if (tx < 0 || ty < 0 || tx >= FN || ty >= FN) return null;
   const c = ctx.cell[ty * FN + tx]; if (!ctx.land(c)) return null;
-  if (ctx.landSquare && !ctx.landSquare(Math.floor(i / YARD_SIDE), Math.floor(j / YARD_SIDE))) return null;
+  const kx = Math.floor(i / YARD_SIDE), ky = Math.floor(j / YARD_SIDE);
+  if (ctx.farmSquare && !(ctx.farmSquare(kx, ky) >= YARD_FARM)) return null;
+  if (ctx.landSquare && !ctx.landSquare(kx, ky)) return null;
   const atl = ctx.culture(c) === CULTURES.atl, p = K * YARDS_PER_KM2[atl ? CULTURES.atl : CULTURES.med] / 16;
   if (h0 >= p) return null;
   const farm = ctx.farm(x, y); if (!(farm > .004)) return null;      // a yard stands in a chunk of farmland
@@ -117,8 +124,10 @@ export function planYards(ctx, ti, tj) {
 export function allYards(ctx) {
   const tiles = new Set(), T = YARD_TILE * YARD_STEP, TN = Math.ceil(FN * FKM / T), out = [];
   const add = (x0, y0, x1, y1) => { for (let tj = Math.max(0, Math.floor((y0 - GY0) / T)); tj <= Math.min(TN - 1, Math.floor((y1 - GY0) / T)); tj++) for (let ti = Math.max(0, Math.floor((x0 - GX0) / T)); ti <= Math.min(TN - 1, Math.floor((x1 - GX0) / T)); ti++) tiles.add(tj * TN + ti); };
-  // (the fields of a chunk reach a little into the chunks around it: state.js farmAt)
-  for (const c of ctx.farmList || []) { const x = KX0 + (c % KN) * KKM, y = KY0 + Math.floor(c / KN) * KKM; add(x - KKM, y - KKM, x + 2 * KKM, y + 2 * KKM); }
+  // (without farmSquare a yard may stand in the chunk next to a ploughed one: the fields of a chunk reach a little
+  // into the chunks around it — state.js farmAt)
+  const e = ctx.farmSquare ? 0 : KKM;
+  for (const c of ctx.farmList || []) { const x = KX0 + (c % KN) * KKM, y = KY0 + Math.floor(c / KN) * KKM; add(x - e, y - e, x + KKM + e, y + KKM + e); }
   for (const key of [...tiles].sort((a, b) => a - b)) {
     const ti = key % TN, tj = Math.floor(key / TN);
     for (let j = tj * YARD_TILE; j < (tj + 1) * YARD_TILE; j++) for (let i = ti * YARD_TILE; i < (ti + 1) * YARD_TILE; i++) { const r = yardAt(ctx, i, j); if (r) out.push({ i, j, x: r[0], y: r[1], kind: r[3] }); }

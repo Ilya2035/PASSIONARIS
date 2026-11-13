@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packLand, unpackLand, landBytes, landOfAlbum, farmsteadsOfAlbum, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS, YARD_LIST, YARD_LIST_CHUNKS } from '../src/album/save/land.js';
+import { packLand, unpackLand, landBytes, landOfAlbum, farmsteadsOfAlbum, farmRank, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS, YARD_LIST, YARD_LIST_CHUNKS } from '../src/album/save/land.js';
 import { encodeSave, decodeSave } from '../src/save/saveSystem.js';
 import { Chunks, kmOf } from '../src/album/chunks.js';
 import { KN as FN, KKM as FKM, kmOrder, kmData, cellsOfChunks } from '../src/album/division/km.js';
@@ -16,7 +16,7 @@ import { roadNetwork } from '../src/album/roads/routes.js';
 import { decodeSites } from '../src/album/town/sites.js';
 import { growTowns, centrePlaces } from '../src/album/town/grow.js';
 import { cultureAt } from '../src/album/town/rules.js';
-import { allYards, patchIndex, yardPlace } from '../src/album/town/yards.js';
+import { allYards, patchIndex, yardPlace, YARD_FARM } from '../src/album/town/yards.js';
 import { mirrorFarm, farmAt } from '../src/album/town/state.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 
@@ -95,10 +95,14 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); manner[k] = cultureAt(c.lat, c.lon); }
   const landSquare = (kx, ky) => { const d = div.cells[ky * FN + kx]; return d >= 0 && div.kinds[d] === LAND; };
   const farmTex = new Uint8Array(FN * FN * 4); mirrorFarm(model.farm, farmTex);
-  const yards = allYards({ cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y, farmTex), farmList: model.farm.list, culture: c => manner[c], patches, density: 1, landSquare, env: { at, river: () => 1e9, swamp: () => 0 } });
-  // every yard is one of the sixteen places of a chunk of 1 km²; the chunks of a district are numbered from its centre outward
-  const order = kmOrder(div, data.base.at);
-  const farmsteads = farmsteadsOfAlbum(yards.map(y => yardPlace(y.i, y.j)), { cells: div.cells, rank: order.rank, n: FN });
+  const yards = allYards({ cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y, farmTex), farmList: model.farm.list, farmSquare: (kx, ky) => model.farm.km[ky * FN + kx] / 255, culture: c => manner[c], patches, density: 1, landSquare, env: { at, river: () => 1e9, swamp: () => 0 } });
+  // every yard is one of the sixteen places of a chunk of farmland; the chunks of farmland of a district are numbered
+  // from its centre outward — which chunks are farmland is worked out from the settlements, so the save keeps two
+  // bytes for those chunks only
+  const order = kmOrder(div, data.base.at), rank = farmRank(order, model.farm.km, YARD_FARM);
+  const farmsteads = farmsteadsOfAlbum(yards.map(y => yardPlace(y.i, y.j)), { cells: div.cells, rank, n: FN });
+  { let farmland = 0; for (const c of model.farm.list) { if (model.farm.km[c] >= 128) { farmland++; assert.ok(rank[c] >= 0); } else assert.equal(rank[c], -1); }
+    assert.ok(farmland > 5000 && yards.length / farmland > 1.8 && yards.length / farmland < 3.2, `${yards.length} yards in ${farmland} chunks of farmland`); }
   const world = landOfAlbum({ div, model, places, legs: net.legs, districtOf, farmsteads, cellOf: cellsOfChunks(ch).cell });
   { let chunks = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) chunks += kmData(div).box.num[d]; assert.equal(order.list.length, chunks, 'every chunk of land has its number in its district'); }
   assert.equal(world.districts.length, div.count); assert.equal(world.roads.length, net.legs.length);
@@ -109,9 +113,9 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   const file = await encodeSave({ meta: { t: 0, name: 'album' }, sections }), back = unpackLand((await decodeSave(file)).sections);
   assert.equal(back.settlements.length, world.settlements.length); assert.deepEqual(back.roads, world.roads);
   assert.equal(b.settlements, world.settlements.length * 8); assert.equal(b.districts, div.count * 9);
-  // the yards the album draws: some twenty thousand in the chunks of farmland, every one kept, under two bytes each
+  // the yards the album draws: some twenty thousand in the chunks of farmland, every one kept, under a byte each
   assert.ok(yards.length > 15000 && yards.length < 30000, `${yards.length} yards among the fields`); assert.equal(world.farmsteads.length, yards.length, 'every yard has its place in the save');
-  assert.equal(back.farmsteads.length, yards.length); assert.ok(b.farmsteads > 0 && b.farmsteads < yards.length * 3, `${b.farmsteads} bytes for ${yards.length} yards`);
+  assert.equal(back.farmsteads.length, yards.length); assert.ok(b.farmsteads > 0 && b.farmsteads < yards.length, `${b.farmsteads} bytes for ${yards.length} yards`);
   { const key = f => f.district * 1e7 + f.chunk * 16 + f.slot, sent = new Set(world.farmsteads.map(key)); assert.equal(sent.size, yards.length); assert.ok(back.farmsteads.every(f => sent.has(key(f)))); }
   // every land district ploughs its first sixty chunks and stands farmsteads on them, four to a chunk and then
   // sixteen: four times as many farmsteads, not a byte more
@@ -121,9 +125,9 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
     assert.equal(landBytes(thin).farmsteads, land.length * 60 * 2); assert.equal(landBytes(thick).farmsteads, landBytes(thin).farmsteads);
     const got = unpackLand((await decodeSave(await encodeSave({ meta: { t: 0 }, sections: thick }))).sections).farmsteads;
     assert.equal(got.length, land.length * 60 * 16); assert.deepEqual(got[17], { district: land[0], chunk: 1, slot: 1 }); }
-  assert.ok(raw < 90000 && file.length < 40000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
-  assert.ok(raw / landKm2 * 1000 < 115, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
-  assert.ok(raw / landKm2 * 149e6 < 18e6, 'the land of the whole world at this density is under 18 MB before packing');
+  assert.ok(raw < 70000 && file.length < 26000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
+  assert.ok(raw / landKm2 * 1000 < 85, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
+  assert.ok(raw / landKm2 * 149e6 < 13e6, 'the land of the whole world at this density is under 13 MB before packing');
   // people are not lost on the way: a village keeps every one of its own, a city to a part in a thousand
   const before = world.settlements.reduce((s, t) => s + t.people, 0), after = back.settlements.reduce((s, t) => s + t.people, 0);
   assert.ok(Math.abs(after / before - 1) < 1e-3);

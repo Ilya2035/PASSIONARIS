@@ -12,7 +12,7 @@ import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/a
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
 import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.js';
 import { mirrorSettle, mirrorFarm, farmAt, settleUniforms } from '../src/album/town/state.js';
-import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2 } from '../src/album/town/yards.js';
+import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2, YARD_FARM } from '../src/album/town/yards.js';
 import { farmsteadsOfAlbum, packLand, unpackLand, landBytes } from '../src/album/save/land.js';
 import { KN, squareOf, districtOrder } from '../src/album/division/km.js';
 
@@ -307,6 +307,10 @@ test('yards: sixteen places a square kilometre; a yard stands only in a chunk of
   const open = yardsAround(yardCtx([]), L.x, L.y, 4), part = yardsAround(yardCtx([], { farm: () => .5 }), L.x, L.y, 4);
   assert.ok(open.length > 300 && open.length < 520, `${open.length} yards on 144 km² ploughed from edge to edge`);
   assert.ok(part.length > open.length * .05 && part.length < open.length * .6, `${part.length} yards where half the land is ploughed`); assert.equal(yardsAround(yardCtx([], { farm: () => .2 }), L.x, L.y, 4).length, 0);
+  // a yard stands in a chunk of farmland only: one ploughed for the greater part
+  const km = town.m.farm.km, inFarmland = yardsAround({ ...ctx, farmSquare: (kx, ky) => km[ky * KN + kx] / 255 }, L.x, L.y, 12), all = new Set(yards.map(key));
+  assert.equal(YARD_FARM, .5); assert.ok(inFarmland.length > yards.length * .7 && inFarmland.length < yards.length && inFarmland.every(r => all.has(key(r))), `${inFarmland.length} of ${yards.length} yards stand in chunks of farmland`);
+  for (const r of inFarmland) assert.ok(km[squareOf(r[0] - (r[0] - GX0) % YARD_STEP + YARD_STEP / 2, r[1] - (r[1] - GY0) % YARD_STEP + YARD_STEP / 2)] >= 128);
   // how surely the land is ploughed: by the share of its chunk; in a chunk ploughed in part, more beside the houses
   assert.equal(ploughed(0), 0); assert.equal(ploughed(1), 1); assert.equal(ploughed(.5), .5); assert.ok(ploughed(.8) === 1 && ploughed(.2) === 0, 'fields keep together');
   assert.ok(ploughed(.4, 0, .9) > ploughed(.4, -.5 * fieldsBeyond(.9), .9) && ploughed(.4, -.5 * fieldsBeyond(.9), .9) > ploughed(.4, -fieldsBeyond(.9), .9)); assert.equal(ploughed(.4, -fieldsBeyond(.9), .9), ploughed(.4)); assert.equal(ploughed(0, 0, .9), 0);

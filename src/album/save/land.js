@@ -18,9 +18,10 @@
 //               not — and however thickly the yards stand, the cost is the ploughed land.        2 bytes a chunk
 //               A district where yards stand thinly keeps them as a list instead, whichever is shorter: the chunk
 //               (12 bits) and the place in it (4 bits) of every yard.                              2 bytes a yard
-//               The chunks of a district are counted in the order its land is taken up (division/km.js
-//               districtOrder: from its centre outward, level ground first): the first N of them carry yards,
-//               and N is kept with the district.
+//               Only the chunks of farmland are counted (those ploughed enough to carry a yard: the fields are
+//               worked out from the settlements, farmland.js), in the order the district takes up its land
+//               (division/km.js districtOrder: from its centre outward, level ground first): the first N of them
+//               carry yards, and N is kept with the district.
 //   road        for every pair of neighbouring districts a road may join: none, track, road, main road   2 bits
 //   exception   a chunk that does not follow the rule of its district (a burnt wood, a mine): the district, the
 //               chunk in it, what and how much                                                           8 bytes
@@ -117,11 +118,19 @@ export function landBytes(sections) {
     roads: size('land/roads'), exceptions: sum(['land/x.of', 'land/x.chunk', 'land/x.kind', 'land/x.value']) };
 }
 
+// The number of every chunk among the chunks of farmland of its district: those at least `least` under fields
+// (km: a byte a chunk, farmland.js), in the order the district takes up its land. order: km.js districtOrder().
+// → Int32Array, −1 for a chunk that is no farmland
+export function farmRank(order, km, least = 0) {
+  const rank = new Int32Array(km.length).fill(-1), min = Math.max(1, Math.ceil(least * 255 - 1e-9));
+  for (let d = 0; d + 1 < order.first.length; d++) { let r = 0; for (let q = order.first[d]; q < order.first[d + 1]; q++) { const c = order.list[q]; if (km[c] >= min) rank[c] = r++; } }
+  return rank;
+}
 // The farmsteads of the album as such a save keeps them (town/yards.js draws them). A yard stands at one of the
 // sixteen places of a chunk of 1 km² (division/km.js): the chunk is the square (kx, ky) of the lattice of n × n
 // squares its place lies in. yards: [{ kx, ky, slot }]; cells: the district of every chunk; rank: the number of every
-// chunk in the order its district takes up its land, the centre and the level ground first (km.js districtOrder;
-// −1 for a chunk of water — no yard stands there).
+// chunk among the chunks of its district that are counted — its farmland (farmRank), or all its chunks in the order
+// the district takes up its land (km.js districtOrder().rank); −1 for a chunk that is not counted: no yard stands there.
 // → [{ district, chunk, slot }], chunk = that number
 export function farmsteadsOfAlbum(yards, { cells, rank, n }) {
   const out = [];
