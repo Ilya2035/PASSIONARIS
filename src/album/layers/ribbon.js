@@ -37,6 +37,9 @@ export function smoothLine(pts, step = 1.5, rounds = 2) {
 
 // The light of the ground at a point, for a thing that lies flat on it: the slope toward the sun, the shadow the
 // relief casts, how open the place is — the same sums as the ground shader (terrain.js), from the same heights.
+// At night the ground also takes the faint light of the Moon, once the light of the album knows it (light.js,
+// albumMoonLit: the part «Небо и свет»); a road on a moonlit slope must not be darker than the ground it lies on.
+const MOON = LIGHT.includes('albumMoonLit(') ? ' + albumMoonLit(n)' : '';
 export const GROUND_LIGHT = /* glsl */`
 uniform float uShade;
 vec3 groundLight(vec2 ll, float px) {
@@ -50,7 +53,7 @@ vec3 groundLight(vec2 ll, float px) {
     sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.)); d *= 2.2;
   }
   float rad = .234 * exp2(lod0 + 3.5), ao = 1. - clamp((max(heightLod(ll, lod0 + 3.5), 0.) - hl) * uExag / (rad * 260.), 0., 1.) * .72;
-  return albumSunCol() * max(dot(n, uSun), 0.) * sh * 1.25 + albumSkyCol() * (.4 + .6 * n.z) * ao;
+  return albumSunCol() * max(dot(n, uSun), 0.) * sh * 1.25 + albumSkyCol() * (.4 + .6 * n.z) * ao${MOON};
 }`;
 
 // lines: [{ pts: [[lon, lat], ...], width: km, fade: [0..1 for every point] (may be left out) }]

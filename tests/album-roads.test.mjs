@@ -18,6 +18,8 @@ import { HISTORIC } from '../src/album/roads/historic.js';
 import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
+import { GROUND_LIGHT } from '../src/album/layers/ribbon.js';
+import { LIGHT } from '../src/album/light.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS } from '../src/album/params.js';
 
@@ -256,4 +258,9 @@ test('roads: from high up — below 300 km a road is as it is near the ground; h
   // a great road of history stays, a faint thin thread: from 820 km — the height the game opens at — a fifth of its strength
   const open = roadFar(TRUNK, pxOf(820)); assert.ok(Math.abs(open.alpha - LOOK[TRUNK].keep) < 1e-9 && open.alpha <= .25 && open.alpha > .1 && Math.abs(open.minPx - LOOK[TRUNK].px[1]) < 1e-9 && open.minPx <= 1.3);
   assert.ok(roadFar(TRUNK, pxOf(500)).alpha < .6 && roadFar(TRUNK, pxOf(2000)).alpha === open.alpha && THIN[0] >= pxOf(295));
+});
+
+test('roads: a road takes the light of the ground — the sun, the sky, and the Moon once the light of the album knows it', () => {
+  assert.ok(GROUND_LIGHT.includes('albumSunCol()') && GROUND_LIGHT.includes('albumSkyCol()') && GROUND_LIGHT.includes('vec3 groundLight(vec2 ll, float px)'));
+  assert.equal(GROUND_LIGHT.includes('albumMoonLit(n)'), LIGHT.includes('albumMoonLit('), 'the moonlight is added to a road exactly when the ground has it');
 });
