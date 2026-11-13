@@ -1,6 +1,7 @@
 // Shared GLSL of the album: geometry of the sphere patch, height sampling, noise.
 import { R, CENTRE, KM_PER_DEG, COS_REF } from './geo.js';
 import { FN, FKM } from './chunks.js';
+import { WARM, LAPSE, TREE_WARM, TREE_SOFT, TREE_SOFT_K, WET_RISE, WET_RISE_MIN, WET_RISE_MAX } from './ground/climate.js';
 
 const f = n => Number(n).toFixed(8);
 const D = Math.PI / 180;
@@ -39,11 +40,17 @@ float heightLod(vec2 ll, float lod) {
   if (w > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + 3.)).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
   return mix(-3200., hb, inRegion(ll));
 }
-float hash21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+// (The whole part of p meets only the fraction of each factor: far from the origin — and the album lies 4000 km north
+// of it — p × 456.21 has no bits left for a fraction of its own, and every fine noise ran in stripes from north to south.)
+float hash21(vec2 p) { vec2 i = floor(p); p = fract((p - i) * vec2(123.34, 456.21) + i * vec2(.34, .21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+// The same for whole numbers only — the corners of a cell of noise, which is where nearly every call comes from. One
+// multiplication, as the old line had, and small factors, so that the row numbers of the album (tens of thousands)
+// keep their fraction.
+float hashCell(vec2 i) { vec2 p = fract(i * vec2(.1031, .2137)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 vec2 hash22(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
 float vnoise(vec2 p) {
   vec2 i = floor(p), u = fract(p); u = u * u * (3. - 2. * u);
-  return mix(mix(hash21(i), hash21(i + vec2(1, 0)), u.x), mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), u.x), u.y);
+  return mix(mix(hashCell(i), hashCell(i + vec2(1, 0)), u.x), mix(hashCell(i + vec2(0, 1)), hashCell(i + vec2(1, 1)), u.x), u.y);
 }
 float fbm(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = p * 2.03 + 17.1; a *= .5; } return s; }
 // distance to the nearest of a jittered lattice of points (x), and a random value of that point (y)
@@ -51,7 +58,7 @@ vec2 worley(vec2 p) {
   vec2 i = floor(p), u = fract(p); float d = 9.; float id = 0.;
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
     vec2 g = vec2(float(x), float(y)), o = hash22(i + g), r = g + o - u; float dd = dot(r, r);
-    if (dd < d) { d = dd; id = hash21(i + g + 7.7); }
+    if (dd < d) { d = dd; id = hashCell(i + g + 77.); }
   }
   return vec2(sqrt(d), id);
 }
@@ -60,21 +67,27 @@ vec4 worleyV(vec2 p) {
   vec2 i = floor(p), u = fract(p), best = vec2(0.); float d = 9., id = 0.;
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
     vec2 g = vec2(float(x), float(y)), r = g + hash22(i + g) - u; float dd = dot(r, r);
-    if (dd < d) { d = dd; best = r; id = hash21(i + g + 7.7); }
+    if (dd < d) { d = dd; best = r; id = hashCell(i + g + 77.); }
   }
   return vec4(best, sqrt(d), id);
 }
-// how wet a place is, 0 dry steppe .. 1 Atlantic forest (a stand-in for the climate data of the game)
-float albumWet(vec2 ll, float hl, float n1) {
-  float lat = ll.x, lon = ll.y;
-  return .42 + .34 * smoothstep(42.2, 43.4, lat) * smoothstep(-.5, -2.5, lon)
-    + .30 * smoothstep(-6.2, -8.6, lon) * smoothstep(38.2, 41.8, lat)
-    + .22 * smoothstep(42., 43.2, lat) * smoothstep(3.5, .5, lon) + .25 * smoothstep(43., 44.5, lat)
-    - .24 * exp(-dot(ll - vec2(41.6, -.6), ll - vec2(41.6, -.6)) / 1.7)
-    - .30 * exp(-dot(ll - vec2(37.6, -1.8), ll - vec2(37.6, -1.8)) / 2.2)
-    - .12 * exp(-dot(ll - vec2(39.3, -3.), ll - vec2(39.3, -3.)) / 2.6)
-    + hl * .00016 + (n1 - .5) * .18;
+// The climate of a place, from the map baked out of open data (ground/climate.js, docs/album/ground.md):
+//   r  mean height of the land around, / 4096 m      g  how wet: 0 desert .. .2 steppe .. .34 open woodland .. .58 closed forest .. 1
+//   b  mean of the warmest month at sea level, ${WARM[0]} .. ${WARM[1]} °C      a  0 a summer without water .. 1 a green summer
+// A shader that asks for it needs tClimate and uClimRect among its uniforms (album.terrain.u has them).
+uniform sampler2D tClimate; uniform vec4 uClimRect;
+// (textureLod, not texture: a read that needs screen derivatives inside a condition makes the compiler of the video
+// card run both sides of every condition around it, and the whole ground shader slowed down by a half)
+vec4 albumClimate(vec2 ll) { return textureLod(tClimate, (vec2(ll.y * KM * COSREF, ll.x * KM) - uClimRect.xy) * uClimRect.zw, 0.); }
+// how wet a place is, 0 desert .. 1 Atlantic forest: the climate of the country, wetter above it and drier below, and
+// a little unevenness (n1: the shared noise of 38 km)
+float albumWetOf(vec4 clim, float hl, float n1) {
+  return clim.g + clamp((hl - clim.r * 4096.) * ${f(WET_RISE)}, ${f(WET_RISE_MIN)}, ${f(WET_RISE_MAX)}) + (n1 - .5) * .12;
 }
+float albumWet(vec2 ll, float hl, float n1) { return albumWetOf(albumClimate(ll), hl, n1); }
+// the height at which trees stop, m: where the warmest month is no warmer than ${TREE_WARM} °C; in the hot dry mountains
+// of the south drought and wind stop them lower than the warmth would (treelineOf() in ground/climate.js is its twin)
+float albumTreelineOf(vec4 clim) { float t = (mix(${f(WARM[0])}, ${f(WARM[1])}, clim.b) - ${f(TREE_WARM)}) / ${f(LAPSE)}; return t < ${f(TREE_SOFT)} ? t : ${f(TREE_SOFT)} + (t - ${f(TREE_SOFT)}) * ${f(TREE_SOFT_K)}; }
 `;
 
 // ---- chunks: the state of the natural cells of the world (chunks.js), read the same way by the ground, the trees,

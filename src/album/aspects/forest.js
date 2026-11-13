@@ -1,35 +1,33 @@
-// ASPECT «Лес»: where the forest of a chunk stands, what it is made of, how old it is and how it looks. This file and
-// layers/forest.js belong to the forest work; the contract with the rest of the album is in docs/ALBUM-CHUNKS.md, the
-// rules of the forest itself are in docs/album/forest.md.
+// ASPECT «Лес»: where the forest of a chunk stands, what it is made of, how old it is and how it looks. This file
+// belongs to the part «Земля и лес»; the contract with the rest of the album is in docs/ALBUM-CHUNKS.md, the rules of
+// the forest itself are in docs/album/forest.md.
 //   forestCover(p)   → share of the pixel under canopy (the ground shader asks it first)
 //   aspForest(p, L)  → paints the canopy over the ground colour L.col
 // The state comes from the chunks: p.cA = (forest 0 felled .. 1 natural, share of conifers, age 0 young .. 1 old, swamp).
-// The same rules place the 3D trees (layers/forest.js), and a small model here lets a felled chunk grow over again.
-import { Vector4, DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
-import { kmOf, llOf } from '../chunks.js';
+// The forest is a soft cover with height, painted on the ground: no trees stand on the land as things of their own
+// (the owner, 13.11.2026: from the height of the map they were of the wrong size and of another colour than the
+// forest under them). A small model here lets a felled chunk grow over again.
+import { kmOf } from '../chunks.js';
+import { wetAt as climateWet, treelineAt } from '../ground/climate.js';
 
 // ---- the natural state: the world of 5000 BC, before anyone felled anything
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const clamp01 = v => Math.max(0, Math.min(1, v));
 const hashK = k => { let x = Math.imul(k + 1, 2654435761) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return (x >>> 0) / 4294967296; };
-// the CPU twin of albumWet() in glsl.js, without its noise: 0 dry steppe .. 1 Atlantic forest
-export function wetAt(lat, lon, h) {
-  const g = (la, lo, s) => Math.exp(-((lat - la) ** 2 + (lon - lo) ** 2) / s);
-  return .42 + .34 * ss(42.2, 43.4, lat) * ss(-.5, -2.5, lon) + .30 * ss(-6.2, -8.6, lon) * ss(38.2, 41.8, lat)
-    + .22 * ss(42, 43.2, lat) * ss(3.5, .5, lon) + .25 * ss(43, 44.5, lat)
-    - .24 * g(41.6, -.6, 1.7) - .30 * g(37.6, -1.8, 2.2) - .12 * g(39.3, -3, 2.6) + h * .00016;
-}
+// the CPU twin of albumWet() in glsl.js, without its noise: 0 desert .. 1 Atlantic forest (ground/climate.js)
+export const wetAt = (lat, lon, h) => climateWet(lat, lon, h);
 // What the forest of a chunk is by nature, from its mean height, wetness and latitude. jit −.5 .. .5 varies neighbours.
 //   conifer  share of conifers: the mountain belt (fir, mountain pine), the dry interior and the south (pines, juniper)
 //   age      0 young .. 1 old: old forest where it is wet and mild; lower, younger wood where fire and drought return
 //            and near the tree line
 //   speed    how fast a felled chunk grows over again: 1 in mild wet country, slower in the dry and in the heights
 export function naturalForest(lat, lon, h, jit = 0) {
-  const wet = wetAt(lat, lon, h), mont = ss(900, 1750, h), dry = ss(.56, .36, wet), south = ss(42.5, 37.5, lat);
+  // (the mountain belt of conifers and the thin forest under the tree line follow that line, which is not the same everywhere)
+  const wet = wetAt(lat, lon, h), tl = treelineAt(lat, lon), mont = ss(tl - 1250, tl - 400, h), dry = ss(.56, .36, wet), south = ss(42.5, 37.5, lat);
   return {
     conifer: clamp01(.06 + .82 * mont + (.5 * dry + .08 * south) * (1 - mont) + jit * .1),
-    age: clamp01(.92 - .3 * ss(.5, .25, wet) - .35 * ss(1600, 2200, h) + jit * .1),
-    speed: (.55 + .65 * ss(.25, .8, wet)) * (1 - .5 * ss(1400, 2200, h)),
+    age: clamp01(.92 - .3 * ss(.5, .25, wet) - .35 * ss(tl - 550, tl + 50, h) + jit * .1),
+    speed: (.55 + .65 * ss(.25, .8, wet)) * (1 - .5 * ss(tl - 750, tl + 50, h)),
   };
 }
 
@@ -125,16 +123,19 @@ export function applyDemo(ch, id) {
   }
 }
 
-// ---- rules shared with the 3D trees (layers/forest.js): a tree stands exactly where the ground is painted as forest,
-// and is of the kind, the age and the colour the ground is painted in
+// ---- the rules of the forest in GLSL. They read what the ground shader worked out about the place: gRise (the mean
+// height of the land around, m) and gTreeline (the height at which trees stop here, m).
 export const FOREST_RULES = /* glsl */`
-float albumTreeline(float n1) { return 2150. + (n1 - .5) * 260.; }
+float albumTreeline(float n1) { return gTreeline + (n1 - .5) * 260.; }
 // share of the ground under trees before patchiness: closed forest where wet, open woodland where dry
 float albumForestShare(float wet, float hl, float slope, float n1) {
   float steep = smoothstep(.40, .82, slope), tl = albumTreeline(n1);
   float fc = smoothstep(.34, .58, wet) * (1. - smoothstep(tl - 180., tl + 40., hl)) * (1. - steep);
-  return max(fc, smoothstep(.20, .34, wet) * .38 * (1. - steep) * (1. - smoothstep(1500., 1900., hl)));
+  return max(fc, smoothstep(.20, .34, wet) * .38 * (1. - steep) * (1. - smoothstep(tl - 650., tl - 250., hl)));
 }
+// How closed the canopy of a stand is by nature: an open woodland of single trees over grass where it is dry (the
+// dehesa of evergreen oak), crown against crown where it is wet.
+float albumClosure(float wet) { return mix(.40, 1., smoothstep(.33, .58, wet)); }
 // The natural forest is patchy: a noise of two sizes, 7 and 1 km, against the share of the ground the trees take.
 float albumPatch(float n2, float n3) { return n2 * .65 + n3 * .35; }
 // the edge of a stand is roughened by a finer, turned noise, so that the lattice of the patch noise never shows
@@ -175,14 +176,14 @@ float albumAge(float age, float inside, float st) { return clamp(age * (.6 + .4 
 // Colour of the canopy as seen from above, before the shading of the crowns.
 //   con 0 broadleaf .. 1 conifer; age 0 .. 1; stand: noise of the stands; autumn: 0 .. 1, turns the broadleaf of wet country
 vec3 albumForestTint(float con, float age, float wet, float hl, float lat, float stand, float autumn) {
-  float w = smoothstep(.5, .75, wet), south = smoothstep(42.5, 37.5, lat), mont = smoothstep(800., 1600., hl);
+  float w = smoothstep(.5, .75, wet), south = smoothstep(42.5, 37.5, lat), mont = smoothstep(gTreeline - 1350., gTreeline - 550., hl);
   // broadleaf: grey-olive evergreen oak where dry, fresh green where wet; cooler in the mountains, warmer in the south
   vec3 broad = mix(vec3(.20, .27, .10), vec3(.105, .235, .085), w);
   broad = mix(broad, vec3(.085, .215, .105), mont * .45);
   broad = mix(broad, broad * vec3(1.14, 1.02, .80), south * .5);
   // conifers: the warm green pine of the dry south, dark blue-green fir and mountain pine higher up and in the wet
   vec3 conif = mix(vec3(.13, .22, .085), vec3(.085, .20, .118), max(mont, w * .8));
-  conif = mix(conif, vec3(.07, .165, .115), smoothstep(1700., 2150., hl) * .5);
+  conif = mix(conif, vec3(.07, .165, .115), smoothstep(gTreeline - 450., gTreeline, hl) * .5);
   conif = mix(conif, conif * vec3(1.10, 1.02, .84), south * .35);
   // stands of different trees
   broad = mix(broad, vec3(.36, .44, .14), smoothstep(.58, .8, stand) * .55);
@@ -199,20 +200,9 @@ vec3 albumForestTint(float con, float age, float wet, float hl, float lat, float
 }
 `;
 
-// The finishing pass of the picture (post.js: «Затенение у объектов») darkens a forest that has 3D trees in it: the
-// ground between the trees and their lower halves. Measured share of the light it takes: 8 % seen from straight
-// above, 29 % more per (1 − cosine of the angle between the view and the vertical); strength is 1 at the usual setting
-// of that knob and full-size trees. The ground under the trees and the crowns are shown lighter by exactly as much,
-// so a forest with trees is as light as the forest painted beyond them and the edge of the lattice does not show.
-export const TREE_DARK = /* glsl */`
-float albumTreeGain(float strength, float up) { return 1. / (1. - min(.45, strength * (.08 + .29 * (1. - up)))); }
-`;
-
 const GLSL = /* glsl */`
 ${FOREST_RULES}
-${TREE_DARK}
-uniform vec4 uTreeZone;   // where the 3D trees stand: centre x, y and radius in km, and the strength of the darkening among them (albumTreeGain)
-uniform sampler2D tForestRise;   // mean height of the land in squares of 10 km, / 4096 m: the country around a place
+uniform float uForestVol;   // the height of the canopy as it is drawn: 0 flat paint, 1 the usual
 // crowns: a jittered lattice of points like worleyV() — xy = vector to the nearest point, z = distance to it, w = its
 // random number. The number is taken from the hash that places the point, which stays good far from the origin.
 // (A cheaper lattice of four cells with less jitter was tried: its regular rows show from above.)
@@ -228,25 +218,30 @@ vec4 crowns(vec2 p) {
 float crownMask(vec4 w, float g) { return 1. - smoothstep(g * 1.14 - .14, g * 1.14, smoothstep(.12, 1.08, w.z * .9 + w.w * .45)); }
 // what forestCover() worked out about the pixel, kept for aspForest(): share of trees by nature, the patch noise
 // (roughened where an edge of the natural forest is near), how far the noises of felling have faded, the own noises
-// of the felling order, the stand
-float fFc, fPat, fFade, fOwn; vec2 fStand;
-// The colour that comes out gain times lighter on the screen than seen would, under this light and behind this much
-// air. The end of the ground shader is run forward and back: light, air, exposure and the tone curve of albumFinish()
-// (glsl.js). Its saturation and gamma need no undoing: a lift by gain on the screen is a lift by gain^2.2 in front of
-// them. If the tone curve of albumFinish() changes, this one changes with it.
-vec3 forestLift(vec3 seen, vec3 light, float gain, float haze) {
-  vec3 air = albumHazeCol() * haze, k = max(light, vec3(.02)) * (1. - haze);
-  vec3 c = (pow(seen, vec3(2.2)) * k + air) * uExposure;
-  c = min(c * (2.51 * c + .03) / (c * (2.43 * c + .59) + .14) * pow(gain, 2.2), vec3(.93));
-  vec3 a = 2.51 - 2.43 * c, b = .03 - .59 * c;
-  c = (-b + sqrt(b * b + .56 * a * c)) / (2. * a) / uExposure;
-  return pow(max(c - air, 0.) / k, vec3(1. / 2.2));
+// of the felling order, the stand, and how much of the land here is under fields (setFarm; 0 where no forest could stand)
+float fFc, fPat, fFade, fOwn, fFarm; vec2 fStand;
+// What people and the dryness of the place leave of a stand. No forest on ploughed land and among houses: where the
+// chunk of 1 km² is under fields (farm: the state of the part «Поселения», setFarm) the forest is cleared whole, not
+// furlong by furlong — fields with trees standing in them are what the owner asked not to see. The edge of a clearing
+// is ragged like any edge of the forest: the patch noise moves it in and out. Where the land around is ploughed only
+// here and there, the fields are drawn only while their furlongs can be told (aspSettle); the clearing comes and goes
+// with them, or every village would be a pale speck in the forest. By nature a dry stand is open: single crowns over grass.
+// people: built and ploughed shares of the natural cell (p.cC.rg).
+// (These helpers take the few numbers they need, not the pixel as a whole: handing the whole Px to one more function
+// was what slowed the ground shader down by a half — see docs/album/ground.md, «Скорость».)
+float forestKeep(float farm, float pat, float px, vec2 people, float wet) {
+  float seen = people.y >= .12 ? 1. : mix(smoothstep(.075, .045, px), 1., smoothstep(.03, .12, people.y));
+  return (1. - smoothstep(.04, .2, farm * (.45 + 1.1 * pat)) * seen) * (1. - smoothstep(.04, .25, people.x)) * albumClosure(wet);
 }
-// the air between the eye and the pixel, as albumHaze() of glsl.js counts it, from what the pixel already knows: the
-// way through the air is the height of the eye above the ground over the cosine of the view
-float forestHaze(Px p) {
-  float alt = length(cameraPosition + vec3(0., RKM, 0.)) - RKM, up = max(p.V.z, .03);
-  return 1. - exp(-(uHaze * max(alt - p.hl * uExag / 1000., 0.) / up / (alt * 2.2 + 25.) + .012 / up));
+// The stand at another point near this one — a step toward the sun, or where the eye sees the top of the canopy. The
+// patch noise is asked again there; the own noises of the felling order are taken as they are here, which is close
+// enough over a fifth of a km. (Reading the change off the screen with dFdx was tried: at close range it speckles
+// the edges.)
+// farm: how much of the land there is under fields (setFarm); have: p.cA.r; people: p.cC.rg.
+float forestNear(vec2 q, float farm, float px, float have, vec2 people, float wet) {
+  float ps = albumPatch(mix(.5, fbm(q / 7.3 + 5.), smoothstep(5., 1.5, px)), mix(.5, vnoise(q / 1.1), smoothstep(.7, .25, px)));
+  if (px < .5) ps += albumRough(q) * smoothstep(.5, .2, px) * smoothstep(.3, .16, abs(albumMargin(fFc, uForestK, ps)));
+  return albumStand(fFc, uForestK, ps, albumOrder(ps, fOwn), have, fFade).x * forestKeep(farm, ps, px, people, wet);
 }
 float forestCover(Px p) {
   float have = p.cA.r; fOwn = .275;
@@ -254,17 +249,18 @@ float forestCover(Px p) {
   if (p.px < .5) fPat += albumRough(p.pk) * smoothstep(.5, .2, p.px) * smoothstep(.3, .16, abs(albumMargin(fFc, uForestK, fPat)));   // fades in toward the edge: no step in the noise
   if (have < .999 && have > .001 && fFade > 0.) fOwn = albumOrderOwn(p.pk, p.px);
   fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade);
-  return fStand.x;
+  fFarm = 0.; if (fStand.x > .003) fFarm = setFarm(p.pk);
+  return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet);
 }
 
 void aspForest(Px p, inout Land L) {
-  float px = p.px, dens = L.cover, have = p.cA.r, fc = fFc, own = fStand.x; vec2 pk = p.pk;   // own: what forestCover() answered, before swamp and people
+  float px = p.px, dens = L.cover, have = p.cA.r, fc = fFc, own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet); vec2 pk = p.pk;   // own: what forestCover() answered, before the swamp and the fields
   if (fc < .003 && dens < .003) return;                              // nothing grows here: too dry, too steep, too high
 
   // ---- felled ground: where the natural forest of the chunk no longer stands. Pale grass and stumps; bare earth and
   // slash where the chunk was cut clean; brush comes up as the forest of the chunk returns
   if (have < .995) {
-    float cut = (albumCover(fc, uForestK, fPat) - own) * (1. - clamp(p.cC.g * 1.6 + p.cC.r * 2., 0., 1.));
+    float cut = (albumCover(fc, uForestK, fPat) - fStand.x) * (1. - clamp(p.cC.g * 1.6 + p.cC.r * 2., 0., 1.));
     if (cut > .01) {
       vec3 cg = mix(vec3(.55, .50, .29), vec3(.43, .48, .21), smoothstep(.35, .65, p.wet));
       cg = mix(cg, vec3(.50, .42, .30), (1. - smoothstep(0., .3, have)) * (.35 + .4 * p.n3));
@@ -274,22 +270,28 @@ void aspForest(Px p, inout Land L) {
     }
   }
 
-  // ---- the same question a step toward the sun: a lit rim and cast shade. The patch noise is asked again there; the
-  // own noises of the felling order are taken as they are here, which is close enough over a fifth of a km. (Reading
-  // the change off the screen with dFdx was tried: at close range it speckles the edges.)
-  float coverS = dens;
-  if (px < .7 && abs(fStand.y) < .34 && have > .02) {
-    vec2 pks = pk + p.sd * .22;
-    float ps = albumPatch(mix(.5, fbm(pks / 7.3 + 5.), smoothstep(5., 1.5, px)), mix(.5, vnoise(pks / 1.1), smoothstep(.7, .25, px)));
-    if (px < .5) ps += albumRough(pks) * smoothstep(.5, .2, px) * smoothstep(.3, .16, abs(albumMargin(fc, uForestK, ps)));
-    coverS = mix(dens, albumStand(fc, uForestK, ps, albumOrder(ps, fOwn), have, fFade).x * (own > .001 ? min(dens / own, 1.) : 1.), smoothstep(.7, .4, px));
+  // ---- the same question a step toward the sun: a lit rim and cast shade
+  // (an edge is near: the margin of the stand itself, or the fields of a clearing)
+  float coverS = dens, edgy = step(.02, have) * max(step(abs(fStand.y), .34), step(.004, fFarm) * step(fFarm, .5)), part = own > .001 ? min(dens / own, 1.) : 1.;
+  if (px < .7 && edgy > 0.) coverS = mix(dens, forestNear(pk + p.sd * .22, fFarm, px, have, p.cC.rg, p.wet) * part, smoothstep(.7, .4, px));   // (the fields as they are here: near enough)
+  // ---- the canopy has height. Seen at a slant, its top lies toward the eye from the ground it stands on: it hides
+  // the ground behind the far edge of a wood, and at the near edge the flank of the wood shows under it. hc: the
+  // height of the canopy as drawn, km; vs: how far toward the eye its top is seen
+  float vol = uForestVol * smoothstep(.06, .025, px), flank = 0.;
+  vec2 vs = vec2(0.);
+  if (vol > 0.) {
+    vs = p.V.xy / max(p.V.z, .34) * (.07 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
+    if (edgy > 0. && dot(vs, vs) > px * px * .25) {
+      float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
+      flank = clamp(dens - top, 0., 1.); dens = top;
+    }
   }
-  if (dens < .003 && coverS < .003) return;
+  if (dens < .003 && coverS < .003 && flank < .003) return;
 
   // ---- what stands here: kind and age of the forest at this place, from the state of the chunk
   float st = px < 2.5 ? mix(.5, vnoise(pk / 2.6 + 11.), smoothstep(2.5, 1., px)) : .5, tree = st * .6 + p.n2 * .4;
   vec2 nh = p.n.xy / max(length(p.n.xy), 1e-4);
-  float rel = (p.hl - textureLod(tForestRise, (pk - uChunkRect.xy) * uChunkRect.zw, 0.).r * 4096.) / 300.;
+  float rel = (p.hl - gRise) / 300.;
   float con = albumConifer(p.cA.g, st, p.n2, rel, -nh.y * smoothstep(.05, .3, p.slope), p.slope);
   float age = albumAge(p.cA.b, fStand.y, st), ya = smoothstep(.1, .5, age), oa = smoothstep(.55, 1., age);
 
@@ -298,35 +300,43 @@ void aspForest(Px p, inout Land L) {
   // and tighter than broadleaf. Where the canopy is not closed — at an edge, in a thinned stand, in brush — the
   // crowns stand one by one with ground between them instead of fading.
   float f1 = smoothstep(.055, .015, px), f2 = smoothstep(.2, .05, px), f3 = smoothstep(.9, .25, px);
-  float tuft = 0., tone = .5, litc = 0., k1 = con, k2 = con, m1 = dens, m2 = dens;
+  float tuft = 0., tone = .5, litc = 0., k1 = con, k2 = con, m1 = dens, m2 = dens; vec2 pkc = pk + vs; vec4 w1 = vec4(0., 0., 9., 0.);
   if (dens > .01) {
     if (f1 > 0.) {
-      vec4 w = crowns(pk / .045); float a = f1 * mix(1.3, .9, oa); k1 = step(fract(w.w * 7.31), con);
+      vec4 w = crowns(pkc / .045); float a = f1 * mix(1.3, .9, oa); k1 = step(fract(w.w * 7.31), con); w1 = w;
       tuft += a * .45 * mix(1. - w.z, 1.2 - 1.5 * w.z, k1); litc += a * .55 * (dot(normalize(vec3(-w.xy * mix(2.4, 3.6, k1), 1.)), uSun) - uSun.z); tone = mix(tone, w.w, f1 * .5);
       if (dens < .985) m1 = crownMask(w, dens);
     }
     if (f2 > 0.) {
-      vec4 w = crowns(pk / .14 + 3.1); float a = f2 * mix(.25, 1., ya) * (1. + .3 * oa); k2 = step(fract(w.w * 7.31), con);
+      vec4 w = crowns(pkc / .14 + 3.1); float a = f2 * mix(.25, 1., ya) * (1. + .3 * oa); k2 = step(fract(w.w * 7.31), con);
       tuft += a * .35 * mix(1. - w.z, 1.15 - 1.35 * w.z, k2); litc += a * .4 * (dot(normalize(vec3(-w.xy * mix(2., 3., k2), 1.)), uSun) - uSun.z); tone = mix(tone, w.w, min(a, 1.2) * .42);
       if (dens < .985) m2 = crownMask(w, dens);
     }
     if (f3 > 0.) {
-      vec4 w = crowns(pk / .62 + 7.7); float a = f3 * mix(.12, 1., ya) * (1. + .4 * oa) * (1. - .3 * con);
+      vec4 w = crowns(pkc / .62 + 7.7); float a = f3 * mix(.12, 1., ya) * (1. + .4 * oa) * (1. - .3 * con);
       tuft += a * .3 * (1. - w.z); litc += a * .32 * (dot(normalize(vec3(-w.xy * 1.6, 1.)), uSun) - uSun.z); tone = mix(tone, w.w, min(a, 1.2) * .5);
     }
   }
   float kind = mix(mix(con, k2, f2 * .75), k1, f1);                  // the kind of the crown itself where crowns can be told apart
-  float mask = mix(dens, mix(m2, m1, (1. - ya) * f1), smoothstep(.07, .03, px));   // brush and young growth: small crowns; older: large ones
+  // brush, young growth and the open woodland of dry country: small crowns one by one; older and closer: large ones
+  float open = 1. - smoothstep(.5, .85, albumClosure(p.wet));
+  float mask = mix(dens, mix(m2, m1, max(1. - ya, open) * f1), smoothstep(.07, .03, px));
   vec3 tint = albumForestTint(kind, age, p.wet, p.hl, p.ll.x, tree, uSeason * (.55 + .45 * p.n3));
   tint = mix(tint, vec3(.50, .44, .16), smoothstep(.93, .99, tone) * .4 * (1. - kind) * ya);       // a crown gone yellow here and there
   float ta = mix(.2, .46, ya) * (1. + .25 * oa);                     // how much one crown differs from the next
-  vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day) * (dens > .01 ? mix(vec3(1.), texDetail(tForest, pk, px, p.pdx, p.pdy), .35) : vec3(1.));
-  // the finishing pass (post.js) darkens the ground between 3D trees: under them the canopy is painted lighter by as much
-  float zone = smoothstep(1., .66, length(pk - uTreeZone.xy) / uTreeZone.z); zone *= zone * uTreeZone.w * (1. + .04 * kind);
-  if (zone > .002) canopy = forestLift(canopy, p.sunCol * max(dot(p.n, uSun), 0.) * p.sh * 1.25 + p.skyCol * (.4 + .6 * p.n.z) * p.ao, albumTreeGain(zone, p.V.z), forestHaze(p));
+  vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day);
   // rim and shade grow with the height of the stand; the ground between the crowns of an open stand is mostly in the sun
   float tall = .3 + .7 * ya, rim = clamp(mask - coverS, 0., 1.) * tall, castS = clamp(coverS - mask, 0., 1.) * coverS * tall;
-  L.col = mix(L.col * (1. - .5 * castS * p.day), canopy * (1. + .35 * rim * p.day), mask);
+  // every crown of an open stand throws its own shade on the grass, a crown's height away from the sun: the nearest
+  // crown is known already (w1), its shade is the same round shape moved off
+  if (vol > 0. && f1 > 0. && dens > .01 && dens < .985) {
+    vec4 ws = vec4(w1.xy, length(w1.xy + (vs - p.sd * (.06 * vol)) / .045), w1.w);
+    castS = max(castS, crownMask(ws, dens) * (1. - mask) * f1 * .8);
+  }
+  vec3 under = L.col * (1. - .5 * castS * p.day);
+  // the flank of a wood: trunks and the dark under the crowns; lighter when the sun stands behind the eye
+  if (flank > .003) under = mix(under, tint * mix(.34, .78, clamp(dot(normalize(vs + 1e-5), p.sd) * .5 + .5, 0., 1.) * p.day) * (.9 + .2 * tone), flank * tall);
+  L.col = mix(under, canopy * (1. + .35 * rim * p.day), mask);
   L.cover = mask;
 }`;
 
@@ -334,11 +344,11 @@ const NEAR = { lat: 43.2, lon: -4.85 };   // Picos de Europa: broadleaf valleys,
 const demoCam = (h, tilt = 45, heading = 0, dLat = 0, dLon = 0) => ({ lat: DEMO.lat + dLat, lon: DEMO.lon + dLon, h, tilt, heading });
 const PLAIN = { towns: 0, labels: 0, roadsOn: 0 };
 export default {
-  id: 'forest', title: 'Лес', glsl: GLSL, uniforms: { uTreeZone: { value: new Vector4(0, 0, 1, 0) }, tForestRise: { value: null } },
+  id: 'forest', title: 'Лес', glsl: GLSL, uniforms: { uForestVol: { value: 1 } },
   params: [
     { key: 'forest', label: 'Густота леса', group: 'scale', min: 0, max: 1.6, step: .05, value: 1, unit: '×', uniform: 'uForestK' },
-    { key: 'trees', label: 'Размер деревьев', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×' },
-    { key: 'forest3d', label: 'Объёмные деревья', group: 'layers', type: 'toggle', value: 1 },
+    { key: 'trees', label: 'Высота леса', group: 'scale', min: 0, max: 3, step: .05, value: 1, unit: '×', zero: 'плоский' },
+    { key: 'forest3d', label: 'Объём леса', group: 'layers', type: 'toggle', value: 1 },
     { key: 'forestDemo', label: 'Показ леса', group: 'modes', type: 'select', value: '', options: [['', 'нет'], ...Object.entries(DEMOS)] },
     { key: 'regrow', label: 'Зарастание: прошло лет', group: 'modes', min: 0, max: 300, step: 5, value: 0, unit: ' лет' },
   ],
@@ -351,8 +361,9 @@ export default {
     { id: 'forest-regrow-150', group: 'Лес', title: 'Зарастание: через 150 лет', note: 'Лес вернулся и почти сравнялся со старым вокруг; середина ещё моложе и светлее.', p: { forestDemo: 'clearing', regrow: 150, play: 0, ...PLAIN }, cam: demoCam(100, 42) },
     { id: 'forest-seam', group: 'Лес', title: 'Стык чанков: соседи с разным лесом', note: 'У каждого чанка своё случайное состояние: вид леса, возраст, сколько стоит. Очертаний чанков на картинке не видно: лес меняется куртинами, как в природе.', p: { forestDemo: 'mosaic', ...PLAIN }, cam: demoCam(120, 30) },
     { id: 'forest-seam-grid', group: 'Лес', title: 'Тот же стык с границами чанков', note: 'Те же чанки с их настоящими очертаниями. Наведите курсор на чанк: внизу видно его состояние. Перемена леса идёт не по линиям границ, а куртинами.', p: { forestDemo: 'mosaic', grid: 1, chunkInfo: 1, ...PLAIN }, cam: demoCam(120, 30) },
-    { id: 'forest-3d', group: 'Лес', title: 'Лес с 20 км: объёмные кроны', note: 'Природный лес Пикос-де-Эуропа. Поверх краски стоят мелкие деревья: лиственные круглые, хвойные острые, молодые меньше старых.', p: { forest3d: 1 }, cam: { ...NEAR, h: 22, tilt: 55, heading: 150 } },
-    { id: 'forest-paint', group: 'Лес', title: 'Лес с 20 км только краской', note: 'Тот же вид без объёмных деревьев: лес показан цветом и рисунком крон на земле.', p: { forest3d: 0 }, cam: { ...NEAR, h: 22, tilt: 55, heading: 150 } },
+    { id: 'forest-3d', group: 'Лес', title: 'Лес с 20 км: полог с высотой', note: 'Природный лес Пикос-де-Эуропа. Отдельных деревьев нет: лес — мягкий покров того же цвета, что и издалека. У него есть высота: у ближнего края виден бок леса, дальний край закрывает землю за собой, от крон на траву падает тень.', p: { forest3d: 1 }, cam: { ...NEAR, h: 22, tilt: 55, heading: 150 } },
+    { id: 'forest-paint', group: 'Лес', title: 'Лес с 20 км без высоты', note: 'Тот же вид с выключенным «Объёмом леса»: лес лежит на земле плоским рисунком.', p: { forest3d: 0 }, cam: { ...NEAR, h: 22, tilt: 55, heading: 150 } },
+    { id: 'forest-open', group: 'Лес', title: 'Редколесье сухого края с 20 км', note: 'Дубравы Эстремадуры: кроны стоят по одной над выгоревшей травой, у каждой своя тень. Чем суше место, тем реже лес; в полях и у домов его нет.', p: {}, cam: { lat: 39.25, lon: -6.3, h: 20, tilt: 45, heading: 0 } },
     { id: 'forest-moss', group: 'Лес', title: 'Лес как мох с 200 км', note: 'Обычная игровая высота. Лес — мягкий ворс из пучков трёх размеров; хвойные пояса гор темнее и ровнее лиственных долин.', p: {}, cam: { ...NEAR, h: 200, tilt: 40, heading: 170 } },
     { id: 'forest-500', group: 'Лес', title: 'Лес с 500 км', note: 'Высота больших держав. Видны оттенки по месту: свежая зелень атлантического севера, тёмные хвойные горы, оливковый дуб и светлая сосна сухой середины.', p: {}, cam: { lat: 42.3, lon: -3.6, h: 500, tilt: 30, heading: 0 } },
   ],
@@ -365,22 +376,15 @@ export default {
       ch.setNatural('conifer', k, n.conifer); ch.setNatural('age', k, n.age);
       speed[k] = n.speed; natAge[k] = ch.getNatural('age', k);
     }
-    // the country around a place, for the conifers that take the higher ground: mean height of the land in squares of
-    // 10 km over the mapped square of the chunks (uChunkRect)
-    const RN = 128, rect = ch.uniforms.uChunkRect.value, step = 1 / rect.z / RN, at = album.data.base.at, rise = new Uint8Array(RN * RN);
-    for (let j = 0, o = 0; j < RN; j++) for (let i = 0; i < RN; i++, o++) {
-      let sum = 0, n = 0;
-      for (let b = 0; b < 3; b++) for (let a = 0; a < 3; a++) { const q = llOf(rect.x + (i + (a + .5) / 3) * step, rect.y + (j + (b + .5) / 3) * step), h = at(q.lat, q.lon); if (h > 0) { sum += h; n++; } }
-      rise[o] = n ? Math.min(255, Math.round(sum / n / 4096 * 255)) : 0;
-    }
-    const riseTex = new DataTexture(rise, RN, RN, RedFormat, UnsignedByteType);
-    riseTex.magFilter = riseTex.minFilter = LinearFilter; riseTex.wrapS = riseTex.wrapT = ClampToEdgeWrapping; riseTex.needsUpdate = true;
-    this.uniforms.tForestRise.value = riseTex;
     const model = album.forest = new Regrowth(ch, speed, natAge);
     let pending = true, acc = 0;
     const lay = () => { applyDemo(ch, p.get('forestDemo')); pending = true; };
     ch.onReset(lay);
+    // the height of the canopy as drawn: the two knobs that used to turn the 3D trees on and size them
+    const vol = () => { this.uniforms.uForestVol.value = p.get('forest3d') && !['paper', 'atlas', 'night'].includes(p.get('look')) ? +p.get('trees') || 0 : 0; };
+    vol();
     p.on(key => {
+      if (key == null || key === 'forest3d' || key === 'trees' || key === 'look') vol();
       if (key === 'forestDemo') { for (let k = 0; k < ch.count; k++) for (const name of ['forest', 'conifer', 'age']) ch.set(name, k, ch.getNatural(name, k)); lay(); }
       else if (key === 'regrow' && !pending) { model.rewind(); model.step(+p.get('regrow') || 0); }
     });
@@ -391,8 +395,7 @@ export default {
       const years = album.shot ? 0 : acc * p.get('play') * YEARS_PER_SECOND; acc = 0;
       model.sync(); model.step(years);
     } };
-    let trees = null;
-    try { trees = await (await import('../layers/forest.js')).default(album); } catch (e) { console.warn('[album] trees failed:', e.message); }
-    return [time, trees];
+    // (album.layers.forest stays for those who asked it how high the tallest crown stands: nothing stands now, top is 0)
+    return [time, { id: 'forest', top: 0, count: () => 0 }];
   },
 };

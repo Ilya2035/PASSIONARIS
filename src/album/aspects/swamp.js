@@ -5,17 +5,14 @@
 // Which swamp grows at a place is not stored: it follows from the height, the wetness and the sea (swampKind).
 
 import { FKM, FN, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+import { wetAt as climateWet } from '../ground/climate.js';
 
 // ---- rules on the CPU: the same numbers as in the GLSL below, for the natural state, the map of swamps, the tests
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM;   // flat km, as in chunks.js
-// the CPU twin of albumWet() in glsl.js, without its noise: 0 dry steppe .. 1 Atlantic forest
-export function wetAt(lat, lon, h) {
-  const g = (la, lo, s) => Math.exp(-((lat - la) ** 2 + (lon - lo) ** 2) / s);
-  return .42 + .34 * ss(42.2, 43.4, lat) * ss(-.5, -2.5, lon) + .30 * ss(-6.2, -8.6, lon) * ss(38.2, 41.8, lat)
-    + .22 * ss(42, 43.2, lat) * ss(3.5, .5, lon) + .25 * ss(43, 44.5, lat)
-    - .24 * g(41.6, -.6, 1.7) - .30 * g(37.6, -1.8, 2.2) - .12 * g(39.3, -3, 2.6) + h * .00016;
-}
+// the CPU twin of albumWet() in glsl.js, without its noise: 0 desert .. 1 Atlantic forest — the baked climate of the
+// ground (ground/climate.js); without its file, the formula the album began with
+export const wetAt = (lat, lon, h) => climateWet(lat, lon, h);
 // mean temperature of the year, °C (the same stand-in as the data mode of terrain.js)
 export const tempAt = (lat, h) => 17.5 - (lat - 38) * .75 - h * .0062;
 // which swamp grows here; the four shares add up to 1
@@ -251,7 +248,7 @@ void aspSwamp(Px p, inout Land L) {
   vec3 veg = kind.x * vBog + kind.y * vFen + kind.z * vSalt + kind.w * vCarr;
   vec3 dead = kind.x * vec3(.35, .26, .19) + kind.y * vec3(.63, .55, .34) + kind.z * vec3(.46, .42, .31) + kind.w * vec3(.21, .20, .14);
   veg = mix(veg, dead * (.85 + .3 * mott), smoothstep(.05, .5, cold) * .85);          // winter: reed and sedge die back to straw, moss darkens
-  veg *= mix(vec3(1.), texDetail(tGrass, pk, px, p.pdx, p.pdy), .7);
+  veg *= .88 + .24 * fine;                                                           // (its own mottle; the grain of the ground is not kept this far)
   // the bank: a wall of dark reed in a fen, bright moss round a bog pool
   float bankW = .03 + px, bank = (1. - smoothstep(0., bankW, edge)) * near;
   veg = mix(veg, kind.x * vec3(.51, .46, .17) + kind.y * vec3(.17, .30, .11) + kind.z * veg + kind.w * vec3(.10, .14, .07), bank * .65);

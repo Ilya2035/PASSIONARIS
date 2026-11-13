@@ -50,7 +50,7 @@ test('album feedback: marks and notes become plain text for the chat', () => {
   const album = { pages: PAGES, page: PAGES[1], params: { get: k => values[k] }, cam: { s: { h: 200, tilt: 48, lat: 42.63, lon: .66 } } };
   const text = feedbackText(album, { [PAGES[0].id]: { mark: 'ok', note: 'красиво' }, [PAGES[2].id]: { mark: 'no' } }, '0.3.0');
   assert.match(text, /Подходит:\n- .*красиво/); assert.match(text, /Не то:\n- /);
-  assert.match(text, /Размер деревьев: 1\.5/); assert.match(text, /высота 200 км/);
+  assert.match(text, /Высота леса: 1\.5/); assert.match(text, /высота 200 км/);
   assert.match(feedbackText(album, {}, ''), /Оценок пока нет/);
 });
 test('album lines: smoothing keeps the ends and resamples to an even step', () => {

@@ -7,12 +7,15 @@
 // overlays, air. The living and changing things — swamp, fields, forest, water, borders — are aspects
 // (src/album/aspects/*.js), each one file with its own owner; they read the state of the chunks (chunks.js) and are
 // all lit by the same light (LIGHT in glsl.js). The contract is docs/ALBUM-CHUNKS.md.
-import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Vector2, Vector3, Vector4, SphereGeometry, BackSide, Color, DataArrayTexture, RGBAFormat,
-  UnsignedByteType, SRGBColorSpace, RepeatWrapping, LinearMipmapLinearFilter, LinearFilter } from 'three';
+import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Vector2, Vector3, Vector4, SphereGeometry, BackSide, Color, DataArrayTexture, DataTexture, RGBAFormat,
+  UnsignedByteType, NoColorSpace, RepeatWrapping, ClampToEdgeWrapping, LinearMipmapLinearFilter, LinearFilter } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT } from './glsl.js';
 import { ASPECT_GLSL, ASPECT_UNIFORMS } from './aspects/index.js';
 import { R, KM_PER_DEG, COS_REF } from './geo.js';
 import { FKM } from './chunks.js';
+import { GROUND_TILES } from './data.js';
+import { CLIM_N, climateTexels } from './ground/climate.js';
+import { stepTable } from './ground/steps.js';
 
 const M = 160, LEVELS = 9;
 
@@ -33,21 +36,23 @@ void main() {
   gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.);
 }`;
 
-const FRAG = /* glsl */`
+const FRAG_SRC = /* glsl */`
 ${COMMON}
 ${CHUNK_GLSL}
 ${LIGHT}
 uniform float uTime, uShade, uSnow, uForestK, uSeason;
 uniform int uGrid, uData;
-// The six ground photos are layers of one texture: a pixel shader may read only 16 textures, and the aspects need
-// some of them. Their names stay, as layer numbers for texDetail().
+// The grain of the ground: squares of real ground about 10 km across, seen from a satellite, with their broad tones
+// taken out (scripts/album/bake-ground-tiles.mjs). They are layers of one texture: a pixel shader may read only 16
+// textures, and the aspects need some of them. The names are layer numbers for texDetail():
+// wet heath and meadow (the mottle of a forest canopy is the same), dry steppe, stony desert, dunes (and snow shaped by wind).
 uniform highp sampler2DArray tGround;
 #define tGrass 0
 #define tDry 1
 #define tRock 2
 #define tSand 3
-#define tSnow 4
-#define tForest 5
+#define tSnow 3
+#define tForest 0
 uniform sampler2D uFire; uniform vec4 uFireRect; uniform float uFireOn; uniform vec4 uQuake;
 uniform sampler2D tChunkPal; uniform float uChunkShow, uChunkHoverId;
 varying vec2 vLL; varying vec3 vPos;
@@ -82,14 +87,22 @@ float heightPix(vec2 ll) {
   if (uDetOn > .5) { float w = detailWeight(m), hd = texture(uDet, (m - uDetRect.xy) * uDetRect.zw).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
   return mix(-3200., hb, inRegion(ll));
 }
-// a ground photo as detail around 1: keeps our palette, adds real grain. The tile grows with the pixel size, so a
-// tile is always tens of pixels wide and its repetition never shows.
-// t is one of tGrass, tDry, tRock, tSand, tSnow, tForest: a layer of the ground-photo texture.
+// The grain of the ground as detail around 1: keeps our palette, adds the pattern of real ground. A square lies on
+// the land at its true size (10 km, a texel is 10 m), and twice more: five times finer (the same shapes are the rills
+// and bushes of the near view) and five times coarser (the mottle of a whole country), each turned its own way so
+// that their repeats never fall together. All three are fixed to the land. A size fades by itself as its texels get
+// smaller than a pixel (the reduced copies of the texture end in its mean, which is 1), so nothing is ever switched
+// as the camera rises: there is no layer to see change.
+// t is one of tGrass, tDry, tRock, tSand, tSnow, tForest: a layer of the ground texture.
+// The ground shader itself calls this once for a pixel, last of all, over the bare ground, the rock and the sand
+// together, and uses the answer at once (why: aspects/ground.js).
 vec3 texDetail(int t, vec2 pk, float px, vec2 dx, vec2 dy) {
-  float L = clamp(log(max(px, 1e-4) * 380. / 1.9) / 1.65, 0., 2.999), i = floor(L), f = L - i, s0 = 1.9 * pow(5.2, i), s1 = s0 * 5.2, z = float(t);
-  vec3 a = textureGrad(tGround, vec3(pk / s0 + i * .37, z), dx / s0, dy / s0).rgb, b = textureGrad(tGround, vec3(pk.yx / s1 + i * .61 + .5, z), dx.yx / s1, dy.yx / s1).rgb;
-  vec3 r = mix(a, b, f) / max(textureLod(tGround, vec3(.5, .5, z), 10.).rgb, vec3(.04));
-  return clamp(mix(vec3(dot(r, vec3(.333))), r, .4), .55, 1.6);
+  float z = float(t); vec3 d = vec3(0.);
+  const mat2 A = mat2(.8, -.6, .6, .8) / 2.05, B = mat2(1., 0., 0., 1.) / 10.24, C = mat2(.6, .8, -.8, .6) / 51.2;
+  if (px < .05) d += (textureGrad(tGround, vec3(A * pk, z), A * dx, A * dy).rgb - .5) * smoothstep(.05, .016, px);
+  if (px < .6) d += (textureGrad(tGround, vec3(B * pk + .37, z), B * dx, B * dy).rgb - .5) * (1.4 * smoothstep(.6, .15, px));
+  d += (textureGrad(tGround, vec3(C * pk + .71, z), C * dx, C * dy).rgb - .5) * 1.3;
+  return clamp(1. + d, .55, 1.5);
 }
 vec3 hypso(float h) {
   vec3 c = vec3(.62, .76, .56);
@@ -98,13 +111,21 @@ vec3 hypso(float h) {
   c = mix(c, vec3(.66, .62, .60), smoothstep(2100., 2800., h)); return mix(c, vec3(.97), smoothstep(2800., 3300., h));
 }
 vec3 idColour(float id) { return .5 + .5 * cos(6.2832 * (id + vec3(0., .33, .67))); }
+// What the ground shader worked out about the place before it asked the aspects: the mean height of the land around,
+// m (albumClimate), and the height at which trees stop here, m.
+// (Two numbers and no more. Whatever must be remembered from here until the last aspect has run is held for every
+// pixel in flight; past a certain count a weak video card works on fewer pixels at a time, and the whole ground
+// shader runs half as fast. Measured 13.11.2026: thirteen more numbers than before were too many, ten were not.)
+float gRise, gTreeline;
 
 ${ASPECT_GLSL}
 
 void main() {
   vec2 ll = vLL; float lat = ll.x, lon = ll.y, cl = cos(radians(lat));
   float px = length(fwidth(vPos));                                  // km per pixel
-  float e = clamp(px * 1.3, .035, 6.);
+  // (The step is never finer than the height data — 0.23 km a cell, 0.03 km around the showcase places. Inside one
+  // cell the slope is that of the cell's own facet, and steep ground turned to rock by whole square cells.)
+  float e = clamp(px * 1.3, mix(.24, .035, detailWeight(merc(ll))), 6.);
   float h0 = heightPix(ll), hE = heightPix(ll + vec2(0., e / (KM * cl))), hN = heightPix(ll + vec2(e / KM, 0.));
   vec2 g = vec2(hE - h0, hN - h0) / (e * 1000.);                    // rise over run toward east and north
   float slope = length(g), hl = max(h0, 0.);
@@ -149,33 +170,46 @@ void main() {
   if (h0 > -25.) {
     // noises fade to their mean once their features are smaller than a pixel, so nothing shimmers from afar
     float n1 = fbm(pk / 38.), n2 = px < 5. ? mix(.5, fbm(pk / 7.3 + 5.), smoothstep(5., 1.5, px)) : .5, n3 = px < .7 ? mix(.5, vnoise(pk / 1.1), smoothstep(.7, .25, px)) : .5;
-    float wet = albumWet(ll, hl, n1), treeline = albumTreeline(n1), steep = smoothstep(.40, .82, slope);
+    // the climate of the place; a slope that faces north and the floor of a valley are wetter than the ridge above
+    vec4 clim = albumClimate(ll); gRise = clim.r * 4096.; gTreeline = albumTreelineOf(clim);
+    float hollow = clamp(conc, 0., 1.), north = -g.y / (slope + .12);
+    float wet = albumWetOf(clim, hl, n1) + north * .05 + hollow * .07 - ridge * .05;
+    // (in a wet land grass and scrub hold on a slope that would be bare rock in a dry one)
+    float humid = smoothstep(.45, .8, wet), treeline = albumTreeline(n1), steep = smoothstep(.40 + .12 * humid, .82 + .14 * humid, slope);
     p.n1 = n1; p.n2 = n2; p.n3 = n3; p.wet = wet;
     Land L; L.gloss = 0.;
     L.cover = forestCover(p);
 
-    // bare ground: soil and grass by wetness, rock on steep slopes and summits, sand at the shore
-    vec3 grassCol = mix(vec3(.50, .47, .24), vec3(.30, .44, .15), smoothstep(.30, .62, wet));
-    vec3 ground = mix(mix(vec3(.66, .56, .37), vec3(.58, .50, .30), n2), grassCol, smoothstep(.22, .5, wet));
-    ground = mix(ground, vec3(.40, .44, .24), smoothstep(treeline - 100., treeline + 150., hl));
-    float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(2350., 2800., hl) * .8 + ridge * .25 * smoothstep(1200., 2000., hl), 0., 1.);
-    ground = mix(ground, vec3(.62, .42, .28), (1. - smoothstep(.2, .42, wet)) * smoothstep(.55, .8, vnoise(pk / 6. + 21.)) * .5);          // red earth of the dry south
-    ground = mix(ground, vec3(.47, .38, .40), smoothstep(treeline - 500., treeline, hl) * smoothstep(.5, .8, vnoise(pk / 1.9 + 2.)) * .35);   // heath
-    ground = mix(ground, vec3(.64, .61, .27), smoothstep(.45, .7, wet) * smoothstep(.6, .85, vnoise(pk / .8 + 31.)) * smoothstep(.5, .15, px) * .3); // meadows in flower
-    float wg = smoothstep(.25, .55, wet);
-    if (L.cover < .995) { vec3 dd = wg < .999 ? texDetail(tDry, pk, px, pdx, pdy) : vec3(1.), dg = wg > .001 ? texDetail(tGrass, pk, px, pdx, pdy) : vec3(1.); ground *= mix(dd, dg, wg); }
+    // bare ground: soil and low growth by the climate (aspects/ground.js), rock on steep slopes and summits, sand at the shore
+    float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + ridge * .25 * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
+    float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
+    vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, pk);
     if (rockW > .004) {
       float rk = vnoise(pk / 2.3 + 3.), rk2 = vnoise(pk / 9. + 17.);
-      vec3 rockCol = mix(vec3(.43, .40, .37), vec3(.60, .57, .52), n2);
-      rockCol = mix(rockCol, vec3(.66, .53, .37), smoothstep(.55, .8, rk2) * .7);                                  // ochre limestone
-      rockCol = mix(rockCol, vec3(.55, .34, .26), smoothstep(.62, .9, rk) * smoothstep(.3, .6, rk2) * .65);          // red sandstone
-      rockCol = mix(rockCol, vec3(.27, .28, .32), smoothstep(.35, .1, rk2) * .6);                                   // dark slate
-      rockCol *= .86 + .24 * (.5 + .5 * sin(hl / 38. + vnoise(pk / 1.7) * 5.)) * smoothstep(.3, .06, px);            // beds of rock
-      rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .28 * smoothstep(.3, .6, wet));          // lichen and moss
-      ground = mix(ground, rockCol * texDetail(tRock, pk, px, pdx, pdy), rockW);
+      vec3 rockCol = mix(vec3(.44, .42, .40), vec3(.61, .59, .56), n2);                                              // grey limestone and granite
+      rockCol = mix(rockCol, vec3(.62, .52, .38), smoothstep(.55, .8, rk2) * .4);                                   // ochre limestone
+      rockCol = mix(rockCol, vec3(.52, .34, .27), smoothstep(.62, .9, rk) * smoothstep(.3, .6, rk2) * .5);           // red sandstone
+      rockCol = mix(rockCol, vec3(.29, .30, .33), smoothstep(.35, .1, rk2) * .45);                                  // dark slate
+      rockCol *= .86 + .24 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px);                          // beds of rock
+      // Gullies and scree run down the slope: a noise drawn out along the fall line. The fall line is taken as the two
+      // of eight fixed directions nearest to it, joined smoothly — along a direction that turned freely with the slope
+      // the pattern would shear and swirl.
+      if (px < .1 && slope > .2) {
+        float ang = atan(g.y, g.x) / .7853982, k = floor(ang), a0 = k * .7853982, a1 = a0 + .7853982;
+        vec2 d0 = vec2(cos(a0), sin(a0)), d1 = vec2(cos(a1), sin(a1));
+        float gul = mix(vnoise(vec2(dot(pk, vec2(-d0.y, d0.x)), dot(pk, d0)) / vec2(.07, .9) + 7.), vnoise(vec2(dot(pk, vec2(-d1.y, d1.x)), dot(pk, d1)) / vec2(.07, .9) + 7.), smoothstep(0., 1., ang - k)) - .5;
+        rockCol *= 1. + gul * .8 * smoothstep(.1, .03, px) * smoothstep(.2, .55, slope);
+      }
+      rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .34 * smoothstep(.3, .6, wet));          // lichen and moss
+      rockCol = mix(rockCol, vec3(.60, .51, .38) * (.9 + .2 * n2), (1. - smoothstep(.14, .40, wet)) * .65);           // the sun-bleached rock of dry country
+      ground = mix(ground, rockCol, rockW);
     }
-    float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
-    if (sandW > .004) ground = mix(ground, mix(vec3(.80, .72, .53), vec3(.27, .37, .20), smoothstep(.45, .62, wet)) * texDetail(tSand, pk, px, pdx, pdy), sandW);
+    if (sandW > .004) ground = mix(ground, mix(vec3(.80, .72, .53), vec3(.27, .37, .20), smoothstep(.45, .62, wet)), sandW);
+    // The grain of the ground, one read for the pixel and used at once: the tile of the ground that is mostly here —
+    // sand, stone (rock and desert), dry steppe or green land. The line between two tiles wanders with a noise and is
+    // never seen: every tile is a pattern around 1.
+    float kind = wet + (n3 - .5) * .12;
+    ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, pk, px, pdx, pdy), uGrainK);
     ground = aspShore(p, ground, L.cover);                           // beaches and rocks at the waterline (the water work)
     L.col = ground;
 
@@ -186,10 +220,12 @@ void main() {
     land = L.col; cover = L.cover;
 
     // snow: above the snow line, and wherever the chunk holds snow (thin snow lies in patches, hollows first)
-    float snowline = 2980. - (lat - 37.) * 55. + (n2 - .5) * 200. + (n3 - .5) * 160. + uSnow;
+    // (the edge of the snow is roughened by a finer, turned noise: the noise of 1 km alone shows its square lattice there)
+    float sr = 0.; if (px < .5) sr = albumRough(pk) * smoothstep(.5, .2, px);
+    float snowline = 2980. - (lat - 37.) * 55. + (n2 - .5) * 200. + (n3 - .5) * 90. + sr * 900. + uSnow;
     float snowW = smoothstep(snowline - 90., snowline + 110., hl - g.y * 260.) * (1. - smoothstep(.85, 1.4, slope));
-    if (p.cB.g > .003) snowW = max(snowW, smoothstep(-.1, .1, p.cB.g * 1.3 - (n2 * .55 + n3 * .45)) * (1. - smoothstep(.85, 1.4, slope)) * (1. - .3 * cover));
-    if (snowW > .004) land = mix(land, vec3(.93, .95, .99) * mix(vec3(1.), texDetail(tSnow, pk, px, pdx, pdy), .25), snowW);
+    if (p.cB.g > .003) snowW = max(snowW, smoothstep(-.1, .1, p.cB.g * 1.3 - (n2 * .55 + n3 * .45) - sr * 1.2) * (1. - smoothstep(.85, 1.4, slope)) * (1. - .3 * cover));
+    if (snowW > .004) land = mix(land, vec3(.93, .95, .99) * (.97 + .06 * n3), snowW);
     cover *= 1. - snowW;
     land = pow(max(land, vec3(0.)), vec3(2.2));                     // the palette above is written as seen on screen
 
@@ -257,9 +293,13 @@ void main() {
   // ---- air between the eye and the ground, then the finish shared by everything
   gl_FragColor = vec4(albumFinish(albumAir(col, vPos)), 1.);
 }`;
+// The numbers written as the edges of smoothstep() go into a table (the uniform uStep) before the shader is compiled:
+// with them in its code the shader ran 40 % slower on a weak video card. Why and how: ground/steps.js.
+export const GROUND_STEPS = stepTable(FRAG_SRC);
+const FRAG = GROUND_STEPS.glsl;
 
-// The ground photos as layers of one texture, 1024 px a side. They are only seen much reduced (a tile is never
-// under about 2 km across), so nothing is lost against the 2048 px originals and they take a quarter of the memory.
+// The grain of the ground as layers of one texture, 1024 px a side. The bytes are read as they are (128 = the mean
+// = no change); a picture that is missing is a layer of 128, and its ground stays smooth.
 function groundArray(photos) {
   const S = 1024, layer = S * S * 4, data = new Uint8Array(layer * photos.length), cv = document.createElement('canvas');
   cv.width = cv.height = S;
@@ -269,7 +309,7 @@ function groundArray(photos) {
     ctx.drawImage(t.image, 0, 0, S, S); data.set(ctx.getImageData(0, 0, S, S).data, i * layer);
   });
   const a = new DataArrayTexture(data, S, S, photos.length);
-  a.format = RGBAFormat; a.type = UnsignedByteType; a.colorSpace = SRGBColorSpace; a.wrapS = a.wrapT = RepeatWrapping;
+  a.format = RGBAFormat; a.type = UnsignedByteType; a.colorSpace = NoColorSpace; a.wrapS = a.wrapT = RepeatWrapping;
   a.minFilter = LinearMipmapLinearFilter; a.magFilter = LinearFilter; a.generateMipmaps = true; a.anisotropy = 8; a.needsUpdate = true;
   return a;
 }
@@ -281,7 +321,9 @@ export class Terrain {
     for (let j = 0, k = 0; j < M; j++) for (let i = 0; i < M; i++) { const a = j * n + i; idx[k++] = a; idx[k++] = a + 1; idx[k++] = a + n; idx[k++] = a + 1; idx[k++] = a + n + 1; idx[k++] = a + n; }
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setAttribute('grid', new BufferAttribute(grid, 2)); geo.setIndex(new BufferAttribute(idx, 1));
-    const T = data.tex, pick = (...ids) => ids.map(i => T[i]).find(Boolean) || null;
+    // the climate of the ground as one picture over the square of the chunks (ground/climate.js)
+    const cr = chunks.uniforms.uChunkRect.value, clim = new DataTexture(climateTexels(data.base.at, { x0: cr.x, y0: cr.y, side: 1 / cr.z }, data.climate), CLIM_N, CLIM_N, RGBAFormat, UnsignedByteType);
+    clim.magFilter = clim.minFilter = LinearFilter; clim.wrapS = clim.wrapT = ClampToEdgeWrapping; clim.needsUpdate = true;
     this.u = {
       uBase: { value: data.base.tex }, uBaseRect: { value: new Vector4(...data.base.rect) },
       uDet: { value: data.base.tex }, uDetRect: { value: new Vector4(0, 0, 1, 1) }, uDetOn: { value: 0 },
@@ -289,9 +331,10 @@ export class Terrain {
       uSat: { value: 1.12 }, uSnow: { value: 0 }, uForestK: { value: 1 }, uHaze: { value: .09 }, uExposure: { value: 1.05 }, uWarm: { value: 0 }, uSeason: { value: 0 },
       uStyle: { value: 0 }, uGrid: { value: 0 }, uData: { value: 0 },
       uFire: { value: null }, uFireRect: { value: new Vector4(0, 0, 1, 1) }, uFireOn: { value: 0 }, uQuake: { value: new Vector4(0, 0, 0, 0) },
-      // layers in the order of the names in the shader: grass, dry ground, rock, sand, snow, forest floor
-      tGround: { value: groundArray([pick('aerial_grass_rock_diff'), pick('aerial_ground_rock_diff', 'dry_ground_01_diff'), pick('aerial_rocks_02_diff', 'aerial_rocks_04_diff'),
-        pick('aerial_beach_01_diff', 'aerial_sand_diff'), pick('snow_field_aerial_diff', 'snow_02_diff'), pick('forest_floor_diff', 'forrest_ground_01_diff')]) },
+      // layers in the order of the names in the shader (GROUND_TILES in data.js): heath, steppe, stone, dunes
+      tGround: { value: groundArray(GROUND_TILES.map(id => data.ground?.[id] || null)) },
+      tClimate: { value: clim }, uClimRect: { value: new Vector4(cr.x, cr.y, cr.z, cr.w) },
+      uStep: { value: GROUND_STEPS.table },
       ...chunks.uniforms, ...ASPECT_UNIFORMS,
     };
     this.levels = [];

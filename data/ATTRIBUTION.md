@@ -38,7 +38,7 @@
 | Реки, озёра, поселения | Natural Earth 10m | Общественное достояние |
 | Деление: очертания нынешних провинций, округов и департаментов — подсказка, к какой исторической земле тянется чанк (`public/assets/album/division/admin.json`) | Natural Earth 10m admin-1 states and provinces | Общественное достояние |
 | 3D-модели домов, строек, стен, деревьев и скал (41 штука) | [KayKit : Medieval Hexagon Pack 1.0](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0), Kay Lousberg (www.kaylousberg.com) | CC0 1.0 |
-| Текстуры земли, 16 штук (`aerial_*`, `forest_floor`, `snow_*` и другие) | [Poly Haven](https://polyhaven.com/textures) | CC0 1.0 |
+| Текстуры земли, 16 штук (`aerial_*`, `forest_floor`, `snow_*` и другие). С 13.11.2026 альбом их не читает: см. «Альбом: земля и лес» | [Poly Haven](https://polyhaven.com/textures) | CC0 1.0 |
 
 ### Альбом: вода
 
@@ -55,6 +55,16 @@
 |---|---|---|
 | Большие дороги истории (`src/album/roads/historic.js`): какие города и в каком порядке соединяла дорога | Перечень свой, по общеизвестным сведениям о римских дорогах Испании, южной Галлии и Тингитаны (Итинерарий Антонина) и средневековых трактах. Ни одна карта не копировалась: путь между городами находит рельеф альбома | Свой перечень; исторические факты авторским правом не охраняются |
 | Сеть дорог (`public/assets/album/roads/roads.bin.gz`, в репозитории) | Проложена кодом альбома по его же высотам, рекам и делению: `src/album/roads/routes.js`, `scripts/album/bake-roads.mjs` | Своя; высоты и реки — см. выше |
+
+### Альбом: земля и лес
+
+| Данные | Источник | Лицензия |
+|---|---|---|
+| Климат земли: влажность места, сухость лета, тепло самого тёплого месяца (`public/assets/album/ground/climate.bin.gz`, в репозитории); считает `scripts/album/bake-ground.mjs` | [CHELSA V2.1](https://www.chelsa-climate.org/datasets/chelsa_climatologies), климатологии 1981–2010, и [ETOPO 2022](https://www.ncei.noaa.gov/products/etopo-global-relief-model) — те же файлы, что у климата игры (см. выше) | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| Зерно земли: четыре плитки по 1024 точки (`public/assets/album/ground/steppe.webp`, `heath.webp`, `stone.webp`, `dunes.webp`, в репозитории) — мелкий рисунок настоящей земли без её общего тона; делает `scripts/album/bake-ground-tiles.mjs` | Снимки Sentinel-2 L2A, каналы B04, B03, B02: плато восточного Марокко (24.07.2022), лесостепь севера Монголии (30.08.2022), плато Тадемаит (03.06.2022), Большой Западный Эрг (13.06.2022). Читаются из открытого архива [Sentinel-2 Cloud-Optimized GeoTIFFs](https://registry.opendata.aws/sentinel-2-l2a-cogs/) через каталог Earth Search (Element 84) | Данные Copernicus Sentinel: свободное, полное и открытое использование ([условия](https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice)). Обязательная пометка: **Contains modified Copernicus Sentinel data 2022** |
+
+Готовая мозаика «Sentinel-2 cloudless» компании EOX **не используется**: у её слоя 2016 года лицензия записана по-разному
+в двух местах (CC BY 4.0 и CC BY-SA 4.0), а слои с 2018 года закрыты для коммерческого использования.
 
 ## Ресурсы
 

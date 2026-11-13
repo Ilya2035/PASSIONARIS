@@ -1,11 +1,15 @@
-// Loads what scripts/album/fetch-data.mjs baked into public/album-data/: heights, vectors, ground textures.
-import { DataTexture, RedFormat, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, RepeatWrapping,
-  DataUtils, TextureLoader, SRGBColorSpace, NoColorSpace } from 'three';
+// Loads what scripts/album/fetch-data.mjs baked into public/album-data/ (heights, vectors) and the part of the ground
+// that lies in the repository, public/assets/album/ground/: the climate (scripts/album/bake-ground.mjs) and the grain
+// of the ground (scripts/album/bake-ground-tiles.mjs).
+import { DataTexture, RedFormat, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, DataUtils, TextureLoader } from 'three';
 import { mercX, mercY } from './geo.js';
 import { loadCourses, mainRivers } from './water/courses.js';
 import { fillHollows } from './water/hollows.js';
+import { decodeClimate, useClimate } from './ground/climate.js';
 
-const BASE = 'album-data/';
+const BASE = 'album-data/', GROUND = 'assets/album/ground/';
+// the grain of the ground: the layers of the ground texture, in their order there (terrain.js)
+export const GROUND_TILES = ['heath', 'steppe', 'stone', 'dunes'];
 async function gunzipU16(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -41,13 +45,18 @@ export async function loadData(onProgress = () => {}) {
   // the real courses of the rivers (the water work); those who only ask where a river runs get the greater ones as lines
   const courses = await loadCourses('assets/album/water/rivers.bin.gz');
   if (courses) { vectors.riversCoarse = vectors.rivers; vectors.rivers = mainRivers(courses); }
-  onProgress('текстуры');
-  const loader = new TextureLoader(), tex = {};
-  await Promise.all((meta.textures || []).flatMap(t => [['diff', true], ...(t.normal ? [['nor', false]] : [])].map(([kind, srgb]) =>
-    loader.loadAsync(`${BASE}tex/${t.id}_${kind}.jpg`).then(x => {
-      x.wrapS = x.wrapT = RepeatWrapping; x.anisotropy = 8; x.colorSpace = srgb ? SRGBColorSpace : NoColorSpace;
-      tex[`${t.id}_${kind}`] = x;
-    }).catch(() => {}))));
+  onProgress('климат и земля');
+  // the climate under the ground; without the file the rules fall back on the old formula (ground/climate.js)
+  let climate = null;
+  try {
+    const r = await fetch(GROUND + 'climate.bin.gz');
+    if (r.ok) climate = decodeClimate(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  } catch (e) { console.warn('[album] no climate of the ground:', e.message); }
+  useClimate(climate);
+  // the grain of the ground: pictures of 1024 px; a missing one leaves its ground smooth. (The close-up photographs
+  // of soil the album began with are no longer read: enlarged a hundred times they were what looked false.)
+  const loader = new TextureLoader(), tex = {}, ground = {};
+  await Promise.all(GROUND_TILES.map(id => loader.loadAsync(`${GROUND}${id}.webp`).then(x => { ground[id] = x; }).catch(() => {})));
   // detail patches around the showcase places are loaded on demand
   const details = new Map();
   async function detail(id) {
@@ -58,5 +67,5 @@ export async function loadData(onProgress = () => {}) {
     details.set(id, d);
     return d;
   }
-  return { meta, base, vectors, courses, tex, detail, places: meta.places };
+  return { meta, base, vectors, courses, tex, ground, climate, detail, places: meta.places };
 }
