@@ -26,14 +26,16 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   float g2 = vnoise(pk / 23. + 31.), fine = .5, bush = 0.;
   if (px < .12) fine = mix(.5, vnoise(mat2(.8, -.6, .6, .8) * pk / .21 + 5.), smoothstep(.12, .04, px));
   if (px < .02) bush = smoothstep(.80, .92, vnoise(pk / .017 + 3.)) * smoothstep(.02, .009, px) * smoothstep(.10, .22, wet);   // bushes one by one, in the near view
-  float mott = nz.z * .55 + fine * .45, tl = albumTreeline(nz.x);
+  // (the patches of a kilometre are for the near and middle heights: from 300 km up they would speckle the whole
+  // plateau with the same pattern, so they fade into the mean and leave the large patches — soils, valleys, the wet)
+  float n3f = mix(.5, nz.z, smoothstep(.13, .045, px)), mott = n3f * .55 + fine * .45, tl = albumTreeline(nz.x);
   // how much of the soil the low growth hides (grass, herbs, dwarf scrub), in patches where it is thin
   float vc = smoothstep(.07 * uDryK, .40 * uDryK, wet);
   float veg = max(clamp(vc + (mott - .5) * 4.4 * vc * (1. - vc), 0., 1.), bush * .9);
   // straw where the summer is dry, green where it rains in summer
   float green = smoothstep(.30, .80, summer * .5 + wet * .5);
   // scrub in patches: grey-olive matorral in the dry lands, heather and gorse on the wet hills
-  float sp = max(smoothstep(.50, .74, nz.z * .5 + nz.y * .22 + fine * .28) * smoothstep(.13, .26, wet) * (.75 - .3 * smoothstep(.55, .8, wet)), bush * .8);
+  float sp = max(smoothstep(.50, .74, n3f * .5 + nz.y * .22 + fine * .28) * smoothstep(.13, .26, wet) * (.75 - .3 * smoothstep(.55, .8, wet)), bush * .8);
   // dry slopes are bare: pale marl in beds (the badlands of the Ebro and of Almería)
   float bad = (1. - smoothstep(.13 * uDryK, .30 * uDryK, wet)) * smoothstep(.07, .30, slope) * (1. - smoothstep(.45, .9, slope)) * .85;
   float beds = .90 + .14 * (.5 + .5 * sin(hl / 7. + fine * 6.)) * smoothstep(.12, .03, px);
@@ -47,7 +49,7 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   soil = mix(soil, mix(soil, vec3(.68, .60, .45), .3) * beds, bad);
   c = mix(soil, c, veg * (1. - bad));
   // ---- above the trees: short alpine grass; just below them, heath in patches
-  c = mix(c, vec3(.43, .46, .26) * (.92 + .16 * nz.z), smoothstep(tl - 100., tl + 150., hl) * smoothstep(.15, .4, wet));
+  c = mix(c, vec3(.43, .46, .26) * (.92 + .16 * n3f), smoothstep(tl - 100., tl + 150., hl) * smoothstep(.15, .4, wet));
   c = mix(c, vec3(.47, .39, .38), smoothstep(tl - 500., tl, hl) * smoothstep(.55, .8, mott) * .3 * smoothstep(.35, .6, wet));
   // ---- a true desert: sand in seas of dunes, stony plain between them
   return mix(c, vec3(.80, .64, .40) * (.95 + .1 * nz.y), (1. - smoothstep(.03, .07, wet)) * smoothstep(.46, .58, nz.x * .6 + g2 * .4));

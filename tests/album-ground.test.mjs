@@ -118,7 +118,8 @@ test('ground shader: the grain lies on the land at fixed sizes, nothing is switc
   const src = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
   const body = src.slice(src.indexOf('vec3 texDetail(int t, vec2 pk, float px, vec2 dx, vec2 dy) {'), src.indexOf('vec3 hypso(float h)'));
   assert.ok(body.length > 200, 'texDetail keeps its name and arguments: the aspects call it');
-  assert.equal(body.split('textureGrad(tGround').length - 1, 3, 'three sizes of the same tile');
+  assert.equal(body.split('textureGrad(tGround').length - 1, 1, 'the tile lies on the land once, at its true size');
+  assert.ok(body.includes('if (px >= .11) return vec3(1.);'), 'no grain from on high: it fades out with the size of a pixel');
   assert.ok(!/floor\(L\)|pow\(5\.2/.test(body), 'no level that steps with the size of a pixel (that step was the layer the owner saw change)');
   for (const name of ['tGrass', 'tDry', 'tRock', 'tSand', 'tSnow', 'tForest']) assert.match(src, new RegExp(`#define ${name} \\d`), name);
   assert.ok(Math.max(...[...src.matchAll(/#define t(?:Grass|Dry|Rock|Sand|Snow|Forest) (\d)/g)].map(m => +m[1])) < GROUND_TILES.length, 'every name is a layer that exists');

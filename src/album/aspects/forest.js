@@ -143,6 +143,12 @@ float albumRough(vec2 pk) { return (vnoise(mat2(.8, -.6, .6, .8) * pk / .63 + 23
 // how deep inside the natural forest a place is (> 0) or how far outside (< 0)
 float albumMargin(float fc, float k, float pat) { return fc * k - pat * .9 + .05; }
 float albumCover(float fc, float k, float pat) { return smoothstep(-.10, .10, albumMargin(fc, k, pat)); }
+// From on high a wood has no crisp outline, and the patches of a kilometre must not show at all: the noise of 1 km
+// is a lattice of squares, and an open woodland drawn by it speckled the dry plateau with little blocks (the map
+// from 150 km up, 14.11.2026). So the edge of a stand widens with the size of a pixel (albumSoft), and the noise of
+// 1 km leaves the patches as the camera rises (albumFine): from afar the woods are large soft patches of the 7 km noise.
+float albumSoft(float px) { return .10 + min(px * 1.6, .22); }
+float albumFine(float n3, float px) { return mix(.5, n3, smoothstep(.09, .03, px)); }
 // The order in which a chunk loses its stands as it is felled, 0 last .. 1 first, spread about evenly over the ground.
 // The weak stands go first (the patch noise), in shapes of their own that follow no lattice: three noises of 1.9,
 // 0.7 and 0.3 km, two of them turned. px: km per pixel, the small noises fade out with distance (0 = keep all).
@@ -158,9 +164,10 @@ float albumOrder(float pat, float own) { return smoothstep(.28, .70, pat * .45 +
 //   x  share of the ground under canopy     y  how deep inside the standing forest (for the age of its edge)
 // order: albumOrder() of the place (anything when have is 1); fade: 1 near, 0 where the noises have faded with
 // distance and the stands melt into their mean
-vec2 albumStand(float fc, float k, float pat, float order, float have, float fade) {
+// soft: half the width of the edge of a stand, in the units of the margin — albumSoft(px)
+vec2 albumStand(float fc, float k, float pat, float order, float have, float fade, float soft) {
   float m = albumMargin(fc, k, pat), a = sqrt(have), left = a * 1.12 - .06 - order;
-  return vec2(smoothstep(-.10, .10, m) * mix(a, smoothstep(-.06, .06, left), fade) * a, min(m, left + step(.999, have)));
+  return vec2(smoothstep(-soft, soft, m) * mix(a, smoothstep(-.06, .06, left), fade) * a, min(m, left + step(.999, have)));
 }
 // The conifers of a chunk are not an even mix: they take the higher, steeper and sunnier ground first, in stands.
 //   share  conifer share of the chunk        st, n2  noises of the stands, 2.6 and 7 km
@@ -239,16 +246,16 @@ float forestKeep(float farm, float pat, float px, vec2 people, float wet) {
 // the edges.)
 // farm: how much of the land there is under fields (setFarm); have: p.cA.r; people: p.cC.rg.
 float forestNear(vec2 q, float farm, float px, float have, vec2 people, float wet) {
-  float ps = albumPatch(mix(.5, fbm(q / 7.3 + 5.), smoothstep(5., 1.5, px)), mix(.5, vnoise(q / 1.1), smoothstep(.7, .25, px)));
+  float ps = albumPatch(mix(.5, fbm(q / 7.3 + 5.), smoothstep(5., 1.5, px)), albumFine(vnoise(q / 1.1), px));
   if (px < .5) ps += albumRough(q) * smoothstep(.5, .2, px) * smoothstep(.3, .16, abs(albumMargin(fFc, uForestK, ps)));
-  return albumStand(fFc, uForestK, ps, albumOrder(ps, fOwn), have, fFade).x * forestKeep(farm, ps, px, people, wet);
+  return albumStand(fFc, uForestK, ps, albumOrder(ps, fOwn), have, fFade, albumSoft(px)).x * forestKeep(farm, ps, px, people, wet);
 }
 float forestCover(Px p) {
   float have = p.cA.r; fOwn = .275;
-  fFc = albumForestShare(p.wet, p.hl, p.slope, p.n1); fPat = albumPatch(p.n2, p.n3); fFade = smoothstep(1.2, .5, p.px);
+  fFc = albumForestShare(p.wet, p.hl, p.slope, p.n1); fPat = albumPatch(p.n2, albumFine(p.n3, p.px)); fFade = smoothstep(1.2, .5, p.px);
   if (p.px < .5) fPat += albumRough(p.pk) * smoothstep(.5, .2, p.px) * smoothstep(.3, .16, abs(albumMargin(fFc, uForestK, fPat)));   // fades in toward the edge: no step in the noise
   if (have < .999 && have > .001 && fFade > 0.) fOwn = albumOrderOwn(p.pk, p.px);
-  fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade);
+  fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade, albumSoft(p.px));
   fFarm = 0.; if (fStand.x > .003) fFarm = setFarm(p.pk);
   return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet);
 }

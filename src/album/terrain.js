@@ -87,22 +87,23 @@ float heightPix(vec2 ll) {
   if (uDetOn > .5) { float w = detailWeight(m), hd = texture(uDet, (m - uDetRect.xy) * uDetRect.zw).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
   return mix(-3200., hb, inRegion(ll));
 }
-// The grain of the ground as detail around 1: keeps our palette, adds the pattern of real ground. A square lies on
-// the land at its true size (10 km, a texel is 10 m), and twice more: five times finer (the same shapes are the rills
-// and bushes of the near view) and five times coarser (the mottle of a whole country), each turned its own way so
-// that their repeats never fall together. All three are fixed to the land. A size fades by itself as its texels get
-// smaller than a pixel (the reduced copies of the texture end in its mean, which is 1), so nothing is ever switched
-// as the camera rises: there is no layer to see change.
+// The grain of the ground as detail around 1: keeps our palette, adds the pattern of real ground. A square of real
+// ground lies on the land at its true size and nowhere else: 10 km a tile, 10 m a texel. It is fixed to the land and
+// nothing is ever switched as the camera rises: there is no layer to see change.
+// The grain is for the near and middle heights only. It fades out with the size of a pixel and is gone from about
+// 300 km up: seen from there a tile of 10 km repeats every few dozen pixels, and the land must be a calm tone with
+// the large patches of nature — soils, valleys, the wet and the dry (the owner on the map from on high: the same
+// winding, spotted pattern all over the plateau).
+// The same tile laid five times finer and five times coarser was tried and dropped (14.11.2026). Coarser, it drew the
+// dry river beds of the tile 50 km long over the whole plateau. Finer, its one river bed came back every 2 km as the
+// same little hook, row upon row at 20–50 km. What is finer than the tile is drawn by rule: the mottle and the bushes
+// of the bare ground (aspects/ground.js), the gullies of the rock.
 // t is one of tGrass, tDry, tRock, tSand, tSnow, tForest: a layer of the ground texture.
 // The ground shader itself calls this once for a pixel, last of all, over the bare ground, the rock and the sand
 // together, and uses the answer at once (why: aspects/ground.js).
 vec3 texDetail(int t, vec2 pk, float px, vec2 dx, vec2 dy) {
-  float z = float(t); vec3 d = vec3(0.);
-  const mat2 A = mat2(.8, -.6, .6, .8) / 2.05, B = mat2(1., 0., 0., 1.) / 10.24, C = mat2(.6, .8, -.8, .6) / 51.2;
-  if (px < .05) d += (textureGrad(tGround, vec3(A * pk, z), A * dx, A * dy).rgb - .5) * smoothstep(.05, .016, px);
-  if (px < .6) d += (textureGrad(tGround, vec3(B * pk + .37, z), B * dx, B * dy).rgb - .5) * (1.4 * smoothstep(.6, .15, px));
-  d += (textureGrad(tGround, vec3(C * pk + .71, z), C * dx, C * dy).rgb - .5) * 1.3;
-  return clamp(1. + d, .55, 1.5);
+  if (px >= .11) return vec3(1.);
+  return clamp(1. + (textureGrad(tGround, vec3(pk / 10.24 + .37, float(t)), dx / 10.24, dy / 10.24).rgb - .5) * (1.7 * smoothstep(.11, .035, px)), .55, 1.5);
 }
 vec3 hypso(float h) {
   vec3 c = vec3(.62, .76, .56);
