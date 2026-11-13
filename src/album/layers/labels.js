@@ -15,10 +15,13 @@
 //   stand, from 200 km none. The knob «Названия столиц издалека» keeps the names of the chief towns while they are marked.
 // • Nothing overlaps: the greater settlement takes the room first; a mark that would touch another mark or a name is
 //   left out, and a name that has no room is left out while its mark stays.
+// • Under a tilted camera the ground toward the horizon is far away: a settlement more than FAR times farther from
+//   the eye than the point the camera looks at is shown as from that much higher up (heightFor()), and one beyond the
+//   horizon is not shown at all. So the horizon is not crowded with the marks of villages.
 // The panel of a district (division/panel.js) shows the same marks: markSvg().
 // The scale bar of the map (town/scale.js) is kept here too: the settlements stand at their real size, and the bar
 // says what that size is.
-import { toWorld } from '../geo.js';
+import { toWorld, R as EARTH } from '../geo.js';
 import { CLASSES, RANKS, NAME_FROM, SHAPES_TO, CELL, classOf } from '../town/rules.js';
 import { createScaleBar, kmPerPixel } from '../town/scale.js';
 
@@ -51,6 +54,10 @@ export function shownAt(rank, h, farNames = false) {
   const R = RANKS[rank], mark = fade(h, R.to);
   return { mark, name: mark * rise(NAME_FROM[0], NAME_FROM[1], h) * (farNames && rank >= 3 ? 1 : fade(h, R.name)), far: h > SHAPES_TO };
 }
+// The camera height a settlement is shown for: the height of the camera (its distance from the point it looks at),
+// or, for a settlement much farther from the eye than that, its own distance from the eye over FAR.
+export const FAR = 1.25;
+export const heightFor = (h, dist) => Math.max(h, dist / FAR);
 // Which of the marks and names have room. list: the settlements the greater first, each { x, y (px), mark (px across,
 // 0: no mark stands), name (px wide, 0: no name), gap (px from the place to where its name begins) }.
 // → for each: 0 nothing shown · 1 the mark alone · 2 mark and name (or the name alone when no mark stands)
@@ -106,10 +113,13 @@ export default async function init(album) {
     for (const it of items) {
       it.want = 0;
       if (!on) continue;
-      const s = shownAt(it.rank, h, farNames); if (!(s.mark > 0)) continue;
+      if (!(shownAt(it.rank, h, farNames).mark > 0)) continue;
       if (it.rank === 0 && !(Math.abs(it.lat - cl) < reach && Math.abs(it.lon - co) < reach * 1.4)) continue;
       toWorld(it.lat, it.lon, it.alt * cam.exag / 1000, v);
-      const kmPx = Math.max(1e-6, cam.cam.position.distanceTo(v) * k), rpx = it.r / kmPx;   // km to a pixel there · the radius of the houses on the screen
+      const eye = cam.cam.position, dist = eye.distanceTo(v);
+      if (v.x * (eye.x - v.x) + (v.y + EARTH) * (eye.y - v.y) + v.z * (eye.z - v.z) <= 0) continue;   // beyond the horizon: the ground there faces away from the eye
+      const s = shownAt(it.rank, heightFor(h, dist), farNames); if (!(s.mark > 0)) continue;
+      const kmPx = Math.max(1e-6, dist * k), rpx = it.r / kmPx;     // km to a pixel there · the radius of the houses on the screen
       v.project(cam.cam);
       const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * hh;
       if (!(v.z < 1 && x > 20 && x < w - 20 && y > 20 && y < hh - 20)) continue;

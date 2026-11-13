@@ -559,3 +559,14 @@ test('settle scale bar: a round length, cut into equal pieces — the real size 
   for (const k of [.0004, .003, .0127, .05, .13, .32, .64, 1.3]) { const s = scaleOf(k); assert.ok(s.px <= 170 + 1e-9 && s.px > 60 && SCALE_STEPS.includes(s.km) && Math.abs(s.px * k - s.km) < 1e-9, `${s.km} km is ${s.px.toFixed(0)} px`); }
   const bar = DEFS.find(d => d.key === 'scaleBar'); assert.ok(bar && bar.value === 1 && bar.map, 'the scale bar is on, with a switch on the map panel');
 });
+
+test('settle marks under a tilted camera: a far settlement is shown as from farther up, none beyond the horizon; a main street runs on to where the road takes over', async () => {
+  const { heightFor, FAR, shownAt } = await import('../src/album/layers/labels.js');
+  assert.equal(heightFor(100, 100), 100); assert.equal(heightFor(100, 100 * FAR), 100, 'within the picture of a camera that looks down: the height of the camera');
+  assert.equal(heightFor(40, 400), 400 / FAR); assert.ok(shownAt(0, heightFor(40, 30)).mark > 0 && !(shownAt(0, heightFor(40, 400)).mark > 0), 'a village far toward the horizon is not marked');
+  assert.ok(shownAt(3, heightFor(40, 400)).mark > 0 && !(shownAt(1, heightFor(40, 400)).name > 0), 'a chief town is, without its name');
+  const g = settle.glsl;
+  assert.match(g, /bool town = !village && r >= SET_STREETS_FROM/); assert.match(g, /smoothstep\(-reach, -reach \+ \.04, own\)/, 'the street is painted past the last houses');
+  assert.ok(g.indexOf('float past = ') < g.indexOf('if (tm < .003) return;') && g.indexOf('if (tm < .003) return;') < g.indexOf('setWall(r, th, atan(dc.y, dc.x))'), 'before the pixel is given up as open land; the wall after');
+  assert.equal((g.match(/texelFetch\(tSettle, bc\.xy \+ SET_GATES, 0\)/g) || []).length, 1, 'the gates are read once');
+});

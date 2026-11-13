@@ -229,6 +229,22 @@ void aspSettle(Px p, inout Land L) {
     float lane = min(abs(q.x - .5), abs(q.y - .5)) * S, la = clamp(1.5 - lane / max(.003, px * .6), 0., 1.) * clamp(1. + m / laneOut, 0., 1.) * (1. - tm) * (1. - smoothstep(.3, .5, p.slope)) * min(1., farm * 4.);
     if (la > 0.) { L.col = mix(L.col, vec3(.75, .69, .57), la * .75 * clamp((.04 - px) * 80., 0., 1.)); L.cover *= 1. - la; }
   }
+  // ---- the main streets of a town: from its site straight out along its roads (town/plan.js keeps the blocks off
+  // them; their directions are four bytes beside the patch). A street runs on a little way past the last houses — to
+  // where the road takes over: the road work draws its ribbon up to the edge of the town, not through it.
+  float street = 1e3, told = 0., reach = .08 * r + .06; bool town = !village && r >= SET_STREETS_FROM && px < .07 && own > -reach - .3;
+  vec3 paved = vec3(.85, .81, .71) * (.95 + .08 * p.n3);
+  if (town) {
+    vec4 gt = floor(texelFetch(tSettle, bc.xy + SET_GATES, 0) * 255. + .5);
+    vec2 dl = p.pk - site; told = 1. - smoothstep(.03, .07, px);
+    for (int g = 0; g < 4; g++) {
+      if (gt[g] < .5) continue;
+      float a = (gt[g] - 1.) * (6.2831853 / 254.); vec2 u = vec2(cos(a), sin(a));
+      if (dot(dl, u) > -.006) street = min(street, abs(dl.x * u.y - dl.y * u.x));
+    }
+    float past = clamp(1.5 - street / max(SET_STREET_W * .5, px * .8), 0., 1.) * told * (1. - tm) * smoothstep(-reach, -reach + .04, own) * (1. - smoothstep(.3, .5, p.slope)) * smoothstep(.4, 2., p.h);
+    if (past > 0.) { L.col = mix(L.col, paved, past * .9); L.cover *= 1. - past; }
+  }
   if (tm < .003) return;
 
   // ---- the settlement itself
@@ -260,21 +276,14 @@ void aspSettle(Px p, inout Land L) {
   // that of its roofs, so the mark stands out from the land
   float far = smoothstep(.6, 2.5, px / S);
   col = mix(col, mix(earth, settleMat(0, atl, .3) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));
-  // ---- a town: its main streets, from its site straight out along its roads, and its wall around its middle, with a
-  // gate where a street crosses it (town/plan.js keeps the blocks off both). A line thinner than a pixel is kept a
-  // pixel wide while it can be told; from higher up it melts into the tone of the town.
-  if (!village && r >= SET_STREETS_FROM && px < .07) {
-    vec4 gt = floor(texelFetch(tSettle, bc.xy + SET_GATES, 0) * 255. + .5);
-    vec2 dl = p.pk - site; float street = 1e3, told = 1. - smoothstep(.03, .07, px);
-    for (int g = 0; g < 4; g++) {
-      if (gt[g] < .5) continue;
-      float a = (gt[g] - 1.) * (6.2831853 / 254.); vec2 u = vec2(cos(a), sin(a));
-      if (dot(dl, u) > -.006) street = min(street, abs(dl.x * u.y - dl.y * u.x));
-    }
+  // ---- a town: its main streets among the houses, and its wall around its middle, with a gate where a street
+  // crosses it (town/plan.js keeps the blocks off both). A line thinner than a pixel is kept a pixel wide while it can
+  // be told; from higher up it melts into the tone of the town.
+  if (town) {
     float sa = clamp(1.5 - street / max(SET_STREET_W * .5, px * .8), 0., 1.) * told;
-    col = mix(col, vec3(.85, .81, .71) * (.95 + .08 * p.n3), sa * .95);                     // paved
+    col = mix(col, paved, sa * .95);
     if (r >= SET_WALL_FROM) {
-      vec2 dc = dl - sh; float dw = abs(length(dc) - setWall(r, th, atan(dc.y, dc.x)));
+      vec2 dc = p.pk - site - sh; float dw = abs(length(dc) - setWall(r, th, atan(dc.y, dc.x)));
       col = mix(col, earth, (1. - smoothstep(SET_WALL_CLEAR, SET_WALL_CLEAR + .012, dw)) * (1. - sa) * told * .85);   // the open strip along the wall
       col = mix(col, vec3(.47, .45, .42), clamp(1.5 - dw / max(SET_WALL_W * .5, px * .65), 0., 1.) * step(SET_GATE_W * .5, street) * told);   // grey stone, as the wall that stands on it
     }
@@ -293,7 +302,7 @@ const MARK_NOTES = {
   500: 'С 500 км: точки главных городов провинций и самых крупных городов. У главного города земли и региона — кольцо.',
   1000: 'С 1000 км на карте нет ни одной отметки: совсем далеко — ничего.',
 };
-const markPages = (id, where, far, title) => [20, 50, 100, 200, 500, 1000].map(h => ({ id: `${id}-${h}`, group: G, title: `Отметки по высоте: ${title} с ${h} км`, note: MARK_NOTES[h], p: {}, cam: { ...(h >= 200 ? far : where), h, tilt: 15, heading: 0 } }));
+const markPages = (id, where, far, title) => [20, 50, 100, 200, 500, 1000].map(h => ({ id: `${id}-${h}`, group: G, title: `Отметки по высоте: ${title} с ${h} км`, note: MARK_NOTES[h], p: {}, cam: { ...(h >= 500 ? far : where), h, tilt: 15, heading: 0 } }));
 const zar = (h, tilt = 35, heading = 30) => ({ ...ZAR, h, tilt, heading });
 export default {
   id: 'settle', title: 'Поселения', glsl: GLSL, uniforms: settleUniforms,
