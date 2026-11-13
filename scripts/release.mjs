@@ -10,7 +10,8 @@
 //   <entry.md>: the changelog bullets only ("- …" lines, Russian); the "## [X.Y.Z] — date · title" header is added here.
 //
 // Releases are serialised through a lock file in the shared .git folder, so parallel sessions can each run this.
-// Safety: refuses to commit WorldClim-derived files; pushes only main and the new tag (never refs/backup/*).
+// Safety: refuses to commit WorldClim-derived files; pushes only main, the new tag and the version tags on main
+// that an earlier release could not send (never refs/backup/*).
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, openSync, closeSync, statSync, rmSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -121,12 +122,25 @@ try {
     if (!token) console.log('push skipped: no GITHUB_TOKEN in .env.local of the main checkout (ask the owner for a new token)');
     else {
       const auth = Buffer.from(`x-access-token:${token}`).toString('base64');
-      const r = spawnSync('git', ['-c', 'credential.helper=', '-c', `http.extraheader=AUTHORIZATION: basic ${auth}`,
-        'push', '-q', REPO_URL, 'main', `refs/tags/v${V}`], { cwd: MAIN, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, timeout: 300e3 });
+      const remote = args => spawnSync('git', ['-c', 'credential.helper=', '-c', `http.extraheader=AUTHORIZATION: basic ${auth}`, ...args],
+        { cwd: MAIN, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, timeout: 300e3 });
+      // Tags of earlier versions that never reached GitHub (their release had no network): send them now.
+      // Only version tags lying on main, so nothing from refs/backup/* or the old history can go out.
+      const tags = [`refs/tags/v${V}`];
+      const seen = remote(['ls-remote', '--tags', REPO_URL, 'refs/tags/v*']);
+      if (seen.status === 0) {
+        const there = new Set((seen.stdout || '').split('\n').map(l => (l.split('\t')[1] || '').replace(/\^\{\}$/, '')).filter(Boolean));
+        for (const t of git(['tag', '--merged', 'main', '--list', 'v*'], MAIN).split('\n').filter(Boolean)) {
+          if (!there.has(`refs/tags/${t}`) && !tags.includes(`refs/tags/${t}`)) tags.push(`refs/tags/${t}`);
+        }
+      }
+      const r = remote(['push', '-q', REPO_URL, 'main', ...tags]);
       const out = `${r.stdout || ''}${r.stderr || ''}`.split('\n').filter(l => l && !/authorization/i.test(l) && !l.includes(token)).join('\n');
       if (out) console.log(out);
-      if (r.status === 0) { git(['update-ref', 'refs/remotes/origin/main', 'main'], MAIN); console.log('pushed main + tag'); }
-      else console.log('push FAILED (token expired? network?) — the version is committed and tagged locally');
+      if (r.status === 0) {
+        git(['update-ref', 'refs/remotes/origin/main', 'main'], MAIN);
+        console.log('pushed main + tag' + (tags.length > 1 ? ` (and the tags missed earlier: ${tags.slice(1).map(t => t.slice(10)).join(', ')})` : ''));
+      } else console.log('push FAILED (token expired? network?) — the version is committed and tagged locally; the next release sends its tag too');
     }
   }
 
