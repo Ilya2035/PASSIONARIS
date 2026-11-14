@@ -19,7 +19,6 @@ const HEAD = `#define cameraPosition uEye\n${COMMON}\n${LIGHT}\n${WEATHER}`;
 // the lines of rain are this many times longer than the cell they fall in is wide
 const RAIN_LEN = 20;
 const RAIN_FN = /* glsl */`
-        uniform float uRpp;                           // radians in one pixel (a little more on a large picture)
         // where the rain that passes a point of the air comes from, on the plane of the weather: the cloud has moved
         // on while it fell (not at all at the height of the clouds, RAIN_LAG km at the ground)
         vec2 wxFallQ(vec3 P) { return P.xz / max(P.y, 1.) * RKM + WX_WIND * (RAIN_LAG * clamp(1. - (length(P) - RKM) / uCloud.w, 0., 1.)); }
@@ -102,6 +101,25 @@ const FOGGY = /* glsl */`
               c = mix(c, albumFinish(albumAir(fl, wpos)), fog);
             }
           }`;
+// The sky under the clouds. From near the ground the clouds are not drawn over the map (it must be readable), but
+// the sky over the horizon shows them from below: where a cloud stands in that direction the sky is grey, not clear —
+// light at the thin edge of a cloud, darker under its thick middle, heavy and dark where it rains. The ray of a pixel
+// of sky is followed to the ceiling of the clouds and the field is read there. The ceiling is the height of the
+// clouds, or a little above the eye when the eye is higher: the camera of a map stands higher than a man, and the
+// sky must not clear just because it rose. From a height this fades away: there the clouds are seen from above.
+const UNDER = /* glsl */`
+          if (uCloud.x > 0. && !ground && uRain.w > 0.) {
+            vec3 Es = uEye + vec3(0., RKM, 0.); float alt = length(Es) - RKM, ceil0 = max(uCloud.w, alt * 1.25 + 2.), top = RKM + ceil0, eb = dot(Es, rdW);
+            float tc = sqrt(max(eb * eb - dot(Es, Es) + top * top, 0.)) - eb; vec3 Pc = Es + rdW * tc; vec2 qc = Pc.xz / max(Pc.y, 1.) * RKM;
+            // (toward the horizon one pixel covers many km of the ceiling: a softer field there)
+            float thr = wxThr(), n = wxCloudN(qc, clamp(log2(tc * tc * uRpp / (max(ceil0 - alt, .5) * 8.)), 0., 3.)), dens = smoothstep(thr - .04, thr + .16, n);
+            if (dens > .003) {
+              float body = smoothstep(thr + .05, thr + .32, n), wet = uRain.x > 0. ? wxRainMask(qc) * smoothstep(thr - .02, thr + .12, n) : 0.;
+              vec3 uc = (albumSkyCol() * mix(1.15, .72, body) + albumSunCol() * mix(.2, .05, body) + albumMoonCol() * .3) * (1. - .42 * wet) * mix(.45, 1., albumDay());
+              uc = mix(vec3(dot(uc, vec3(.2126, .7152, .0722))), uc, .45);                  // (grey, not the blue of the sky it hides)
+              c = mix(c, albumFinish(mix(uc, mix(albumHorizon(rdW), uc, .35), albumHaze(uEye + rdW * tc) * .65)), dens * (.55 + .45 * dens) * uRain.w);
+            }
+          }`;
 // the shadows of the clouds: how much sun the clouds leave the point behind the pixel; the air in front of the
 // point is not shaded (the picture here is already in screen colours: hence the root)
 const SHADE = /* glsl */`
@@ -118,11 +136,12 @@ const RAINY = /* glsl */`
               if (t1 > t0) {
                 // (a short way through the layer — a steep look from near the ground — is walked in three steps, and
                 // which clouds rain is asked at its two ends only: that picture is too large to change on 40 km)
-                bool brief = t1 - t0 < 40.; int steps = brief ? 3 : 6; float rain = 0., sf = 0., ma = 0., mb = 0.;
+                bool brief = t1 - t0 < 40.; int steps = brief ? 3 : 6; float rain = 0., sf = 0., ma = 0., mb = 0., tn = t1;
                 if (brief) { ma = wxRainMask(wxFallQ(E + rdW * t0)); mb = wxRainMask(wxFallQ(E + rdW * t1)); }
                 for (int i = 0; i < steps; i++) {
                   float u = (float(i) + .5) / float(steps); vec2 qi = wxFallQ(E + rdW * mix(t0, t1, u));
-                  rain += wxRainCloud(qi, 0.) * (brief ? mix(ma, mb, u) : wxRainMask(qi));
+                  float r = wxRainCloud(qi, 0.) * (brief ? mix(ma, mb, u) : wxRainMask(qi));
+                  rain += r; if (r > .05) tn = min(tn, mix(t0, t1, u));              // (tn: how far the nearest of it is)
                 }
                 rain *= 6. / float(steps);
                 // how much of it is snow: in the air by the height of the land under it; near the ground by the very
@@ -139,7 +158,9 @@ const RAINY = /* glsl */`
                   // two grids, one twice as fine as the other, pass into each other
                   float az = atan(dot(hd, ax), dot(hd, ay)) / 6.2831853 + .5, vv = log(sg / (1. + cg + 1e-4));
                   float L = log2(sg * 6.2831853 / (uRpp * 7.)), Lb = L - 1.8, kb = floor(Lb), ab = az + uRain.z * .0003, bands = .5;
-                  if (uRain.w < 1.) bands = mix(.5, mix(wxBands(ab, exp2(kb)), wxBands(ab, exp2(kb + 1.)), Lb - kb), smoothstep(2., 3.5, Lb));
+                  // (the streaks are for a curtain seen from the side: a look steeply down has none — around the point
+                  // under the eye they would spread like the spokes of a wheel)
+                  if (uRain.w < 1.) bands = mix(.5, mix(wxBands(ab, exp2(kb)), wxBands(ab, exp2(kb + 1.)), Lb - kb), smoothstep(2., 3.5, Lb) * smoothstep(.5, .85, sg));
                   // (near the ground the veil stays thin, so that the map under the rain can be read, and has no streaks)
                   veil = min(veil * mix(mix(.66 + .68 * bands, .8 + .4 * bands, sf), 1., uRain.w), mix(.9, .38 + .1 * sf, uRain.w));
                   // (the curtain is a darker, bluer grey than its cloud from afar; near the ground it is a pale mist;
@@ -152,7 +173,8 @@ const RAINY = /* glsl */`
                     // (lines of rain or flakes of snow, never both in one pixel: sleet is a narrow strip of the slope)
                     if (sf < .5) fall = mix(wxLines(az, vv, exp2(k)), wxLines(az, vv, exp2(k + 1.)), L - k) * (1. - sf);
                     else fall = mix(wxFlakes(az, vv, exp2(k)), wxFlakes(az, vv, exp2(k + 1.)), L - k) * sf * 1.6;
-                    c += fall * smoothstep(3., 4.5, L) * veil * uRain.w * (.12 + .3 * albumDay()) * vec3(.92, .96, 1.);
+                    // (what falls is seen near the eye only: rain a hundred km away is its curtain, not its drops)
+                    c += fall * smoothstep(3., 4.5, L) * veil * uRain.w * (1. - smoothstep(25., 80., tn)) * (.12 + .3 * albumDay()) * vec3(.92, .96, 1.);
                   }
                 }
               }
@@ -161,6 +183,7 @@ const RAINY = /* glsl */`
 const frag = f => /* glsl */`uniform vec3 uEye;
         ${f ? HEAD : ''}${f & RAIN ? RAIN_FN : ''}
         uniform sampler2D tCol, tDepth; uniform vec2 uPx; uniform float uNear, uFar, uProj, uRad, uAO, uSharp, uVig; uniform mat4 uInvProj, uCamWorld; varying vec2 vUv;
+        uniform float uRpp;                           // radians in one pixel (a little more on a large picture)
         float vz(vec2 uv) { float z = texture(tDepth, uv).r * 2. - 1.; return 2. * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main() {
@@ -188,7 +211,7 @@ const frag = f => /* glsl */`uniform vec3 uEye;
           }
           c *= 1. - uAO * ao * .8;
           vec3 n4 = (texture(tCol, vUv + vec2(uPx.x, 0.)).rgb + texture(tCol, vUv - vec2(uPx.x, 0.)).rgb + texture(tCol, vUv + vec2(0., uPx.y)).rgb + texture(tCol, vUv - vec2(0., uPx.y)).rgb) * .25;
-          c = clamp(c + (c - n4) * uSharp, 0., 1.);${f ? RAY : ''}${f & RAIN ? WET : ''}${f & FOG ? FOGGY : ''}${f & CLOUDS ? SHADE : ''}${f & RAIN ? RAINY : ''}
+          c = clamp(c + (c - n4) * uSharp, 0., 1.);${f ? RAY : ''}${f & RAIN ? WET : ''}${f & FOG ? FOGGY : ''}${f & CLOUDS ? UNDER + SHADE : ''}${f & RAIN ? RAINY : ''}
           vec2 q = vUv - .5; c *= 1. - uVig * dot(q, q) * 1.5;
           gl_FragColor = vec4(c, 1.);
         }`;

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { CLOUD_KM, CLOUD_N, WIND, RAIN_LAG, RAIN_EDGE, WEATHER, WX, planeOf, llOfPlane, cloudNoise, cloudAt, cloudOffset, cloudThreshold, rainCover, rainMask, rainAt,
   fogByHour, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers } from '../src/album/sky/weather.js';
 import { readFileSync } from 'node:fs';
+import { cloudShader, LUMPS, cloudShow, rainCloudShow } from '../src/album/layers/clouds.js';
 import { LIGHT } from '../src/album/light.js';
 import { postShader, POST_CLOUDS, POST_RAIN, POST_FOG } from '../src/album/post.js';
 import { sunTimes } from '../src/album/sky/astro.js';
@@ -90,6 +91,26 @@ test('weather: above the line of snowfall it snows, below it rains', () => {
   const rain = postShader(POST_CLOUDS | POST_RAIN);
   assert.ok(/wxFlakes\(az/.test(rain) && /wxSnowAir\(Pa/.test(rain) && /uSnowF\.w > 0\./.test(rain));
   assert.ok(!/wxFlakes|wxSnowAir\(Pa/.test(postShader(POST_CLOUDS)) && !/wxFlakes/.test(postShader(POST_FOG)));
+});
+
+test('weather: a storm cloud from a height, a grey sky from below', () => {
+  // from a height: nearer than 60 km no clouds over the map, from 350 km all of them; a cloud that rains is half seen
+  // from 120 km down (the map under the rain must be readable) and whole from 200 km — a storm as a satellite sees it
+  assert.equal(cloudShow(50), 0); assert.equal(cloudShow(400), 1); assert.equal(rainCloudShow(25), 0);
+  assert.ok(rainCloudShow(100) > .3 && rainCloudShow(100) < .6); assert.ok(rainCloudShow(200) > .95 && rainCloudShow(2000) > .95);
+  for (let h = 20; h < 2000; h *= 1.2) assert.ok(rainCloudShow(h * 1.2) >= rainCloudShow(h) - 1e-9 && cloudShow(h * 1.2) >= cloudShow(h), `height ${h}`);
+  // its lumps are the picture of the clouds read small — no noise counted in the pixel; they do not drown the field itself
+  assert.ok(!/vnoise|fbm|worley/.test(cloudShader.replace(/float vnoise[\s\S]*?\n}/, '').split('uniform float uShow')[1]), 'no noise in the shell');
+  assert.ok(LUMPS.length === 2 && LUMPS[0][0] > LUMPS[1][0] && LUMPS[0][0] / 174 > 2 && LUMPS[0][1] + LUMPS[1][1] < .6);
+  assert.match(cloudShader, /float cloudTex\(vec2 uv, float lod\)/);
+  // from below: the sky under the clouds is a piece of the finishing pass that comes with the clouds, for pixels of sky only
+  const clouds = postShader(POST_CLOUDS);
+  assert.ok(/uCloud\.x > 0\. && !ground && uRain\.w > 0\./.test(clouds) && /wxCloudN\(qc/.test(clouds));
+  assert.ok(!/wxCloudN\(qc/.test(postShader(POST_FOG)) && !/wxCloudN\(qc/.test(postShader(0)));
+  // the page: a look along the ground toward the rain
+  const pg = page('sky-overcast'), force = def('rainForce').value;
+  assert.ok(pg.cam.tilt >= 80 && pg.cam.h <= 30 && pg.cam.heading === 0 && pg.p.rain === 1);
+  assert.ok(rainAt(NOISE, pg.cam.lat + .5, pg.cam.lon, rainCover(force), force, pg.p.cloudShift) > .9, 'it rains ahead');
 });
 
 test('weather: the fog is of the morning', () => {
