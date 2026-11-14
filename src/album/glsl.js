@@ -34,10 +34,17 @@ float detailWeight(vec2 m) {
   return smoothstep(0., .07, min(e.x, e.y));
 }
 // height in metres at an explicit level of detail of the region mosaic (lod 0 = 230 m per texel)
+// Lod 0 is what everything that stands on the ground asks for near the camera: the grid of the ground itself, a road,
+// a house, a river. Where the fine heights of a showcase place are switched on, lod 0 means «as fine as the grid of
+// the ground is now»: uDetOn is 1 + the number of times the finest cell of that grid has been halved below 230 m
+// (Terrain.update), and the fine heights are read that many levels finer. So the ground there is drawn with the
+// ridges and gorges of the fine heights, and whatever asks for lod 0 stands on that same ground. (The fine heights
+// used to be read smoothed to 230 m at any lod: over Aneto, with its square switched on, the mountain was as soft as
+// anywhere else.) From lod 1/8 up — cells of 250 m and coarser — nothing changes.
 float heightLod(vec2 ll, float lod) {
   vec2 m = merc(ll);
   float hb = textureLod(uBase, (m - uBaseRect.xy) * uBaseRect.zw, lod).r, w = detailWeight(m);
-  if (w > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + 3.)).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
+  if (w > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + 3. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
   return mix(-3200., hb, inRegion(ll));
 }
 // (The whole part of p meets only the fraction of each factor: far from the origin — and the album lies 4000 km north
@@ -51,6 +58,13 @@ vec2 hash22(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); q
 float vnoise(vec2 p) {
   vec2 i = floor(p), u = fract(p); u = u * u * (3. - 2. * u);
   return mix(mix(hashCell(i), hashCell(i + vec2(1, 0)), u.x), mix(hashCell(i + vec2(0, 1)), hashCell(i + vec2(1, 1)), u.x), u.y);
+}
+// The same noise with its slope: x = the noise, yz = how fast it changes along x and along y (per unit of p). One call
+// where a slope taken by differences needs three.
+vec3 vnoiseD(vec2 p) {
+  vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f), du = 6. * f * (1. - f);
+  float a = hashCell(i), b = hashCell(i + vec2(1, 0)), c = hashCell(i + vec2(0, 1)), d = hashCell(i + vec2(1, 1)), k = a - b - c + d;
+  return vec3(a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y, du * vec2(b - a + k * u.y, c - a + k * u.x));
 }
 float fbm(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = p * 2.03 + 17.1; a *= .5; } return s; }
 // distance to the nearest of a jittered lattice of points (x), and a random value of that point (y)

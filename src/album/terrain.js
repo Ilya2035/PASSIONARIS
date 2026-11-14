@@ -112,6 +112,21 @@ vec3 texDetail(int t, vec2 pk, float px, vec2 dx, vec2 dy) {
   if (px >= .11) return vec3(1.);
   return clamp(1. + (textureGrad(tGround, vec3(pk / 10.24 + .37, float(t)), dx / 10.24, dy / 10.24).rgb - .5) * (1.7 * smoothstep(.11, .035, px)), .55, 1.5);
 }
+// Ribs and gullies that run down a slope, along the direction d (a unit vector on the ground). A noise drawn out
+// along d and folded at its middle, so that the fold is a crease: at the larger size (ribs some 800 m apart, 50 m
+// high) the crests are sharp, at the smaller (250 m apart, 12 m) the bottoms of the gullies. A crease is what the
+// smooth height data never has, and what the eye reads as a mountain: a line where a lit face meets a shaded one.
+//   xy  the slope of this relief toward east and north (rise over run), to add to that of the ground
+//   z   its height: −1 the bottom of a gully .. 1 the crest of a rib
+// f: how much of the smaller size is still larger than a pixel.
+vec3 ribs(vec2 pk, vec2 d, float f) {
+  vec2 q = vec2(dot(pk, vec2(-d.y, d.x)), dot(pk, d));
+  vec3 a = vnoiseD(q / vec2(.42, 1.5) + 7.), b = vnoiseD(q / vec2(.14, .45) + 31.);
+  float ta = 2. * a.x - 1., tb = 2. * b.x - 1.;
+  f *= .35 + 1.3 * a.x;                                             // (the gullies gather on one flank of a rib: no two slopes alike)
+  vec2 gq = a.yz / vec2(.42, 1.5) * (-.2 * sign(ta)) + b.yz / vec2(.14, .45) * (.05 * f * sign(tb));
+  return vec3(vec2(-d.y, d.x) * gq.x + d * gq.y, (1. - 2. * abs(ta)) * .75 + (2. * abs(tb) - 1.) * .25 * f);
+}
 vec3 hypso(float h) {
   vec3 c = vec3(.62, .76, .56);
   c = mix(c, vec3(.78, .84, .60), smoothstep(100., 350., h)); c = mix(c, vec3(.90, .86, .62), smoothstep(350., 800., h));
@@ -133,16 +148,39 @@ void main() {
   float px = length(fwidth(vPos));                                  // km per pixel
   // (The step is never finer than the height data — 0.23 km a cell, 0.03 km around the showcase places. Inside one
   // cell the slope is that of the cell's own facet, and steep ground turned to rock by whole square cells.)
-  float e = clamp(px * 1.3, mix(.24, .035, detailWeight(merc(ll))), 6.);
+  float dw = detailWeight(merc(ll)), e = clamp(px * 1.3, mix(.24, .035, dw), 6.);
   float h0 = heightPix(ll), hE = heightPix(ll + vec2(0., e / (KM * cl))), hN = heightPix(ll + vec2(e / KM, 0.));
   vec2 g = vec2(hE - h0, hN - h0) / (e * 1000.);                    // rise over run toward east and north
   float slope = length(g), hl = max(h0, 0.);
   vec2 pk = vec2(lon * KM * COSREF, lat * KM);                      // flat km coordinates for patterns
-  float mk = smoothstep(.45, .05, px);                              // small relief the data cannot hold
+  // ---- the relief the height data cannot hold. The data has a point every 230 m and joins them smoothly: every
+  // mountain came out rounded, like wax that has run (the lead on Aneto and the Picos, 14.11.2026). Three things are
+  // added to the slope the light and the rock are worked out from; the height itself is not touched, so a road, a
+  // river and a house stand where they stood.
+  //   1. The forms the data does hold are sharpened: what its slope has beyond the slope of the land smoothed over
+  //      700 m is made stronger. The flanks of a ridge grow steeper toward the crest and the crest reads as a line.
+  //   2. Ribs and gullies down the fall line (ribs()), the stronger the steeper the ground. The fall line is taken
+  //      as the two of eight fixed directions nearest to it, joined smoothly — along a direction that turned freely
+  //      with the slope the pattern would shear and swirl.
+  //   3. A slight unevenness of any ground, 120 m across.
+  // Around the showcase places the fine heights hold much of this themselves, so less is added there (own).
+  // crest: how far the place stands above the land smoothed over 700 m, 1 = a sharp crest, −1 = the floor of a gully;
+  // rib: the height of the added ribs, −1 .. 1.
+  float mk = smoothstep(.45, .05, px), crest = 0., rib = 0.;
   vec2 gm = vec2(0.);
-  if (mk > 0. && h0 > 0.) { float ma = vnoise(pk / .13), mb = vnoise(pk / .43 + 9.);
-  gm = (vec2(vnoise(pk / .13 + vec2(.2, 0.)) - ma, vnoise(pk / .13 + vec2(0., .2)) - ma) * 1.3
-    + vec2(vnoise(pk / .43 + 9. + vec2(.2, 0.)) - mb, vnoise(pk / .43 + 9. + vec2(0., .2)) - mb)) * mk * (.04 + .55 * smoothstep(.15, .8, slope)); }
+  if (mk > 0. && h0 > 0.) {
+    float bC = heightLod(ll, 1.6), bE = heightLod(ll + vec2(0., .7 / (KM * cl)), 1.6), bN = heightLod(ll + vec2(.7 / KM, 0.), 1.6);
+    float own = 1. - .6 * dw, ms = smoothstep(.10, .55, slope) * mk;
+    crest = clamp((hl - max(bC, 0.)) * uExag / 180., -1., 1.) * mk;
+    g += (g - vec2(bE - bC, bN - bC) / 700.) * (.8 * uCrisp * own * smoothstep(.30, .08, px));
+    gm = vnoiseD(pk / .12 + 3.).yz * (mk * (.012 + .05 * ms));
+    if (ms > 0. && px < .22) {
+      float ang = atan(g.y, g.x) / .7853982, k = floor(ang), a0 = k * .7853982, a1 = a0 + .7853982, f = smoothstep(.07, .025, px);
+      vec3 r = mix(ribs(pk, vec2(cos(a0), sin(a0)), f), ribs(pk, vec2(cos(a1), sin(a1)), f), smoothstep(0., 1., ang - k)) * (ms * own * uCrisp * smoothstep(.22, .07, px));
+      gm += r.xy; rib = r.z;
+    }
+  }
+  float slopeD = length(g + gm);                                    // the slope with all of that: what is rock, where snow holds
   vec3 n = normalize(vec3(-(g + gm) * uExag * uShade, 1.));         // east, north, up
   vec3 up = normalize(vPos + vec3(0., RKM, 0.));
   float dl = radians(lon - LON0);
@@ -183,31 +221,26 @@ void main() {
     float hollow = clamp(conc, 0., 1.), north = -g.y / (slope + .12);
     float wet = albumWetOf(clim, hl, n1) + north * .05 + hollow * .07 - ridge * .05;
     // (in a wet land grass and scrub hold on a slope that would be bare rock in a dry one)
-    float humid = smoothstep(.45, .8, wet), treeline = albumTreeline(n1), steep = smoothstep(.40 + .12 * humid, .82 + .14 * humid, slope);
+    float humid = smoothstep(.45, .8, wet), treeline = albumTreeline(n1), steep = smoothstep(.55 + .22 * humid, 1.0 + .25 * humid, slopeD);
     p.n1 = n1; p.n2 = n2; p.n3 = n3; p.wet = wet;
     Land L; L.gloss = 0.;
     L.cover = forestCover(p);
 
     // bare ground: soil and low growth by the climate (aspects/ground.js), rock on steep slopes and summits, sand at the shore
-    float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + ridge * .25 * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
+    float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + (ridge * .15 + max(crest, 0.) * .45) * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
     float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
     vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk);
     if (rockW > .004) {
       float rk = vnoise(pk / 2.3 + 3.), rk2 = vnoise(pk / 9. + 17.);
-      vec3 rockCol = mix(vec3(.44, .42, .40), vec3(.61, .59, .56), n2);                                              // grey limestone and granite
+      vec3 rockCol = mix(vec3(.47, .45, .43), vec3(.66, .64, .61), n2);                                              // grey limestone and granite
       rockCol = mix(rockCol, vec3(.62, .52, .38), smoothstep(.55, .8, rk2) * .4);                                   // ochre limestone
       rockCol = mix(rockCol, vec3(.52, .34, .27), smoothstep(.62, .9, rk) * smoothstep(.3, .6, rk2) * .5);           // red sandstone
       rockCol = mix(rockCol, vec3(.29, .30, .33), smoothstep(.35, .1, rk2) * .45);                                  // dark slate
-      rockCol *= .86 + .24 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px);                          // beds of rock
-      // Gullies and scree run down the slope: a noise drawn out along the fall line. The fall line is taken as the two
-      // of eight fixed directions nearest to it, joined smoothly — along a direction that turned freely with the slope
-      // the pattern would shear and swirl.
-      if (px < .1 && slope > .2) {
-        float ang = atan(g.y, g.x) / .7853982, k = floor(ang), a0 = k * .7853982, a1 = a0 + .7853982;
-        vec2 d0 = vec2(cos(a0), sin(a0)), d1 = vec2(cos(a1), sin(a1));
-        float gul = mix(vnoise(vec2(dot(pk, vec2(-d0.y, d0.x)), dot(pk, d0)) / vec2(.07, .9) + 7.), vnoise(vec2(dot(pk, vec2(-d1.y, d1.x)), dot(pk, d1)) / vec2(.07, .9) + 7.), smoothstep(0., 1., ang - k)) - .5;
-        rockCol *= 1. + gul * .8 * smoothstep(.1, .03, px) * smoothstep(.2, .55, slope);
-      }
+      // Solid rock stands in walls and on crests, and lies in beds. Below the walls and down the gullies lies what
+      // fell from them — scree: paler, even, at the slope it comes to rest at. (The streaks down a wall are the ribs
+      // and gullies of the relief above, lit by the sun; they used to be painted on, all alike.)
+      float solid = smoothstep(.55, 1.05, slopeD + crest * .25 + rib * .15);
+      rockCol *= mix(1.17, .84 + .24 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px), solid) * (1. - rib * .12);
       rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .34 * smoothstep(.3, .6, wet));          // lichen and moss
       rockCol = mix(rockCol, vec3(.60, .51, .38) * (.9 + .2 * n2), (1. - smoothstep(.14, .40, wet)) * .65);           // the sun-bleached rock of dry country
       ground = mix(ground, rockCol, rockW);
@@ -379,13 +412,18 @@ export class Terrain {
     air.position.set(0, -R, 0); air.frustumCulled = false; scene.add(air);
     scene.background = new Color(0x02040a);
   }
+  // uDetOn: 0 no fine heights; with them, 1 + how many times the finest cell of the grid is halved below 230 m
+  // (heightLod() in glsl.js reads the fine heights that much finer)
   setDetail(d) {
+    this.detail = !!d;
     if (!d) { this.u.uDetOn.value = 0; return; }
-    this.u.uDet.value = d.tex; this.u.uDetRect.value.set(...d.rect); this.u.uDetOn.value = 1;
+    this.u.uDet.value = d.tex; this.u.uDetRect.value.set(...d.rect); this.u.uDetOn.value = 1 + (this.fine || 0);
   }
   // re-centres the levels on the camera target; cell sizes are powers of two, so the grid never swims
   update(s) {
     const c0 = 2 ** Math.round(Math.log2(Math.max(.03, Math.min(6, s.h * .0042))));
+    this.fine = Math.max(0, Math.min(3, -Math.log2(c0 / .234)));
+    if (this.detail) this.u.uDetOn.value = 1 + this.fine;
     let fine = null;
     for (let l = 0; l < LEVELS; l++) {
       const c = c0 * 2 ** l, u = this.levels[l].material.uniforms, sLat = 2 * c / KM_PER_DEG, sLon = 2 * c / (KM_PER_DEG * COS_REF);

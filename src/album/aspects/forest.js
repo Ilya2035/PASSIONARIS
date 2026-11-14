@@ -129,7 +129,7 @@ export const FOREST_RULES = /* glsl */`
 float albumTreeline(float n1) { return gTreeline + (n1 - .5) * 260.; }
 // share of the ground under trees before patchiness: closed forest where wet, open woodland where dry
 float albumForestShare(float wet, float hl, float slope, float n1) {
-  float steep = smoothstep(.40, .82, slope), tl = albumTreeline(n1);
+  float steep = smoothstep(.62, 1.05, slope), tl = albumTreeline(n1);
   float fc = smoothstep(.34, .58, wet) * (1. - smoothstep(tl - 180., tl + 40., hl)) * (1. - steep);
   return max(fc, smoothstep(.20, .34, wet) * .38 * (1. - steep) * (1. - smoothstep(tl - 650., tl - 250., hl)));
 }
@@ -240,6 +240,11 @@ float forestKeep(float farm, float pat, float px, vec2 people, float wet) {
   float seen = people.y >= .12 ? 1. : mix(smoothstep(.075, .045, px), 1., smoothstep(.03, .12, people.y));
   return (1. - smoothstep(.04, .2, farm * (.45 + 1.1 * pat)) * seen) * (1. - smoothstep(.04, .25, people.x)) * albumClosure(wet);
 }
+// On steep ground a wood opens up: single trees on the ledges among the rock, none on a wall. The slope is that of
+// the pixel (its normal), with the ribs and gullies the height data cannot hold: the wood runs up the gullies and
+// leaves the ribs bare. (A wood used to end on a line of the smooth slope of the data — a grey oval of rock with a
+// crisp rim in the middle of the forest, like a sticker.)
+float forestSteep(vec3 n) { return 1. - .92 * smoothstep(.80, 1.35, length(n.xy) / (max(n.z, .05) * uExag * uShade)); }
 // The stand at another point near this one — a step toward the sun, or where the eye sees the top of the canopy. The
 // patch noise is asked again there; the own noises of the felling order are taken as they are here, which is close
 // enough over a fifth of a km. (Reading the change off the screen with dFdx was tried: at close range it speckles
@@ -257,11 +262,11 @@ float forestCover(Px p) {
   if (have < .999 && have > .001 && fFade > 0.) fOwn = albumOrderOwn(p.pk, p.px);
   fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade, albumSoft(p.px));
   fFarm = 0.; if (fStand.x > .003) fFarm = setFarm(p.pk);
-  return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet);
+  return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);
 }
 
 void aspForest(Px p, inout Land L) {
-  float px = p.px, dens = L.cover, have = p.cA.r, fc = fFc, own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet); vec2 pk = p.pk;   // own: what forestCover() answered, before the swamp and the fields
+  float px = p.px, dens = L.cover, have = p.cA.r, fc = fFc, own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n); vec2 pk = p.pk;   // own: what forestCover() answered, before the swamp and the fields
   if (fc < .003 && dens < .003) return;                              // nothing grows here: too dry, too steep, too high
 
   // ---- felled ground: where the natural forest of the chunk no longer stands. Pale grass and stumps; bare earth and
@@ -279,7 +284,7 @@ void aspForest(Px p, inout Land L) {
 
   // ---- the same question a step toward the sun: a lit rim and cast shade
   // (an edge is near: the margin of the stand itself, or the fields of a clearing)
-  float coverS = dens, edgy = step(.02, have) * max(step(abs(fStand.y), .34), step(.004, fFarm) * step(fFarm, .5)), part = own > .001 ? min(dens / own, 1.) : 1.;
+  float coverS = dens, edgy = step(.02, have) * max(step(abs(fStand.y), .34), step(.004, fFarm) * step(fFarm, .5)), part = (own > .001 ? min(dens / own, 1.) : 1.) * forestSteep(p.n);   // (the stand a step away is taken on the slope of this place)
   if (px < .7 && edgy > 0.) coverS = mix(dens, forestNear(pk + p.sd * .22, fFarm, px, have, p.cC.rg, p.wet) * part, smoothstep(.7, .4, px));   // (the fields as they are here: near enough)
   // ---- the canopy has height. Seen at a slant, its top lies toward the eye from the ground it stands on: it hides
   // the ground behind the far edge of a wood, and at the near edge the flank of the wood shows under it. hc: the

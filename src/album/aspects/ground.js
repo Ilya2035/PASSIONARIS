@@ -18,7 +18,7 @@
 // every weight is counted first, while no colour is held yet; then the colour is built one layer at a time, each layer
 // used up at once; the grain of the ground is laid on by the ground shader afterwards. Keep it that way.
 const GLSL = /* glsl */`
-uniform float uDryK, uGrainK;
+uniform float uDryK, uGrainK, uCrisp;   // uCrisp: how much relief is added to what the height data holds (terrain.js)
 // nz: the shared noises of 38, 7 and 1 km; wet, px, hl, slope, pk: as in Px (the wetness already knows the slope and
 // the hollow); summer: 0 a summer without water .. 1 a green one (albumClimate().a)
 vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk) {
@@ -73,10 +73,11 @@ const PLAIN = { towns: 0, labels: 0, roadsOn: 0 };
 export default {
   id: 'ground', title: 'Земля',
   glsl: GLSL,
-  uniforms: { uDryK: { value: 1 }, uGrainK: { value: 1 } },
+  uniforms: { uDryK: { value: 1 }, uGrainK: { value: 1 }, uCrisp: { value: 1 } },
   params: [
     { key: 'dry', label: 'Сухие земли и пустыни', group: 'land', min: .6, max: 1.6, step: .05, value: 1, unit: '×', uniform: 'uDryK' },
     { key: 'grain', label: 'Зерно земли', group: 'land', min: 0, max: 1.6, step: .05, value: 1, unit: '×', uniform: 'uGrainK' },
+    { key: 'crisp', label: 'Резкость гор', group: 'land', min: 0, max: 1.6, step: .05, value: 1, unit: '×', uniform: 'uCrisp' },
   ],
   pages: [
     { id: 'ground-meseta', group: G, title: 'Месета у Мадрида с 20 км', note: 'Сухая степь: выгоревшая трава, пятна кустарника, редкие дубравы на северных склонах и в низинах. Лес к северу, на склонах Гвадаррамы.', p: PLAIN, cam: cam(40.05, -3.55, 20) },

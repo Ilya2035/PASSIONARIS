@@ -118,7 +118,7 @@ test('forest aspect: pages of the group «Лес», knobs, and the rules in GLSL
   // the contract and what other files take from the rules
   for (const f of ['float forestCover(Px p)', 'void aspForest(Px p, inout Land L)']) assert.ok(forest.glsl.includes(f), f);
   // no forest in the fields: the canopy asks the state of the chunk of 1 km² (setFarm of the settlements) and the built share
-  assert.ok(forest.glsl.includes('fFarm = 0.; if (fStand.x > .003) fFarm = setFarm(p.pk);') && forest.glsl.includes('return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet);') && /float forestKeep\(float farm, float pat, float px, vec2 people, float wet\)[^}]*people\.x/.test(forest.glsl), 'the forest keeps off ploughed and built land');
+  assert.ok(forest.glsl.includes('fFarm = 0.; if (fStand.x > .003) fFarm = setFarm(p.pk);') && forest.glsl.includes('return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);') && /float forestKeep\(float farm, float pat, float px, vec2 people, float wet\)[^}]*people\.x/.test(forest.glsl), 'the forest keeps off ploughed and built land');
   for (const f of ['float albumClosure(float wet)', 'gTreeline', 'gRise']) assert.ok(FOREST_RULES.includes(f) || forest.glsl.includes(f), f);
   for (const f of ['float albumTreeline(float n1)', 'float albumForestShare(', 'vec2 albumStand(', 'float albumConifer(', 'float albumAge(', 'vec3 albumForestTint(']) assert.ok(FOREST_RULES.includes(f), f);
   // words GLSL ES 3.0 keeps for itself must not be used as names (a shader with one does not compile)
@@ -137,4 +137,11 @@ test('no trees stand on the land: the forest is painted, and the height of the c
 test('forest canopy: the tone of a large tuft fades toward its rim, so the cells of the tufts are not seen as polygons', () => {
   const src = readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
   assert.ok(src.includes('tone = mix(tone, w.w, min(a, 1.2) * .5 * smoothstep(.62, .25, w.z));'));
+});
+
+test('forest on steep ground: the wood opens up into single trees instead of ending on a line', () => {
+  const src = readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
+  assert.ok(/float forestSteep\(vec3 n\) \{ return 1\. - \.92 \* smoothstep\(/.test(src), 'by the slope of the pixel, with the ribs of the relief');
+  assert.ok(src.includes('own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);'), 'the forest aspect counts its own cover the same way');
+  assert.ok(src.includes('part = (own > .001 ? min(dens / own, 1.) : 1.) * forestSteep(p.n);'), 'and the stand a step away, so no false rim appears on a slope');
 });

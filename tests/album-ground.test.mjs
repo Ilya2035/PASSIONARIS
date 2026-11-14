@@ -179,3 +179,25 @@ test('ground shader: the edge of the snow is crisp, follows the small relief and
   assert.ok(terrain.includes('float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 260.)'), 'the slope with the small relief of the pixel');
   assert.ok(!terrain.includes('smoothstep(snowline - 90., snowline + 110.'), 'not the band of 200 m: the snow lay like cotton wool');
 });
+
+test('mountains: relief the height data cannot hold is added to the slope, never to the height', () => {
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
+  const glsl = fs.readFileSync(new URL('../src/album/glsl.js', import.meta.url), 'utf8');
+  const vert = terrain.slice(terrain.indexOf('const VERT'), terrain.indexOf('const FRAG_SRC'));
+  assert.ok(!vert.includes('ribs(') && !vert.includes('vnoise'), 'the grid of the ground is lifted by the height data alone: roads and houses stand on it');
+  assert.ok(glsl.includes('vec3 vnoiseD(vec2 p) {'), 'a noise that gives its slope in one call');
+  assert.ok(terrain.includes('vec3 ribs(vec2 pk, vec2 d, float f) {'), 'ribs and gullies down the fall line');
+  assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / 700.) * (.8 * uCrisp * own * smoothstep('), 'the forms of the data are sharpened against the land smoothed over 700 m');
+  assert.ok(terrain.includes('float slopeD = length(g + gm);'), 'the slope with the added relief');
+  assert.ok(/steep = smoothstep\([^;]*slopeD\);/.test(terrain), 'rock goes by the slope of the pixel, with its ribs');
+  assert.ok(terrain.includes('float solid = smoothstep(.55, 1.05, slopeD + crest * .25 + rib * .15);'), 'solid rock on walls and crests, scree below them');
+  assert.ok(!terrain.includes('float gul = '), 'no streaks painted on the rock: they are the ribs, lit by the sun');
+});
+
+test('mountains: the fine heights of a showcase place are in the grid of the ground itself', () => {
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
+  const glsl = fs.readFileSync(new URL('../src/album/glsl.js', import.meta.url), 'utf8');
+  assert.ok(glsl.includes('max(0., lod + 3. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))'), 'lod 0 reads the fine heights as fine as the grid is; from cells of 250 m up nothing changes');
+  assert.ok(terrain.includes('this.fine = Math.max(0, Math.min(3, -Math.log2(c0 / .234)));') && terrain.includes('if (this.detail) this.u.uDetOn.value = 1 + this.fine;'), 'uDetOn carries how fine the grid is');
+  assert.ok(glsl.includes('if (uDetOn < .5) return 0.;'), 'and still says whether there are fine heights at all');
+});
