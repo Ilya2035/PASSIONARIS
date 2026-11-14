@@ -87,7 +87,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T),
     uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: minPx }, uColour: { value: new Color(colour) }, uDash: { value: dash }, uLift: { value: lift }, uAlpha: { value: 1 },
-    uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uWoods: { value: ground ? woods : 0 }, uRideCol: { value: new Color(rideColour) }, uNear: { value: 1 }, ...(ground ? album.chunks.uniforms : {}),
+    uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uDim: { value: .5 }, uWoods: { value: ground ? woods : 0 }, uRideCol: { value: new Color(rideColour) }, uNear: { value: 1 }, ...(ground ? album.chunks.uniforms : {}),
     // (albumWet() of glsl.js may read the baked climate: the ground shader brings these two for it, when it has them)
     ...(ground && T.tClimate ? { tClimate: T.tClimate, uClimRect: T.uClimRect } : {}) };
   const mat = ground ? new ShaderMaterial({
@@ -116,7 +116,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
       ${CHUNK_GLSL}
       ${LIGHT}
       ${GROUND_LIGHT}
-      uniform vec3 uColour, uVergeCol, uRideCol; uniform float uDash, uAlpha, uVerge, uVergeA, uSea, uWoods, uNear; varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
+      uniform vec3 uColour, uVergeCol, uRideCol; uniform float uDash, uAlpha, uVerge, uVergeA, uSea, uWoods, uNear, uDim; varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
       void main() {
         float pk = max(fwidth(vX), 1e-7), x = abs(vX) / pk, hw = vRoad / pk, px = length(fwidth(vWorld));       // this pixel across the road, km; from the middle of the road, pixels; half the road, pixels
         float core = clamp(hw + .5 - x, 0., 1.) - clamp(.5 - hw - x, 0., 1.);                                    // how much of the pixel the road covers
@@ -136,9 +136,9 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float reach = hw * mix(1. + (uVerge - 1.) * .55, uVerge, woods);
         float verge = strip * (1. - smoothstep(hw, reach, x)) * min(1., uVergeA * (1. + .8 * woods));
         float dim = woods * (1. - .55 * strip);                                                                   // (on its ride the road is still a little darker than in the open)
-        float cover = core + verge * (1. - core), a = cover * fade * (1. - .22 * dim);
+        float cover = core + verge * (1. - core), a = cover * fade * (1. - .44 * uDim * dim);
         if (a < .004) discard;
-        vec3 seen = mix(mix(uVergeCol, uRideCol, woods), uColour * (1. - .5 * dim) * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5))), core / max(cover, 1e-4));
+        vec3 seen = mix(mix(uVergeCol, uRideCol, woods), uColour * (1. - uDim * dim) * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5))), core / max(cover, 1e-4));
         vec3 col = uStyle == 2 || uStyle == 3 || uStyle == 6 ? mix(pow(seen * (.35 + .65 * albumDay()), vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld))
           : albumFinish(albumAir(seen * groundLight(vLL, px), vWorld));
         gl_FragColor = vec4(col, a);

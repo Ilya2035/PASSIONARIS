@@ -12,6 +12,8 @@
 //     is led from the centre of a district on one side over that very point to the centre of a district on the other
 //     side, whatever it costs. The two need not be neighbours: the valley that leads up to a pass is often the edge
 //     of two districts, with their centres in other valleys, and the road of the pass keeps to its own valley.
+//   • A leg that climbs is then laid once more with a step of 200 m, on the floor of its valley and with the bends
+//     of a mountain road (roads/shape.js). The legs of the plains stay as they are.
 //   • MAIN roads (kind 0): first the great roads of history (roads/historic.js), town after town; then the town of
 //     every province is joined with the towns of the provinces next to it — unless the main roads already laid lead
 //     there almost as fast. A new main road likes to run along one that is there: roads gather into trunks.
@@ -26,6 +28,7 @@ import { kmOf, llOf } from '../chunks.js';
 import { KN as FN, KKM as FKM } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { HISTORIC } from './historic.js';
+import { shapeLegs, finePoints, fineSteps, thin, cellXY, DIRS, FW } from './shape.js';
 
 const X0 = -880, Y0 = 3880, LAND = 0;
 export const STEEP = [28, 520];                    // a slope s (rise over run) makes a step 1 + 28 s + 520 s² times dearer
@@ -41,8 +44,9 @@ export const POOR = 2.1;                           // a leg that costs this many
 // with the centres of two districts no farther than `reach` km from it; of two ways about as cheap, the one between
 // the nearer centres is taken: every km from the pass to a centre counts as `keep` km of way more; and where the way
 // to a centre passes another centre within `by` km, the leg ends there: the road goes through that town, not past it
-export const PASS = { rise: 120, reach: 40, keep: 1.2, by: 2 };
-export const NET_ALGO = 5;                         // changes whenever the rules above do: a kept network of another number is laid anew
+// (top: where a leg was shaped, a pass of history is the highest point of the fine way within this many km of its point)
+export const PASS = { rise: 120, reach: 40, keep: 1.2, by: 2, top: 1 };
+export const NET_ALGO = 6;                         // changes whenever the rules above do: a kept network of another number is laid anew
 const NB = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
 const texelOf = (x, y) => { const tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FN ? -1 : ty * FN + tx; };
 const xyOf = t => [X0 + (t % FN + .5) * FKM, Y0 + (Math.floor(t / FN) + .5) * FKM];
@@ -124,13 +128,14 @@ export function provinceTowns(div, centres, places = []) {
   return cap;
 }
 
-// the points of a line: the chunks of its legs one after another, from district `from` on, through the centres
+// the points of a line: the chunks of its legs one after another (the fine cells of a leg that was shaped), from
+// district `from` on, through the centres
 export function linePoints(legs, centres, run, from) {
   const pts = []; let at = from;
   for (const i of run) {
-    const L = legs[i], fw = L.a === at, path = L.path, n = path.length, to = fw ? L.b : L.a;
+    const L = legs[i], fw = L.a === at, path = L.path, way = L.fine ? finePoints(L, centres) : null, n = way ? way.length : path.length, to = fw ? L.b : L.a;
     if (!pts.length) pts.push([centres.x[at], centres.y[at]]);
-    for (let j = 1; j < n - 1; j++) pts.push(xyOf(path[fw ? j : n - 1 - j]));
+    for (let j = 1; j < n - 1; j++) { const k = fw ? j : n - 1 - j; pts.push(way ? way[k] : xyOf(path[k])); }
     pts.push([centres.x[to], centres.y[to]]); at = to;
   }
   return pts;
@@ -208,7 +213,7 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
     const a = Math.min(x, y), b = Math.max(x, y), k = a * 65536 + b;
     const path = walk(centres.texel[a]).concat(walk(centres.texel[b]).slice(0, -1).reverse()); let km = 0;
     for (let j = 1; j < path.length; j++) { const e = Math.abs(path[j] - path[j - 1]); km += (e === 1 || e === FN ? 1 : 1.4142) * FKM; }
-    const L = { a, b, cost: G.g[centres.texel[a]] + G.g[centres.texel[b]], km, path, crossings: crossingsOf(G, path), kind: 3, pass: { name: P[2], t } };
+    const L = { a, b, cost: G.g[centres.texel[a]] + G.g[centres.texel[b]], km, path, crossings: crossingsOf(G, path), kind: 3, pass: { name: P[2], t, x: px, y: py } };
     let i = pairLeg.get(k); if (i === undefined) { i = legs.length; legs.push(L); of[a].push(i); of[b].push(i); pairLeg.set(k, i); } else { L.kind = legs[i].kind; legs[i] = L; }
     return { i, x, y };
   };
@@ -274,21 +279,29 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
     for (const i of mine) { if (seen.has(i)) continue; const L = legs[i]; if (at.get(L.a).length !== 2) walk(i, L.a); else if (at.get(L.b).length !== 2) walk(i, L.b); }
     for (const i of mine) if (!seen.has(i)) walk(i, legs[i].a);    // rings
   }
-  for (const l of lines) l.pts = linePoints(legs, centres, l.legs, l.start);      // a leg may have taken the way over a pass after its line was laid
-  return finishNet(div, centres, legs, lines, capitals, { hard, links: laidLinks }, passesOf(G, legs));
+  // ---- the legs that climb are shaped: a step of 200 m, the real rivers, the bends of a mountain road
+  const heightAt = opts.heightAt === undefined ? div.raster.heightAt : opts.heightAt, shaped = heightAt ? shapeLegs(G, legs, centres, heightAt, opts.courses || null, llOf) : 0;
+  for (const l of lines) l.pts = linePoints(legs, centres, l.legs, l.start);
+  return finishNet(div, centres, legs, lines, capitals, { hard, links: laidLinks, shaped }, passesOf(G, legs, heightAt));
 }
 // The passes of the network: for every leg that is a road, the highest point of its way where that stands PASS.rise
 // metres over both its ends (the leg crosses a crest between its two districts); for a leg led over a pass of
-// history, that pass. → [{ x, y (flat km), h (metres), name ('' unless a pass of history), kind (of the road: 0 main,
+// history, that pass. A leg that was shaped is measured along its fine way, by heightAt(lat, lon).
+// → [{ x, y (flat km), h (metres), name ('' unless a pass of history), kind (of the road: 0 main,
 // 1 lesser, 2 track), a, b (the districts on both sides), rank (0 a pass of history, 1 of a main road, 2 other), leg }]
-export function passesOf(G, legs) {
-  const out = [];
+export function passesOf(G, legs, heightAt = null) {
+  const out = [], hOf = c => { const q = cellXY(c), g = llOf(q[0], q[1]); return heightAt(g.lat, g.lon); };
   legs.forEach((L, i) => {
     if (L.kind === 3 || !L.path) return;
-    const p = L.path, n = p.length; let top = -1, h = -Infinity;
-    if (L.pass) { top = p.indexOf(L.pass.t); h = G.hgt[L.pass.t]; }
-    else { for (let j = 1; j < n - 1; j++) if (G.hgt[p[j]] > h) { h = G.hgt[p[j]]; top = j; } if (top < 0 || h - Math.max(G.hgt[p[0]], G.hgt[p[n - 1]]) < PASS.rise) return; }
-    const [x, y] = xyOf(p[top]); out.push({ x, y, h: Math.round(h), name: L.pass ? L.pass.name : '', kind: L.kind, a: L.a, b: L.b, rank: L.pass ? 0 : L.kind === 0 ? 1 : 2, leg: i });
+    const fine = heightAt && L.fine ? L.fine : null, p = fine || L.path, n = p.length, hAt = fine ? hOf : t => G.hgt[t]; let top = -1, h = -Infinity;
+    if (L.pass && fine) {                                         // the top of the fine way by the point of the pass; failing that, its cell nearest to the point
+      let near = -1, least = Infinity;
+      for (let j = 0; j < n; j++) { const q = cellXY(p[j]), far = Math.hypot(q[0] - L.pass.x, q[1] - L.pass.y); if (far < least) { least = far; near = j; } if (far <= PASS.top) { const v = hAt(p[j]); if (v > h) { h = v; top = j; } } }
+      if (top < 0) { top = near; h = hAt(p[top]); }
+    }
+    else if (L.pass) { top = p.indexOf(L.pass.t); if (top < 0) return; h = hAt(p[top]); }
+    else { for (let j = 1; j < n - 1; j++) { const v = hAt(p[j]); if (v > h) { h = v; top = j; } } if (top < 0 || h - Math.max(hAt(p[0]), hAt(p[n - 1])) < PASS.rise) return; }
+    const [x, y] = fine ? cellXY(p[top]) : xyOf(p[top]); out.push({ x, y, h: Math.round(h), name: L.pass ? L.pass.name : '', kind: L.kind, a: L.a, b: L.b, rank: L.pass ? 0 : L.kind === 0 ? 1 : 2, leg: i });
   });
   return out.sort((p, q) => p.rank - q.rank || q.h - p.h || p.leg - q.leg);
 }
@@ -298,14 +311,15 @@ function finishNet(div, centres, legs, lines, capitals, extra, passes = []) {
   for (const L of legs) { if (L.kind === 3) continue; on[L.a] = on[L.b] = 1; km[L.kind] += L.km; num[L.kind]++; for (const t of L.crossings) crossings.push(xyOf(t)); }
   let unreached = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND && centres.texel[d] >= 0 && !on[d]) unreached++;
   let caps = 0; for (const d of capitals) if (d >= 0) caps++;
-  return { lines, legs, crossings, capitals, passes, stats: { legs: legs.length, hard: extra.hard, main: num[0], lesser: num[1], track: num[2], km: km.map(Math.round), crossings: crossings.length, unreached, capitals: caps, links: extra.links, passes: [0, 1, 2].map(r => passes.filter(p => p.rank === r).length) } };
+  return { lines, legs, crossings, capitals, passes, stats: { legs: legs.length, hard: extra.hard, main: num[0], lesser: num[1], track: num[2], km: km.map(Math.round), crossings: crossings.length, unreached, capitals: caps, links: extra.links, shaped: extra.shaped || 0, passes: [0, 1, 2].map(r => passes.filter(p => p.rank === r).length) } };
 }
 
-// a line of the network as the ribbons want it: the steps of the texels ironed out, [[lon, lat] …]
+// a line of the network as the ribbons want it: the steps of the texels ironed out, the points that lie on a straight
+// between their neighbours dropped (a shaped leg comes with a point every 200 m), [[lon, lat] …]
 export function roadLine(pts) {
   let p = pts;
   for (let it = 0; it < 2 && p.length > 3; it++) p = p.map((v, i) => (i === 0 || i === p.length - 1 ? v : [(p[i - 1][0] + 2 * v[0] + p[i + 1][0]) / 4, (p[i - 1][1] + 2 * v[1] + p[i + 1][1]) / 4]));
-  return p.map(([x, y]) => { const q = llOf(x, y); return [q.lon, q.lat]; });
+  return thin(p).map(([x, y]) => { const q = llOf(x, y); return [q.lon, q.lat]; });
 }
 
 // ---- the network kept in a file (public/assets/album/roads/roads.bin.gz), so that the page does not lay it at every
@@ -314,7 +328,9 @@ export function roadLine(pts) {
 //            lines: [[kind, start district, name or 0, leg, leg …] …], names: [of roads and passes],
 //            passes: [[leg, x · 100, y · 100, metres, name or 0] …] }
 //   body   leg after leg: u16 a, u16 b, u8 kind, f32 cost, f32 km; then for every leg that is a road its path:
-//          u16 steps, then the steps as bytes 0..7 (NB above), from the centre of a to the centre of b
+//          u16 steps, then the steps as bytes 0..7 (NB above), from the centre of a to the centre of b; then its
+//          fine way: u16 steps (0: the leg was not shaped), and for a shaped leg u16 i, u16 j of its first fine
+//          cell and the steps as bytes 0..15 (DIRS of roads/shape.js)
 // The file is good for one division only: the districts as they are numbered, their centres where they stand, the
 // towns of the provinces (places: the list they are chosen from, as roadNetwork() takes it).
 export function netSignature(div, centres, capitals = []) {
@@ -328,7 +344,7 @@ export function encodeNet(net, div, centres) {
   const legs = net.legs, names = [], nameOf = n => (n ? (names.includes(n) ? names.indexOf(n) : names.push(n) - 1) + 1 : 0), head = { v: 1, algo: NET_ALGO, sig: netSignature(div, centres, net.capitals), districts: div.count, legs: legs.length, hard: net.stats.hard, links: net.stats.links, capitals: Array.from(net.capitals),
     lines: net.lines.map(l => [l.kind, l.start, nameOf(l.name), ...l.legs]), passes: (net.passes || []).map(q => [q.leg, Math.round(q.x * 100), Math.round(q.y * 100), q.h, nameOf(q.name)]), names };
   const hb = new TextEncoder().encode(JSON.stringify(head)); let size = 4 + hb.length + legs.length * 13;
-  for (const L of legs) if (L.kind !== 3) size += 2 + L.path.length - 1;
+  for (const L of legs) if (L.kind !== 3) size += 2 + L.path.length - 1 + 2 + (L.fine ? 4 + L.fine.length - 1 : 0);
   const buf = new ArrayBuffer(size), dv = new DataView(buf); dv.setUint32(0, hb.length, true); new Uint8Array(buf, 4, hb.length).set(hb);
   let o = 4 + hb.length;
   for (const L of legs) { dv.setUint16(o, L.a, true); dv.setUint16(o + 2, L.b, true); dv.setUint8(o + 4, L.kind); dv.setFloat32(o + 5, L.cost, true); dv.setFloat32(o + 9, L.km, true); o += 13; }
@@ -336,6 +352,9 @@ export function encodeNet(net, div, centres) {
     if (L.kind === 3) continue;
     dv.setUint16(o, L.path.length - 1, true); o += 2;
     for (let j = 1; j < L.path.length; j++) { const dx = L.path[j] % FN - L.path[j - 1] % FN, dy = Math.floor(L.path[j] / FN) - Math.floor(L.path[j - 1] / FN); let q = 0; while (q < 8 && (NB[q * 2] !== dx || NB[q * 2 + 1] !== dy)) q++; dv.setUint8(o++, q); }
+    if (!L.fine) { dv.setUint16(o, 0, true); o += 2; continue; }
+    dv.setUint16(o, L.fine.length - 1, true); dv.setUint16(o + 2, L.fine[0] % FW, true); dv.setUint16(o + 4, Math.floor(L.fine[0] / FW), true); o += 6;
+    new Uint8Array(buf, o, L.fine.length - 1).set(fineSteps(L.fine)); o += L.fine.length - 1;
   }
   return buf;
 }
@@ -353,11 +372,15 @@ export function decodeNet(buf, div, centres, places = [], G = { riv: div.raster.
       const n = dv.getUint16(o, true); o += 2; const path = [centres.texel[L.a]];
       for (let j = 0; j < n; j++) { const q = dv.getUint8(o++), t = path[j]; path.push(t + NB[q * 2] + NB[q * 2 + 1] * FN); }
       if (path[n] !== centres.texel[L.b]) return null;
-      L.path = path; L.crossings = crossingsOf(G, path);
+      L.path = path; L.crossings = crossingsOf(G, path); L.fine = null;
+      const m = dv.getUint16(o, true); o += 2; if (!m) continue;
+      const fine = new Int32Array(m + 1); fine[0] = dv.getUint16(o + 2, true) * FW + dv.getUint16(o, true); o += 4;
+      for (let j = 0; j < m; j++) { const d = DIRS[dv.getUint8(o++)]; fine[j + 1] = fine[j] + d[0] + d[1] * FW; }
+      L.fine = fine;
     }
     const lines = head.lines.map(([kind, start, name, ...run]) => ({ kind, pts: linePoints(legs, centres, run, start), legs: run, start, ...(name ? { name: head.names[name - 1] } : {}) }));
     const passes = (head.passes || []).map(([leg, x, y, h, name]) => { const L = legs[leg]; return { x: x / 100, y: y / 100, h, name: name ? head.names[name - 1] : '', kind: L.kind, a: L.a, b: L.b, rank: name ? 0 : L.kind === 0 ? 1 : 2, leg }; });
-    for (const q of passes) if (q.rank === 0) legs[q.leg].pass = { name: q.name, t: texelOf(q.x, q.y) };
-    return finishNet(div, centres, legs, lines, Int32Array.from(head.capitals), { hard: head.hard, links: head.links }, passes);
+    for (const q of passes) if (q.rank === 0) legs[q.leg].pass = { name: q.name, t: texelOf(q.x, q.y), x: q.x, y: q.y };
+    return finishNet(div, centres, legs, lines, Int32Array.from(head.capitals), { hard: head.hard, links: head.links, shaped: legs.filter(L => L.fine).length }, passes);
   } catch { return null; }
 }

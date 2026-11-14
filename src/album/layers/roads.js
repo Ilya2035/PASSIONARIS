@@ -42,6 +42,8 @@ const VERGE = { verge: 3.4, vergeColour: 0x77714a, vergeAlpha: .42, rideColour: 
 // a bridge by the kind of its road: stone on a main road, timber on a lesser one (a track has none)
 const DECK = [{ light: 0xa2957f, ink: 0x3a2a1c, look: 1 }, { light: 0x8a6f4c, ink: 0x4a3622, look: 2 }];
 const DECK_RIM = { verge: 1.82, vergeColour: 0x3a342b, vergeAlpha: .8 };     // the parapets and the shade of the deck on the water
+// how much darker a road is in the woods: near the ground, from high up; between which sizes of a pixel (km) the one gives way to the other (60 and 110 km of height)
+export const WOODS_DIM = [.3, .5], WOODS_NEAR = [.04, .07];
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const setOf = l => (l.kind === 0 ? (l.name ? 0 : 1) : l.kind + 1);
 
@@ -97,8 +99,8 @@ export default async function init(album) {
     const founded = new Map((towns()?.towns || []).map(t => [t.index, t]));
     const places = album.data.vectors.places.map((pl, i) => { const t = founded.get(i); return t ? { ...llOf(t.x, t.y), pop: pl.pop } : pl; });
     let from = 'from the file'; net = file ? decodeNet(file, div, div.centres, places) : null;
-    if (!net) { from = file ? 'laid anew — the file is for another division: node scripts/album/bake-roads.mjs' : 'laid now, no file'; net = roadNetwork(div, div.centres, places); }
-    // every line as the ribbons draw it: the steps of the chunks ironed out, in flat km
+    if (!net) { from = file ? 'laid anew — the file is for another division: node scripts/album/bake-roads.mjs' : 'laid now, no file'; net = roadNetwork(div, div.centres, places, undefined, { heightAt: album.terrain?.heightAt || div.raster.heightAt, courses: album.data.courses || null }); }
+    // every line as the ribbons draw it: the steps of the chunks ironed out, the points on a straight dropped, in flat km
     drawn = net.lines.map(l => ({ set: setOf(l), kind: l.kind, km: smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0])) }));
     fords = album.data.courses ? squareBridges(drawn, riverCrossings(drawn, album.data.courses)) : [];   // a bridge stands square across its river, the road turns to it
     near = null; version++;
@@ -111,7 +113,7 @@ export default async function init(album) {
       signature: () => netSignature(div, div.centres, net.capitals),
       // the network as the file keeps it, base64 (scripts/album/bake-roads.mjs)
       encode: () => { const u = new Uint8Array(encodeNet(net, div, div.centres)); let b = ''; for (let i = 0; i < u.length; i += 8192) b += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(b); } };
-    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history) (${(performance.now() - t0).toFixed(0)} ms)`);
+    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped (${(performance.now() - t0).toFixed(0)} ms)`);
     draw();
   }
   function sync() {
@@ -139,6 +141,8 @@ export default async function init(album) {
         // the cleared strip beside a road is a thing of the near view
         r.u.uNear.value = 1 - ss(.02, .05, px);
         r.u.uVerge.value = px < .05 ? VERGE.verge : 1;
+        // in the woods a road is darker, as it was from high up; below some 60 km less so: a road over a pass must be seen in the dark forest of the mountains
+        r.u.uDim.value = WOODS_DIM[1] + (WOODS_DIM[0] - WOODS_DIM[1]) * (1 - ss(WOODS_NEAR[0], WOODS_NEAR[1], px));
       }
       // a bridge is seen while it is a few pixels long; it lies over the water, which itself is pulled over the crowns
       const bf = 1 - ss(BRIDGE.fade[0], BRIDGE.fade[1], px), kr = p.get('riversOn') ? p.get('rivers') ?? 1 : 0, over = sheetPull(album, cam) + .006;
