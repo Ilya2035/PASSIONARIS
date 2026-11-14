@@ -5,9 +5,11 @@
 // It lists the settlements of the district (the owner, 13.11.2026: «по щелчку на район — список его городов и деревень:
 // значок — та же отметка, что на карте — и площадь в км² по чанкам»): the town of the district first, then its
 // villages. A click on a row flies the camera to that settlement.
+// Under them, the passes on the border of the district (the list is laid by the roads): the mark of a pass as on the
+// map, its name, the road that crosses it and the district beyond, its height in metres.
 import { KIND_TITLE, KIND_ID } from './build.js';
-import { markSvg } from '../layers/labels.js';
-import { CLASSES, RANKS } from '../town/rules.js';
+import { markSvg, passSvg } from '../layers/labels.js';
+import { CLASSES, RANKS, PASS_RANKS, PASS_ROAD } from '../town/rules.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const pct = v => `${Math.round(v * 100)} %`;
@@ -29,14 +31,17 @@ body.mapview #ui > .district-info { right: 20px; }
 // the class of a settlement in words, as the list of the panel writes it
 export const classTitle = s => (s.partOf ? `часть города ${s.partOf}` : s.capital ? `${CLASSES[s.cls].title} · ${RANKS[{ province: 3, land: 4, region: 5 }[s.capital]].title}` : s.town && s.cls === 0 ? 'город района (пока деревня)' : CLASSES[s.cls].title);
 
+// a pass in words, as the list of the panel writes it: what it is, the road over it, the district beyond
+export const passTitle = q => [q.rank === 0 ? PASS_RANKS[0].title : '', PASS_ROAD[q.kind], q.to ? `в район ${q.to}` : ''].filter(Boolean).join(' · ');
+
 export function createPanel(onClose, onGo = null) {
   const box = el('div', 'panel pn district-info');
   if (typeof document !== 'undefined' && !document.getElementById('district-info-css')) document.head.append(Object.assign(document.createElement('style'), { id: 'district-info-css', textContent: CSS }));
   const close = el('button', 'close', '×'); close.type = 'button'; close.title = 'Закрыть';
   close.onclick = e => { e.stopPropagation(); onClose(); };
-  const cap = el('div', 'cap'), title = el('div', 'L'), sub = el('div', 'S'), scroll = el('div', 'di-scroll'), towns = el('div'), rows = el('div', 'M'), res = el('div', 'S');
+  const cap = el('div', 'cap'), title = el('div', 'L'), sub = el('div', 'S'), scroll = el('div', 'di-scroll'), towns = el('div'), ways = el('div'), rows = el('div', 'M'), res = el('div', 'S');
   rows.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:2px 12px';
-  scroll.append(towns, rows, res);
+  scroll.append(towns, ways, rows, res);
   box.append(close, cap, title, sub, scroll);
   const host = () => document.getElementById('ui') || document.body;   // inside #ui: «H» hides it with the other panels
   const row = (name, value) => { rows.append(el('span', null, name), el('span', null, value)); };
@@ -59,6 +64,21 @@ export function createPanel(onClose, onGo = null) {
     }
     towns.append(g, el('div', 'S', 'Площадь — число чанков по 1 км², на которых стоят дома поселения.'));
   }
+  // the passes on the border of the district: mark, name, the road and the district beyond, height
+  function passes(st) {
+    ways.textContent = '';
+    const all = st?.passes; if (!all?.length) return;
+    ways.append(el('div', 'cap', `Перевалы на границе района: ${all.length}`));
+    const g = el('div', 'M di-list'); g.style.marginTop = '4px';
+    for (const q of all) {
+      const mk = el('span', 'mk'); mk.innerHTML = passSvg(q.rank, false);                                    // (the mark is this file's own markup; the name below is text)
+      const nm = el('span', 'nm tw'); nm.append(el('span', null, q.name || 'Перевал без названия'), el('small', null, passTitle(q)));
+      nm.title = `${q.name || 'Перевал'}, ${q.h} м — ${passTitle(q)}. Щелчок: показать на карте`;
+      if (q.lat !== undefined) nm.onclick = e => { e.stopPropagation(); go(q); };
+      g.append(mk, nm, el('span'), el('span', 'r', `${q.h.toLocaleString('ru-RU')} м`));
+    }
+    ways.append(g);
+  }
 
   return {
     el: box,
@@ -68,7 +88,7 @@ export function createPanel(onClose, onGo = null) {
       cap.textContent = 'Район';
       title.textContent = s.name;
       sub.textContent = `${s.provinceName} · ${s.regionName} · ${KIND_TITLE[KIND_ID.indexOf(s.kind)]}, район № ${s.id + 1}, соседей ${s.neighbours}`;
-      list(s.kind === 'land' ? s.settle : null);
+      list(s.kind === 'land' ? s.settle : null); passes(s.kind === 'land' ? s.settle : null);
       rows.textContent = '';
       row('Площадь', `${num(s.area)} км²`);
       if (s.kind === 'land') row('из них суша', `${num(s.landArea)} км²`);

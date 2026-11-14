@@ -84,6 +84,30 @@ export const rankOf = t => (t.capital === 'region' ? 5 : t.capital === 'land' ? 
 // they come in between these two heights, km, and go at the height of their rank (RANKS[].name)
 export const NAME_FROM = [25, 32];
 export const SHAPES_TO = 85;     // km: below this height a mark is a shape that tells the class; above it, a dot that tells the rank
+// ---- The passes of the mountains (the owner, second step of the third wave: «горы, перевалы, дороги в горах»). The
+// list is laid by the roads: album.roadNet.passes, [{ x, y (flat km), h (m), name, kind (0 main road, 1 lesser, 2 track),
+// a, b (the districts on either side), rank }]. A pass is marked by the height of the camera as a settlement is:
+// `to` — the greatest height, km, it is still marked from; `name` — the greatest height its name is written from;
+// `order` — whose turn it is to take the room on the screen, in the ranks of the settlements (RANKS): a great pass
+// goes before the town of a district, a pass of a main road before a village, the rest after the villages.
+export const PASS_RANKS = [
+  { id: 'great', title: 'большой исторический перевал', to: 230, name: 110, order: 2.5 },
+  { id: 'main', title: 'перевал главной дороги', to: 110, name: 75, order: .5 },
+  { id: 'lesser', title: 'перевал', to: 45, name: 45, order: -.5 },
+];
+export const PASS_ROAD = ['главная дорога', 'малая дорога', 'тропа'];
+export const passRank = p => Math.max(0, Math.min(PASS_RANKS.length - 1, p.rank | 0));
+// what is written beside the mark of a pass: its name and its height in metres («Сомпорт, 1632 м»); a pass without a
+// name carries its height alone
+export const passText = p => { const m = `${Math.round(p.h)} м`; return p.name ? `${p.name}, ${m}` : m; };
+// The passes on the border of district d, for its panel: the greater first, then the higher. passes: the list of the
+// roads (or nothing); nameOf(district) → its name; ll(x, y) → { lat, lon } of a point of the flat km plane
+// → [{ name, h, kind, rank, text, to (the name of the district beyond the pass), lat, lon }]
+export function passesOfDistrict(passes, d, nameOf = () => '', ll = null) {
+  return (Array.isArray(passes) ? passes : []).filter(q => q && (q.a === d || q.b === d) && Number.isFinite(q.x) && Number.isFinite(q.y))
+    .map(q => ({ name: q.name || '', h: Math.round(q.h), kind: Math.max(0, Math.min(2, q.kind | 0)), rank: passRank(q), text: passText(q), to: nameOf(q.a === d ? q.b : q.a) || '', ...(ll ? ll(q.x, q.y) : {}) }))
+    .sort((a, b) => a.rank - b.rank || b.h - a.h || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
 // ---- a town grows from its site toward the water (the owner, 13.11.2026: «город должен стоять логично, ближе к морю»;
 // the site itself is the district's and is not moved). The SITE of a patch is the knot of its roads and its market
 // square; the MIDDLE of the patch — of its round outline, its belts and its wall — lies off the site by a SHIFT, kept

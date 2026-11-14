@@ -18,13 +18,14 @@ import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
-import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM } from '../town/rules.js';
+import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { loadPlaceNames, namePlaces } from '../town/sites.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
-import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks } from '../town/grow.js';
+import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks, groundCan } from '../town/grow.js';
+import { treelineAt } from '../ground/climate.js';
 import { planLobe, planShowcase, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
 import { KN, KKM, KX0, KY0, squareOf } from '../division/km.js';
@@ -441,7 +442,9 @@ export default async function init(album) {
       const q = perDistrict.get(d), list = (q?.list || []).map(t => (t.part ? { index: t.index, name: places[t.index].name || '', partOf: t.part.name || 'соседнего города', town: true, people: 0, areaKm2: 0, cls: 0, rank: 0 } : rowOf(t)));
       // the town of the district first, then its villages, the most populous first
       list.sort((a, b) => (b.town ? 1 : 0) - (a.town ? 1 : 0) || (a.partOf ? 1 : 0) - (b.partOf ? 1 : 0) || b.people - a.people || a.index - b.index);
-      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, tracksKm: tracksReady() ? tracksOf(d).km : 0, ...q, list };
+      // the passes on its border (the list is laid by the roads; none until then)
+      const passes = passesOfDistrict(album.roadNet?.passes, d, o => album.districts?.name?.(o) || '', llOf);
+      return { places: n, settlements: 0, villages: 0, people: 0, fieldsKm2: farmPer ? farmPer[d] : 0, tracksKm: tracksReady() ? tracksOf(d).km : 0, ...q, list, passes };
     },
     // the settlements that stand now, as the marks of the map need them: [{ index, name, cls, rank, capital, town,
     // people, areaKm2, radius, lat, lon }]; version() changes whenever they do
@@ -467,7 +470,8 @@ export default async function init(album) {
         // where the division says nobody can settle no village is founded; where only a hamlet can stand it stays one
         // (a place on a chunk of water is a place on the shore: the model moves it to dry land)
         const st = dv.settleFacts?.();
-        if (st?.can) places = placesAllowed(places, pl => { const c = squareOf(...kmOf(pl.lat, pl.lon)); return c < 0 || st.why?.[c] === 1 ? 2 : st.can[c]; });
+        // …and the very ground of a village is asked too (grow.js groundCan): not on a steep slope, not above the trees
+        if (st?.can) places = placesAllowed(places, pl => { const [x, y] = kmOf(pl.lat, pl.lon), c = squareOf(x, y); return Math.min(c < 0 || st.why?.[c] === 1 ? 2 : st.can[c], groundCan(at, x, y, treelineAt(pl.lat, pl.lon))); });
         indexRivers(); applyGrowth(false);
         console.log(`[album] settlements: ${places.length} places (${siteList.x.length} in the lists of the districts, ${(t1 - t0).toFixed(0)} ms), ${model.towns.length} founded at growth ${grown}, ${model.towns.filter(t => t.village).length} of them villages, ${model.farm.area.toFixed(0)} km² of fields in ${model.farm.list.length} chunks (${(performance.now() - t1).toFixed(0)} ms, ${segs.length / 5} stretches of river near them)`); }
       spts.visible = !!p.get('sitesShow') && !!siteList;

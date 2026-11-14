@@ -649,3 +649,60 @@ test('settle and the swamp: a chunk has one state — a chunk of bog is never pl
   // the number of smoothsteps with thresholds written in the code of this aspect must not grow (30, as before the swamp block)
   const pairs = gsl.match(/smoothstep\(\s*-?[.0-9]+\s*,\s*-?[.0-9]+\s*,/g) || []; assert.ok(pairs.length <= 30, `${pairs.length} smoothsteps with numbers in the shader of the settlements`);
 });
+
+test('settle passes: a mark of its own, shown by the height of the camera, the name with the height in metres', async () => {
+  const { PASS_RANKS, PASS_ROAD, passRank, passText, passesOfDistrict, RANKS } = await import('../src/album/town/rules.js');
+  const { passSvg, passSize, passShownAt, markSvg, declutter } = await import('../src/album/layers/labels.js');
+  // the name: «Сомпорт, 1632 м»; a pass without a name carries its height alone
+  assert.equal(passText({ name: 'Сомпорт', h: 1632.4 }), 'Сомпорт, 1632 м'); assert.equal(passText({ name: '', h: 1208 }), '1208 м');
+  // three ranks: the great passes are marked from the highest, the lesser only from near; a name never outlasts its mark
+  assert.equal(PASS_RANKS.length, 3); assert.equal(PASS_ROAD.length, 3);
+  for (let r = 0; r < 3; r++) { assert.ok(PASS_RANKS[r].name <= PASS_RANKS[r].to); if (r) assert.ok(PASS_RANKS[r].to < PASS_RANKS[r - 1].to && PASS_RANKS[r].order < PASS_RANKS[r - 1].order); }
+  assert.ok(PASS_RANKS[2].to <= RANKS[0].to, 'a lesser pass goes no later than a village'); assert.ok(PASS_RANKS[0].to <= RANKS[2].to, 'and a great pass no later than a greater town');
+  assert.ok(PASS_RANKS[0].order > RANKS.findIndex(r => r.id === 'town') && PASS_RANKS[2].order < 0, 'a great pass takes the room before the town of a district, a lesser one after the villages');
+  assert.equal(passRank({ rank: 0 }), 0); assert.equal(passRank({ rank: 7 }), 2); assert.equal(passRank({}), 0);
+  // by the height of the camera: from 20 km every pass has mark and name; from 60 km the lesser are gone; from 200 km
+  // only the great ones stand, without names; from 300 km none
+  for (let r = 0; r < 3; r++) { const s = passShownAt(r, 20); assert.equal(s.mark, 1); assert.equal(s.name, 1); assert.equal(s.far, false); }
+  assert.equal(passShownAt(2, 60).mark, 0); assert.ok(passShownAt(1, 60).mark === 1 && passShownAt(1, 60).name === 1); assert.equal(passShownAt(1, 120).mark, 0);
+  assert.ok(passShownAt(0, 200).mark === 1 && passShownAt(0, 200).name === 0 && passShownAt(0, 200).far); assert.equal(passShownAt(0, 300).mark, 0);
+  // the mark: two arcs, not one of the shapes of the settlements; the great pass is larger
+  const svg = passSvg(1, false); assert.match(svg, /<path d="M[^"]+Q[^"]+M[^"]+Q[^"]+"/); assert.doesNotMatch(svg, /<circle|<polygon|<rect/);
+  for (let c = 0; c < 5; c++) assert.notEqual(markSvg(c, 1, false), svg);
+  assert.ok(passSize(0, false) > passSize(1, false) && passSize(1, true) < passSize(1, false)); assert.notEqual(passSvg(0, false), passSvg(1, false)); assert.notEqual(passSvg(1, true), passSvg(1, false));
+  // it takes its room like any mark: a pass that would touch the mark of a town is left out
+  assert.deepEqual(declutter([{ x: 100, y: 100, mark: 12, name: 60, gap: 14 }, { x: 104, y: 102, mark: passSize(1, false), name: 90, gap: 14 }, { x: 100, y: 160, mark: passSize(1, false), name: 90, gap: 14 }]), [2, 0, 2]);
+  // the panel of a district: the passes on its border, the greater first, then the higher; the district beyond is named
+  const list = [{ x: 10, y: 20, h: 1632, name: 'Сомпорт', kind: 0, a: 3, b: 8, rank: 0 }, { x: 11, y: 21, h: 2408, name: '', kind: 2, a: 8, b: 4, rank: 2 }, { x: 12, y: 22, h: 1794, name: 'Порталет', kind: 1, a: 9, b: 8, rank: 1 }, { x: 1, y: 2, h: 900, name: 'Чужой', kind: 1, a: 1, b: 2, rank: 1 }, null, { x: NaN, y: 0, h: 1, a: 8, b: 1 }];
+  const got = passesOfDistrict(list, 8, d => `Р${d}`, (x, y) => ({ lat: y, lon: x }));
+  assert.deepEqual(got.map(q => q.text), ['Сомпорт, 1632 м', 'Порталет, 1794 м', '2408 м']); assert.deepEqual(got.map(q => q.to), ['Р3', 'Р9', 'Р4']); assert.deepEqual([got[0].lat, got[0].lon], [20, 10]);
+  assert.deepEqual(passesOfDistrict(undefined, 8), []); assert.deepEqual(passesOfDistrict(list, 77), []);
+  const { passTitle } = await import('../src/album/division/panel.js');
+  assert.equal(passTitle(got[0]), 'большой исторический перевал · главная дорога · в район Р3'); assert.equal(passTitle(got[2]), 'тропа · в район Р4');
+  // the switch: on to begin with, on the map panel too; the layer reads the list of the roads and stands without it
+  const knob = DEFS.find(d => d.key === 'passMarks'); assert.ok(knob && knob.value === 1 && knob.map);
+  const { readFileSync } = await import('node:fs'), src = readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8');
+  assert.match(src, /album\.roadNet\?\.passes \|\| null/); assert.match(src, /Array\.isArray\(ps\) \? ps : \[\]/);
+});
+
+test('settle in the mountains: a village stands on the floor of a valley or on a ledge — a hamlet at most on a steep slope, nobody on rock or above the trees; the town of a district is marked without a name', async () => {
+  const { groundCan, slopeOf, SLOPE_SPAN, SLOPE_HAMLET, SLOPE_NONE, placesAllowed, HAMLET_ONLY_R } = await import('../src/album/town/grow.js');
+  assert.ok(SLOPE_HAMLET < SLOPE_NONE && SLOPE_HAMLET >= .25 && SLOPE_NONE <= .6 && SLOPE_SPAN >= .1 && SLOPE_SPAN <= .5);
+  // a plane that rises k metres a metre eastward: its slope is k wherever it is asked
+  const plane = k => (x, y) => 1000 + k * 1000 * x;
+  for (const k of [0, .1, .29, .31, .49, .51, .8]) assert.ok(Math.abs(slopeOf(plane(k), 3, 7) - k) < 1e-9);
+  assert.equal(groundCan(plane(.05), 0, 0), 2); assert.equal(groundCan(plane(.29), 0, 0), 2); assert.equal(groundCan(plane(.31), 0, 0), 1); assert.equal(groundCan(plane(.49), 0, 0), 1); assert.equal(groundCan(plane(.51), 0, 0), 0);
+  // a ledge: level ground with a wall of rock beyond it is ground to build on
+  const ledge = (x, y) => (Math.abs(x) < .4 ? 1200 : x > 0 ? 1200 + (x - .4) * 900 : 1200 - (-x - .4) * 900);
+  assert.equal(groundCan(ledge, 0, 0), 2);
+  // above the trees nobody settles, however level the ground
+  assert.equal(groundCan(plane(0), 0, 0, 900), 0); assert.equal(groundCan(plane(0), 0, 0, 1001), 2);
+  // the layer of settlements asks both the chunk and the ground, and only of villages: the place of a town is the district's
+  const ps = placesAllowed([{ lat: 0, lon: 0, pop: 9000, village: true }, { lat: 0, lon: 1, pop: 9000, village: true }, { lat: 0, lon: 2, pop: 9000 }], pl => Math.min(2, groundCan(plane(pl.lon === 0 ? .35 : .6), 0, 0)));
+  assert.ok(ps[0].r > 0 && ps[0].r <= HAMLET_ONLY_R); assert.equal(ps[1].r, 0); assert.equal(ps[2].r, undefined);
+  const { readFileSync } = await import('node:fs'), src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+  assert.match(src, /Math\.min\(c < 0 \|\| st\.why\?\.\[c\] === 1 \? 2 : st\.can\[c\], groundCan\(at, x, y, treelineAt\(pl\.lat, pl\.lon\)\)\)/);
+  // marks: a village without a name is not marked, the town of a district is — by its mark alone
+  const lab = readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8');
+  assert.match(lab, /if \(!m\.name && !\(m\.rank >= 1\)\) continue;/); assert.match(lab, /const nameA = it\.name \? s\.name : 0;/);
+});

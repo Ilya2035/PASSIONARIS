@@ -330,6 +330,7 @@ export default {
     { key: 'towns', label: 'Поселения', group: 'layers', type: 'toggle', value: 1 },
     { key: 'labelsFar', label: 'Названия столиц издалека', group: 'layers', type: 'toggle', value: 0, map: 'Имена столиц' },
     { key: 'scaleBar', label: 'Линейка масштаба', group: 'layers', type: 'toggle', value: 1, map: 'Линейка масштаба' },
+    { key: 'passMarks', label: 'Отметки перевалов', group: 'layers', type: 'toggle', value: 1, map: 'Перевалы' },
     { key: 'sitesShow', label: 'Места поселений (проверка)', group: 'layers', type: 'toggle', value: 0 },
     { key: 'showcase', label: 'Витрина построек', group: 'layers', type: 'toggle', value: 0 },
   ],

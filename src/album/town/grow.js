@@ -85,6 +85,21 @@ export function towardWater(at, river, x, y, R) {
 // town of a district stands where the division put it. The places keep their numbers: a village that may not be
 // founded stays in the list with no size.
 //   canAt(place) → 2 a town or a village may stand there · 1 a hamlet only · 0 nobody
+// Mountain ground (the owner, second step of the third wave: «горы, перевалы, дороги в горах»): a village stands on the
+// floor of a valley or on a ledge — not on a steep slope, not on rock, not above the trees. The division says so chunk
+// by chunk of 1 km² (km.js chunkSettle); this says it of the very ground the houses stand on, read from the relief as
+// it is drawn every time the places are laid — so the rule holds whatever the relief becomes.
+export const SLOPE_SPAN = .3;      // km: the slope is taken across this much ground to either side — what a village stands on
+export const SLOPE_HAMLET = .3;    // rise over run (17°) from which a hamlet at most stands: a few houses on a ledge
+export const SLOPE_NONE = .5;      // …and from which nobody builds (27°): a slope of rock
+// at(x, y) → metres at a point of the flat km plane
+export const slopeOf = (at, x, y, d = SLOPE_SPAN) => Math.hypot(at(x + d, y) - at(x - d, y), at(x, y + d) - at(x, y - d)) / (2000 * d);
+// → 2 a village may stand at (x, y) · 1 a hamlet at most · 0 nobody. treeline: metres, where the trees stop there
+export function groundCan(at, x, y, treeline = Infinity) {
+  if (at(x, y) >= treeline) return 0;
+  const s = slopeOf(at, x, y);
+  return s >= SLOPE_NONE ? 0 : s >= SLOPE_HAMLET ? 1 : 2;
+}
 export const HAMLET_ONLY_R = .095;                                  // km: under the radius of a village (STAGES)
 export function placesAllowed(places, canAt) {
   return places.map(pl => {
