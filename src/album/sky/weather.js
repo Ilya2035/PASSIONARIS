@@ -11,7 +11,7 @@
 //           lies in the valleys and over the water and its edge runs along the slopes.
 // Both are built on the first frame that needs them; while the weather is off they do not exist.
 import { DataTexture, RedFormat, RGBAFormat, UnsignedByteType, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, ClampToEdgeWrapping, DataUtils, Vector4 } from 'three';
-import { R, BBOX, toWorld, fromWorld } from '../geo.js';
+import { R, BBOX, CENTRE, KM_PER_DEG, toWorld, fromWorld } from '../geo.js';
 
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }, mix = (a, b, t) => a + (b - a) * t;
 
@@ -77,6 +77,20 @@ export function rainAt(noise, lat, lon, cover, force, drift = 0) {
   return ss(t, t + .08, cloudAt(noise, x, z, drift)) * ss(m, m + .08, fieldAt(noise, (x + o[0]) * RAIN_SCALE / CLOUD_KM + RAIN_SHIFT[0], (z + o[1]) * RAIN_SCALE / CLOUD_KM + RAIN_SHIFT[1]));
 }
 
+// ---- snowfall
+// What falls from a cloud is snow where the ground stands above the line of snowfall, and rain below it. That line
+// is the line of lasting snow of the ground shader (terrain.js: 2980 m at 37° N, 55 m lower with every degree north,
+// moved by the look of the map and by the knob «Снеговая линия»), lowered by SNOW_DROP: a snow cloud brings its own
+// cold, and fresh snow lies well below the snow that lasts the summer. Over half of SNOW_BAND the snow turns to rain.
+export const SNOW_DROP = 900, SNOW_BAND = 120;
+export const snowLine = (lat, shift = 0) => 2980 - (lat - 37) * 55 + shift;
+export const snowfallLine = (lat, shift = 0) => snowLine(lat, shift) - SNOW_DROP;
+// how much of what falls at a place is snow, 0 rain .. 1 snow (wxSnowy in the shaders); height in m
+export const snowShare = (lat, height, shift = 0) => ss(-SNOW_BAND, SNOW_BAND, height - snowfallLine(lat, shift));
+// the same line for the shaders, on the plane of the weather: its height at the middle of the map, how much it rises
+// with every km south, and the band — all in km of the world (heights there are stretched `exag` times)
+export const snowNumbers = (shift, exag) => [snowfallLine(CENTRE.lat, shift) * exag / 1000, 55 / KM_PER_DEG * exag / 1000, SNOW_BAND * exag / 1000];
+
 // ---- the fog of the morning
 // How much of the fog is left at an hour of the day, 0..1: it gathers through the night, is thickest at dawn, thins
 // from an hour and a half after sunrise and is gone by noon. Hour 0 is the light of the map, not midnight: there the
@@ -129,12 +143,12 @@ export function fogFloor(at, cell = 4, sub = 4, box = BBOX) {
   low = pass(pass(pass(low, r24, true), r12, false), r12, false); mean = pass(mean, Math.round(16 / cell) || 1, false); sea = pass(sea, r8, false);
   const weight = new Float32Array(n);
   for (let i = 0; i < n; i++) weight[i] = mix(1 + .25 * Math.max(0, Math.min(1, (mean[i] - low[i] - 60) / 340)), .9 * Math.min(1, (1 - open[i]) * 2.2), sea[i]);
-  return { w, h, cell, x0, z0, floor: low, weight, sea };
+  return { w, h, cell, x0, z0, floor: low, weight, sea, mean };
 }
 // the floor and the willingness at a place, as the shader reads them (for the tests)
 export function fogFloorAt(ff, lat, lon) {
   const [x, z] = planeOf(lat, lon), i = Math.max(0, Math.min(ff.w - 1, Math.floor((x - ff.x0) / ff.cell))), j = Math.max(0, Math.min(ff.h - 1, Math.floor((z - ff.z0) / ff.cell)));
-  return { floor: ff.floor[j * ff.w + i], weight: ff.weight[j * ff.w + i], sea: ff.sea[j * ff.w + i] };
+  return { floor: ff.floor[j * ff.w + i], weight: ff.weight[j * ff.w + i], sea: ff.sea[j * ff.w + i], mean: ff.mean[j * ff.w + i] };
 }
 
 // ---- what the shaders get
@@ -143,7 +157,10 @@ export function fogFloorAt(ff, lat, lon) {
 // uFog:  x 1 while there is fog, y the greatest thickness of its layer (km of the world), z from which value of the
 //        field of its banks it lies, w how soft its top is (km of the world).
 // uFogRect: where tFog lies on the plane: (x0, z0, 1 / width, 1 / height), km.
-export const WX = { tCloud: { value: null }, tFog: { value: null }, uFogRect: { value: new Vector4(0, 0, 1, 1) }, uRain: { value: new Vector4(0, .2, 0, 1) }, uFog: { value: new Vector4(0, .3, .5, .05) } };
+// uSnowF: the line of snowfall (snowNumbers): x its height at the middle of the map, y its rise with every km south,
+//        z its band, all in km of the world; w 1 while precipitation can be snow.
+export const WX = { tCloud: { value: null }, tFog: { value: null }, uFogRect: { value: new Vector4(0, 0, 1, 1) }, uRain: { value: new Vector4(0, .2, 0, 1) }, uFog: { value: new Vector4(0, .3, .5, .05) },
+  uSnowF: { value: new Vector4(9, 0, .2, 0) } };
 // builds the textures when they are first needed
 export function needClouds() {
   if (WX.tCloud.value) return;
@@ -154,7 +171,7 @@ export function needClouds() {
 export function needFog(at) {
   if (WX.tFog.value) return;
   const ff = fogFloor(at), hf = new Uint16Array(ff.w * ff.h * 4), one = DataUtils.toHalfFloat(1);
-  for (let i = 0; i < ff.w * ff.h; i++) { hf[i * 4] = DataUtils.toHalfFloat(ff.floor[i]); hf[i * 4 + 1] = DataUtils.toHalfFloat(ff.weight[i]); hf[i * 4 + 2] = DataUtils.toHalfFloat(ff.sea[i]); hf[i * 4 + 3] = one; }
+  for (let i = 0; i < ff.w * ff.h; i++) { hf[i * 4] = DataUtils.toHalfFloat(ff.floor[i]); hf[i * 4 + 1] = DataUtils.toHalfFloat(ff.weight[i]); hf[i * 4 + 2] = DataUtils.toHalfFloat(ff.sea[i]); hf[i * 4 + 3] = DataUtils.toHalfFloat(ff.mean[i]); }
   const t = new DataTexture(hf, ff.w, ff.h, RGBAFormat, HalfFloatType);
   t.internalFormat = 'RGBA16F'; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.magFilter = t.minFilter = LinearFilter; t.needsUpdate = true;
   WX.tFog.value = t; WX.uFogRect.value.set(ff.x0, ff.z0, 1 / (ff.w * ff.cell), 1 / (ff.h * ff.cell));
@@ -162,7 +179,7 @@ export function needFog(at) {
 
 // ---- the GLSL of the weather: pasted after COMMON and LIGHT (it uses RKM, uExag, uCloud, uSun, uSunW, albumDay)
 export const WEATHER = /* glsl */`
-uniform sampler2D tCloud, tFog; uniform vec4 uRain, uFog, uFogRect;
+uniform sampler2D tCloud, tFog; uniform vec4 uRain, uFog, uFogRect, uSnowF;
 const vec2 WX_WIND = vec2(${WIND[0].toFixed(4)}, ${WIND[1].toFixed(4)});
 #define RAIN_LAG ${RAIN_LAG.toFixed(1)}
 // km on the plane that touches the globe at the middle of the map: the weather is laid out on it
@@ -184,7 +201,13 @@ float albumCloudShade(vec3 wpos) {
 // which clouds rain, 0..1 (the same picture, read larger and from another place)
 float wxRainMask(vec2 q) { return smoothstep(uRain.y, uRain.y + .08, textureLod(tCloud, (q + uCloud.yz) * ${(RAIN_SCALE / CLOUD_KM).toFixed(9)} + vec2(${RAIN_SHIFT[0]}, ${RAIN_SHIFT[1]}), 0.).r); }
 // rain over a point of the plane, 0..1: under a cloud that rains, nearly to its edge
-float wxRainAt(vec2 q, float lod) { float t = wxThr() + ${RAIN_EDGE.toFixed(3)}; return smoothstep(t, t + .08, wxCloudN(q, lod)) * wxRainMask(q); }
+// (wxRainCloud: is there cloud enough over the point for rain; whether that cloud rains at all is wxRainMask)
+float wxRainCloud(vec2 q, float lod) { float t = wxThr() + ${RAIN_EDGE.toFixed(3)}; return smoothstep(t, t + .08, wxCloudN(q, lod)); }
+float wxRainAt(vec2 q, float lod) { return wxRainCloud(q, lod) * wxRainMask(q); }
+// how much of what falls is snow, 0 rain .. 1 snow: at a height (km of the world over the sea) over a point of the plane
+float wxSnowy(vec2 q, float alt) { return smoothstep(-uSnowF.z, uSnowF.z, alt - uSnowF.x - q.y * uSnowF.y); }
+// the same in the air over a point of the plane: by the height of the land around it (the mean of 16 km)
+float wxSnowAir(vec2 q) { return wxSnowy(q, textureLod(tFog, (q - uFogRect.xy) * uFogRect.zw, 0.).a * uExag * .001); }
 // the top of the fog over a point of the plane, km over the sea: the floor of the land there, and over it a layer
 // whose thickness goes by the place and by the banks the fog lies in (over the sea the banks are fewer: sea fog
 // stands off a stretch of the coast here and there, not along all of it)

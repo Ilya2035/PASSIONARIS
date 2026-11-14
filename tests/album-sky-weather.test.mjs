@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CLOUD_KM, CLOUD_N, WIND, RAIN_LAG, RAIN_EDGE, WEATHER, WX, planeOf, llOfPlane, cloudNoise, cloudAt, cloudOffset, cloudThreshold, rainCover, rainMask, rainAt,
-  fogByHour, fogNumbers, fogFloor, fogFloorAt, needClouds } from '../src/album/sky/weather.js';
+  fogByHour, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers } from '../src/album/sky/weather.js';
+import { readFileSync } from 'node:fs';
 import { LIGHT } from '../src/album/light.js';
 import { postShader, POST_CLOUDS, POST_RAIN, POST_FOG } from '../src/album/post.js';
 import { sunTimes } from '../src/album/sky/astro.js';
@@ -62,6 +63,35 @@ test('weather: it rains under some of the clouds, nearly to their edge', () => {
   for (const pg of [far, edge, mid]) assert.equal(pg.p.rain, 1);
 });
 
+test('weather: above the line of snowfall it snows, below it rains', () => {
+  // the line hangs on the snow line of the ground shader: if that rule changes there, it must change here
+  assert.match(readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8'), /snowline = 2980\. - \(lat - 37\.\) \* 55\./);
+  near(snowLine(37), 2980, 1e-9); near(snowLine(42.63), 2980 - 5.63 * 55, 1e-9); near(snowLine(40, -250), snowLine(40) - 250, 1e-9);
+  near(snowfallLine(42.63), snowLine(42.63) - SNOW_DROP, 1e-9); assert.ok(SNOW_DROP >= 500 && SNOW_DROP <= 1500, 'fresh snow lies below the lasting snow, but not on the plains in summer');
+  // rain well below the line, snow well above, half and half on it
+  const line = snowfallLine(42.63);
+  assert.equal(snowShare(42.63, line - SNOW_BAND - 1), 0); assert.equal(snowShare(42.63, line + SNOW_BAND + 1), 1); near(snowShare(42.63, line), .5, 1e-9);
+  // Aneto (3404 m) is in snow, Benasque in the valley under it (1140 m) in rain; with the winter look the valley snows too
+  assert.equal(snowShare(42.63, 3404), 1); assert.equal(snowShare(42.6, 1140), 0); assert.equal(snowShare(42.6, 1140, -2150), 1);
+  assert.equal(snowShare(37.05, 3479), 1, 'Sierra Nevada'); assert.equal(snowShare(40.4, 660), 0, 'Madrid');
+  // the same line as the shaders get it: on the plane of the weather, in km of the world
+  for (const exag of [1, 1.6]) for (const shift of [0, -2150]) {
+    const [at0, perKm, band] = snowNumbers(shift, exag); near(band, SNOW_BAND * exag / 1000, 1e-12);
+    for (const lat of [36, 40, 42.63, 44.5]) near((at0 + planeOf(lat, CENTRE.lon)[1] * perKm) / exag * 1000, snowfallLine(lat, shift), 3, `lat ${lat}`);
+  }
+  // the pages of snowfall: it rains over the place with the clouds moved as the page moves them, and the mountains there are above the line
+  const force = def('rainForce').value, cover = rainCover(force);
+  for (const id of ['sky-snow', 'sky-snow-near', 'sky-snow-200']) {
+    const pg = page(id); assert.equal(pg.p.rain, 1, id);
+    assert.ok(rainAt(NOISE, pg.cam.lat, pg.cam.lon, cover, force, pg.p.cloudShift) > .9, id); assert.ok(snowfallLine(pg.cam.lat) < 2500, id);
+  }
+  assert.equal(def('cloudShift').value, 0); assert.ok(!def('cloudShift').map, 'a knob of the album, not a switch of the map');
+  // in the finishing pass: with the rain only
+  const rain = postShader(POST_CLOUDS | POST_RAIN);
+  assert.ok(/wxFlakes\(az/.test(rain) && /wxSnowAir\(Pa/.test(rain) && /uSnowF\.w > 0\./.test(rain));
+  assert.ok(!/wxFlakes|wxSnowAir\(Pa/.test(postShader(POST_CLOUDS)) && !/wxFlakes/.test(postShader(POST_FOG)));
+});
+
 test('weather: the fog is of the morning', () => {
   const rise = sunTimes(172, 41.65).rise;
   assert.equal(fogByHour(0, rise), 1, 'in the light of the map the switch shows fog');
@@ -92,6 +122,8 @@ test('weather: fog fills the land from the floor of the valley and the sea', () 
   // side rises out of the fog; far away on the plain it is the plain itself
   assert.ok(at(41, -3).floor < 260, `${at(41, -3).floor}`); assert.ok(at(41.1, -3).floor < 300 && land(41.1, -3) - at(41.1, -3).floor > 200);
   near(at(43, -3).floor, 500, 5); near(at(38, -3).floor, 500, 5);
+  // (and the mean height of the land around: what the snowfall asks about the air over a place)
+  near(at(43, -3).mean, 500, 5); assert.ok(at(41, -3).mean > at(41, -3).floor + 50 && at(41, -3).mean < 500); assert.equal(ff.mean.length, ff.w * ff.h);
   assert.ok(at(41, -3).weight > at(43, -3).weight && at(43, -3).weight >= 1, 'fog likes a valley more than an open plain');
   // the sea: its floor is the sea itself; fog stands off the coast and thins out to nothing in the open sea
   near(at(40, -9.9).floor, 0, 1e-6); near(at(40, -9.9).sea, 1, 1e-6); near(at(40, -9.9).weight, 0, .02); near(at(38, -3).sea, 0, 1e-6);
@@ -101,10 +133,10 @@ test('weather: fog fills the land from the floor of the valley and the sea', () 
 test('weather: nothing of it in the shaders of the land, and nothing at all while it is off', () => {
   // the shared light, which every shader of the land pastes, knows no weather and reads no texture
   assert.ok(!/sampler|albumCloud|wxRain|wxFog|tCloud|tFog/.test(LIGHT)); assert.equal(sky.glsl, '', 'the sky paints nothing in the ground shader');
-  for (const k of ['tCloud', 'tFog', 'uRain', 'uFog', 'uFogRect']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
+  for (const k of ['tCloud', 'tFog', 'uRain', 'uFog', 'uFogRect', 'uSnowF']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
   // the GLSL of the weather: what post.js and layers/clouds.js call
-  for (const sig of ['vec2 wxPlane(vec3 wpos)', 'float wxCloudN(vec2 q, float lod)', 'float albumCloudField(vec3 wpos)', 'float albumCloudShade(vec3 wpos)', 'float wxRainMask(vec2 q)', 'float wxRainAt(vec2 q, float lod)',
-    'float wxFogTop(vec2 q)']) assert.ok(WEATHER.includes(sig), sig);
+  for (const sig of ['vec2 wxPlane(vec3 wpos)', 'float wxCloudN(vec2 q, float lod)', 'float albumCloudField(vec3 wpos)', 'float albumCloudShade(vec3 wpos)', 'float wxRainMask(vec2 q)', 'float wxRainCloud(vec2 q, float lod)', 'float wxRainAt(vec2 q, float lod)',
+    'float wxFogTop(vec2 q)', 'float wxSnowy(vec2 q, float alt)', 'float wxSnowAir(vec2 q)']) assert.ok(WEATHER.includes(sig), sig);
   assert.ok(!/vnoise|fbm|worley/.test(WEATHER), 'the weather reads its two pictures and counts no noise');
   for (const k of Object.keys(WX)) assert.match(WEATHER, new RegExp(`\\b${k}\\b`), k);
   // off by default, and the pictures are not even built

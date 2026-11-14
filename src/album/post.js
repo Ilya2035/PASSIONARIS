@@ -20,6 +20,9 @@ const HEAD = `#define cameraPosition uEye\n${COMMON}\n${LIGHT}\n${WEATHER}`;
 const RAIN_LEN = 20;
 const RAIN_FN = /* glsl */`
         uniform float uRpp;                           // radians in one pixel (a little more on a large picture)
+        // where the rain that passes a point of the air comes from, on the plane of the weather: the cloud has moved
+        // on while it fell (not at all at the height of the clouds, RAIN_LAG km at the ground)
+        vec2 wxFallQ(vec3 P) { return P.xz / max(P.y, 1.) * RKM + WX_WIND * (RAIN_LAG * clamp(1. - (length(P) - RKM) / uCloud.w, 0., 1.)); }
         // Lines of falling rain, in the cells of a grid wrapped around the vertical through the eye. All rain falls
         // along that vertical, so on the screen its lines run toward the point straight under the eye, wherever the
         // camera looks. a: 0..1 around the vertical; v: along the fall; n: how many cells around.
@@ -28,6 +31,13 @@ const RAIN_FN = /* glsl */`
           float y = v * n * ${(1 / (2 * Math.PI * RAIN_LEN)).toFixed(5)} + uRain.z * (2.6 + 1.8 * h) + h * 61.;
           float iy = floor(y), fy = y - iy, d = hashCell(vec2(col + n, iy));
           return (1. - smoothstep(.04, .15, abs(fx - .25 - .5 * fract(d * 7.31)))) * smoothstep(0., .35, fy) * (1. - smoothstep(.55, 1., fy)) * step(.4, d) * (.35 + .65 * fract(d * 3.77));
+        }
+        // Falling snow in the same grid, in cells as long as they are wide: one small soft flake in about half of
+        // the cells, falling slowly and swaying.
+        float wxFlakes(float a, float v, float n) {
+          float y = v * n * .15915 + uRain.z * 1.9, x = a * n + sin(y * 1.3 + uRain.z * .7) * .22;
+          vec2 i = floor(vec2(x, y)), f = vec2(x, y) - i; float d = hashCell(vec2(mod(i.x, n) + n, i.y));
+          return (1. - smoothstep(.07, .2, length(f - .25 - .5 * vec2(fract(d * 7.31), fract(d * 3.77))))) * step(.45, d);
         }
         // soft stripes around the same vertical: the streaks of a curtain of rain seen from afar
         float wxBands(float a, float n) {
@@ -41,10 +51,32 @@ const RAY = /* glsl */`
           float tG = z0 / max(-dv.z, 1e-4); vec3 wpos = uEye + rdW * tG;`;
 // Wet ground: darker and a little deeper in colour where the rain falls now, and — fading — where it fell a while
 // ago: the rain goes on with its cloud and leaves a wet trail behind. (The picture here is in screen colours.)
+//
+// Above the line of snowfall what falls is snow, and the ground under it is not wet but white: fresh snow, thin at
+// the line and whole a few hundred metres higher. It stays longer than the wet: the white trail behind a snow cloud
+// is more than a hundred km long. What was bright in the picture — open slopes in the Sun — becomes white; what was
+// dark — forest, a slope in shade — becomes blue-grey, so the relief and the forests still read through the snow.
+// (This snow is weather, laid here by the height of the pixel. The lasting snow is the ground shader's own.)
 const WET = /* glsl */`
           if (uRain.x > 0. && ground) {
-            vec2 qw = wxPlane(wpos) + WX_WIND * RAIN_LAG;
-            float wet = max(wxRainAt(qw, 0.), .7 * wxRainAt(qw + WX_WIND * 40., 2.)) * min(uRain.x * 1.6, 1.);
+            vec2 q0 = wxPlane(wpos), qw = q0 + WX_WIND * RAIN_LAG;
+            float now = wxRainAt(qw, 0.), was = wxRainAt(qw + WX_WIND * 40., 2.), wk = min(uRain.x * 1.6, 1.), wet = max(now, .7 * was) * wk;
+            float alt = length(wpos + vec3(0., RKM, 0.)) - RKM, over = alt - uSnowF.x - q0.y * uSnowF.y;
+            if (uSnowF.w > 0. && over > -uSnowF.z * 2.) {
+              // The edge of the fresh snow is crisp and ragged, with patches before it: not a contour drawn with a
+              // ruler and not a soft band either (a soft band lies on the slopes like cotton wool). The raggedness
+              // is the picture of the clouds read very small (a read of a picture is cheaper here than noise), at a
+              // level of detail by the size of the pixel: patches smaller than a pixel fade by themselves.
+              float pk = tG * uRpp;
+              float e = over / uSnowF.z + (textureLod(tCloud, q0 * ${(37 / 8192).toFixed(7)}, log2(max(pk / .216, 1.))).r - .5) * 3.2
+                + (textureLod(tCloud, q0 * ${(160 / 8192).toFixed(7)} + .31, log2(max(pk / .05, 1.))).r - .5) * 2.4;
+              float white = smoothstep(-.15, .45, e);
+              // (no snow on the sea in a winter when the line is down at the shore: snow melts in open water)
+              float lay = white * max(max(now, .9 * was), .75 * wxRainAt(qw + WX_WIND * 110., 3.)) * wk * smoothstep(.002, .012, alt);
+              wet *= 1. - white;
+              float day = albumDay(), ref = mix(.1, .4, day), up = smoothstep(ref * .2, ref * 1.6, dot(c, vec3(.2126, .7152, .0722)));
+              c = mix(c, mix(vec3(.45, .53, .69), vec3(.96, .97, .99), up) * mix(.2, 1., day), lay * mix(.74, .93, up));
+            }
             vec3 w3 = c * (.5 + .32 * c); w3 = mix(vec3(dot(w3, vec3(.2126, .7152, .0722))), w3, 1.12);
             c = mix(c, w3, wet * .9);
           }`;
@@ -84,29 +116,43 @@ const RAINY = /* glsl */`
             if (disc > 0.) {
               float sq = sqrt(disc), t0 = max(-eb - sq, 0.), t1 = ground ? min(tG, sq - eb) : sq - eb;
               if (t1 > t0) {
-                float rain = 0.;
-                for (int i = 0; i < 6; i++) {
-                  vec3 P = E + rdW * mix(t0, t1, (float(i) + .5) / 6.);
-                  rain += wxRainAt(P.xz / max(P.y, 1.) * RKM + WX_WIND * (RAIN_LAG * clamp(1. - (length(P) - RKM) / uCloud.w, 0., 1.)), 0.);
+                // (a short way through the layer — a steep look from near the ground — is walked in three steps, and
+                // which clouds rain is asked at its two ends only: that picture is too large to change on 40 km)
+                bool brief = t1 - t0 < 40.; int steps = brief ? 3 : 6; float rain = 0., sf = 0., ma = 0., mb = 0.;
+                if (brief) { ma = wxRainMask(wxFallQ(E + rdW * t0)); mb = wxRainMask(wxFallQ(E + rdW * t1)); }
+                for (int i = 0; i < steps; i++) {
+                  float u = (float(i) + .5) / float(steps); vec2 qi = wxFallQ(E + rdW * mix(t0, t1, u));
+                  rain += wxRainCloud(qi, 0.) * (brief ? mix(ma, mb, u) : wxRainMask(qi));
                 }
-                float veil = 1. - exp(-rain * (t1 - t0) / 6. * uRain.x * .075);
+                rain *= 6. / float(steps);
+                // how much of it is snow: in the air by the height of the land under it; near the ground by the very
+                // slope behind the pixel, so that snow falls exactly where the ground turns white
+                if (uSnowF.w > 0. && rain > 0.) {
+                  if (!ground || uRain.w < 1.) { vec3 Pa = E + rdW * mix(t0, t1, .3), Pb = E + rdW * mix(t0, t1, .75); sf = .5 * (wxSnowAir(Pa.xz / max(Pa.y, 1.) * RKM) + wxSnowAir(Pb.xz / max(Pb.y, 1.) * RKM)); }
+                  if (ground) sf = mix(sf, wxSnowy(wxPlane(wpos), length(wpos + vec3(0., RKM, 0.)) - RKM), uRain.w);
+                }
+                float veil = 1. - exp(-rain * (t1 - t0) / 6. * uRain.x * (.075 + .04 * sf));
                 if (veil > .004) {
                   vec3 upE = normalize(E); float cg = clamp(-dot(rdW, upE), -1., 1.), sg = sqrt(max(1. - cg * cg, 1e-8));
                   vec3 hd = rdW + upE * cg, ax = normalize(cross(upE, vec3(0., 0., 1.))), ay = cross(ax, upE);
                   // around the vertical of the eye (0..1), and along the fall; cells of the same size in pixels everywhere:
                   // two grids, one twice as fine as the other, pass into each other
                   float az = atan(dot(hd, ax), dot(hd, ay)) / 6.2831853 + .5, vv = log(sg / (1. + cg + 1e-4));
-                  float L = log2(sg * 6.2831853 / (uRpp * 7.)), Lb = L - 1.8, kb = floor(Lb), ab = az + uRain.z * .0003;
-                  float bands = mix(.5, mix(wxBands(ab, exp2(kb)), wxBands(ab, exp2(kb + 1.)), Lb - kb), smoothstep(2., 3.5, Lb));
+                  float L = log2(sg * 6.2831853 / (uRpp * 7.)), Lb = L - 1.8, kb = floor(Lb), ab = az + uRain.z * .0003, bands = .5;
+                  if (uRain.w < 1.) bands = mix(.5, mix(wxBands(ab, exp2(kb)), wxBands(ab, exp2(kb + 1.)), Lb - kb), smoothstep(2., 3.5, Lb));
                   // (near the ground the veil stays thin, so that the map under the rain can be read, and has no streaks)
-                  veil = min(veil * mix(.66 + .68 * bands, 1., uRain.w), mix(.9, .38, uRain.w));
+                  veil = min(veil * mix(mix(.66 + .68 * bands, .8 + .4 * bands, sf), 1., uRain.w), mix(.9, .38 + .1 * sf, uRain.w));
                   // (the curtain is a darker, bluer grey than its cloud from afar; near the ground it is a pale mist;
-                  // by night it is only a little lighter than the dark land)
-                  vec3 rc = albumFinish(mix((albumSkyCol() * .6 + albumSunCol() * .08 + albumMoonCol() * .25) * mix(.52, 1., uRain.w) * mix(.4, 1., albumDay()), albumHorizon(rdW), albumHaze(uEye + rdW * mix(t0, t1, .5))));
+                  // by night it is only a little lighter than the dark land. A curtain of snow is white and soft.)
+                  vec3 air = mix((albumSkyCol() * .6 + albumSunCol() * .08 + albumMoonCol() * .25) * mix(.52, 1., uRain.w), albumSkyCol() + albumSunCol() * .3 + albumMoonCol() * .45, sf);
+                  vec3 rc = albumFinish(mix(air * mix(.4, 1., albumDay()), albumHorizon(rdW), albumHaze(uEye + rdW * mix(t0, t1, .5))));
                   c = mix(c, rc, veil);
                   if (uRain.w > 0.) {
-                    float k = floor(L), lines = mix(wxLines(az, vv, exp2(k)), wxLines(az, vv, exp2(k + 1.)), L - k) * smoothstep(3., 4.5, L);
-                    c += lines * veil * uRain.w * (.12 + .3 * albumDay()) * vec3(.92, .96, 1.);
+                    float k = floor(L), fall = 0.;
+                    // (lines of rain or flakes of snow, never both in one pixel: sleet is a narrow strip of the slope)
+                    if (sf < .5) fall = mix(wxLines(az, vv, exp2(k)), wxLines(az, vv, exp2(k + 1.)), L - k) * (1. - sf);
+                    else fall = mix(wxFlakes(az, vv, exp2(k)), wxFlakes(az, vv, exp2(k + 1.)), L - k) * sf * 1.6;
+                    c += fall * smoothstep(3., 4.5, L) * veil * uRain.w * (.12 + .3 * albumDay()) * vec3(.92, .96, 1.);
                   }
                 }
               }

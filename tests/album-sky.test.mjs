@@ -123,7 +123,7 @@ test('sky: knobs and pages of the part', () => {
   for (const k of ['clouds', 'dayRun', 'edgePan', 'rain', 'fog']) { assert.equal(def(k).type, 'toggle', k); assert.ok(def(k).map.length > 3, k); }
   assert.equal(def('edgePan').value, 1);
   const ids = sky.pages.map(p => p.id); assert.equal(new Set(ids).size, ids.length);
-  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-fog', 'sky-fog-late', 'sky-fog-far']) {
+  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-snow', 'sky-snow-near', 'sky-snow-200', 'sky-fog', 'sky-fog-late', 'sky-fog-far']) {
     const pg = PAGES.find(p => p.id === id); assert.ok(pg, id); assert.ok(pg.title.length > 5 && pg.note.length > 20);
     assert.ok(pg.cam.h >= H_MIN && pg.cam.h <= H_MAX && pg.cam.tilt <= TILT_MAX && pg.cam.lat > BBOX.lat0 && pg.cam.lat < BBOX.lat1, id);
     for (const k of Object.keys(pg.p)) assert.ok(def(k), `${id}: no knob ${k}`);
