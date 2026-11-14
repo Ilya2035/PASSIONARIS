@@ -11,7 +11,7 @@ import { Vector3, Vector4, BackSide } from 'three';
 import { frame } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes } from '../sky/astro.js';
-import { WX, needClouds, needFog, cloudOffset, rainCover, rainMask, fogByHour, fogNumbers, snowNumbers } from '../sky/weather.js';
+import { WX, needClouds, needFog, cloudOffset, rainCover, rainMask, fogByHour, fogNumbers, snowNumbers, HILL_FILL, capBank } from '../sky/weather.js';
 
 const MAP_LIGHT = sunAt(0);
 
@@ -56,6 +56,8 @@ export default {
     { id: 'sky-snow-200', group: 'Небо и свет', title: 'След снегопада с 200 км', note: 'Туча уходит на восток, за ней на горах остаётся белый след длиной больше ста километров; равнина под той же тучей только мокрая.', p: { rain: 1, cloudShift: 1312 }, cam: cam([42.7, .3], 200, 25, 0) },
     { id: 'sky-fog', group: 'Небо и свет', title: 'Утренний туман в долине Эбро', note: 'Половина седьмого утра: туман лежит в долине и над водой, холмы стоят из него островами. К полудню он рассеивается — следующая страница. Переключатель «Туман», ручка «Сколько тумана».', p: { fog: 1, hour: 6.5 }, cam: cam(P.zar, 40, 65, 300) },
     { id: 'sky-fog-late', group: 'Небо и свет', title: 'Туман уходит: половина девятого', note: 'То же место через два часа: туман редеет и держится только в самых низких местах и над рекой. К полудню его не будет.', p: { fog: 1, hour: 8.5 }, cam: cam(P.zar, 40, 65, 300) },
+    { id: 'sky-valley-clouds', group: 'Небо и свет', title: 'Облака в горных долинах', note: 'Половина седьмого утра в Пиренеях: долины залиты облаком, гребни и вершины стоят над ним. Это тот же «Туман»: в горах он заполняет долины до половины их глубины. К полудню рассеивается.', p: { fog: 1, hour: 6.5 }, cam: cam([42.7, .3], 60, 45, 0) },
+    { id: 'sky-caps', group: 'Небо и свет', title: 'Шапки облаков на гребнях', note: 'Ането с 20 км, облака включены: высокие гребни носят шапки облаков, долины под ними открыты. Сколько гребней в шапках — ручка «Облачность».', p: { clouds: 1, cloudCover: .7 }, cam: cam(P.pyr, 20, 60, 0) },
     { id: 'sky-fog-far', group: 'Небо и свет', title: 'Туман с высоты: долины Дуэро', note: 'Семь утра, вид с 500 км: туман заполняет долины рек и повторяет их рисунок, как на снимке со спутника.', p: { fog: 1, hour: 7 }, cam: cam(P.duero, 500, 0, 0) },
   ],
   async init(album) {
@@ -96,9 +98,14 @@ export default {
       if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); } else WX.uSnowF.value.w = 0;
       // fog: what the hour has left of it (thickest at dawn, gone by noon)
       const rise = sunTimes(yday, s.lat)?.rise ?? 6, fog = p.get('fog') && natural ? p.get('fogAmount') * fogByHour(hour, rise) : 0;
-      if (fog > .02) { const f = fogNumbers(fog), k = T.uExag.value / 1000; needFog(album.data.base.at); WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); } else WX.uFog.value.x = 0;
+      // (clouds in the mountains: with the fog the deep valleys fill with cloud; with the clouds on, high crests wear caps)
+      const caps = natural && p.get('clouds') ? p.get('cloudCover') : 0;
+      if (fog > .02 || caps > 0) {
+        const f = fogNumbers(fog > .02 ? fog : 0), k = T.uExag.value / 1000; needFog(album.data.base.at);
+        WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); WX.uLow.value.set(fog > .02 ? HILL_FILL * Math.min(1, fog / .7) : 0, caps > 0 ? 1 : 0, capBank(caps), fog > .02 ? 1 : 0);
+      } else WX.uFog.value.x = 0;
       if (cover > 0 || fog > .02) needClouds();
-      layer.weather = { cover, rain: rain ? force : 0, fog };
+      layer.weather = { cover, rain: rain ? force : 0, fog, caps };
       dome.update(c.cam, album.renderer.domElement.height);
     } };
     return layer;

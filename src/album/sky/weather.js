@@ -116,11 +116,14 @@ export function fogFloor(at, cell = 4, sub = 4, box = BBOX) {
   }
   const w = Math.ceil((x1 - x0) / cell), h = Math.ceil((z1 - z0) / cell), n = w * h;
   let low = new Float32Array(n), mean = new Float32Array(n), sea = new Float32Array(n);
+  // (and, on a grid twice as fine, the highest ground of every cell: the crests, for the caps of cloud they wear)
+  const pw = w * 2, ph = h * 2, peak = new Float32Array(pw * ph), half = sub / 2;
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
     let lo = Infinity, m = 0, s = 0;
     for (let b = 0; b < sub; b++) for (let a = 0; a < sub; a++) {
       const ll = llOfPlane(x0 + (i + (a + .5) / sub) * cell, z0 + (j + (b + .5) / sub) * cell), g = at(ll.lat, ll.lon), g0 = Math.max(g, 0);
       if (g0 < lo) lo = g0; m += g0; if (g <= 0) s++;
+      const pi = (j * 2 + (b >= half ? 1 : 0)) * pw + i * 2 + (a >= half ? 1 : 0); if (g0 > peak[pi]) peak[pi] = g0;
     }
     low[j * w + i] = lo; mean[j * w + i] = m / (sub * sub); sea[j * w + i] = s / (sub * sub);
   }
@@ -143,13 +146,33 @@ export function fogFloor(at, cell = 4, sub = 4, box = BBOX) {
   low = pass(pass(pass(low, r24, true), r12, false), r12, false); mean = pass(mean, Math.round(16 / cell) || 1, false); sea = pass(sea, r8, false);
   const weight = new Float32Array(n);
   for (let i = 0; i < n; i++) weight[i] = mix(1 + .25 * Math.max(0, Math.min(1, (mean[i] - low[i] - 60) / 340)), .9 * Math.min(1, (1 - open[i]) * 2.2), sea[i]);
-  return { w, h, cell, x0, z0, floor: low, weight, sea, mean };
+  // (the crests a little rounded — the mean of a cell and its neighbours: a cap of cloud is not cut in facets)
+  const round = new Float32Array(pw * ph);
+  for (let j = 0; j < ph; j++) for (let i = 0; i < pw; i++) {
+    let s = 0, c = 0;
+    for (let b = Math.max(0, j - 1); b <= Math.min(ph - 1, j + 1); b++) for (let a = Math.max(0, i - 1); a <= Math.min(pw - 1, i + 1); a++) { s += peak[b * pw + a]; c++; }
+    round[j * pw + i] = s / c;
+  }
+  return { w, h, cell, x0, z0, floor: low, weight, sea, mean, peak: round, pw, ph };
 }
 // the floor and the willingness at a place, as the shader reads them (for the tests)
 export function fogFloorAt(ff, lat, lon) {
   const [x, z] = planeOf(lat, lon), i = Math.max(0, Math.min(ff.w - 1, Math.floor((x - ff.x0) / ff.cell))), j = Math.max(0, Math.min(ff.h - 1, Math.floor((z - ff.z0) / ff.cell)));
-  return { floor: ff.floor[j * ff.w + i], weight: ff.weight[j * ff.w + i], sea: ff.sea[j * ff.w + i], mean: ff.mean[j * ff.w + i] };
+  const pi = Math.max(0, Math.min(ff.pw - 1, Math.floor((x - ff.x0) / ff.cell * 2))), pj = Math.max(0, Math.min(ff.ph - 1, Math.floor((z - ff.z0) / ff.cell * 2)));
+  return { floor: ff.floor[j * ff.w + i], weight: ff.weight[j * ff.w + i], sea: ff.sea[j * ff.w + i], mean: ff.mean[j * ff.w + i], peak: ff.peak[pj * ff.pw + pi] };
 }
+// ---- clouds in the mountains
+// With the fog on, the deep valleys of the mountains fill with cloud: to the layer of the fog is added HILL_FILL (at the
+// most, from a fog of .7) of what the relief of the place — its mean height over its floor — has above HILL_FROM m.
+// So a plain and a wide river valley keep their fog as it was, and in the mountains the cloud stands about up to the
+// mean height of the land: the crests stand out of a sea of cloud. With the clouds on, a high crest wears a cap of
+// cloud: a crest is ground that stands CAP_CREST[0]..[1] m above the mean of the land around it and
+// CAP_HIGH[0]..[1] m above the sea; the cap lies from CAP_UNDER m below the crest to CAP_OVER m above it. Not every
+// crest has one: only where the field of the banks is above capBank(cover).
+export const HILL_FILL = 1.2, HILL_FROM = 300, CAP_CREST = [250, 600], CAP_HIGH = [1500, 2100], CAP_UNDER = 260, CAP_OVER = 240;
+export const capBank = cover => mix(.60, .30, cover);
+// how much of a cap the crest at a place may wear, 0..1 (before the banks), by the heights from fogFloorAt
+export const capAt = f => ss(CAP_CREST[0], CAP_CREST[1], f.peak - f.mean) * ss(CAP_HIGH[0], CAP_HIGH[1], f.peak);
 
 // ---- what the shaders get
 // uRain: x how hard it rains (0 = no rain) .. 1, y which clouds rain (rainMask), z the time for the falling lines (s),
@@ -159,8 +182,12 @@ export function fogFloorAt(ff, lat, lon) {
 // uFogRect: where tFog lies on the plane: (x0, z0, 1 / width, 1 / height), km.
 // uSnowF: the line of snowfall (snowNumbers): x its height at the middle of the map, y its rise with every km south,
 //        z its band, all in km of the world; w 1 while precipitation can be snow.
-export const WX = { tCloud: { value: null }, tFog: { value: null }, uFogRect: { value: new Vector4(0, 0, 1, 1) }, uRain: { value: new Vector4(0, .2, 0, 1) }, uFog: { value: new Vector4(0, .3, .5, .05) },
-  uSnowF: { value: new Vector4(9, 0, .2, 0) } };
+// uLow:  the low clouds: x how much of the relief the cloud of a mountain valley fills (of the way from the floor of
+//        the land to its mean height), y 1 while high crests wear caps of cloud, z from which value of the field of
+//        the banks a crest has its cap, w 1 while there is fog itself. (uFog.x is 1 while there is fog or caps.)
+// tPeak: the highest ground of every 2 km, m: the crests (laid over the same rect as tFog).
+export const WX = { tCloud: { value: null }, tFog: { value: null }, tPeak: { value: null }, uFogRect: { value: new Vector4(0, 0, 1, 1) }, uRain: { value: new Vector4(0, .2, 0, 1) }, uFog: { value: new Vector4(0, .3, .5, .05) },
+  uSnowF: { value: new Vector4(9, 0, .2, 0) }, uLow: { value: new Vector4(0, 0, .5, 0) } };
 // builds the textures when they are first needed
 export function needClouds() {
   if (WX.tCloud.value) return;
@@ -175,11 +202,15 @@ export function needFog(at) {
   const t = new DataTexture(hf, ff.w, ff.h, RGBAFormat, HalfFloatType);
   t.internalFormat = 'RGBA16F'; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.magFilter = t.minFilter = LinearFilter; t.needsUpdate = true;
   WX.tFog.value = t; WX.uFogRect.value.set(ff.x0, ff.z0, 1 / (ff.w * ff.cell), 1 / (ff.h * ff.cell));
+  const pk = new Uint16Array(ff.pw * ff.ph); for (let i = 0; i < pk.length; i++) pk[i] = DataUtils.toHalfFloat(ff.peak[i]);
+  const tp = new DataTexture(pk, ff.pw, ff.ph, RedFormat, HalfFloatType);
+  tp.internalFormat = 'R16F'; tp.wrapS = tp.wrapT = ClampToEdgeWrapping; tp.magFilter = tp.minFilter = LinearFilter; tp.needsUpdate = true;
+  WX.tPeak.value = tp;
 }
 
 // ---- the GLSL of the weather: pasted after COMMON and LIGHT (it uses RKM, uExag, uCloud, uSun, uSunW, albumDay)
 export const WEATHER = /* glsl */`
-uniform sampler2D tCloud, tFog; uniform vec4 uRain, uFog, uFogRect, uSnowF;
+uniform sampler2D tCloud, tFog, tPeak; uniform vec4 uRain, uFog, uFogRect, uSnowF, uLow;
 const vec2 WX_WIND = vec2(${WIND[0].toFixed(4)}, ${WIND[1].toFixed(4)});
 #define RAIN_LAG ${RAIN_LAG.toFixed(1)}
 // km on the plane that touches the globe at the middle of the map: the weather is laid out on it
@@ -211,9 +242,19 @@ float wxSnowAir(vec2 q) { return wxSnowy(q, textureLod(tFog, (q - uFogRect.xy) *
 // the top of the fog over a point of the plane, km over the sea: the floor of the land there, and over it a layer
 // whose thickness goes by the place and by the banks the fog lies in (over the sea the banks are fewer: sea fog
 // stands off a stretch of the coast here and there, not along all of it)
+// In the mountains the layer is thicker: it fills a part of the way from the floor of the land to its mean height,
+// so that the crests stand out of a sea of cloud.
 float wxFogTop(vec2 q) {
-  vec3 f = textureLod(tFog, (q - uFogRect.xy) * uFogRect.zw, 0.).rgb;
-  float lo = uFog.z + .22 * f.b, bank = smoothstep(lo, lo + .2, textureLod(tCloud, q / ${CLOUD_KM.toFixed(1)} * 2.3 + .37, 1.).r);
-  return f.r * uExag * .001 + uFog.y * f.g * bank;
+  vec4 f = textureLod(tFog, (q - uFogRect.xy) * uFogRect.zw, 0.);
+  float lo = uFog.z + .22 * f.b, bank = smoothstep(lo, lo + .2, textureLod(tCloud, q / ${CLOUD_KM.toFixed(1)} * 2.3 + .37, 1.).r), k = uExag * .001;
+  return f.r * k + (uFog.y * f.g + uLow.x * max(f.a - f.r - ${HILL_FROM.toFixed(1)}, 0.) * k) * bank;
+}
+// the cap of cloud a high crest wears over a point of the plane: its bottom and its top, km over the sea (no cap
+// where the top is not above the bottom)
+vec2 wxCap(vec2 q) {
+  vec2 uv = (q - uFogRect.xy) * uFogRect.zw; float pk = textureLod(tPeak, uv, 0.).r;
+  float crest = smoothstep(${CAP_CREST[0].toFixed(1)}, ${CAP_CREST[1].toFixed(1)}, pk - textureLod(tFog, uv, 0.).a) * smoothstep(${CAP_HIGH[0].toFixed(1)}, ${CAP_HIGH[1].toFixed(1)}, pk)
+    * smoothstep(uLow.z, uLow.z + .1, textureLod(tCloud, q / ${CLOUD_KM.toFixed(1)} * 2.3 + .37, 1.).r);
+  return vec2(pk - ${CAP_UNDER.toFixed(1)}, pk - ${CAP_UNDER.toFixed(1)} + ${(CAP_UNDER + CAP_OVER).toFixed(1)} * crest) * uExag * .001;
 }
 `;

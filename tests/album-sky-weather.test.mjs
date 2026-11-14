@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CLOUD_KM, CLOUD_N, WIND, RAIN_LAG, RAIN_EDGE, WEATHER, WX, planeOf, llOfPlane, cloudNoise, cloudAt, cloudOffset, cloudThreshold, rainCover, rainMask, rainAt,
-  fogByHour, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers } from '../src/album/sky/weather.js';
+  fogByHour, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
+  HILL_FILL, HILL_FROM, CAP_CREST, CAP_HIGH, CAP_UNDER, CAP_OVER, capBank, capAt } from '../src/album/sky/weather.js';
 import { readFileSync } from 'node:fs';
 import { cloudShader, LUMPS, cloudShow, rainCloudShow } from '../src/album/layers/clouds.js';
 import { LIGHT } from '../src/album/light.js';
@@ -151,13 +152,40 @@ test('weather: fog fills the land from the floor of the valley and the sea', () 
   assert.ok(at(40, -8.05).weight > .6 && at(40, -8.4).weight < at(40, -8.05).weight && at(40, -8.4).weight > at(40, -9.9).weight);
 });
 
+test('weather: clouds in the mountains — a sea of cloud in the valleys, caps on the crests', () => {
+  // a made-up land: a plain at 400 m and a range along 42.5° N whose crest stands at 3000 m, 20 km from its foot
+  const land = (lat, lon) => 400 + 2600 * Math.max(0, 1 - Math.abs(lat - 42.5) * 111.2 / 20);
+  const ff = fogFloor(land, 8, 2), at = (la, lo) => fogFloorAt(ff, la, lo);
+  assert.equal(ff.pw, ff.w * 2); assert.equal(ff.ph, ff.h * 2); assert.equal(ff.peak.length, ff.pw * ff.ph);
+  // the crests are kept on a grid twice as fine, as the highest ground of a cell, only a little rounded
+  const crest = at(42.5, 0), foot = at(42.0, 0), plain = at(40, 0);
+  assert.ok(crest.peak > 2400 && crest.peak <= 3000, `${crest.peak}`); assert.ok(crest.mean < crest.peak - 300 && crest.mean > 1200, `${crest.mean}`); near(plain.peak, 400, 1);
+  // a crest wears a cap: high ground that stands well above the land around it; a plain or a low hill does not
+  assert.ok(capAt(crest) > .2, `${capAt(crest)}`); assert.equal(capAt(plain), 0); assert.equal(capAt({ peak: 1200, mean: 500 }), 0, 'a low hill'); assert.equal(capAt({ peak: 2600, mean: 2500 }), 0, 'a high plateau');
+  near(capAt({ peak: 3200, mean: 2000 }), 1, 1e-9); assert.ok(capAt(foot) < capAt(crest));
+  assert.ok(CAP_CREST[0] < CAP_CREST[1] && CAP_HIGH[0] >= 1200 && CAP_HIGH[1] <= 2500 && CAP_UNDER > 100 && CAP_OVER > 100 && CAP_UNDER + CAP_OVER < 1000);
+  // more of the knob «Облачность»: more crests in caps
+  assert.ok(capBank(.2) > capBank(.9) && capBank(1) > .2 && capBank(.05) < .7);
+  // the cloud of a mountain valley fills the way from the floor of the land nearly to its mean height: the crests stay out
+  assert.ok(HILL_FILL > .5 && HILL_FILL <= 1.5 && HILL_FROM >= 200); assert.ok(crest.floor + HILL_FILL * (crest.mean - crest.floor - HILL_FROM) < crest.peak - 150, `${crest.floor} ${crest.mean} ${crest.peak}`);
+  // (a plain keeps its fog as it was: its relief is under HILL_FROM)
+  assert.ok(plain.mean - plain.floor < HILL_FROM);
+  // the pieces of the shader: both come with the walk of the fog
+  const fog = postShader(POST_FOG);
+  assert.ok(/wxFogTop\(P\.xz/.test(fog) && /wxCap\(qf\)/.test(fog) && /uLow\.w > 0\./.test(fog) && /uLow\.y > 0\. && f0\.a > 650\./.test(fog)); assert.ok(!/wxCap\(qf\)/.test(postShader(POST_CLOUDS)));
+  assert.match(WEATHER, /uLow\.x \* max\(f\.a - f\.r - 300\.0, 0\.\)/);
+  // the pages
+  const sea = page('sky-valley-clouds'), caps = page('sky-caps'), rise = sunTimes(172, sea.cam.lat).rise;
+  assert.ok(sea.p.fog === 1 && fogByHour(sea.p.hour, rise) > .9 && !sea.p.clouds); assert.ok(caps.p.clouds === 1 && !caps.p.fog && caps.cam.h <= 30);
+});
+
 test('weather: nothing of it in the shaders of the land, and nothing at all while it is off', () => {
   // the shared light, which every shader of the land pastes, knows no weather and reads no texture
   assert.ok(!/sampler|albumCloud|wxRain|wxFog|tCloud|tFog/.test(LIGHT)); assert.equal(sky.glsl, '', 'the sky paints nothing in the ground shader');
-  for (const k of ['tCloud', 'tFog', 'uRain', 'uFog', 'uFogRect', 'uSnowF']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
+  for (const k of ['tCloud', 'tFog', 'tPeak', 'uRain', 'uFog', 'uFogRect', 'uSnowF', 'uLow']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
   // the GLSL of the weather: what post.js and layers/clouds.js call
   for (const sig of ['vec2 wxPlane(vec3 wpos)', 'float wxCloudN(vec2 q, float lod)', 'float albumCloudField(vec3 wpos)', 'float albumCloudShade(vec3 wpos)', 'float wxRainMask(vec2 q)', 'float wxRainCloud(vec2 q, float lod)', 'float wxRainAt(vec2 q, float lod)',
-    'float wxFogTop(vec2 q)', 'float wxSnowy(vec2 q, float alt)', 'float wxSnowAir(vec2 q)']) assert.ok(WEATHER.includes(sig), sig);
+    'float wxFogTop(vec2 q)', 'vec2 wxCap(vec2 q)', 'float wxSnowy(vec2 q, float alt)', 'float wxSnowAir(vec2 q)']) assert.ok(WEATHER.includes(sig), sig);
   assert.ok(!/vnoise|fbm|worley/.test(WEATHER), 'the weather reads its two pictures and counts no noise');
   for (const k of Object.keys(WX)) assert.match(WEATHER, new RegExp(`\\b${k}\\b`), k);
   // off by default, and the pictures are not even built

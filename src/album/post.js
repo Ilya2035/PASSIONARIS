@@ -11,7 +11,7 @@
 import { WebGLRenderTarget, DepthTexture, UnsignedIntType, LinearFilter, NearestFilter, ShaderMaterial, Mesh, PlaneGeometry, OrthographicCamera, Scene, Vector2, Vector3, Matrix4 } from 'three';
 import { COMMON } from './glsl.js';
 import { LIGHT, lightUniforms } from './light.js';
-import { WEATHER, WX } from './sky/weather.js';
+import { WEATHER, WX, HILL_FROM } from './sky/weather.js';
 
 const CLOUDS = 1, RAIN = 2, FOG = 4;
 // (this pass is drawn with its own flat camera: the eye of the map comes as uEye, under the name LIGHT knows)
@@ -82,17 +82,37 @@ const WET = /* glsl */`
 // The fog of the morning. The last stretch of the ray before the ground is walked in six steps; a step that lies
 // under the top of the fog adds to it. So the fog has its own thickness: its edge runs along the slopes where the
 // ground rises out of it, and a look along the ground sees more of it than a look from above.
+// The same walk draws the cloud that fills a deep mountain valley; the cap of cloud on a high crest is laid with it
+// (sky/weather.js, «clouds in the mountains»).
 const FOGGY = /* glsl */`
-          if (uFog.x > 0. && ground) {
+          // (with the caps alone there is nothing to walk for outside the mountains: where the land around is low)
+          vec2 qf = vec2(0.); vec4 f0 = vec4(0.);
+          if (uFog.x > 0. && ground) { qf = wxPlane(wpos); f0 = textureLod(tFog, (qf - uFogRect.xy) * uFogRect.zw, 0.); }
+          if (uFog.x > 0. && ground && (uLow.w > 0. || f0.a > 650.)) {
             vec3 G = wpos + vec3(0., RKM, 0.);
             // the top of a fog is not smooth: it billows, and its edge is ragged
-            vec2 qf = wxPlane(wpos); float puff = vnoise(qf / 2.3) * .4 + vnoise(qf / 7.1 + 3.) * .6, lift = (puff - .5) * uFog.y * .45;
-            float reach = min(min((uFog.y * 1.6 + .04) / max(-dot(rdW, G) / length(G), .03), 30.), tG * .9), fog = 0.;
-            for (int i = 0; i < 6; i++) {
-              vec3 P = G - rdW * (reach * (float(i) + .5) / 6.);
-              fog += smoothstep(0., uFog.w, wxFogTop(P.xz / max(P.y, 1.) * RKM) + lift - (length(P) - RKM));
+            float puff = vnoise(qf / 2.3) * .4 + vnoise(qf / 7.1 + 3.) * .6, lift = (puff - .5) * uFog.y * .45;
+            // (how high over the ground the low clouds may stand here: the fog, the cloud of a mountain valley — by the
+            // relief of this very place, so that on a plain the fog is walked exactly as before — and the cap of a crest)
+            float deep = uFog.y * 1.6 + uLow.x * max(f0.a - f0.r - ${HILL_FROM.toFixed(1)}, 0.) * uExag * .00115, down = max(-dot(rdW, G) / length(G), .03);
+            float reach = min(min((deep + .04) / down, 30.), tG * .9), fog = 0.;
+            // (the top of a thick layer is as soft as one step of the walk is high: a harder top would show the steps
+            // as rings around every slope)
+            float soft = max(uFog.w, (deep - uFog.y * 1.6) / 6.);
+            if (uLow.w > 0.) {
+              for (int i = 0; i < 6; i++) {
+                vec3 P = G - rdW * (reach * (float(i) + .5) / 6.);
+                fog += smoothstep(0., soft, wxFogTop(P.xz / max(P.y, 1.) * RKM) + lift - (length(P) - RKM));
+              }
+              fog = 1. - exp(-fog * reach / 6. * 7.);
             }
-            fog = 1. - exp(-fog * reach / 6. * 7.);
+            // The cap of a crest is not walked: it is the cloud standing over this very ground — from the ragged
+            // bottom of the cap, or from the ground where the ground stands in it, up to its top. It is thinner than
+            // fog and torn: wisps of it, with the crest showing between them.
+            if (uLow.y > 0. && f0.a > 650.) {
+              vec2 cap = wxCap(qf); float over = max(cap.y - max(cap.x - (puff - .5) * .3, length(G) - RKM), 0.) * smoothstep(0., .25, cap.y - cap.x);
+              fog = 1. - (1. - fog) * (1. - (1. - exp(-over * 3.2 / max(down, .3))) * smoothstep(.28, .6, puff) * .88);
+            }
             if (fog > .004) {
               // its billows are lit from the side of the Sun
               vec2 qs = qf + normalize(uSunW.xz + 1e-4) * 1.1; float side = clamp((puff - vnoise(qs / 2.3) * .4 - vnoise(qs / 7.1 + 3.) * .6) * 4., -1., 1.);
