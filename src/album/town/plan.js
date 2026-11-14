@@ -205,6 +205,27 @@ export function planLobe(L, S, env) {
 // every kind once in both manners of building, in rows around a point: the «витрина»
 const SHOW = { quarter: [.9, .9], quarterU: [.9, .9], quarterL: [.9, .9], palace: [.9, .9], rows: [.9, .84], lanes: [.9, .86], terrace: [.88, .88], cluster: [.84, .84], farm: [.76, .68], villa: [.8, .7], house: [.52, .3], tower: [.4, .4],
   temple: [.94, .94], market: [.96, .96], fort: [1.3, 1.3, 1.3], mill: [.5, .5], pier: [.9, .5], site: [.8, .8], yard: [.9, .8], longyard: [.9, .7], cot: [.7, .6], wall: [1, 1], gate: [.7, .7] };
+// ---- A hospice at a great pass (the owner, second step of the third wave: «горы, перевалы, дороги в горах»; the task:
+// «у больших исторических перевалов — малое укрепление или приют у дороги: Сомпорт — приют Санта-Кристина, Ронсеваль
+// — монастырь»). Three buildings of the settlements at their real size, in a row beside the road: the hall where
+// travellers are taken in, a chapel, a watch tower. They stand on the side of the road where the ground is nearer the
+// height of the road — on the ledge, not over the drop. It is no settlement: nobody is counted there, no chunk is
+// built up, the ground under it stays as it is.
+export const HOSPICE = { off: .9, hall: [.8, .7], chapel: [.7, .7], tower: [.4, .4], along: [0, 1.05, -.85] };   // in cells: off the axis of the road · sizes · where along it
+// q: { x, y } the pass on the road, flat km · dir: radians, the way the road runs there · S: the cell, km ·
+// env: { at(x, y) → m, atl: Atlantic manner of building }  → rows of ROW numbers, a block each
+export function planHospice(q, dir, S, env = {}) {
+  const ux = Math.cos(dir), uy = Math.sin(dir), off = HOSPICE.off * S, at = env.at;
+  let side = 1;
+  if (at) { const h0 = at(q.x, q.y), l = Math.abs(at(q.x - uy * off * 1.4, q.y + ux * off * 1.4) - h0), r = Math.abs(at(q.x + uy * off * 1.4, q.y - ux * off * 1.4) - h0); side = l <= r ? 1 : -1; }
+  const cx = q.x - uy * side * off, cy = q.y + ux * side * off, fl = env.atl ? FLAG_ATL : 0, k = Math.round(q.x * 7 + q.y * 13), out = [];
+  [[KIND.villa, HOSPICE.hall], [KIND.temple, HOSPICE.chapel], [KIND.tower, HOSPICE.tower]].forEach(([kind, size], n) => {
+    const a = HOSPICE.along[n] * S;
+    out.push(cx + ux * a, cy + uy * a, dir, kind, 0, 0, 0, fl, size[0], size[1], cellHash(n, 5, k, 3), 1);
+  });
+  return out;
+}
+
 export function planShowcase(x, y, gap) {
   const out = [], names = Object.keys(SHOW), cols = 12, rows = Math.ceil(names.length / cols);
   for (let c = 0; c < 2; c++) names.forEach((name, n) => {

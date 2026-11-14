@@ -58,6 +58,7 @@ export function markSvg(cls, rank = cls > 0 ? 2 : 0, far = false) {
 }
 // The mark of a pass: two arcs back to back. A great pass (rank 0) is drawn a little larger and heavier.
 export const passSize = (rank, far) => (far ? 9 : 12) + (rank === 0 ? 2 : 0);
+export const PASS_LIFT = 15;                                        // px: the mark of a pass stands this much above its point — over the saddle, not on the road and the hospice beside it
 export function passSvg(rank = 2, far = false) {
   const s = (far ? 3.9 : 5.2) + (rank === 0 ? .9 : 0), w = s * .66, n = x => +x.toFixed(2);
   const d = `M${n(-w)},${n(-s)} Q${n(-w * .08)},0 ${n(-w)},${n(s)} M${n(w)},${n(-s)} Q${n(w * .08)},0 ${n(w)},${n(s)}`;
@@ -118,7 +119,8 @@ export default async function init(album) {
       passSeen = ps; for (const it of byPass.values()) it.el?.remove(); byPass.clear();
       (Array.isArray(ps) ? ps : []).forEach((q, i) => {
         if (!q || !Number.isFinite(q.x) || !Number.isFinite(q.y)) return;
-        const { lat, lon } = llOf(q.x, q.y), rank = passRank(q), name = passText(q);
+        const on = towns?.passPoint?.(q) || q;                       // (on the road as it is drawn: the list has the pass on the way the road was found by)
+        const { lat, lon } = llOf(on.x, on.y), rank = passRank(q), name = passText(q);
         byPass.set(i, { pass: true, index: i, el: null, shown: false, far: false, wide: 8 + name.length * (rank ? 7 : 8.5), name, rank, cls: 0, pri: PASS_RANKS[rank].order, people: q.h || 0, r: 0, lat, lon, alt: Math.max(0, album.data.base.at(lat, lon)) });
       });
     }
@@ -159,7 +161,7 @@ export default async function init(album) {
       const s = it.pass ? passShownAt(it.rank, heightFor(h, dist)) : shownAt(it.rank, heightFor(h, dist), farNames); if (!(s.mark > 0)) continue;
       const kmPx = Math.max(1e-6, dist * k), rpx = it.r / kmPx;     // km to a pixel there · the radius of the houses on the screen
       v.project(cam.cam);
-      const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * hh;
+      const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * hh - (it.pass ? PASS_LIFT : 0);
       if (!(v.z < 1 && x > 20 && x < w - 20 && y > 20 && y < hh - 20)) continue;
       // the houses are readable: no mark over them. A settlement of village size is a few houses — the town of a
       // district may be no more than that: its mark goes as soon as a single house can be told (the owner: the name

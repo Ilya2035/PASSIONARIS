@@ -18,7 +18,7 @@ import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
-import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict } from '../town/rules.js';
+import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict, passRank, CULTURES } from '../town/rules.js';
 import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
@@ -26,7 +26,7 @@ import { loadPlaceNames, namePlaces } from '../town/sites.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks, groundCan } from '../town/grow.js';
 import { treelineAt } from '../ground/climate.js';
-import { planLobe, planShowcase, ROW } from '../town/plan.js';
+import { planLobe, planShowcase, planHospice, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
 import { KN, KKM, KX0, KY0, squareOf } from '../division/km.js';
 import { roadChunks, districtTracks, trackLines, trackIndex, TRACK_SNAP } from '../town/tracks.js';
@@ -284,7 +284,7 @@ export default async function init(album) {
   const ymat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { ...mat.uniforms, uYard: { value: new Vector4(0, 0, 0, 1) } } });
   const yard = blockSet(ymat, slots.subarray(0, ySlots * 3), MAX_YARDS);
   // roads as the yards must know them: no yard stands on a road
-  let roadSeen = null, roadN = 0, roadMirrored = -1, rsegs = [], rkind = [], rgrid = new Map(); const RC = 2;
+  let roadSeen = null, roadN = 0, roadMirrored = -1, rsegs = [], rkind = [], rgrid = new Map(), hospices = []; const RC = 2, PASS_REACH = 1.5;   // km: how far from a pass its road is looked for
   function indexRoads() {
     rsegs = []; rkind = []; rgrid = new Map(); roadSeen = album.roadNet || null; roadN++;
     for (const l of roadSeen?.lines || []) {
@@ -293,6 +293,25 @@ export default async function init(album) {
         for (let gy = Math.floor((Math.min(a[1], b[1]) - .2) / RC); gy <= Math.floor((Math.max(a[1], b[1]) + .2) / RC); gy++)
           for (let gx = Math.floor((Math.min(a[0], b[0]) - .2) / RC); gx <= Math.floor((Math.max(a[0], b[0]) + .2) / RC); gx++) { const key = gx * 100000 + gy; (rgrid.get(key) || rgrid.set(key, []).get(key)).push(id); } }
     }
+    // the great passes (the list is laid by the roads): a hospice stands beside the road at each (plan.js planHospice) —
+    // at the point of the road as it is drawn nearest to the pass, turned the way the road runs there
+    hospices = [];
+    for (const q of Array.isArray(roadSeen?.passes) ? roadSeen.passes : []) {
+      if (!q || passRank(q) !== 0 || !Number.isFinite(q.x) || !Number.isFinite(q.y)) continue;
+      const hit = roadPoint(q.x, q.y);
+      if (hit) { const ll = llOf(hit.x, hit.y); hospices.push({ ...hit, name: q.name || '', atl: cultureAt(ll.lat, ll.lon) === CULTURES.atl }); }
+    }
+  }
+  // The point of the nearest road as it is drawn, within PASS_REACH km of (x, y): { x, y, dir: the way the road runs
+  // there, radians } or null. A pass is a point of the way its road was found by; the ribbon is that way made smooth
+  // and may run a few hundred metres beside it — the mark of the pass and its hospice stand at the ribbon.
+  function roadPoint(x, y) {
+    let best = PASS_REACH, hit = null; const gx = Math.floor(x / RC), gy = Math.floor(y / RC);
+    for (let j = gy - 1; j <= gy + 1; j++) for (let i = gx - 1; i <= gx + 1; i++) for (const id of rgrid.get(i * 100000 + j) || []) {
+      const o = id * 4, ax = rsegs[o], ay = rsegs[o + 1], dx = rsegs[o + 2] - ax, dy = rsegs[o + 3] - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+      const d = Math.hypot(x - ax - dx * t, y - ay - dy * t); if (d < best) { best = d; hit = { x: ax + dx * t, y: ay + dy * t, dir: Math.atan2(dy, dx) }; }
+    }
+    return hit;
   }
   const roadAt = (x, y) => {                                        // km to the nearest road (only roads within 200 m are found)
     let best = 1e9;
@@ -410,6 +429,7 @@ export default async function init(album) {
       let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, S, planEnv); cache.set(L.k, rows); }
       parts.push(rows); total += rows.length; if (total >= MAX_BLOCKS * ROW) break;
     }
+    for (const q of hospices) if (Math.hypot(q.x - tx, q.y - ty) < D + .3) { const rows = planHospice(q, q.dir, S, { at, atl: q.atl }); parts.push(rows); total += rows.length; }
     const all = new Float32Array(total); let o = 0; for (const r of parts) { all.set(r, o); o += r.length; }
     fill(all);
   }
@@ -451,6 +471,10 @@ export default async function init(album) {
     marks: () => model.towns.map(rowOf), version: () => grownN,
     // where the roads enter the town of place `index`: { x, y (its site, flat km), streets: [radians from the east] —
     // the directions of its main streets from its site }, or null. A road should run in along one of them.
+    // the hospices at the great passes: [{ x, y (flat km, on the road), dir (radians, the way the road runs), name (of the pass) }]
+    hospices: () => hospices.map(q => ({ x: q.x, y: q.y, dir: q.dir, name: q.name })),
+    // where a pass of the roads' list stands on the road as it is drawn: { x, y, dir } (flat km), or null when no road is near
+    passPoint: q => { if ((album.roadNet || null) !== roadSeen) indexRoads(); return roadPoint(q.x, q.y); },
     gates: index => { const t = model.towns.find(x => x.index === index), L = t && lobes.find(o => o.fine === undefined && Math.hypot(o.x - t.x, o.y - t.y) < .05); return L ? { x: L.x, y: L.y, streets: L.gates.slice() } : null; },
     // «чанк города такого-то»: the settlement chunk c of 1 km² is built up by (the number of the chunk: division/km.js),
     // or null; chunksOfTown(index of the place) → the numbers of its chunks

@@ -706,3 +706,32 @@ test('settle in the mountains: a village stands on the floor of a valley or on a
   const lab = readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8');
   assert.match(lab, /if \(!m\.name && !\(m\.rank >= 1\)\) continue;/); assert.match(lab, /const nameA = it\.name \? s\.name : 0;/);
 });
+
+test('settle hospice: at a great pass a hall, a chapel and a tower stand in a row beside the road, at real size, on the level side', async () => {
+  const { planHospice, HOSPICE } = await import('../src/album/town/plan.js');
+  const S = cellSize(20, 1), q = { x: 100, y: 200 };
+  // the road runs east; the ground drops away to the south of it and is level to the north
+  const at = (x, y) => (y >= 200 ? 1600 : 1600 - (200 - y) * 900);
+  const rows = planHospice(q, 0, S, { at });
+  assert.equal(rows.length, 3 * ROW);
+  const b = [0, 1, 2].map(n => ({ x: rows[n * ROW], y: rows[n * ROW + 1], turn: rows[n * ROW + 2], kind: rows[n * ROW + 3], flags: rows[n * ROW + 7], sx: rows[n * ROW + 8], sy: rows[n * ROW + 9] }));
+  assert.deepEqual(b.map(o => KINDS[o.kind]), ['villa', 'temple', 'tower']);
+  for (const o of b) {
+    assert.ok(o.y > 200, 'on the level side of the road'); assert.equal(o.turn, 0); assert.equal(o.flags, 0);
+    assert.ok(o.y - 200 - o.sy * S / 2 > .02, 'no building stands on the road'); assert.ok(Math.hypot(o.x - q.x, o.y - q.y) < .2, 'within two hundred metres of the pass');
+    assert.ok(o.sx <= 1 && o.sy <= 1, 'a building is no larger than a block of a town: real size');
+  }
+  // the buildings do not stand on one another along the road
+  const along = b.map(o => [o.x - o.sx * S / 2, o.x + o.sx * S / 2]).sort((u, v) => u[0] - v[0]); for (let i = 1; i < 3; i++) assert.ok(along[i][0] >= along[i - 1][1] - 1e-9);
+  // the other way round the hospice stands on the other side; a road running north turns it with the road
+  const flip = planHospice(q, 0, S, { at: (x, y) => at(x, 400 - y) }); assert.ok(flip[1] < 200);
+  const north = planHospice(q, Math.PI / 2, S, {}); assert.ok(Math.abs(north[0] - q.x) > HOSPICE.off * S * .99 && Math.abs(north[1] - q.y) < 1e-9); assert.equal(north[2], Math.PI / 2);
+  assert.equal(planHospice(q, 0, S, { atl: true })[7], 1, 'the Atlantic manner of building where the land is Atlantic');
+  // the layer: only the great passes, at the road as it is drawn; nothing without the list of the roads
+  const { readFileSync } = await import('node:fs'), src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+  assert.match(src, /Array\.isArray\(roadSeen\?\.passes\) \? roadSeen\.passes : \[\]/); assert.match(src, /passRank\(q\) !== 0/); assert.match(src, /const hit = roadPoint\(q\.x, q\.y\);/);
+  // …and a little above it on the screen, so that it covers neither the road nor the hospice
+  const { PASS_LIFT, passSize } = await import('../src/album/layers/labels.js'); assert.ok(PASS_LIFT > passSize(0, false) / 2 + 5 && PASS_LIFT <= 20);
+  // the mark of a pass stands on the road as it is drawn, like its hospice
+  assert.match(readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8'), /const on = towns\?\.passPoint\?\.\(q\) \|\| q;/); assert.match(src, /planHospice\(q, q\.dir, S, \{ at, atl: q\.atl \}\)/);
+});
