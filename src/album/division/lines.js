@@ -87,6 +87,8 @@ function ribbons(album, lines, w, colour, minPx, order) {
   rib.mesh.renderOrder = order; rib.mesh.material.depthTest = false;      // a border is drawn over the land whatever the relief: on a crest the coarse ground of the far view would bury parts of it
   return rib;
 }
+// (the walls of walls.js are drawn the same way)
+export const makeRibbonsFor = ribbons;
 const drop = (album, m) => { if (!m) return; album.scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); };
 
 // The outline of one district: a light line over a dark one, on the very border the lines and the fill share

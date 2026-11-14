@@ -11,6 +11,8 @@
 //     a river more, an open cape less;
 //   • else by a river: the bigger, the better; where two rivers meet, better still;
 //   • never on a top: ground standing above the land around it is dear; low ground of the district is cheaper;
+//   • in the mountains on the floor of the valley, not up its slope: dear by how far up the rise around it (within
+//     2 km) it stands, the more the more of a mountain the land is (cells.js mountainRaster) — the roads run there too;
 //   • not at the far rim: a little dearer away from the middle of the district;
 //   • a real village of the region pulls the place to itself a little, the more the bigger it is;
 //   • towns of neighbouring districts do not stand together: within 8 km of a place already chosen the ground is dear.
@@ -33,6 +35,7 @@ export const SEAT = { province: 1, land: 2, region: 4 };
 export const PLACE_WHY = ['настоящий город', 'бухта', 'устье реки', 'берег', 'слияние рек', 'река', 'ровное место', 'лучшее, что есть'];
 const SPACING_KM = 8;
 export const TOWN_POP = 2000;                          // a real place this big is a town: the district's town stands on it
+export const FLOOR = 3;                               // how dear the top of the rise around a place is in the mountains (its foot costs nothing)
 export const MERGE_KM = 5;                             // a real town this near a bigger one is a part of it
 
 // sums over boxes of squares: v(t) summed over the (2r+1)² box around each square, and how many squares counted
@@ -57,7 +60,7 @@ function boxSum(val, use, r) {
 //     (the chunk the place is on), why: Uint8Array (PLACE_WHY), pop: Float64Array (people of the real place, 0 none),
 //     seat: Uint8Array (SEAT bits), seats: { province: [district], land: Map(name → district), region: [district] } }
 export function districtCentres(div, sites = [], opts = {}) {
-  const count = div.count, cells = div.cells, { hgt, riv } = div.raster, n = FN * FN;
+  const count = div.count, cells = div.cells, { hgt, riv, mtn } = div.raster, n = FN * FN;
   const facts = opts.facts || kmFacts(div, div.raster.heightAt), settle = opts.settle || kmSettle(div, div.raster.heightAt);
   const land = t => { const d = cells[t]; return d >= 0 && div.kinds[d] === LAND; };
   const x = new Float64Array(count).fill(NaN), y = new Float64Array(count).fill(NaN), site = new Int32Array(count).fill(-1), texel = new Int32Array(count).fill(-1);
@@ -145,6 +148,12 @@ export function districtCentres(div, sites = [], opts = {}) {
       // never on a top; low ground of the district is cheaper
       const mean = around.num[t] ? around.out[t] / around.num[t] : hgt[t];
       sc += Math.max(0, hgt[t] - mean - 30) / 60 + (hgt[t] - low[d]) / 600;
+      // in the mountains, on the valley floor
+      if (mtn && mtn[t] > 0) {
+        let lo = hgt[t], hi = hgt[t];
+        for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const u = t + dj * FN + di; if (i + di < 0 || i + di >= FN || u < 0 || u >= n || !land(u)) continue; if (hgt[u] < lo) lo = hgt[u]; if (hgt[u] > hi) hi = hgt[u]; }
+        sc += FLOOR * mtn[t] * (hgt[t] - lo) / Math.max(1, hi - lo);
+      }
       // not at the far rim
       const dx = i - mx[d], dy = j - my[d]; sc += .8 * (dx * dx + dy * dy) / (.3 * num);
       // a real village pulls the town to itself a little

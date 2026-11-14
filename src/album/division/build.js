@@ -381,7 +381,7 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   // district was laid out from, and what the other aspects still ask by.
   // The borders are then drawn once as smooth lines along the rivers and the crests (border.js), and every chunk goes
   // to the district its seed lies in by those lines: the chunks of a district are what is drawn as the district.
-  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, heightAt };
+  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, mtn: c.mtn, heightAt };
     div.geo = borderGeometry(div, rivers);
     for (let t = 0; t < div.cells.length; t++) { const d = div.cells[t]; if (d >= 0 && div.kinds[d] === LAND) div.provCells[t] = div.province[d]; }
     kmData(div); }

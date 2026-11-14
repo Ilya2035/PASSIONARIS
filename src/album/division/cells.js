@@ -16,6 +16,14 @@ const X0 = -880, Y0 = 3880, LAND = 0, NONE = 0xFFFF;
 export const RIVER_TOLL = [0, 14, 26, 40];          // km of way paid on entering and again on leaving a river: a brook-sized one, a lesser, a great
 export const CREST_TOLL = [0, 2.5, 11];               // … on entering and on leaving a crest: a lesser one, a great one
 export const CLIMB = .008;                          // km of way for every metre of height gained or lost: steep ground is slow both ways
+// In the mountains a range is the border and a valley with both its slopes is one district (the owner: «горный хребет
+// никогда не единица, он граница»). The land is claimed as everywhere (below); then in the mountains every catchment
+// (catchmentUnits: a stretch of a stream with both its slopes, up to the divides) goes whole to one district
+// (valleyVote): a valley is no longer cut along its river, and the borders there lie on the divides, the crests. A
+// catchment counts as mountain where its land within r km rises and falls by more than relief[1] metres on the whole
+// (mountainRaster: from relief[0], fully from relief[1]; the mean over the catchment at least share). Nothing else
+// moves: the plains keep their districts, and the provinces (history) keep their borders.
+export const MOUNTAIN = { r: 4, relief: [300, 700], share: .5, area: 25, run: 12, vote: true };
 const GAIN = 5, ROUNDS = 5;                         // km a district twice the middle size starts later; how many times the land is claimed
 
 // rivers: [{ pts: [[lon, lat], …], rank }] → a byte a texel: 0 none, 1 a small river, 2 a lesser, 3 a great one
@@ -44,6 +52,60 @@ const NB = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
 // it for tens of kilometres and its bed would be a thin arm of one district between all the others)
 const stepCost = (q, t, u, hgt, riv, crest) => (q < 8 ? FKM : FKM * 1.4142) * (riv[t] > 0 && riv[u] > 0 ? 3 : 1) + Math.abs(hgt[u] - hgt[t]) * CLIMB
   + ((riv[t] > 0) !== (riv[u] > 0) ? RIVER_TOLL[riv[t] > riv[u] ? riv[t] : riv[u]] : 0) + ((crest[t] > 0) !== (crest[u] > 0) ? CREST_TOLL[crest[t] > crest[u] ? crest[t] : crest[u]] : 0);
+
+// The catchments of the land, texel by texel. Water runs from every texel to the neighbour it was flooded from when
+// the land is flooded from the shore and the edge up (priority flood: hollows fill, flats drain to their outlet);
+// streams are where more than area km² drain; a stream is cut into stretches at every confluence and every
+// run km; every texel belongs to the stretch its water first reaches.
+// → { of: Int32Array (unit of every land texel, −1 none), down: Int32Array (the texel water runs to, −1 out), count }
+export function catchmentUnits(hgt, land, { area = MOUNTAIN.area, run = MOUNTAIN.run } = {}) {
+  const n = FN * FN, down = new Int32Array(n).fill(-1), order = new Int32Array(n), lvl = new Float32Array(n), seen = new Uint8Array(n), heap = new Heap(1 << 16);
+  let m = 0;
+  for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+    const t = ty * FN + tx; if (land[t] < 0) continue;
+    let out = tx === 0 || ty === 0 || tx === FN - 1 || ty === FN - 1;
+    for (let q = 0; q < 16 && !out; q += 2) if (land[(ty + NB[q + 1]) * FN + tx + NB[q]] < 0) out = true;
+    if (out) { seen[t] = 1; lvl[t] = hgt[t]; heap.push(hgt[t], t); }
+  }
+  while (heap.n) {
+    const t = heap.pop(); order[m++] = t; const tx = t % FN, ty = (t - tx) / FN;
+    for (let q = 0; q < 16; q += 2) {
+      const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue;
+      const u = uy * FN + ux; if (land[u] < 0 || seen[u]) continue;
+      seen[u] = 1; lvl[u] = Math.max(hgt[u], lvl[t] + .01); down[u] = t; heap.push(lvl[u], u);
+    }
+  }
+  const acc = new Float32Array(n), ups = new Uint8Array(n), of = new Int32Array(n).fill(-1), len = new Int32Array(n);
+  for (let i = m - 1; i >= 0; i--) { const t = order[i]; acc[t] += 1; if (down[t] >= 0) acc[down[t]] += acc[t]; }
+  for (let i = 0; i < m; i++) { const t = order[i]; if (acc[t] >= area && down[t] >= 0 && ups[down[t]] < 255) ups[down[t]]++; }
+  let count = 0;
+  for (let i = 0; i < m; i++) {
+    const t = order[i], d = down[t];
+    if (d < 0) { of[t] = count++; continue; }
+    if (acc[t] < area) { of[t] = of[d]; continue; }
+    if (acc[d] >= area && ups[d] === 1 && len[d] < run) { of[t] = of[d]; len[t] = len[d] + 1; } else of[t] = count++;
+  }
+  return { of, down, count };
+}
+
+// How much of a mountain a texel is, 0 … 1: the rise and fall of the land within MOUNTAIN.r km of it (land only, a
+// square window: the highest texel minus the lowest)
+export function mountainRaster(hgt, land) {
+  const n = FN * FN, R = Math.round(MOUNTAIN.r / FKM), hi = new Float32Array(n), lo = new Float32Array(n), a = new Float32Array(n), b = new Float32Array(n);
+  for (let t = 0; t < n; t++) { const on = land[t] >= 0; hi[t] = on ? hgt[t] : -1e9; lo[t] = on ? hgt[t] : 1e9; }
+  // the window, one way and then the other
+  const pass = (src, dst, step, max) => {
+    for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+      const t = ty * FN + tx, c = step === 1 ? tx : ty; let v = src[t];
+      for (let k = -R; k <= R; k++) { const e = c + k; if (e < 0 || e >= FN || !k) continue; const w = src[t + k * step]; if (max ? w > v : w < v) v = w; }
+      dst[t] = v;
+    }
+  };
+  pass(hi, a, 1, true); pass(a, hi, FN, true); pass(lo, b, 1, false); pass(b, lo, FN, false);
+  const out = new Float32Array(n), [r0, r1] = MOUNTAIN.relief;
+  for (let t = 0; t < n; t++) if (land[t] >= 0) out[t] = Math.max(0, Math.min(1, (hi[t] - lo[t] - r0) / (r1 - r0)));
+  return out;
+}
 
 // Crests: a texel that stands above the land 3.75 km away on both sides of it, along some line through it — by 130 m
 // (a lesser crest, which costs little) or by 320 m (a great one). A crest is paid for like a river, so a border settles on it. Paying
@@ -132,7 +194,8 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
 // ch: the chunks; div: the division of the chunk graph (district per chunk, kinds, province, cx, cy);
 // heightAt(lat, lon) → metres; rivers as for riverRaster
 // → { cells: Int32Array FN × FN, the district of every texel (−1 none); prov: the province of every land texel;
-//     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land }
+//     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land;
+//     mtn: how much of a mountain every texel is (mountainRaster) }
 export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
   const n = FN * FN, cell = cellsOfChunks(ch).cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
   for (let ty = 0, t = 0; ty < FN; ty++) {
@@ -145,7 +208,8 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
       if (heightAt) hgt[t] = Math.max(0, heightAt(lat, (X0 + (tx + .5) * FKM) / (KM_PER_DEG * COS_REF)));
     }
   }
-  const riv = riverRaster(rivers), crest = crestRaster(hgt, prov0), count = div.count, prov = provinceCells(prov0, hgt, riv, crest, div.provinces.length);
+  const riv = riverRaster(rivers), crest = crestRaster(hgt, prov0), mtn = mountainRaster(hgt, prov0);
+  const count = div.count, prov = provinceCells(prov0, hgt, riv, crest, div.provinces.length);
   // the heart of a district to begin with: the texel of its own, inside its province as it is drawn now, nearest to
   // its middle, off the rivers if it can be
   const seed = new Int32Array(count).fill(-1), best = new Float64Array(count).fill(Infinity);
@@ -207,7 +271,68 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
     for (const d of byProv.get(prov[t]) || []) { const dx = (t % FN) - (seed[d] % FN), dy = Math.floor(t / FN) - Math.floor(seed[d] / FN), q = dx * dx + dy * dy; if (q < bd) { bd = q; bi = d; } }
     if (bi >= 0) out[t] = bi;
   }
-  return { cells: out, prov, prov0, hgt, riv };
+  if (MOUNTAIN.vote) valleyVote(out, prov, seed, mtn, catchmentUnits(hgt, prov0), div);
+  tidyPieces(out, prov, seed, div);
+  return { cells: out, prov, prov0, hgt, riv, mtn };
+}
+
+// Every mountain catchment, within each province it spans, goes whole to the district that holds the most of it, or to
+// the district whose heart lies in it; a part with the hearts of two districts stays as it was.
+function valleyVote(cells, prov, seed, mtn, unit, div) {
+  const n = FN * FN, sum = new Float64Array(unit.count), num = new Int32Array(unit.count);
+  for (let t = 0; t < n; t++) { const u = unit.of[t]; if (u >= 0) { sum[u] += mtn[t]; num[u]++; } }
+  const partOf = t => { const u = unit.of[t], d = cells[t]; return u < 0 || d < 0 || div.kinds[d] !== LAND || prov[t] < 0 || sum[u] < MOUNTAIN.share * num[u] ? -1 : u * 65536 + prov[t]; };
+  const parts = new Map();
+  for (let t = 0; t < n; t++) {
+    const k = partOf(t); if (k < 0) continue;
+    let p = parts.get(k); if (!p) parts.set(k, p = { votes: new Map(), hearts: [], to: -1 });
+    p.votes.set(cells[t], (p.votes.get(cells[t]) || 0) + 1);
+  }
+  for (let d = 0; d < div.count; d++) if (seed[d] >= 0) { const k = partOf(seed[d]); if (k >= 0) parts.get(k).hearts.push(d); }
+  for (const p of parts.values()) {
+    if (p.hearts.length > 1) continue;
+    if (p.hearts.length === 1) { p.to = p.hearts[0]; continue; }
+    let bv = 0; for (const [d, v] of p.votes) if (v > bv || (v === bv && d < p.to)) { p.to = d; bv = v; }
+  }
+  for (let t = 0; t < n; t++) { const k = partOf(t); if (k >= 0) { const to = parts.get(k).to; if (to >= 0) cells[t] = to; } }
+}
+
+// A district is land side by side. The claim steps across corners too, so a few texels of a district may touch the
+// rest of it only by a corner: a pocket that the border would draw as a little ring. A piece of a district apart from
+// its largest one, of no more than TIDY texels and without its heart, goes to the district of its province it shares
+// the most sides with.
+export const TIDY = 60;
+function tidyPieces(cells, prov, seed, div) {
+  const n = FN * FN, piece = new Int32Array(n).fill(-1), stack = [], size = [], owner = [], first = [];
+  for (let s0 = 0; s0 < n; s0++) {
+    const d = cells[s0]; if (d < 0 || piece[s0] >= 0 || prov[s0] < 0 || div.kinds[d] !== LAND) continue;
+    const id = size.length; let k = 0; piece[s0] = id; stack.push(s0);
+    while (stack.length) {
+      const t = stack.pop(), tx = t % FN; k++;
+      for (const u of [tx > 0 ? t - 1 : -1, tx < FN - 1 ? t + 1 : -1, t >= FN ? t - FN : -1, t < n - FN ? t + FN : -1])
+        if (u >= 0 && piece[u] < 0 && cells[u] === d && prov[u] >= 0) { piece[u] = id; stack.push(u); }
+    }
+    size.push(k); owner.push(d); first.push(s0);
+  }
+  const main = new Int32Array(div.count).fill(-1);
+  for (let id = 0; id < size.length; id++) { const d = owner[id]; if (main[d] < 0 || size[id] > size[main[d]]) main[d] = id; }
+  const drop = new Uint8Array(size.length);
+  for (let id = 0; id < size.length; id++) { const d = owner[id]; if (main[d] !== id && size[id] <= TIDY && !(seed[d] >= 0 && piece[seed[d]] === id)) drop[id] = 1; }
+  // the texels of every dropped piece, by a walk from its first texel; its neighbours across sides
+  for (let id = 0; id < size.length; id++) {
+    if (!drop[id]) continue;
+    const d = owner[id], list = [first[id]], votes = new Map();
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i], tx = t % FN;
+      for (const u of [tx > 0 ? t - 1 : -1, tx < FN - 1 ? t + 1 : -1, t >= FN ? t - FN : -1, t < n - FN ? t + FN : -1]) {
+        if (u < 0) continue;
+        if (piece[u] === id) { if (!list.includes(u)) list.push(u); continue; }
+        const e = cells[u]; if (e >= 0 && e !== d && prov[u] === prov[t] && div.kinds[e] === LAND) votes.set(e, (votes.get(e) || 0) + 1);
+      }
+    }
+    let best = -1, bv = 0; for (const [e, v] of votes) if (v > bv || (v === bv && e < best)) { best = e; bv = v; }
+    if (best >= 0) for (const t of list) cells[t] = best;
+  }
 }
 
 // what the outlines are like, for the notes and the tests: for every land district its texels, the sides it shares
