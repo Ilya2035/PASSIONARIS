@@ -190,10 +190,12 @@ test('mountains: relief the height data cannot hold is added to the slope, never
   assert.ok(glsl.includes('vec3 vnoiseD(vec2 p) {'), 'a noise that gives its slope in one call');
   assert.ok(terrain.includes('vec3 ribs(vec2 pk, vec2 d, float f, float w) {') && terrain.includes('ra = sqrt(ta * ta + .03)'), 'ribs and gullies down the fall line; their fold is rounded, or every flank is a flat facet');
   assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * (.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far);'), 'near, the forms of the data are sharpened against the land smoothed over 700 m; from afar the small forms are calmed');
-  assert.ok(terrain.includes('nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(heightLod(ll, 6.), 0.)) / 900., -1., 1.) * .25 * far;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
+  assert.ok(terrain.includes('nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(textureLod(uBase, bu, 6.).r, 0.)) / 900., -1., 1.) * .25 * far;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
   assert.ok(terrain.includes('float slopeD = length(g + gm);'), 'the slope with the added relief');
   assert.ok(/steep = smoothstep\([^;]*slopeD\);/.test(terrain), 'rock goes by the slope of the pixel, with its ribs');
-  assert.ok(terrain.includes('float solid = smoothstep(.55, 1.05, slopeD + crest * .25 + rib * .15);'), 'solid rock on walls and crests, scree below them');
+  assert.ok(terrain.includes('float solid = smoothstep(.55, 1.05, slopeD + crest);') && terrain.includes('crest = crest * .25 + rib * .15;'), 'solid rock on walls and crests, scree below them; one number is kept for it');
+  assert.equal(terrain.slice(terrain.lastIndexOf('void main() {')).split('ribs(pk, ').length - 1, 1, 'one family of ribs for a pixel');
+  assert.ok(terrain.includes('float bC = textureLod(uBase, bu, lb).r,') && !/b[CEN] = heightLod\(/.test(terrain), 'the smoothed land is read straight from the height texture: through heightLod() four reads cost a tenth of the frame');
   assert.ok(!terrain.includes('float gul = '), 'no streaks painted on the rock: they are the ribs, lit by the sun');
 });
 

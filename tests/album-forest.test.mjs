@@ -142,6 +142,6 @@ test('forest canopy: the tone of a large tuft fades toward its rim, so the cells
 test('forest on steep ground: the wood opens up into single trees instead of ending on a line', () => {
   const src = readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
   assert.ok(/float forestSteep\(vec3 n\) \{ return 1\. - \.92 \* smoothstep\(/.test(src), 'by the slope of the pixel, with the ribs of the relief');
-  assert.ok(src.includes('own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);'), 'the forest aspect counts its own cover the same way');
-  assert.ok(src.includes('part = (own > .001 ? min(dens / own, 1.) : 1.) * forestSteep(p.n);'), 'and the stand a step away, so no false rim appears on a slope');
+  assert.ok(src.includes('return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);'), 'the cover the ground shader is told');
+  assert.equal(src.split('forestSteep(p.n)').length - 1, 1, 'asked once: the share of the cover that is left (part) carries it to the stand a step away');
 });

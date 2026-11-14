@@ -270,7 +270,7 @@ float forestCover(Px p) {
 }
 
 void aspForest(Px p, inout Land L) {
-  float px = p.px, dens = L.cover, have = p.cA.r, fc = fFc, own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n); vec2 pk = p.pk;   // own: what forestCover() answered, before the swamp and the fields
+  float px = p.px, dens = L.cover, have = p.cA.r, fc = fFc, own = fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet); vec2 pk = p.pk;   // own: what forestCover() answered, before the swamp and the fields
   if (fc < .003 && dens < .003) return;                              // nothing grows here: too dry, too steep, too high
 
   // ---- felled ground: where the natural forest of the chunk no longer stands. Pale grass and stumps; bare earth and
@@ -288,7 +288,7 @@ void aspForest(Px p, inout Land L) {
 
   // ---- the same question a step toward the sun: a lit rim and cast shade
   // (an edge is near: the margin of the stand itself, or the fields of a clearing)
-  float coverS = dens, edgy = step(.02, have) * max(step(abs(fStand.y), .34), step(.004, fFarm) * step(fFarm, .5)), part = (own > .001 ? min(dens / own, 1.) : 1.) * forestSteep(p.n);   // (the stand a step away is taken on the slope of this place)
+  float coverS = dens, edgy = step(.02, have) * max(step(abs(fStand.y), .34), step(.004, fFarm) * step(fFarm, .5)), part = own > .001 ? min(dens / own, 1.) : 1.;   // (dens already holds the thinning on steep ground, forestSteep(): part carries it to the stand a step away)
   if (px < .7 && edgy > 0.) coverS = mix(dens, forestNear(pk + p.sd * .22, fFarm, px, have, p.cC.rg, p.wet) * part, smoothstep(.7, .4, px));   // (the fields as they are here: near enough)
   // ---- the canopy has height. Seen at a slant, its top lies toward the eye from the ground it stands on: it hides
   // the ground behind the far edge of a wood, and at the near edge the flank of the wood shows under it. hc: the

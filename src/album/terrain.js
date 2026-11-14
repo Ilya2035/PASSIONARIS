@@ -152,7 +152,9 @@ void main() {
   float px = length(fwidth(vPos));                                  // km per pixel
   // (The step is never finer than the height data — 0.23 km a cell, 0.03 km around the showcase places. Inside one
   // cell the slope is that of the cell's own facet, and steep ground turned to rock by whole square cells.)
-  float dw = detailWeight(merc(ll)), e = clamp(px * 1.3, mix(.24, .035, dw), 6.);
+  vec2 bu = merc(ll);
+  float dw = detailWeight(bu), e = clamp(px * 1.3, mix(.24, .035, dw), 6.);
+  bu = (bu - uBaseRect.xy) * uBaseRect.zw;                           // where the pixel lies in the height texture of the region
   float h0 = heightPix(ll), hE = heightPix(ll + vec2(0., e / (KM * cl))), hN = heightPix(ll + vec2(e / KM, 0.));
   vec2 g = vec2(hE - h0, hN - h0) / (e * 1000.);                    // rise over run toward east and north
   float slope = length(g), hl = max(h0, 0.);
@@ -164,21 +166,28 @@ void main() {
   //   1. The forms the data does hold are sharpened: what its slope has beyond the slope of the land smoothed over
   //      700 m is made stronger. The flanks of a ridge grow steeper toward the crest and the crest reads as a line.
   //   2. Ribs and gullies down the fall line (ribs()), the stronger the steeper the ground. The fall line is taken
-  //      as the two of eight fixed directions nearest to it, joined smoothly — along a direction that turned freely
-  //      with the slope the pattern would shear and swirl.
+  //      as the nearest of eight fixed directions — along a direction that turned freely with the slope the pattern
+  //      would shear and swirl.
   //   3. A slight unevenness of any ground, 120 m across.
   // Around the showcase places the fine heights hold much of this themselves, so less is added there (own).
   // crest: how far the place stands above the land smoothed over 700 m, 1 = a sharp crest, −1 = the floor of a gully;
-  // rib: the height of the added ribs, −1 .. 1.
+  // rib: the height of the added ribs, −1 .. 1. After the block the two are one number, crest (a quarter of the crest
+  // and .15 of the rib): the less is held from here to the rock, the faster the whole shader runs.
   // From afar it is the other way round (far: the heights between about 100 and 700 km). A pixel there is as large
   // as a cell of the data, every small valley is a wrinkle of two pixels, and a range read as a flat busy pattern.
   // So the small forms are calmed (the slope leans toward that of the smoothed land) and the light is given more
   // contrast instead (below): the large forms of a range carry the relief, as on a hand-shaded map.
+  // (n3: the shared noise of 1 km, counted here because the ribs wander with it — a noise of their own was one more
+  // noise for every pixel)
+  float n3 = px < .7 && h0 > -25. ? mix(.5, vnoise(pk / 1.1), smoothstep(.7, .25, px)) : .5;
   float mk = smoothstep(.45, .05, px), far = smoothstep(.10, .30, px) * (1. - smoothstep(.7, 1.3, px)), crest = 0., rib = 0., depth = 0.;
   vec2 gm = vec2(0.);
   if (px < 1.3 && h0 > 0.) {
+    // (The smoothed land is read straight from the height texture of the region, a step east and a step north of
+    // the pixel taken in the texture itself. Asked through heightLod(), every read brought the projection and the
+    // test of the borders of the map with it, and four such reads cost a tenth of the frame: 155 → 173 ms.)
     float lb = 1.6 + max(log2(px / .234), 0.), eb = .7 * exp2(lb - 1.6);                 // (the land smoothed over 700 m, or over three pixels)
-    float bC = heightLod(ll, lb), bE = heightLod(ll + vec2(0., eb / (KM * cl)), lb), bN = heightLod(ll + vec2(eb / KM, 0.), lb);
+    float bC = textureLod(uBase, bu, lb).r, bE = textureLod(uBase, bu + vec2(eb / (KM * cl * 360.) * uBaseRect.z, 0.), lb).r, bN = textureLod(uBase, bu - vec2(0., eb / (KM * cl * 360.) * uBaseRect.w), lb).r;
     float own = 1. - .6 * dw, ms = smoothstep(.10, .55, slope) * mk;
     crest = clamp((hl - max(bC, 0.)) * uExag / 180., -1., 1.) * mk;
     g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * (.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far);
@@ -187,15 +196,19 @@ void main() {
     // (It is worked out here, among the other reads of the relief, and goes into the light of the sun. As one more
     // line on the finished light, after the aspects, it pushed the whole ground shader over the edge of speed:
     // 153 → 242 ms a frame.)
-    if (far > 0.) depth = clamp((hl - max(heightLod(ll, 6.), 0.)) / 900., -1., 1.) * .25 * far;
+    if (far > 0.) depth = clamp((hl - max(textureLod(uBase, bu, 6.).r, 0.)) / 900., -1., 1.) * .25 * far;
     if (mk > 0.) gm = vnoiseD(pk / .12 + 3.).yz * (mk * (.012 + .05 * ms));
     if (ms > 0. && px < .22) {
-      float ang = atan(g.y, g.x) / .7853982, k = floor(ang), a0 = k * .7853982, a1 = a0 + .7853982, f = smoothstep(.07, .025, px), w = (vnoise(pk / .8 + 5.) - .5) * .5;
-      vec3 r = mix(ribs(pk, vec2(cos(a0), sin(a0)), f, w), ribs(pk, vec2(cos(a1), sin(a1)), f, w), smoothstep(0., 1., ang - k)) * (ms * own * uCrisp * smoothstep(.22, .07, px));
+      // (One family of ribs for a pixel: along the nearest of the eight directions, and the line where one family
+      // gives way to the next wanders with a noise. Two families joined smoothly were drawn at first; with the code
+      // of the other parts that came in since, they cost a tenth of the frame — 155 → 173 ms, 14.11.2026.)
+      float w = (n3 - .5) * .5, a0 = floor(atan(g.y, g.x) / .7853982 + .5 + w) * .7853982;
+      vec3 r = ribs(pk, vec2(cos(a0), sin(a0)), smoothstep(.07, .025, px), w) * (ms * own * uCrisp * smoothstep(.22, .07, px));
       gm += r.xy; rib = r.z;
     }
   }
   float slopeD = length(g + gm);                                    // the slope with all of that: what is rock, where snow holds
+  crest = crest * .25 + rib * .15;
   vec3 n = normalize(vec3(-(g + gm) * uExag * uShade, 1.));         // east, north, up
   vec3 up = normalize(vPos + vec3(0., RKM, 0.));
   float dl = radians(lon - LON0);
@@ -231,7 +244,7 @@ void main() {
   float cover = 0.;
   if (h0 > -25.) {
     // noises fade to their mean once their features are smaller than a pixel, so nothing shimmers from afar
-    float n1 = fbm(pk / 38.), n2 = px < 5. ? mix(.5, fbm(pk / 7.3 + 5.), smoothstep(5., 1.5, px)) : .5, n3 = px < .7 ? mix(.5, vnoise(pk / 1.1), smoothstep(.7, .25, px)) : .5;
+    float n1 = fbm(pk / 38.), n2 = px < 5. ? mix(.5, fbm(pk / 7.3 + 5.), smoothstep(5., 1.5, px)) : .5;
     // the climate of the place; a slope that faces north and the floor of a valley are wetter than the ridge above
     vec4 clim = albumClimate(ll); gRise = clim.r * 4096.; gTreeline = albumTreelineOf(clim); gSummer = clim.a;
     float hollow = clamp(conc, 0., 1.), north = -g.y / (slope + .12);
@@ -243,7 +256,7 @@ void main() {
     L.cover = forestCover(p);
 
     // bare ground: soil and low growth by the climate (aspects/ground.js), rock on steep slopes and summits, sand at the shore
-    float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + (ridge * .15 + max(crest, 0.) * .45) * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
+    float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + (ridge * .15 + max(crest, 0.) * 1.8) * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
     rockW *= 1. - .3 * humid * (1. - smoothstep(treeline - 300., treeline + 100., hl));   // (in wet country grass and bushes hold on the ledges of a wall below the tree line)
     float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
     vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk);
@@ -256,8 +269,8 @@ void main() {
       // Solid rock stands in walls and on crests, and lies in beds. Below the walls and down the gullies lies what
       // fell from them — scree: paler, even, at the slope it comes to rest at. (The streaks down a wall are the ribs
       // and gullies of the relief above, lit by the sun; they used to be painted on, all alike.)
-      float solid = smoothstep(.55, 1.05, slopeD + crest * .25 + rib * .15);
-      rockCol *= mix(1.17, .84 + .24 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px), solid) * (1. - rib * .12);
+      float solid = smoothstep(.55, 1.05, slopeD + crest);
+      rockCol *= mix(1.17, .84 + .24 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px), solid) * (1. - crest * .5);
       rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .34 * smoothstep(.3, .6, wet));          // lichen and moss
       rockCol = mix(rockCol, vec3(.60, .51, .38) * (.9 + .2 * n2), (1. - smoothstep(.14, .40, wet)) * .65);           // the sun-bleached rock of dry country
       ground = mix(ground, rockCol, rockW);
