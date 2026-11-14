@@ -23,13 +23,18 @@ const arg = name => { const i = process.argv.indexOf(name); return i > 0 ? proce
 const N = 1024;
 // id → the middle of the square, the months to look in, and how far the tones are flattened (px: broader keeps
 // larger shapes). hue: how much of the change of hue is kept (by default half). cloud: see cloudy() below.
+// even (px): the pattern is made equally strong all over the square, counted over this far. bend: how many
+// deviations from the mean a shape may stand out before it is bent back (by default 2).
 // scene: a fixed picture, so that the bake gives the same file every time.
+// The dry tiles (steppe, stone) keep only shapes up to about half a kilometre — rills, scrub, the mottle of the soil.
+// With the broader shapes left in (flat 90) the one river bed of the square, with its pale banks, was seen again at
+// every repeat: from 20–50 km the deserts of the map were laid with it in rows, like wallpaper.
 export const SAMPLES = [
-  { id: 'steppe', what: 'сухая степь (плато восточного Марокко, альфа)', lat: 33.60, lon: -2.60, from: '2022-06-01', to: '2022-09-30', flat: 90, scene: 'S2B_30SWC_20220724_0_L2A' },
+  { id: 'steppe', what: 'сухая степь (плато восточного Марокко, альфа)', lat: 33.60, lon: -2.60, from: '2022-06-01', to: '2022-09-30', flat: 22, even: 50, bend: 1.5, hue: .3, scene: 'S2B_30SWC_20220724_0_L2A' },
   // (the green land is taken far from Europe on purpose: on the moors of Britain and Spain the square always caught
   // a plantation or the walls of fields, and their straight lines showed in every meadow of the map)
   { id: 'heath', what: 'зелёная лесостепь: луга и перелески (север Монголии)', lat: 48.30, lon: 106.00, from: '2022-06-20', to: '2022-08-31', flat: 70, cloud: .13, hue: .3, scene: 'S2B_48UWU_20220830_0_L2A' },
-  { id: 'stone', what: 'каменистая пустыня с руслами (плато Тадемаит, Сахара)', lat: 28.40, lon: 1.90, from: '2022-06-01', to: '2022-09-30', flat: 90, scene: 'S2A_31RCM_20220603_0_L2A' },
+  { id: 'stone', what: 'каменистая пустыня с руслами (плато Тадемаит, Сахара)', lat: 28.40, lon: 1.90, from: '2022-06-01', to: '2022-09-30', flat: 22, even: 50, bend: 1.5, hue: .3, scene: 'S2A_31RCM_20220603_0_L2A' },
   { id: 'dunes', what: 'барханы (Большой Западный Эрг)', lat: 30.30, lon: .90, from: '2022-06-01', to: '2022-09-30', flat: 110, hue: .15, scene: 'S2A_31RBP_20220613_0_L2A' },
 ];
 
@@ -115,9 +120,16 @@ for (const s of SAMPLES) {
   const dev = bands.map(b => pattern(b, s.flat)), grey = new Float32Array(N * N);
   for (let i = 0; i < grey.length; i++) grey[i] = (dev[0][i] + dev[1][i] + dev[2][i]) / 3;
   // Nothing may stand out of the pattern: one dark river bed or one white salt pan would be seen again at every
-  // repeat of the tile. What lies further than two deviations from the mean is bent back toward it.
+  // repeat of the tile. So the pattern is made equally strong all over the square (s.even: it is divided by its own
+  // strength around the point, but a calm place is never raised more than threefold), and what lies further than
+  // two deviations from the mean (s.bend) is bent back toward it.
+  if (s.even) {
+    const q = new Float32Array(N * N); for (let i = 0; i < q.length; i++) q[i] = grey[i] * grey[i];
+    const e = blur(q, s.even); let m = 0; for (const v of e) m += Math.sqrt(v); m /= e.length;
+    for (let i = 0; i < grey.length; i++) { const k = m / Math.max(Math.sqrt(e[i]), m * .35); grey[i] *= k; for (const d of dev) d[i] *= k; }
+  }
   let gs = 0, gq = 0; for (const v of grey) { gs += v; gq += v * v; }
-  const gm = gs / grey.length, lim = 2 * Math.sqrt(gq / grey.length - gm * gm), bend = v => gm + lim * Math.tanh((v - gm) / lim);
+  const gm = gs / grey.length, lim = (s.bend ?? 2) * Math.sqrt(gq / grey.length - gm * gm), bend = v => gm + lim * Math.tanh((v - gm) / lim);
   const chan = dev.map(d => { const c = new Float32Array(N * N); for (let i = 0; i < c.length; i++) c[i] = bend(grey[i]) + (d[i] - grey[i]) * (s.hue ?? .5); return seamless(c); });
   // every tile has the same strength: a deviation of 0.14 around 1; the shader decides how strong the grain is
   let sum = 0, sq = 0; for (const c of chan) for (const v of c) { sum += v; sq += v * v; }

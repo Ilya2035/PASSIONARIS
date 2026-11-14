@@ -191,7 +191,7 @@ void main() {
     // bare ground: soil and low growth by the climate (aspects/ground.js), rock on steep slopes and summits, sand at the shore
     float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + ridge * .25 * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
     float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
-    vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, pk);
+    vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk);
     if (rockW > .004) {
       float rk = vnoise(pk / 2.3 + 3.), rk2 = vnoise(pk / 9. + 17.);
       vec3 rockCol = mix(vec3(.44, .42, .40), vec3(.61, .59, .56), n2);                                              // grey limestone and granite
@@ -216,8 +216,16 @@ void main() {
     // The grain of the ground, one read for the pixel and used at once: the tile of the ground that is mostly here —
     // sand, stone (rock and desert), dry steppe or green land. The line between two tiles wanders with a noise and is
     // never seen: every tile is a pattern around 1.
-    float kind = wet + (n3 - .5) * .12;
-    ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, pk, px, pdx, pdy), uGrainK);
+    // The square of the grain is 10 km and comes again every 10 km. Laid plainly, its own shapes stood in rows from
+    // 20–50 km up: the dry lands looked papered. So the land is a patchwork: in patches a few kilometres across the
+    // square lies shifted by its own step, and in every other patch turned over its diagonal. The borders of the
+    // patches wander with the noises of the ground, like the border between two tiles, and are not seen.
+    // (The grain is rills, gullies and scrub: it is at full strength on slopes and weaker on level ground — a plain
+    // and the floor of a basin are smoother than the hills around them.)
+    float kind = wet + (n3 - .5) * .12, ga = floor(n2 * 7.), gb = floor(fract(n1 * 5. + n2 * 1.5) * 3.);
+    vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;
+    if (fract((ga + gb) * .5) > .25) { gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }
+    ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)));
     ground = aspShore(p, ground, L.cover);                           // beaches and rocks at the waterline (the water work)
     L.col = ground;
 

@@ -21,7 +21,7 @@ const GLSL = /* glsl */`
 uniform float uDryK, uGrainK;
 // nz: the shared noises of 38, 7 and 1 km; wet, px, hl, slope, pk: as in Px (the wetness already knows the slope and
 // the hollow); summer: 0 a summer without water .. 1 a green one (albumClimate().a)
-vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, vec2 pk) {
+vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk) {
   // ---- noises and weights first
   float g2 = vnoise(pk / 23. + 31.), fine = .5, bush = 0.;
   if (px < .12) fine = mix(.5, vnoise(mat2(.8, -.6, .6, .8) * pk / .21 + 5.), smoothstep(.12, .04, px));
@@ -39,6 +39,9 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   // dry slopes are bare: pale marl in beds (the badlands of the Ebro and of Almería)
   float bad = (1. - smoothstep(.13 * uDryK, .30 * uDryK, wet)) * smoothstep(.07, .30, slope) * (1. - smoothstep(.45, .9, slope)) * .85;
   float beds = .90 + .14 * (.5 + .5 * sin(hl / 7. + fine * 6.)) * smoothstep(.12, .03, px);
+  // desert and half-desert (Almería, Murcia, the badlands of the Ebro): the ground is mineral, not straw.
+  // low: how far the place lies under the country around it (gRise, the mean height of 15 km around) — a basin
+  float arid = 1. - smoothstep(.11 * uDryK, .25 * uDryK, wet), low = clamp((gRise - hl) / 140., -1., 1.);
   // ---- the low growth
   vec3 c = mix(mix(vec3(.65, .57, .33), vec3(.53, .52, .28), smoothstep(0., .5, green)), mix(vec3(.38, .49, .20), vec3(.29, .45, .15), smoothstep(.6, 1., green)), smoothstep(.3, .85, green)) * (.93 + .14 * nz.y);
   c = mix(c, mix(vec3(.39, .42, .25), mix(vec3(.33, .40, .20), vec3(.46, .37, .37), smoothstep(.55, .8, mott)), smoothstep(.5, .75, wet)) * (1. - .18 * bush), sp);
@@ -46,8 +49,17 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   vec3 soil = mix(vec3(.64, .53, .34), vec3(.70, .63, .46), smoothstep(.38, .62, nz.x));
   soil = mix(soil, vec3(.62, .42, .28), smoothstep(.55, .85, g2) * .7);
   soil = mix(soil, vec3(.54, .49, .40), smoothstep(.45, .15, g2) * .6) * (.94 + .12 * nz.y);
+  // In the desert the soils follow the relief, as they do on the real land: the basins are filled with pale marl,
+  // gypsum and clay (the white badlands of Tabernas and of the Bardenas), the higher ground around them is ochre
+  // and rusty gravel and stone. A noise of a few kilometres makes the border between the two uneven.
+  float fill = nz.y * .45 + .27 + low * .4;
+  soil = mix(soil, vec3(.78, .71, .56), arid * smoothstep(.44, .60, fill) * .6);
+  soil = mix(soil, vec3(.68, .49, .30), arid * smoothstep(.50, .36, fill) * smoothstep(.40, .64, n3f) * .5);
   soil = mix(soil, mix(soil, vec3(.68, .60, .45), .3) * beds, bad);
   c = mix(soil, c, veg * (1. - bad));
+  // and the desert shows its relief in its colours, as it does from a satellite: pale silt, sand and salt on the
+  // floors of the valleys (the dry beds of the ramblas), darker stony ground on the tops between them
+  c = mix(c, vec3(.84, .78, .64), arid * clamp(conc, 0., 1.) * .6) * (1. - arid * clamp(-conc, 0., 1.) * .15);
   // ---- above the trees: short alpine grass; just below them, heath in patches
   c = mix(c, vec3(.43, .46, .26) * (.92 + .16 * n3f), smoothstep(tl - 100., tl + 150., hl) * smoothstep(.15, .4, wet));
   c = mix(c, vec3(.47, .39, .38), smoothstep(tl - 500., tl, hl) * smoothstep(.55, .8, mott) * .3 * smoothstep(.35, .6, wet));

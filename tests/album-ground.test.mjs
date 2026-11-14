@@ -124,7 +124,10 @@ test('ground shader: the grain lies on the land at fixed sizes, nothing is switc
   for (const name of ['tGrass', 'tDry', 'tRock', 'tSand', 'tSnow', 'tForest']) assert.match(src, new RegExp(`#define ${name} \\d`), name);
   assert.ok(Math.max(...[...src.matchAll(/#define t(?:Grass|Dry|Rock|Sand|Snow|Forest) (\d)/g)].map(m => +m[1])) < GROUND_TILES.length, 'every name is a layer that exists');
   // the climate comes from the baked map; the wetness of a place also knows its slope and its hollow
-  for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, pk)', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
+  for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk)', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
+  // the square of the grain is laid as a patchwork — shifted from patch to patch, turned over in every other one —
+  // so that its own shapes do not stand in rows; and it is weaker on level ground than on slopes
+  for (const need of ['vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;', '{ gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }', 'gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)));']) assert.ok(src.includes(need), need);
   for (const need of ['uniform sampler2D tClimate', 'vec4 albumClimate(vec2 ll)', 'float albumWet(vec2 ll, float hl, float n1)', 'float albumTreelineOf(vec4 clim)']) assert.ok(COMMON.includes(need), need);
   // the grain of the ground: every tile is there, 1024 px, and its mean is the middle grey that changes nothing
   assert.deepEqual(GROUND_TILES, ['heath', 'steppe', 'stone', 'dunes']);
@@ -148,7 +151,9 @@ test('ground aspect: pages of the group «Земля», knobs, and the rules in 
   for (const id of ['ground-meseta', 'ground-meseta-200', 'ground-desert', 'ground-desert-200', 'ground-atlantic', 'ground-rif', 'ground-far']) assert.ok(mine.some(p => p.id === id), id);
   for (const pg of mine) { assert.equal(pg.group, 'Земля'); assert.ok(PAGES.includes(pg)); for (const k of Object.keys(pg.p || {})) assert.ok(keys.has(k), `${pg.id}: ${k}`); assert.ok(pg.cam.h >= 20 && pg.cam.h <= 2000); }
   for (const key of ['dry', 'grain']) { const d = DEFS.find(x => x.key === key); assert.ok(d && ground.uniforms[d.uniform], key); assert.equal(ground.uniforms[d.uniform].value, d.value); }
-  assert.ok(ground.glsl.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, vec2 pk)'));
+  assert.ok(ground.glsl.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk)'));
+  // the desert: mineral soils that follow the relief — pale fill in the basins and on the floors of valleys
+  for (const need of ['float arid = 1. - smoothstep(.11 * uDryK, .25 * uDryK, wet), low = clamp((gRise - hl) / 140., -1., 1.);', 'arid * clamp(conc, 0., 1.) * .6']) assert.ok(ground.glsl.includes(need), need);
   // the ground shader is kept short: the grain is read once for a pixel and shared, the bare ground asks for no texture of its own
   assert.ok(!ground.glsl.includes('texDetail(') && !ground.glsl.includes('worley('), 'the bare ground reads no texture: the grain is laid on afterwards');
   const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8'), main = terrain.slice(terrain.lastIndexOf('void main() {'));   // the pixel shader's
