@@ -172,3 +172,10 @@ test('ground grid: the levels are kept apart by a step under the finer one, neve
   assert.ok(/if \(max\(d\.x, d\.y\) < uFine\.z\) h -= uCell \* \.9;/.test(terrain), 'the step under the finer level');
   assert.ok(/fine \? fine\.half - c \* 1\.5 : 0/.test(terrain), 'the step begins between two rows of vertices: no rounding decides which row steps down');
 });
+
+test('ground shader: the edge of the snow is crisp, follows the small relief and is never thinner than a pixel', () => {
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
+  assert.ok(terrain.includes('sb = max(40., fwidth(hl) * 1.5);'), 'a band of 80 m of height, or what one pixel spans');
+  assert.ok(terrain.includes('float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 260.)'), 'the slope with the small relief of the pixel');
+  assert.ok(!terrain.includes('smoothstep(snowline - 90., snowline + 110.'), 'not the band of 200 m: the snow lay like cotton wool');
+});

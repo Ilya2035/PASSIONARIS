@@ -321,7 +321,9 @@ void aspForest(Px p, inout Land L) {
     }
     if (f3 > 0.) {
       vec4 w = crowns(pkc / .62 + 7.7); float a = f3 * mix(.12, 1., ya) * (1. + .4 * oa) * (1. - .3 * con);
-      tuft += a * .3 * (1. - w.z); litc += a * .32 * (dot(normalize(vec3(-w.xy * 1.6, 1.)), uSun) - uSun.z); tone = mix(tone, w.w, min(a, 1.2) * .5);
+      // (the tone of a large tuft is strongest at its middle and fades toward its rim: a tone that filled the whole
+      // cell showed the cells themselves — polygons of a kilometre with straight borders all over the canopy)
+      tuft += a * .3 * (1. - w.z); litc += a * .32 * (dot(normalize(vec3(-w.xy * 1.6, 1.)), uSun) - uSun.z); tone = mix(tone, w.w, min(a, 1.2) * .5 * smoothstep(.62, .25, w.z));
     }
   }
   float kind = mix(mix(con, k2, f2 * .75), k1, f1);                  // the kind of the crown itself where crowns can be told apart

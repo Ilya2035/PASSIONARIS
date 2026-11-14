@@ -239,7 +239,13 @@ void main() {
     // (the edge of the snow is roughened by a finer, turned noise: the noise of 1 km alone shows its square lattice there)
     float sr = 0.; if (px < .5) sr = albumRough(pk) * smoothstep(.5, .2, px);
     float snowline = 2980. - (lat - 37.) * 55. + (n2 - .5) * 200. + (n3 - .5) * 90. + sr * 900. + uSnow;
-    float snowW = smoothstep(snowline - 90., snowline + 110., hl - g.y * 260.) * (1. - smoothstep(.85, 1.4, slope));
+    // The edge of the snow is crisp and follows the ground. It used to be a band 200 m of height wide: on gentle
+    // ground that is half a kilometre of fading white, and the snow lay like cotton wool. Now the band is 80 m, or the
+    // height one pixel spans where that is more (so the edge does not shimmer from afar). A slope that faces north
+    // keeps its snow lower, and the slope is taken with the small relief the height data cannot hold (the normal of
+    // the pixel): the edge runs into every gully instead of along a smooth curve.
+    float gyS = clamp(-n.y / (max(n.z, .2) * uExag * uShade), -1.2, 1.2), sb = max(40., fwidth(hl) * 1.5);
+    float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 260.) * (1. - smoothstep(.85, 1.4, slope));
     if (p.cB.g > .003) snowW = max(snowW, smoothstep(-.1, .1, p.cB.g * 1.3 - (n2 * .55 + n3 * .45) - sr * 1.2) * (1. - smoothstep(.85, 1.4, slope)) * (1. - .3 * cover));
     if (snowW > .004) land = mix(land, vec3(.93, .95, .99) * (.97 + .06 * n3), snowW);
     cover *= 1. - snowW;

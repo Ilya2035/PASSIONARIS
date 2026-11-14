@@ -133,3 +133,8 @@ test('no trees stand on the land: the forest is painted, and the height of the c
   const src = readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
   assert.ok(!src.includes('layers/forest.js') && /id: 'forest', top: 0/.test(src), 'album.layers.forest.top stays, and is 0');
 });
+
+test('forest canopy: the tone of a large tuft fades toward its rim, so the cells of the tufts are not seen as polygons', () => {
+  const src = readFileSync(new URL('../src/album/aspects/forest.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('tone = mix(tone, w.w, min(a, 1.2) * .5 * smoothstep(.62, .25, w.z));'));
+});
