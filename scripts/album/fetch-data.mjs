@@ -4,6 +4,7 @@
 //   vectors  — Natural Earth 10m rivers, lakes (no reservoirs) and populated places clipped to the region → vectors.json
 //   textures — tiling ground photos from Poly Haven (CC0) → tex/<id>_diff.jpg, tex/<id>_nor.jpg
 //   meta.json — what is where
+// (The fine heights of the mountains, zoom 11, are fetched by scripts/album/fetch-heights-fine.mjs after this script.)
 // Raw downloads are cached in data/album/ (gitignored), so the script can be re-run and resumes where it stopped.
 //   node scripts/album/fetch-data.mjs [--no-textures] [--no-detail]
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -141,5 +142,7 @@ if (!flag('--no-detail')) for (const p of PLACES) {
 } else meta.places = PLACES;
 console.log('vectors'); meta.vectors = vectors();
 if (!flag('--no-textures')) { console.log('textures'); meta.textures = await textures(); }
+// the fine heights of the mountains are another script's (fetch-heights-fine.mjs): keep what it wrote
+try { const old = JSON.parse(readFileSync(join(OUT, 'meta.json'), 'utf8')); if (old.fine) meta.fine = old.fine; } catch { /* first run */ }
 writeFileSync(join(OUT, 'meta.json'), JSON.stringify(meta, null, 1));
 console.log('done →', OUT);

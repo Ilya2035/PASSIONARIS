@@ -34,7 +34,7 @@
 
 | Данные | Источник | Лицензия |
 |---|---|---|
-| Высоты Пиренейского полуострова и юга Франции (уровни 9 и 12) | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), формат terrarium; собраны Mapzen из SRTM, GMTED, ETOPO1 и других открытых наборов | Открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
+| Высоты Пиренейского полуострова и юга Франции (уровни 9 и 12; уровень 11 для гор) | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), формат terrarium; собраны Mapzen из SRTM, GMTED, ETOPO1 и других открытых наборов | Открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
 | Реки, озёра, поселения | Natural Earth 10m | Общественное достояние |
 | Деление: очертания нынешних провинций, округов и департаментов — подсказка, к какой исторической земле тянется чанк (`public/assets/album/division/admin.json`) | Natural Earth 10m admin-1 states and provinces | Общественное достояние |
 | 3D-модели домов, строек, стен, деревьев и скал (41 штука) | [KayKit : Medieval Hexagon Pack 1.0](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0), Kay Lousberg (www.kaylousberg.com) | CC0 1.0 |
