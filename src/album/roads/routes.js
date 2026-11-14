@@ -357,6 +357,7 @@ export function decodeNet(buf, div, centres, places = [], G = { riv: div.raster.
     }
     const lines = head.lines.map(([kind, start, name, ...run]) => ({ kind, pts: linePoints(legs, centres, run, start), legs: run, start, ...(name ? { name: head.names[name - 1] } : {}) }));
     const passes = (head.passes || []).map(([leg, x, y, h, name]) => { const L = legs[leg]; return { x: x / 100, y: y / 100, h, name: name ? head.names[name - 1] : '', kind: L.kind, a: L.a, b: L.b, rank: name ? 0 : L.kind === 0 ? 1 : 2, leg }; });
+    for (const q of passes) if (q.rank === 0) legs[q.leg].pass = { name: q.name, t: texelOf(q.x, q.y) };
     return finishNet(div, centres, legs, lines, Int32Array.from(head.capitals), { hard: head.hard, links: head.links }, passes);
   } catch { return null; }
 }
