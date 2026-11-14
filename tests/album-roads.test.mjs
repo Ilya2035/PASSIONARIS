@@ -13,8 +13,8 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns, encodeNet, decodeNet, netHead, netSignature,
-  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO } from '../src/album/roads/routes.js';
-import { HISTORIC } from '../src/album/roads/historic.js';
+  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom } from '../src/album/roads/routes.js';
+import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
 import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
@@ -200,13 +200,64 @@ test('roads: a road stops at the first houses of a settlement, and whoever asks 
 
 test('roads: the great roads of history are chains of towns inside the album; the file of the network is small', () => {
   assert.ok(HISTORIC.length >= 25); const names = new Set();
-  for (const r of HISTORIC) { assert.ok(r.name && !names.has(r.name) && r.way.length >= 2); names.add(r.name); for (const [lat, lon] of r.way) assert.ok(lat > 35.2 && lat < 44.9 && lon > -10 && lon < 4.5, r.name); }
+  for (const r of HISTORIC) { assert.ok(r.name && !names.has(r.name) && r.way.length >= 2); names.add(r.name); for (const [lat, lon, pass] of r.way) assert.ok(lat > 35.2 && lat < 44.9 && lon > -10 && lon < 4.5 && (pass === undefined || (typeof pass === 'string' && pass.length > 2)), r.name);
+    assert.ok(r.way[0].length === 2 && r.way[r.way.length - 1].length === 2, r.name + ' begins and ends at a town'); }
+  // the passes the lead asked for (14.11.2026) are all there, each once
+  for (const n of ['Сомпорт', 'Ибаньета', 'Пертюс', 'Пахарес', 'Сомосьерра', 'Гвадаррама', 'Деспеньяперрос', 'Бехар']) assert.equal(PASSES.filter(p => p.name === n).length, 1, n);
+  assert.equal(new Set(PASSES.map(p => p.name)).size, PASSES.length); assert.ok(PASSES.every(p => p.road && Number.isFinite(p.lat + p.lon)));
   const f = join(ROOT, 'public/assets/album/roads/roads.bin.gz'); assert.ok(existsSync(f), 'public/assets/album/roads/roads.bin.gz: node scripts/album/bake-roads.mjs');
   assert.ok(statSync(f).size < 3e5, 'the file stays small');
   const u = gunzipSync(readFileSync(f)), head = netHead(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength));
   assert.ok(head.v === 1 && head.legs > 3000 && head.lines.length > 500 && head.capitals.length > 50 && /^[0-9a-f]{8}$/.test(head.sig), 'a network of the whole album');
   assert.equal(head.algo, NET_ALGO, 'the file was laid by the rules as they are now: node scripts/album/bake-roads.mjs');
   assert.ok(head.names.includes('Августова дорога') && head.lines.some(l => l[0] === 0) && head.lines.some(l => l[0] === 1) && head.lines.some(l => l[0] === 2));
+  // the passes are kept with the network: every pass of history by its name, and the passes of the other roads
+  assert.ok(Array.isArray(head.passes) && head.passes.length > 100 && head.passes.every(q => q.length === 5 && q[0] < head.legs && q[3] > 0 && q[3] < 3500));
+  for (const p of PASSES) assert.ok(head.passes.some(q => q[4] && head.names[q[4] - 1] === p.name), p.name + ' is in the file');
+});
+
+test('roads: a pass of history — the great road is led over that very point; every road over a crest has its pass in the list', () => {
+  const c = div.centres, HIGH_Y = IY0 + (IY1 - IY0) * .3, P = at(RX + .5, HIGH_Y), pt = texel(RX + .5, HIGH_Y);      // on the crest, far from the saddle
+  const way = [{ name: 'Южный тракт', way: [[towns[2].lat, towns[2].lon], [P[0], P[1], 'Высокий'], [towns[3].lat, towns[3].lon]] }];
+  const net = roadNetwork(div, c, towns, G, { historic: way }), plain = roadNetwork(div, c, towns, G, { historic: OLD });
+  const named = net.passes.filter(p => p.rank === 0); assert.equal(named.length, 1); assert.equal(net.stats.passes[0], 1);
+  const p = named[0], L = net.legs[p.leg];
+  assert.ok(p.name === 'Высокий' && p.kind === 0 && L.kind === 0 && L.pass.t === pt && p.a === L.a && p.b === L.b && p.h > 1800, JSON.stringify(p));
+  assert.ok(Math.hypot(p.x - (RX + .5), p.y - HIGH_Y) < .8, 'the pass stands at its own point');
+  assert.ok(L.path.includes(pt) && L.path[0] === c.texel[L.a] && L.path[L.path.length - 1] === c.texel[L.b], 'the leg: centre, the pass, centre');
+  assert.ok((c.x[L.a] - RX) * (c.x[L.b] - RX) < 0, 'its districts lie on both sides of the ridge');
+  for (const d of [L.a, L.b]) assert.ok(Math.hypot(c.x[d] - RX, c.y[d] - HIGH_Y) <= PASS.reach, 'and near the pass');
+  for (let j = 1; j < L.path.length; j++) { const e = Math.abs(L.path[j] - L.path[j - 1]); assert.ok(e === 1 || e === FN || e === FN - 1 || e === FN + 1, 'the way of the leg has no jumps'); }
+  const line = net.lines.find(l => l.legs.includes(p.leg)); assert.ok(line && line.name === 'Южный тракт' && line.kind === 0, 'the leg of the pass is the old highway');
+  assert.ok(line.pts.some(q => Math.hypot(q[0] - xyOf(pt)[0], q[1] - xyOf(pt)[1]) < 1e-6), 'the line runs through the pass');
+  // without the name the highway takes the range where it is low: no pass 1800 m high on a main road
+  assert.ok(!plain.passes.some(q => q.kind === 0 && q.h > 1200) && plain.stats.passes[0] === 0);
+  // the other passes: the top of a leg that stands PASS.rise over both its ends; the list is in the order of the ranks
+  let other = 0;
+  for (const net2 of [net, plain]) {
+    assert.deepEqual(net2.passes, passesOf(G, net2.legs));
+    net2.passes.forEach((q, i) => {
+      const M = net2.legs[q.leg], ends = Math.max(G.hgt[M.path[0]], G.hgt[M.path[M.path.length - 1]]);
+      assert.ok(M.kind !== 3 && q.kind === M.kind && q.a === M.a && q.b === M.b && Number.isInteger(q.h));
+      assert.ok(M.path.some(t => Math.hypot(xyOf(t)[0] - q.x, xyOf(t)[1] - q.y) < 1e-6), 'a pass is a point of its leg');
+      if (q.rank) { other++; assert.ok(q.name === '' && q.rank === (M.kind === 0 ? 1 : 2) && q.h - ends >= PASS.rise - 1 && q.h >= Math.max(...M.path.slice(1, -1).map(t => G.hgt[t])) - 1); }
+      if (i) assert.ok(net2.passes[i - 1].rank <= q.rank);
+    });
+    for (const M of net2.legs) if (M.kind !== 3 && !M.pass && !net2.passes.some(q => net2.legs[q.leg] === M)) assert.ok(Math.max(...M.path.slice(1, -1).map(t => G.hgt[t]), -1e9) - Math.max(G.hgt[M.path[0]], G.hgt[M.path[M.path.length - 1]]) < PASS.rise, 'a leg without a pass climbs no crest');
+  }
+  assert.ok(other > 0, 'the roads over the ridge have their passes');
+  // the passes go into the file and come back
+  const back = decodeNet(encodeNet(net, div, c), div, c, towns);
+  assert.ok(back) ; assert.equal(back.passes.length, net.passes.length);
+  net.passes.forEach((q, i) => { const r = back.passes[i]; assert.ok(Math.abs(r.x - q.x) < .011 && Math.abs(r.y - q.y) < .011 && r.h === q.h && r.name === q.name && r.kind === q.kind && r.a === q.a && r.b === q.b && r.rank === q.rank && r.leg === q.leg); });
+  assert.deepEqual(back.stats, net.stats);
+  // a road marked `after` is laid when the towns of the provinces are joined: it takes no main road from the network
+  const late = roadNetwork(div, c, towns, G, { historic: [...OLD, { name: 'Высокая дорога', after: true, way: [[towns[0].lat, towns[0].lon], [P[0], P[1], 'Высокий'], [towns[1].lat, towns[1].lon]] }] });
+  const mainOf = n => new Set(n.legs.filter(M => M.kind === 0).map(M => M.a * 65536 + M.b)), was = mainOf(plain), now = mainOf(late);
+  for (const k of was) assert.ok(now.has(k), 'a main road stays a main road');
+  assert.ok(now.size > was.size && late.passes.some(q => q.name === 'Высокий' && q.kind === 0));
+  // the fan of cheapest ways from a point agrees with the way found between two points
+  { const a = c.texel[L.a], stamp = fanFrom(G, pt, 60), cost = G.done[a] === stamp ? G.g[a] : NaN, leg = legBetween(G, pt, a); assert.ok(Math.abs(cost - leg.cost) < 1e-6 * leg.cost, cost + ' against ' + leg.cost); }
 });
 
 const data = loadAlbumData(ROOT), skip = !data && 'public/album-data/ is not there';
@@ -225,6 +276,19 @@ test('roads of the album: main roads reach the towns of the provinces, lesser ro
   assert.ok(caps > 60 && joined / caps > .85, joined + ' of ' + caps + ' towns of provinces stand on a main road');
   const km = name => net.lines.filter(l => l.name === name).reduce((a, l) => a + l.legs.reduce((b, i) => b + net.legs[i].km, 0), 0);
   assert.ok(km('Августова дорога') > 1000 && km('Серебряный путь') > 500, 'the great roads of history are laid');
+  // every pass of history is on a main road, at its own point and height (the lead, 14.11.2026)
+  for (const P of PASSES) { const q = net.passes.find(v => v.name === P.name), [px, py] = kmOf(P.lat, P.lon);
+    assert.ok(q && q.rank === 0 && q.kind === 0 && Math.hypot(q.x - px, q.y - py) < 1.5 && Math.abs(q.h - data.base.at(P.lat, P.lon)) < 250, P.name + ': ' + JSON.stringify(q)); }
+  const hOf = n => net.passes.find(v => v.name === n).h;
+  assert.ok(hOf('Сомпорт') > 1400 && hOf('Сомпорт') < 1800 && hOf('Пертюс') < 500 && hOf('Пахарес') > 1200 && hOf('Гвадаррама') > 1300 && hOf('Деспеньяперрос') < 900, 'the heights are those of the real passes');
+  assert.ok(s.passes[0] === PASSES.length && s.passes[1] > 30 && s.passes[2] > 100 && net.passes.length < 800, JSON.stringify(s.passes));
+  // the road of Somport keeps to its own valleys: from Jaca up the Aragón, down the Aspe — never over a crest higher than the pass
+  { const L = net.legs[net.passes.find(v => v.name === 'Сомпорт').leg], top = Math.max(...L.path.map(t => real.raster.hgt[t])); assert.ok(top < hOf('Сомпорт') + 150 && L.km < 70, 'Somport: ' + Math.round(top) + ' m, ' + L.km.toFixed(0) + ' km'); }
+  // the network of the plains is the one the owner approved: against the ways without their passes nearly every leg is of the same kind
+  { const bare = HISTORIC.filter(r => !r.after).map(r => ({ name: r.name, way: r.way.filter(p => p.length === 2) })), old = roadNetwork(real, real.centres, data.vectors.places, undefined, { historic: bare });
+    const kinds = new Map(old.legs.map(L => [L.a * 65536 + L.b, L.kind])); let same = 0, lost = 0;
+    for (const L of net.legs) { const k = kinds.get(L.a * 65536 + L.b) ?? 3; if (k === L.kind) same++; else if (k === 0 && Math.max(...L.path.map(t => real.raster.hgt[t])) - Math.min(...L.path.map(t => real.raster.hgt[t])) < 150) lost++; }
+    assert.ok(same / net.legs.length > .975 && lost < 12, same + ' of ' + net.legs.length + ' legs as they were; ' + lost + ' level main legs are main no more'); }
   let land = 0, served = 0; const on = new Set(); for (const L of net.legs) if (L.kind !== 3) { on.add(L.a); on.add(L.b); }
   for (let d = 0; d < real.count; d++) if (real.kinds[d] === LAND && real.centres.texel[d] >= 0) { land++; if (on.has(d)) served++; }
   assert.ok(served / land > .97, served + ' of ' + land + ' districts have a road');

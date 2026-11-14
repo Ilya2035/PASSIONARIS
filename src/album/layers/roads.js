@@ -1,7 +1,7 @@
 // The roads of the album, drawn. They are laid beforehand (roads/routes.js; the network is kept in
 // public/assets/album/roads/roads.bin.gz and laid anew only when the land is divided otherwise): main roads from the
 // town of a province to the towns of the provinces next to it and along the great roads of history, lesser roads
-// between districts, tracks over the passes. A road lies on the ground (layers/ribbon.js): on the slope, in the same
+// between districts, tracks over hard ground; a great road takes a range at its real pass. A road lies on the ground (layers/ribbon.js): on the slope, in the same
 // light and shade as the land, the colour of trodden earth, with a cleared verge that reads as a ride where it runs
 // through a forest. From high up it is a thin thread, and the lesser kinds go first. It stops at the first houses
 // of a settlement — inside, the streets of the settlement take over — and where it meets a river there is a bridge
@@ -103,13 +103,15 @@ export default async function init(album) {
     fords = album.data.courses ? squareBridges(drawn, riverCrossings(drawn, album.data.courses)) : [];   // a bridge stands square across its river, the road turns to it
     near = null; version++;
     const s = net.stats, nb = fords.filter(f => f.type === 'bridge').length;
-    album.roadNet = { main: s.main, minor: s.lesser, tracks: s.track, km: s.km, crossings: net.crossings, impassable: s.hard, lines: net.lines, legs: net.legs, stats: s, capitals: net.capitals, fords, version, fromFile: from === 'from the file',
+    album.roadNet = { main: s.main, minor: s.lesser, tracks: s.track, km: s.km, crossings: net.crossings, impassable: s.hard, lines: net.lines, legs: net.legs, stats: s, capitals: net.capitals, fords, version,
+      // the passes: { x, y (flat km), h (metres), name, kind (of the road), a, b (districts), rank (0 a pass of history, 1 of a main road, 2 other), leg }
+      passes: net.passes, fromFile: from === 'from the file',
       // km from a point of the flat km plane to the nearest road as it is drawn (1e9 when none within 300 m): for whoever must keep off the roads
       near: (x, y) => (near ||= nearIndex(drawn.map(l => l.km), 2, .3))(x, y),
       signature: () => netSignature(div, div.centres, net.capitals),
       // the network as the file keeps it, base64 (scripts/album/bake-roads.mjs)
       encode: () => { const u = new Uint8Array(encodeNet(net, div, div.centres)); let b = ''; for (let i = 0; i < u.length; i += 8192) b += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(b); } };
-    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road (${(performance.now() - t0).toFixed(0)} ms)`);
+    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history) (${(performance.now() - t0).toFixed(0)} ms)`);
     draw();
   }
   function sync() {
