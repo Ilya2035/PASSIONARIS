@@ -6,7 +6,6 @@ import { loadData } from './data.js';
 import { Terrain } from './terrain.js';
 import { Chunks } from './chunks.js';
 import { AlbumCamera } from './camera.js';
-import { distKm } from './geo.js';
 import { createParams } from './params.js';
 import { Post } from './post.js';
 
@@ -35,17 +34,9 @@ async function start() {
   const cam = album.cam = new AlbumCamera(canvas, data.base.at, { shot: SHOT, upDown: () => q.get('ui') === '0' || document.body.classList.contains('mapview') });
   const params = album.params = createParams(album);
 
-  // the nearest showcase place lends its fine heights when the camera is low over it
-  let detailId = null;
-  async function pickDetail(s) {
-    let best = null, bd = 1e9;
-    for (const p of data.places) { const d = distKm(s, p); if (d < bd) { bd = d; best = p; } }
-    const id = best && bd < 70 && s.h < 420 ? best.id : null;
-    if (id === detailId) return;
-    detailId = id;
-    const d = id ? await data.detail(id) : null;
-    if (detailId === id) terrain.setDetail(d);
-  }
+  // the fine heights under the camera: a window of fine tiles in the mountains, or the square of a showcase place
+  // (data.js, detailFor — the part «Земля и лес»); undefined: nothing to change
+  async function pickDetail(s) { const d = await data.detailFor(s); if (d !== undefined) terrain.setDetail(d); }
   cam.on(s => { terrain.update(s); pickDetail(s); });
 
   const { initLayers } = await import('./layers.js');
@@ -96,7 +87,6 @@ async function start() {
     requestAnimationFrame(frame);
   }
   terrain.update(cam.s); await pickDetail(cam.s);
-  if (detailId) await data.detail(detailId);
   requestAnimationFrame(frame);
   document.getElementById('loading').classList.add('done');
   // captures wait for this flag: a few frames after everything is on screen

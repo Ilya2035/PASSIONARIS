@@ -41,10 +41,14 @@ float detailWeight(vec2 m) {
 // ridges and gorges of the fine heights, and whatever asks for lod 0 stands on that same ground. (The fine heights
 // used to be read smoothed to 230 m at any lod: over Aneto, with its square switched on, the mountain was as soft as
 // anywhere else.) From lod 1/8 up — cells of 250 m and coarser — nothing changes.
+// The fine heights are not always as fine: a square of a showcase place has a point every 28 m, a window of fine
+// tiles in the mountains every 57 or 115 m (ground/fine.js). How many times finer than the base they are is read off
+// uDetRect: every such square is 2048 points a side, so log2(uDetRect.z) − 6 is 3, 2 or 1 — the levels of detail the
+// fine heights have below the base.
 float heightLod(vec2 ll, float lod) {
   vec2 m = merc(ll);
   float hb = textureLod(uBase, (m - uBaseRect.xy) * uBaseRect.zw, lod).r, w = detailWeight(m);
-  if (w > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + 3. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
+  if (w > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + log2(uDetRect.z) - 6. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
   return mix(-3200., hb, inRegion(ll));
 }
 // (The whole part of p meets only the fraction of each factor: far from the origin — and the album lies 4000 km north

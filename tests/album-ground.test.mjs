@@ -202,7 +202,7 @@ test('mountains: relief the height data cannot hold is added to the slope, never
 test('mountains: the fine heights of a showcase place are in the grid of the ground itself', () => {
   const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
   const glsl = fs.readFileSync(new URL('../src/album/glsl.js', import.meta.url), 'utf8');
-  assert.ok(glsl.includes('max(0., lod + 3. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))'), 'lod 0 reads the fine heights as fine as the grid is; from cells of 250 m up nothing changes');
+  assert.ok(glsl.includes('max(0., lod + log2(uDetRect.z) - 6. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))'), 'lod 0 reads the fine heights as fine as the grid is; from cells of 250 m up nothing changes');
   assert.ok(terrain.includes('this.fine = Math.max(0, Math.min(3, -Math.log2(c0 / .234)));') && terrain.includes('if (this.detail) this.u.uDetOn.value = 1 + this.fine;'), 'uDetOn carries how fine the grid is');
   assert.ok(glsl.includes('if (uDetOn < .5) return 0.;'), 'and still says whether there are fine heights at all');
 });

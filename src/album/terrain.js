@@ -153,7 +153,7 @@ void main() {
   // (The step is never finer than the height data — 0.23 km a cell, 0.03 km around the showcase places. Inside one
   // cell the slope is that of the cell's own facet, and steep ground turned to rock by whole square cells.)
   vec2 bu = merc(ll);
-  float dw = detailWeight(bu), e = clamp(px * 1.3, mix(.24, .035, dw), 6.);
+  float dw = detailWeight(bu), e = clamp(px * 1.3, mix(.24, 17.92 / uDetRect.z, dw), 6.);   // (17.92 / uDetRect.z: .035, .07 or .14 km — a point and a quarter of the fine heights)
   bu = (bu - uBaseRect.xy) * uBaseRect.zw;                           // where the pixel lies in the height texture of the region
   float h0 = heightPix(ll), hE = heightPix(ll + vec2(0., e / (KM * cl))), hN = heightPix(ll + vec2(e / KM, 0.));
   vec2 g = vec2(hE - h0, hN - h0) / (e * 1000.);                    // rise over run toward east and north
@@ -188,7 +188,7 @@ void main() {
     // test of the borders of the map with it, and four such reads cost a tenth of the frame: 155 → 173 ms.)
     float lb = 1.6 + max(log2(px / .234), 0.), eb = .7 * exp2(lb - 1.6);                 // (the land smoothed over 700 m, or over three pixels)
     float bC = textureLod(uBase, bu, lb).r, bE = textureLod(uBase, bu + vec2(eb / (KM * cl * 360.) * uBaseRect.z, 0.), lb).r, bN = textureLod(uBase, bu - vec2(0., eb / (KM * cl * 360.) * uBaseRect.w), lb).r;
-    float own = 1. - .6 * dw, ms = smoothstep(.10, .55, slope) * mk;
+    float own = 1. - dw * (.2 * log2(uDetRect.z) - 1.2), ms = smoothstep(.10, .55, slope) * mk;   // (.6, .4 or .2 less: the finer the heights, the less is added)
     crest = clamp((hl - max(bC, 0.)) * uExag / 180., -1., 1.) * mk;
     g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * (.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far);
     // From afar a range has depth as well: the floors of its valleys, far under the land around them (the land
