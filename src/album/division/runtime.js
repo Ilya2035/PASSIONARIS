@@ -251,7 +251,7 @@ export async function startDivision(album, U) {
     // the knob is on, seen from a little higher than the borders of the districts
     const net = album.roadNet;
     if (net && (wallsFor?.net !== net || wallsFor?.div !== cur.div)) {
-      walls?.dispose(); walls = createWalls(album, cur.div.geo, impassablePairs(cur.div, cur.div.centres, net.legs)); wallsFor = { net, div: cur.div };
+      walls?.dispose(); walls = createWalls(album, cur.div.geo, impassablePairs(cur.div, cur.div.centres, net.legs, net.crossed)); wallsFor = { net, div: cur.div };
       console.log(`[album] walls: ${walls.pairs.length} pairs of districts nobody can pass between, ${walls.km.toFixed(0)} km`);
     }
     walls?.update(cam, dom, mode && p.get('divWalls') ? far * ss(5, 14, s.district / pxKm) : 0);
