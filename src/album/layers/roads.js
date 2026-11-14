@@ -7,7 +7,7 @@
 // of a settlement — inside, the streets of the settlement take over — and where it meets a river there is a bridge
 // or a ford (roads/crossings.js).
 import { makeRibbons, smoothLine } from './ribbon.js';
-import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature } from '../roads/routes.js';
+import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature, fineCache } from '../roads/routes.js';
 import { riverCrossings, squareBridges, cutAtTowns, townIndex, nearIndex, BRIDGE } from '../roads/crossings.js';
 import { sheetPull } from '../aspects/water.js';
 import { riverDrawn } from './rivers.js';
@@ -99,7 +99,8 @@ export default async function init(album) {
     const founded = new Map((towns()?.towns || []).map(t => [t.index, t]));
     const places = album.data.vectors.places.map((pl, i) => { const t = founded.get(i); return t ? { ...llOf(t.x, t.y), pop: pl.pop } : pl; });
     let from = 'from the file'; net = file ? decodeNet(file, div, div.centres, places) : null;
-    if (!net) { from = file ? 'laid anew — the file is for another division: node scripts/album/bake-roads.mjs' : 'laid now, no file'; net = roadNetwork(div, div.centres, places, undefined, { heightAt: album.terrain?.heightAt || div.raster.heightAt, courses: album.data.courses || null }); }
+    if (!net) { from = file ? 'laid anew — the file is for another division: node scripts/album/bake-roads.mjs' : 'laid now, no file'; // (the shape of the mountain legs is taken from the stale file wherever a leg is still the same: finding it anew takes seconds)
+      net = roadNetwork(div, div.centres, places, undefined, { heightAt: album.terrain?.heightAt || div.raster.heightAt, courses: album.data.courses || null, reuse: file ? fineCache(file, div, div.centres) : null }); }
     // every line as the ribbons draw it: the steps of the chunks ironed out, the points on a straight dropped, in flat km
     drawn = net.lines.map(l => ({ set: setOf(l), kind: l.kind, km: smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0])) }));
     fords = album.data.courses ? squareBridges(drawn, riverCrossings(drawn, album.data.courses)) : [];   // a bridge stands square across its river, the road turns to it
@@ -113,7 +114,7 @@ export default async function init(album) {
       signature: () => netSignature(div, div.centres, net.capitals),
       // the network as the file keeps it, base64 (scripts/album/bake-roads.mjs)
       encode: () => { const u = new Uint8Array(encodeNet(net, div, div.centres)); let b = ''; for (let i = 0; i < u.length; i += 8192) b += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(b); } };
-    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped (${(performance.now() - t0).toFixed(0)} ms)`);
+    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped${s.reused ? ' (' + s.reused + ' from the file)' : ''} (${(performance.now() - t0).toFixed(0)} ms)`);
     draw();
   }
   function sync() {

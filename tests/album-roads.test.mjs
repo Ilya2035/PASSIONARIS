@@ -13,7 +13,7 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns, encodeNet, decodeNet, netHead, netSignature,
-  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom } from '../src/album/roads/routes.js';
+  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom, fineCache } from '../src/album/roads/routes.js';
 import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
 import { FINE, cellXY, climbs, finePoints } from '../src/album/roads/shape.js';
 import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
@@ -153,7 +153,16 @@ test('roads: the network is kept in a file and read back as it was; a file for a
   { const src = roadNetwork(div, div.centres, towns, G, { historic: OLD }), back = decodeNet(encodeNet(src, div, div.centres), div, div.centres, towns);
     assert.ok(back && back.stats.shaped === src.stats.shaped && src.stats.shaped > 0);
     src.legs.forEach((L, i) => assert.deepEqual(back.legs[i].fine ? Array.from(back.legs[i].fine) : null, L.fine ? Array.from(L.fine) : null, 'the fine way of leg ' + i + ' comes back from the file'));
-    src.lines.forEach((l, i) => assert.deepEqual(back.lines[i].pts, l.pts)); }
+    src.lines.forEach((l, i) => assert.deepEqual(back.lines[i].pts, l.pts));
+    // the town of one district moves a km: the file is for another division now and is not read — but the shape of every
+    // leg that is still the same is taken from it, and comes out as if found anew
+    const d0 = districtOf(towns[2]), moved = { ...div.centres, texel: Int32Array.from(div.centres.texel), x: Float64Array.from(div.centres.x), y: Float64Array.from(div.centres.y) };
+    assert.ok(div.cells[moved.texel[d0] + 1] === d0); moved.texel[d0] += 1; moved.x[d0] += FKM;
+    const stale = encodeNet(src, div, div.centres); assert.equal(decodeNet(stale, div, moved, towns), null);
+    const cache = fineCache(stale, div, moved), again = roadNetwork(div, moved, towns, G, { historic: OLD, reuse: cache }), fresh = roadNetwork(div, moved, towns, G, { historic: OLD });
+    assert.ok(cache.size > 3 && again.stats.shaped === fresh.stats.shaped && again.stats.reused > 0 && again.stats.reused <= cache.size && again.stats.reused < again.stats.shaped + 1, again.stats.reused + ' of ' + again.stats.shaped + ' shapes from the stale file');
+    again.legs.forEach((L, k) => assert.deepEqual(L.fine ? Array.from(L.fine) : null, fresh.legs[k].fine ? Array.from(fresh.legs[k].fine) : null, 'the same shape as found anew'));
+    assert.equal(fineCache(new ArrayBuffer(8), div, div.centres).size, 0); assert.equal(src.stats.reused, 0); }
   const head = netHead(buf); assert.ok(head.v === 1 && head.algo === NET_ALGO && head.districts === div.count && head.sig === netSignature(div, div.centres, net.capitals));
   assert.ok(buf.byteLength < net.legs.length * 60, 'a small file: ' + buf.byteLength + ' bytes');
   // the town of one district moves by a chunk: the file is for another division

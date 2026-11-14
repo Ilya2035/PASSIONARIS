@@ -28,7 +28,7 @@ import { kmOf, llOf } from '../chunks.js';
 import { KN as FN, KKM as FKM } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { HISTORIC } from './historic.js';
-import { shapeLegs, finePoints, fineSteps, thin, cellXY, DIRS, FW } from './shape.js';
+import { shapeLegs, legKey, finePoints, fineSteps, thin, cellXY, DIRS, FW } from './shape.js';
 
 const X0 = -880, Y0 = 3880, LAND = 0;
 export const STEEP = [28, 520];                    // a slope s (rise over run) makes a step 1 + 28 s + 520 s² times dearer
@@ -280,9 +280,10 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
     for (const i of mine) if (!seen.has(i)) walk(i, legs[i].a);    // rings
   }
   // ---- the legs that climb are shaped: a step of 200 m, the real rivers, the bends of a mountain road
-  const heightAt = opts.heightAt === undefined ? div.raster.heightAt : opts.heightAt, shaped = heightAt ? shapeLegs(G, legs, centres, heightAt, opts.courses || null, llOf) : 0;
+  // (opts.reuse: the fine ways of a file laid for another division — fineCache(); most legs are the same and take theirs from it)
+  const heightAt = opts.heightAt === undefined ? div.raster.heightAt : opts.heightAt, shape = heightAt ? shapeLegs(G, legs, centres, heightAt, opts.courses || null, llOf, opts.reuse || null) : { shaped: 0, reused: 0 };
   for (const l of lines) l.pts = linePoints(legs, centres, l.legs, l.start);
-  return finishNet(div, centres, legs, lines, capitals, { hard, links: laidLinks, shaped }, passesOf(G, legs, heightAt));
+  return finishNet(div, centres, legs, lines, capitals, { hard, links: laidLinks, shaped: shape.shaped, reused: shape.reused }, passesOf(G, legs, heightAt));
 }
 // The passes of the network: for every leg that is a road, the highest point of its way where that stands PASS.rise
 // metres over both its ends (the leg crosses a crest between its two districts); for a leg led over a pass of
@@ -311,7 +312,7 @@ function finishNet(div, centres, legs, lines, capitals, extra, passes = []) {
   for (const L of legs) { if (L.kind === 3) continue; on[L.a] = on[L.b] = 1; km[L.kind] += L.km; num[L.kind]++; for (const t of L.crossings) crossings.push(xyOf(t)); }
   let unreached = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND && centres.texel[d] >= 0 && !on[d]) unreached++;
   let caps = 0; for (const d of capitals) if (d >= 0) caps++;
-  return { lines, legs, crossings, capitals, passes, stats: { legs: legs.length, hard: extra.hard, main: num[0], lesser: num[1], track: num[2], km: km.map(Math.round), crossings: crossings.length, unreached, capitals: caps, links: extra.links, shaped: extra.shaped || 0, passes: [0, 1, 2].map(r => passes.filter(p => p.rank === r).length) } };
+  return { lines, legs, crossings, capitals, passes, stats: { legs: legs.length, hard: extra.hard, main: num[0], lesser: num[1], track: num[2], km: km.map(Math.round), crossings: crossings.length, unreached, capitals: caps, links: extra.links, shaped: extra.shaped || 0, reused: extra.reused || 0, passes: [0, 1, 2].map(r => passes.filter(p => p.rank === r).length) } };
 }
 
 // a line of the network as the ribbons want it: the steps of the texels ironed out, the points that lie on a straight
@@ -358,6 +359,29 @@ export function encodeNet(net, div, centres) {
   }
   return buf;
 }
+// The fine ways of a file, whatever division it was laid for: Map legKey → cells. When towns move or the division
+// changes a little, most legs of the mountains keep their way chunk by chunk, and their shape need not be found
+// anew (that takes seconds). A leg whose steps no longer lead from the centre of its first district to the centre of
+// its second is left out. → the Map (empty when the file is of other rules or of another number of districts)
+export function fineCache(buf, div, centres) {
+  const map = new Map();
+  try {
+    const dv = new DataView(buf), hl = dv.getUint32(0, true), head = netHead(buf); if (head.v !== 1 || head.algo !== NET_ALGO || head.districts !== div.count) return map;
+    const legs = []; let o = 4 + hl;
+    for (let i = 0; i < head.legs; i++, o += 13) legs.push({ a: dv.getUint16(o, true), b: dv.getUint16(o + 2, true), kind: dv.getUint8(o + 4) });
+    for (const L of legs) {
+      if (L.kind === 3) continue;
+      const n = dv.getUint16(o, true); o += 2; const path = [centres.texel[L.a]]; let ok = path[0] >= 0;
+      for (let j = 0; j < n; j++) { const q = dv.getUint8(o++), t = path[j]; path.push(t + NB[q * 2] + NB[q * 2 + 1] * FN); }
+      ok = ok && path[n] === centres.texel[L.b];
+      const m = dv.getUint16(o, true); o += 2; if (!m) continue;
+      const fine = new Int32Array(m + 1); fine[0] = dv.getUint16(o + 2, true) * FW + dv.getUint16(o, true); o += 4;
+      for (let j = 0; j < m; j++) { const d = DIRS[dv.getUint8(o++)]; fine[j + 1] = fine[j] + d[0] + d[1] * FW; }
+      if (ok) map.set(legKey({ kind: L.kind, path }), fine);
+    }
+  } catch { map.clear(); }
+  return map;
+}
 // the head of the file: what it was laid for and how much of it there is
 export function netHead(buf) { const dv = new DataView(buf), hl = dv.getUint32(0, true); return JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl))); }
 // → the network as roadNetwork() gives it, or null when the file was laid for another division or by other rules
@@ -381,6 +405,6 @@ export function decodeNet(buf, div, centres, places = [], G = { riv: div.raster.
     const lines = head.lines.map(([kind, start, name, ...run]) => ({ kind, pts: linePoints(legs, centres, run, start), legs: run, start, ...(name ? { name: head.names[name - 1] } : {}) }));
     const passes = (head.passes || []).map(([leg, x, y, h, name]) => { const L = legs[leg]; return { x: x / 100, y: y / 100, h, name: name ? head.names[name - 1] : '', kind: L.kind, a: L.a, b: L.b, rank: name ? 0 : L.kind === 0 ? 1 : 2, leg }; });
     for (const q of passes) if (q.rank === 0) legs[q.leg].pass = { name: q.name, t: texelOf(q.x, q.y), x: q.x, y: q.y };
-    return finishNet(div, centres, legs, lines, Int32Array.from(head.capitals), { hard: head.hard, links: head.links, shaped: legs.filter(L => L.fine).length }, passes);
+    return finishNet(div, centres, legs, lines, Int32Array.from(head.capitals), { hard: head.hard, links: head.links, shaped: legs.filter(L => L.fine).length, reused: 0 }, passes);
   } catch { return null; }
 }

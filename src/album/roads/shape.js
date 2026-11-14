@@ -136,14 +136,19 @@ export function fineWay(G, path, ends, kind, heightAt, rivers = null) {
   return Int32Array.from(out);
 }
 
+// what tells one leg from another for its shape: the kind of its road and its way chunk by chunk
+export const legKey = L => L.kind + '|' + L.path.join(',');
 // Every leg of the network that is a road and climbs gets its fine way: L.fine (cells from the centre of L.a to the
-// centre of L.b). legs, centres: of roadNetwork(); heightAt(lat, lon) → metres; courses: the real rivers, or null
-// → how many legs were shaped
-export function shapeLegs(G, legs, centres, heightAt, courses = null, llOf) {
-  const rivers = courses ? fineRivers(courses) : null, at = (x, y) => { const p = llOf(x, y); return heightAt(p.lat, p.lon); }; let n = 0;
+// centre of L.b). legs, centres: of roadNetwork(); heightAt(lat, lon) → metres; courses: the real rivers, or null;
+// reuse: fine ways found before, by legKey (a leg with the same way between the same two points takes its own from
+// there) → { shaped: how many legs have a fine way, reused: how many of them were taken from `reuse` }
+export function shapeLegs(G, legs, centres, heightAt, courses = null, llOf, reuse = null) {
+  const at = (x, y) => { const p = llOf(x, y); return heightAt(p.lat, p.lon); }; let n = 0, reused = 0, rivers;
   for (const L of legs) {
     L.fine = null; if (L.kind === 3 || !L.path || !climbs(G, L.path)) continue;
-    const A = [centres.x[L.a], centres.y[L.a]], B = [centres.x[L.b], centres.y[L.b]];
+    const A = [centres.x[L.a], centres.y[L.a]], B = [centres.x[L.b], centres.y[L.b]], had = reuse ? reuse.get(legKey(L)) : null;
+    if (had && had[0] === cellOf(A[0], A[1]) && had[had.length - 1] === cellOf(B[0], B[1])) { L.fine = had; n++; reused++; continue; }
+    if (rivers === undefined) rivers = courses ? fineRivers(courses) : null;
     L.fine = fineWay(G, L.path, [A, B], L.kind, at, rivers);
     if (L.pass && L.pass.x !== undefined && !(L.fine && nearest(L.fine, L.pass.x, L.pass.y) <= FINE.pass)) {
       // the line it found misses the pass: it is led through the lowest ground by the point of the pass — the head of the valley that leads up to it
@@ -153,7 +158,7 @@ export function shapeLegs(G, legs, centres, heightAt, courses = null, llOf) {
     }
     if (L.fine) n++;
   }
-  return n;
+  return { shaped: n, reused };
 }
 // km from a point to the nearest cell of a fine way
 export function nearest(fine, x, y) { let d = Infinity; for (const c of fine) { const q = cellXY(c), e = Math.hypot(q[0] - x, q[1] - y); if (e < d) d = e; } return d; }
