@@ -81,7 +81,8 @@ export default async function init(album) {
           float sea = smoothstep(vLake.x + .12, vLake.x - .18, hb) * smoothstep(0., .4, vSd);
           // The colour is needed only where the fine heights put land on that sea; elsewhere the ground has already
           // drawn the same water.
-          float hd = wD > 0. ? textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., log2(px / .029))).r : 0.;
+          // (a point of the fine heights is 15 / uDetRect.z km apart: 29 m in the square of a showcase place, 57 or 115 m in a window of the mountains)
+          float hd = wD > 0. ? textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., log2(px * uDetRect.z / 15.))).r : 0.;
           float cover = sea * smoothstep(.2, .5, hd) * smoothstep(0., .05, wD);
           // The depth is written toward the eye all over the shoal, islands included, which hides the trees of the
           // specks. It comes on gently, over a couple of km, away from the mainland and from the outline, and has no

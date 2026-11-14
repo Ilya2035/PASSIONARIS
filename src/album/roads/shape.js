@@ -12,7 +12,7 @@
 // Plain JavaScript without the GPU: the same land always gives the same shape. The plains are not touched.
 import { KN, KKM } from '../division/km.js';
 import { Heap } from '../division/graph.js';
-import { kmOf } from '../chunks.js';
+import { kmOf, llOf } from '../chunks.js';
 
 export const FINE = {
   step: .2,                          // km: the step of a fine way
@@ -25,6 +25,7 @@ export const FINE = {
   cross: [1, 2.5, 5, 9], along: 1.5, // km of way for stepping onto a brook, a small river, a lesser, a great one; for every km in the bed
   pass: .7,                          // km: a leg over a pass of history is left to find its own line if that runs this near the point of the pass
   thin: .012,                        // km: a point this near the straight between its neighbours is dropped when the line is drawn
+  drape: .12,                        // km: over fine ground a road as it is drawn has a corner at least this often (dense())
 };
 const X0 = -880, Y0 = 3880, F = FINE.step, K = Math.round(KKM / F);
 export const FW = KN * K;            // the fine cells: FW × FW of them over the same ground as the chunks; cell = j · FW + i
@@ -185,4 +186,29 @@ export function thin(pts, tol = FINE.thin) {
     if (far > 0) { keep[far] = 1; stack.push(a, far, far, b); }
   }
   return pts.filter((_, k) => keep[k]);
+}
+// The opposite of thin(), for a ribbon that lies on fine ground. Between two of its corners a ribbon runs straight,
+// and the corners of a road stand 350 m apart. Ground with a point every 57 m (the fine heights of the mountains,
+// ground/fine.js) rises over such a ribbon and falls away under it: by more than 14 m — what the pull toward the eye
+// covers from a few km up — on a ninth of the roads there, by 86 m at most, and the road was seen in pieces. With
+// a corner every 120 m the ground leaves the ribbon by more than 14 m on one km of 13 700. The new corners are put
+// on the line itself: its shape in plan stays as it was.
+//   pts: [[x, y] …] flat km; fine(x, y): does the ground have fine heights here
+// → the line with a corner every `step` km at most on every stretch that has an end on such ground
+export function dense(pts, fine, step = FINE.drape) {
+  if (pts.length < 2) return pts.slice();
+  const out = [pts[0]]; let was = fine(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], is = fine(b[0], b[1]);
+    if (was || is) { const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step - 1e-9); for (let k = 1; k < n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); }
+    out.push(b); was = is;
+  }
+  return out;
+}
+// Where the ground has fine heights. fine: what meta.json says of them — { z, tiles: [[x, y] …] }, the tiles of
+// Web-Mercator level z that there are → (x, y flat km) → is there a tile; null when there are none at all
+export function fineCover(fine) {
+  if (!fine || !fine.tiles || !fine.tiles.length) return null;
+  const n = 2 ** fine.z, has = new Set(fine.tiles.map(t => t[0] * 65536 + t[1]));
+  return (x, y) => { const p = llOf(x, y), s = Math.sin(p.lat * Math.PI / 180); return has.has(Math.floor((p.lon + 180) / 360 * n) * 65536 + Math.floor((.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n)); };
 }

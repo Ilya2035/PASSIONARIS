@@ -5,8 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { KN, KKM } from '../src/album/division/km.js';
 import { Heap } from '../src/album/division/graph.js';
-import { llOf } from '../src/album/chunks.js';
-import { FINE, FW, DIRS, cellOf, cellXY, fineRivers, climbs, fineWay, fineSteps, thin } from '../src/album/roads/shape.js';
+import { llOf, kmOf } from '../src/album/chunks.js';
+import { FINE, FW, DIRS, cellOf, cellXY, fineRivers, climbs, fineWay, fineSteps, thin, dense, fineCover } from '../src/album/roads/shape.js';
 
 const X0 = -880, Y0 = 3880, F = FINE.step, K = Math.round(KKM / F);
 // a piece of made-up ground: chunks with the heights of `height(x, y)` (metres at a point of the flat km plane)
@@ -121,4 +121,26 @@ test('roads, shape: a way is led through every point given, never leaves the lan
   assert.equal(fineWay(sea, path, ends, 1, (x, y) => height(x, y)), null);
   // a point outside the strip of the leg: no way
   assert.equal(fineWay(G, path, [[AX, AY], [AX + 40, AY + 40]], 1, (x, y) => height(x, y)), null);
+});
+
+test('roads, shape: over fine ground a line gets a corner every 120 m at most — and is the same line', () => {
+  const line = [[0, 0], [.35, 0], [.7, 0], [1.05, .1], [1.4, .1], [1.75, .1]], step = (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1]);
+  assert.deepEqual(dense(line, () => false), line, 'no fine ground: the line as it was');
+  const all = dense(line, () => true);
+  assert.equal(all.length, 1 + 3 + 3 + 4 + 3 + 3, 'a stretch of 350 m in three, the slanted one of 364 m in four');
+  for (let i = 1; i < all.length; i++) assert.ok(step(all[i - 1], all[i]) <= FINE.drape + 1e-9);
+  for (const p of line) assert.ok(all.some(q => q[0] === p[0] && q[1] === p[1]), 'every corner of the line stays');
+  assert.deepEqual(thin(all, 1e-6), thin(line, 1e-6), 'the new corners lie on the line');
+  // fine ground east of x = 1 only: the stretches with an end on it
+  const part = dense(line, x => x > 1);
+  assert.equal(part.length, 3 + 4 + 3 + 3); assert.deepEqual(part.slice(0, 3), line.slice(0, 3));
+  assert.deepEqual(dense([[1, 2]], () => true), [[1, 2]]); assert.deepEqual(dense([], () => true), []);
+  // where there is fine ground: the tiles of meta.json (Web-Mercator, level 11 — a tile of the Somport here)
+  const tileOf = (lat, lon) => { const r = lat * Math.PI / 180; return [Math.floor((lon + 180) / 360 * 2048), Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2048)]; };
+  const cover = fineCover({ z: 11, tiles: [tileOf(42.795, -.527)] }), at = (lat, lon) => cover(...kmOf(lat, lon));
+  assert.equal(at(42.795, -.527), true); assert.equal(at(42.80, -.50), true); assert.equal(at(42.795, -.20), false); assert.equal(at(42.50, -.527), false);
+  assert.equal(fineCover(null), null); assert.equal(fineCover({ z: 11, tiles: [] }), null);
+  // a line that enters the tile is made finer from its last corner outside it on
+  const [x0, y0] = kmOf(42.795, -.527), row = Array.from({ length: 40 }, (_, k) => [x0 - 5 + k * .35, y0]), drawn = dense(row, cover);
+  const inside = row.filter(p => cover(p[0], p[1])).length; assert.ok(inside > 10 && inside < 38 && drawn.length >= row.length + 2 * (inside - 1) && drawn.length <= row.length + 2 * (inside + 1), row.length + ' → ' + drawn.length);
 });

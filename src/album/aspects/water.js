@@ -378,9 +378,11 @@ vec3 aspWater(Px p) {
     float gs = length(vec2(hE - hC, hN - hC)) / (e * 1000.);          // rise over run of the smoothed bottom
     w.surf = w.depth / (1000. * max(gs, 1e-4)) + 4. * (1. - smoothstep(.0012, .004, gs));
     // the sea charts step from one depth to the next along jagged lines; the smoothed bottom rounds those steps off
-    // (where there are fine heights, their smoothed bottom: the same rule as heightLod())
+    // (where there are fine heights, their smoothed bottom: the same rule as heightLod() — the fine heights are 2048
+    // points a side whatever they cover, a point every 28, 57 or 115 m, so log2(uDetRect.z) − 6 is how many levels
+    // finer than the base they are: 3, 2 or 1)
     float hS = hC, wD = detailWeight(m);
-    if (wD > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, lod + 3.).r; hS = mix(hC, hd > .6 ? hd : min(hC, -1.5), wD); }
+    if (wD > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + log2(uDetRect.z) - 6.)).r; hS = mix(hC, hd > .6 ? hd : min(hC, -1.5), wD); }
     w.depth = mix(w.depth, max(-hS, 0.), .65 * smoothstep(14., 6., w.depth) * smoothstep(0., 1.2, w.depth));
   }
   return waterLit(w);

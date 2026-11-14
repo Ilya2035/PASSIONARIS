@@ -11,6 +11,7 @@ import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature, fineCache, c
 import { riverCrossings, squareBridges, cutAtTowns, townIndex, nearIndex, BRIDGE } from '../roads/crossings.js';
 import { sheetPull } from '../aspects/water.js';
 import { riverDrawn } from './rivers.js';
+import { dense, fineCover } from '../roads/shape.js';
 import { kmOf, llOf } from '../chunks.js';
 
 // What a kind of road looks like: width on the ground km (a little wider than life, as the owner allows: «совсем
@@ -104,6 +105,10 @@ export default async function init(album) {
     // every line as the ribbons draw it: the steps of the chunks ironed out, the points on a straight dropped, in flat km
     drawn = net.lines.map(l => ({ set: setOf(l), kind: l.kind, km: smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0])) }));
     fords = album.data.courses ? squareBridges(drawn, riverCrossings(drawn, album.data.courses)) : [];   // a bridge stands square across its river, the road turns to it
+    // Over the fine heights of the mountains the ribbon gets a corner every 120 m, not every 350: between two corners
+    // it runs straight, and fine ground would rise over it (roads/shape.js, dense). The line itself is the same.
+    const cover = fineCover(album.data.meta?.fine); let corners = 0;
+    if (cover) for (const l of drawn) { corners -= l.km.length; l.km = dense(l.km, cover); corners += l.km.length; }
     near = null; version++;
     const s = net.stats, nb = fords.filter(f => f.type === 'bridge').length;
     album.roadNet = { main: s.main, minor: s.lesser, tracks: s.track, km: s.km, crossings: net.crossings, impassable: s.hard, lines: net.lines, legs: net.legs, stats: s, capitals: net.capitals, fords, version,
@@ -116,7 +121,7 @@ export default async function init(album) {
       signature: () => netSignature(div, div.centres, net.capitals),
       // the network as the file keeps it, base64 (scripts/album/bake-roads.mjs)
       encode: () => { const u = new Uint8Array(encodeNet(net, div, div.centres)); let b = ''; for (let i = 0; i < u.length; i += 8192) b += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(b); } };
-    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped${s.reused ? ' (' + s.reused + ' from the file)' : ''} (${(performance.now() - t0).toFixed(0)} ms)`);
+    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped${s.reused ? ' (' + s.reused + ' from the file)' : ''}${corners ? ', ' + corners + ' corners added over the fine heights' : ''} (${(performance.now() - t0).toFixed(0)} ms)`);
     draw();
   }
   function sync() {
