@@ -89,11 +89,14 @@ export function yearAt(lat, lon, h = 0) { const c = climateAt(lat, lon); return 
 // Trees stop where the warmest month is cooler than 10 °C (the old rule of the foresters; Körner's 6.4 °C of the
 // growing season says nearly the same). Height of that line, m.
 // In the hot dry mountains of the south that line would lie above 3000 m, and there drought and wind stop the trees
-// first: above TREE_SOFT the line rises only TREE_SOFT_K as fast. (Cantabrian range about 1650 m, Pyrenees 2280 m,
-// Sierra Nevada 2580 m.)
-export const TREE_WARM = 9.5, TREE_SOFT = 2200, TREE_SOFT_K = .35;
-export const treelineOf = warm => { const t = (warm - TREE_WARM) / LAPSE; return t < TREE_SOFT ? t : TREE_SOFT + (t - TREE_SOFT) * TREE_SOFT_K; };
-export function treelineAt(lat, lon) { const c = climateAt(lat, lon); return c ? treelineOf(c[2]) : 2150; }
+// first: above TREE_SOFT the line rises only TREE_SOFT_K as fast.
+// And where the summer is dry the trees stop lower still, by TREE_DRY metres for a summer without water (summer:
+// 0 .. 1, summerAt()): the pines of the Guadarrama end near 2050 m and broom and bare granite lie above them, though
+// by warmth alone the forest would close over every summit of the range (2428 m). (Pyrenees about 2300 m, Picos de
+// Europa 2200 m, Guadarrama and Gredos 2000–2100 m, Sierra Nevada 2100 m.)
+export const TREE_WARM = 9.5, TREE_SOFT = 2200, TREE_SOFT_K = .35, TREE_DRY = 1200;
+export const treelineOf = (warm, summer = 1) => { const t = (warm - TREE_WARM) / LAPSE; return (t < TREE_SOFT ? t : TREE_SOFT + (t - TREE_SOFT) * TREE_SOFT_K) - (1 - summer) * TREE_DRY; };
+export function treelineAt(lat, lon) { const c = climateAt(lat, lon); return c ? treelineOf(c[2], c[1]) : 2150; }
 
 // ---- the climate as the shaders read it: one picture of n × n texels over the square of the chunks, 4 bytes each —
 // mean height of the land around / 4096 m (counted here, from the heights of the album), wet, warm, summer

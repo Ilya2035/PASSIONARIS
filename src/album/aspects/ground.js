@@ -60,8 +60,10 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   // and the desert shows its relief in its colours, as it does from a satellite: pale silt, sand and salt on the
   // floors of the valleys (the dry beds of the ramblas), darker stony ground on the tops between them
   c = mix(c, vec3(.84, .78, .64), arid * clamp(conc, 0., 1.) * .6) * (1. - arid * clamp(-conc, 0., 1.) * .15);
-  // ---- above the trees: short alpine grass; just below them, heath in patches
+  // ---- above the trees: short alpine grass; just below them, heath in patches; and around the last trees a belt of
+  // low dark scrub (juniper, rhododendron, broom), in patches
   c = mix(c, vec3(.43, .46, .26) * (.92 + .16 * n3f), smoothstep(tl - 100., tl + 150., hl) * smoothstep(.15, .4, wet));
+  c = mix(c, vec3(.27, .34, .19), smoothstep(tl - 300., tl - 80., hl) * (1. - smoothstep(tl + 120., tl + 330., hl)) * smoothstep(.42, .60, mott) * .6 * smoothstep(.3, .55, wet));
   c = mix(c, vec3(.47, .39, .38), smoothstep(tl - 500., tl, hl) * smoothstep(.55, .8, mott) * .3 * smoothstep(.35, .6, wet));
   // ---- a true desert: sand in seas of dunes, stony plain between them
   return mix(c, vec3(.80, .64, .40) * (.95 + .1 * nz.y), (1. - smoothstep(.03, .07, wet)) * smoothstep(.46, .58, nz.x * .6 + g2 * .4));

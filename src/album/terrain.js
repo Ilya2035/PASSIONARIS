@@ -118,14 +118,17 @@ vec3 texDetail(int t, vec2 pk, float px, vec2 dx, vec2 dy) {
 // smooth height data never has, and what the eye reads as a mountain: a line where a lit face meets a shaded one.
 //   xy  the slope of this relief toward east and north (rise over run), to add to that of the ground
 //   z   its height: −1 the bottom of a gully .. 1 the crest of a rib
-// f: how much of the smaller size is still larger than a pixel.
-vec3 ribs(vec2 pk, vec2 d, float f) {
-  vec2 q = vec2(dot(pk, vec2(-d.y, d.x)), dot(pk, d));
+// f: how much of the smaller size is still larger than a pixel; w: a shift across the slope, km, that makes the
+// lines of the ribs wander.
+// (The fold is rounded a little. Folded as sharp as a knife, every flank of a rib was one flat facet, and an open
+// slope looked cut out of paper — long triangles all over the alpine meadows of Andorra.)
+vec3 ribs(vec2 pk, vec2 d, float f, float w) {
+  vec2 q = vec2(dot(pk, vec2(-d.y, d.x)) + w, dot(pk, d));
   vec3 a = vnoiseD(q / vec2(.42, 1.5) + 7.), b = vnoiseD(q / vec2(.14, .45) + 31.);
-  float ta = 2. * a.x - 1., tb = 2. * b.x - 1.;
+  float ta = 2. * a.x - 1., tb = 2. * b.x - 1., ra = sqrt(ta * ta + .03), rb = sqrt(tb * tb + .03);
   f *= .35 + 1.3 * a.x;                                             // (the gullies gather on one flank of a rib: no two slopes alike)
-  vec2 gq = a.yz / vec2(.42, 1.5) * (-.2 * sign(ta)) + b.yz / vec2(.14, .45) * (.05 * f * sign(tb));
-  return vec3(vec2(-d.y, d.x) * gq.x + d * gq.y, (1. - 2. * abs(ta)) * .75 + (2. * abs(tb) - 1.) * .25 * f);
+  vec2 gq = a.yz / vec2(.42, 1.5) * (-.2 * ta / ra) + b.yz / vec2(.14, .45) * (.05 * f * tb / rb);
+  return vec3(vec2(-d.y, d.x) * gq.x + d * gq.y, (1. - 2. * ra) * .75 + (2. * rb - 1.) * .25 * f);
 }
 vec3 hypso(float h) {
   vec3 c = vec3(.62, .76, .56);
@@ -139,7 +142,8 @@ vec3 idColour(float id) { return .5 + .5 * cos(6.2832 * (id + vec3(0., .33, .67)
 // (Two numbers and no more. Whatever must be remembered from here until the last aspect has run is held for every
 // pixel in flight; past a certain count a weak video card works on fewer pixels at a time, and the whole ground
 // shader runs half as fast. Measured 13.11.2026: thirteen more numbers than before were too many, ten were not.)
-float gRise, gTreeline;
+// gSummer: 0 a summer without water .. 1 a green one (the forest takes its tint from it).
+float gRise, gTreeline, gSummer;
 
 ${ASPECT_GLSL}
 
@@ -166,17 +170,28 @@ void main() {
   // Around the showcase places the fine heights hold much of this themselves, so less is added there (own).
   // crest: how far the place stands above the land smoothed over 700 m, 1 = a sharp crest, −1 = the floor of a gully;
   // rib: the height of the added ribs, −1 .. 1.
-  float mk = smoothstep(.45, .05, px), crest = 0., rib = 0.;
+  // From afar it is the other way round (far: the heights between about 100 and 700 km). A pixel there is as large
+  // as a cell of the data, every small valley is a wrinkle of two pixels, and a range read as a flat busy pattern.
+  // So the small forms are calmed (the slope leans toward that of the smoothed land) and the light is given more
+  // contrast instead (below): the large forms of a range carry the relief, as on a hand-shaded map.
+  float mk = smoothstep(.45, .05, px), far = smoothstep(.10, .30, px) * (1. - smoothstep(.7, 1.3, px)), crest = 0., rib = 0., depth = 0.;
   vec2 gm = vec2(0.);
-  if (mk > 0. && h0 > 0.) {
-    float bC = heightLod(ll, 1.6), bE = heightLod(ll + vec2(0., .7 / (KM * cl)), 1.6), bN = heightLod(ll + vec2(.7 / KM, 0.), 1.6);
+  if (px < 1.3 && h0 > 0.) {
+    float lb = 1.6 + max(log2(px / .234), 0.), eb = .7 * exp2(lb - 1.6);                 // (the land smoothed over 700 m, or over three pixels)
+    float bC = heightLod(ll, lb), bE = heightLod(ll + vec2(0., eb / (KM * cl)), lb), bN = heightLod(ll + vec2(eb / KM, 0.), lb);
     float own = 1. - .6 * dw, ms = smoothstep(.10, .55, slope) * mk;
     crest = clamp((hl - max(bC, 0.)) * uExag / 180., -1., 1.) * mk;
-    g += (g - vec2(bE - bC, bN - bC) / 700.) * (.8 * uCrisp * own * smoothstep(.30, .08, px));
-    gm = vnoiseD(pk / .12 + 3.).yz * (mk * (.012 + .05 * ms));
+    g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * (.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far);
+    // From afar a range has depth as well: the floors of its valleys, far under the land around them (the land
+    // smoothed over 15 km), take less sun, its high ground more — as haze and the open sky make them.
+    // (It is worked out here, among the other reads of the relief, and goes into the light of the sun. As one more
+    // line on the finished light, after the aspects, it pushed the whole ground shader over the edge of speed:
+    // 153 → 242 ms a frame.)
+    if (far > 0.) depth = clamp((hl - max(heightLod(ll, 6.), 0.)) / 900., -1., 1.) * .25 * far;
+    if (mk > 0.) gm = vnoiseD(pk / .12 + 3.).yz * (mk * (.012 + .05 * ms));
     if (ms > 0. && px < .22) {
-      float ang = atan(g.y, g.x) / .7853982, k = floor(ang), a0 = k * .7853982, a1 = a0 + .7853982, f = smoothstep(.07, .025, px);
-      vec3 r = mix(ribs(pk, vec2(cos(a0), sin(a0)), f), ribs(pk, vec2(cos(a1), sin(a1)), f), smoothstep(0., 1., ang - k)) * (ms * own * uCrisp * smoothstep(.22, .07, px));
+      float ang = atan(g.y, g.x) / .7853982, k = floor(ang), a0 = k * .7853982, a1 = a0 + .7853982, f = smoothstep(.07, .025, px), w = (vnoise(pk / .8 + 5.) - .5) * .5;
+      vec3 r = mix(ribs(pk, vec2(cos(a0), sin(a0)), f, w), ribs(pk, vec2(cos(a1), sin(a1)), f, w), smoothstep(0., 1., ang - k)) * (ms * own * uCrisp * smoothstep(.22, .07, px));
       gm += r.xy; rib = r.z;
     }
   }
@@ -202,6 +217,7 @@ void main() {
   float conc = (max(heightLod(ll, lod0 + 3.5), 0.) - hl) * uExag / (rad * 260.);
   float ao = 1. - clamp(conc, 0., 1.) * .72, ridge = clamp(-conc, 0., 1.);
   float nl = max(dot(n, uSun), 0.), day = albumDay();
+  nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);   // (from afar the light of a slope differs more from that of level ground)
   vec3 sunCol = albumSunCol(), skyCol = albumSkyCol();
 
   Px p;
@@ -217,7 +233,7 @@ void main() {
     // noises fade to their mean once their features are smaller than a pixel, so nothing shimmers from afar
     float n1 = fbm(pk / 38.), n2 = px < 5. ? mix(.5, fbm(pk / 7.3 + 5.), smoothstep(5., 1.5, px)) : .5, n3 = px < .7 ? mix(.5, vnoise(pk / 1.1), smoothstep(.7, .25, px)) : .5;
     // the climate of the place; a slope that faces north and the floor of a valley are wetter than the ridge above
-    vec4 clim = albumClimate(ll); gRise = clim.r * 4096.; gTreeline = albumTreelineOf(clim);
+    vec4 clim = albumClimate(ll); gRise = clim.r * 4096.; gTreeline = albumTreelineOf(clim); gSummer = clim.a;
     float hollow = clamp(conc, 0., 1.), north = -g.y / (slope + .12);
     float wet = albumWetOf(clim, hl, n1) + north * .05 + hollow * .07 - ridge * .05;
     // (in a wet land grass and scrub hold on a slope that would be bare rock in a dry one)
@@ -228,6 +244,7 @@ void main() {
 
     // bare ground: soil and low growth by the climate (aspects/ground.js), rock on steep slopes and summits, sand at the shore
     float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + (ridge * .15 + max(crest, 0.) * .45) * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
+    rockW *= 1. - .3 * humid * (1. - smoothstep(treeline - 300., treeline + 100., hl));   // (in wet country grass and bushes hold on the ledges of a wall below the tree line)
     float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
     vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk);
     if (rockW > .004) {
@@ -278,13 +295,21 @@ void main() {
     // keeps its snow lower, and the slope is taken with the small relief the height data cannot hold (the normal of
     // the pixel): the edge runs into every gully instead of along a smooth curve.
     float gyS = clamp(-n.y / (max(n.z, .2) * uExag * uShade), -1.2, 1.2), sb = max(40., fwidth(hl) * 1.5);
-    float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 260.) * (1. - smoothstep(.85, 1.4, slope));
-    if (p.cB.g > .003) snowW = max(snowW, smoothstep(-.1, .1, p.cB.g * 1.3 - (n2 * .55 + n3 * .45) - sr * 1.2) * (1. - smoothstep(.85, 1.4, slope)) * (1. - .3 * cover));
-    if (snowW > .004) land = mix(land, vec3(.93, .95, .99) * (.97 + .06 * n3), snowW);
+    // Snow has volume. It does not hold on a wall, so the ribs of rock stand out of a snowfield (the slope is that of
+    // the pixel, with its ribs and gullies). And it is painted a little under white: full white under a full sun left
+    // no room for the light — a snowfield was one flat patch whatever its relief. Now its sunny faces are white and
+    // the faces turned away are grey-blue (the light below: snow in the shade is lit by the blue of the sky).
+    float bare = 1. - smoothstep(.8, 1.3, length(n.xy) / (max(n.z, .05) * uExag * uShade));
+    float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 320.) * bare;
+    if (p.cB.g > .003) snowW = max(snowW, smoothstep(-.1, .1, p.cB.g * 1.3 - (n2 * .55 + n3 * .45) - sr * 1.2) * bare * (1. - .3 * cover));
+    if (snowW > .004) land = mix(land, vec3(.80, .83, .88) * (.97 + .06 * n3), snowW);
     cover *= 1. - snowW;
     land = pow(max(land, vec3(0.)), vec3(2.2));                     // the palette above is written as seen on screen
 
-    vec3 light = sunCol * nl * sh * 1.25 + skyCol * (.4 + .6 * n.z) * ao + albumMoonLit(n);   // (the Moon: light.js, the part «Небо»)
+    // A forest in the shade is not black: the tops of its crowns face the sky whatever the slope they stand on, and
+    // a canopy is open to more of the sky than the ground of a ravine. Snow in the shade is blue.
+    float amb = (.4 + .6 * n.z) * ao; amb = mix(amb, .5 + .5 * amb, cover * .7);
+    vec3 light = sunCol * nl * sh * 1.25 + skyCol * amb * mix(vec3(1.), vec3(.86, .97, 1.2), snowW) + albumMoonLit(n);   // (the Moon: light.js, the part «Небо»)
     if (uStyle == 2) {                                              // atlas: tints by height, contour lines
       float cw = fwidth(hl) * 1.2, c200 = 1. - smoothstep(0., cw, abs(fract(hl / 200. + .5) - .5) * 200.);
       land = hypso(hl) * (1. - .22 * c200 * smoothstep(.25, .02, px)) * (.62 + .5 * nl * sh + .1 * ao);

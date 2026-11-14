@@ -129,8 +129,9 @@ export const FOREST_RULES = /* glsl */`
 float albumTreeline(float n1) { return gTreeline + (n1 - .5) * 260.; }
 // share of the ground under trees before patchiness: closed forest where wet, open woodland where dry
 float albumForestShare(float wet, float hl, float slope, float n1) {
+  // (Under the tree line the forest thins out over some 400 m of height, in stands and islands.)
   float steep = smoothstep(.62, 1.05, slope), tl = albumTreeline(n1);
-  float fc = smoothstep(.34, .58, wet) * (1. - smoothstep(tl - 180., tl + 40., hl)) * (1. - steep);
+  float fc = smoothstep(.34, .58, wet) * (1. - smoothstep(tl - 380., tl + 60., hl)) * (1. - steep);
   return max(fc, smoothstep(.20, .34, wet) * .38 * (1. - steep) * (1. - smoothstep(tl - 650., tl - 250., hl)));
 }
 // How closed the canopy of a stand is by nature: an open woodland of single trees over grass where it is dry (the
@@ -185,12 +186,14 @@ float albumAge(float age, float inside, float st) { return clamp(age * (.6 + .4 
 vec3 albumForestTint(float con, float age, float wet, float hl, float lat, float stand, float autumn) {
   float w = smoothstep(.5, .75, wet), south = smoothstep(42.5, 37.5, lat), mont = smoothstep(gTreeline - 1350., gTreeline - 550., hl);
   // broadleaf: grey-olive evergreen oak where dry, fresh green where wet; cooler in the mountains, warmer in the south
+  // (the belts of a mountain must be told apart from above: the beech of the middle heights is a fresh, lighter
+  // green, the fir and pine over it dark and blue)
   vec3 broad = mix(vec3(.20, .27, .10), vec3(.105, .235, .085), w);
-  broad = mix(broad, vec3(.085, .215, .105), mont * .45);
+  broad = mix(broad, vec3(.135, .275, .085), mont * .6);
   broad = mix(broad, broad * vec3(1.14, 1.02, .80), south * .5);
   // conifers: the warm green pine of the dry south, dark blue-green fir and mountain pine higher up and in the wet
   vec3 conif = mix(vec3(.13, .22, .085), vec3(.085, .20, .118), max(mont, w * .8));
-  conif = mix(conif, vec3(.07, .165, .115), smoothstep(gTreeline - 450., gTreeline, hl) * .5);
+  conif = mix(conif, vec3(.075, .175, .115), smoothstep(gTreeline - 450., gTreeline, hl) * .5);
   conif = mix(conif, conif * vec3(1.10, 1.02, .84), south * .35);
   // stands of different trees
   broad = mix(broad, vec3(.36, .44, .14), smoothstep(.58, .8, stand) * .55);
@@ -244,7 +247,8 @@ float forestKeep(float farm, float pat, float px, vec2 people, float wet) {
 // the pixel (its normal), with the ribs and gullies the height data cannot hold: the wood runs up the gullies and
 // leaves the ribs bare. (A wood used to end on a line of the smooth slope of the data — a grey oval of rock with a
 // crisp rim in the middle of the forest, like a sticker.)
-float forestSteep(vec3 n) { return 1. - .92 * smoothstep(.80, 1.35, length(n.xy) / (max(n.z, .05) * uExag * uShade)); }
+float forestSlope(vec3 n) { return length(n.xy) / (max(n.z, .05) * uExag * uShade); }
+float forestSteep(vec3 n) { return 1. - .92 * smoothstep(.80, 1.35, forestSlope(n)); }
 // The stand at another point near this one — a step toward the sun, or where the eye sees the top of the canopy. The
 // patch noise is asked again there; the own noises of the felling order are taken as they are here, which is close
 // enough over a fifth of a km. (Reading the change off the screen with dFdx was tried: at close range it speckles
@@ -339,6 +343,9 @@ void aspForest(Px p, inout Land L) {
   float mask = mix(dens, mix(m2, m1, f1), smoothstep(.07, .03, px));
   vec3 tint = albumForestTint(kind, age, p.wet, p.hl, p.ll.x, tree, uSeason * (.55 + .45 * p.n3));
   tint = mix(tint, vec3(.50, .44, .16), smoothstep(.93, .99, tone) * .4 * (1. - kind) * ya);       // a crown gone yellow here and there
+  // The sunny side of a mountain, and a land of dry summers: pine and oak in place of fir and beech — a lighter,
+  // yellower wood. (The southern flank of the Pyrenees was as dark as the French one.)
+  tint = mix(tint, tint * vec3(1.30, 1.16, .92) + vec3(.02, .015, 0.), max(clamp(-nh.y * smoothstep(.05, .3, p.slope), 0., 1.) * .8, 1. - smoothstep(.6, 1., gSummer)) * .7);
   float ta = mix(.2, .46, ya) * (1. + .25 * oa);                     // how much one crown differs from the next
   vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day);
   // rim and shade grow with the height of the stand; the ground between the crowns of an open stand is mostly in the sun

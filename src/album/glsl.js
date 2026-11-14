@@ -1,7 +1,7 @@
 // Shared GLSL of the album: geometry of the sphere patch, height sampling, noise.
 import { R, CENTRE, KM_PER_DEG, COS_REF } from './geo.js';
 import { FN, FKM } from './chunks.js';
-import { WARM, LAPSE, TREE_WARM, TREE_SOFT, TREE_SOFT_K, WET_RISE, WET_RISE_MIN, WET_RISE_MAX } from './ground/climate.js';
+import { WARM, LAPSE, TREE_WARM, TREE_SOFT, TREE_SOFT_K, TREE_DRY, WET_RISE, WET_RISE_MIN, WET_RISE_MAX } from './ground/climate.js';
 
 const f = n => Number(n).toFixed(8);
 const D = Math.PI / 180;
@@ -100,8 +100,9 @@ float albumWetOf(vec4 clim, float hl, float n1) {
 }
 float albumWet(vec2 ll, float hl, float n1) { return albumWetOf(albumClimate(ll), hl, n1); }
 // the height at which trees stop, m: where the warmest month is no warmer than ${TREE_WARM} °C; in the hot dry mountains
-// of the south drought and wind stop them lower than the warmth would (treelineOf() in ground/climate.js is its twin)
-float albumTreelineOf(vec4 clim) { float t = (mix(${f(WARM[0])}, ${f(WARM[1])}, clim.b) - ${f(TREE_WARM)}) / ${f(LAPSE)}; return t < ${f(TREE_SOFT)} ? t : ${f(TREE_SOFT)} + (t - ${f(TREE_SOFT)}) * ${f(TREE_SOFT_K)}; }
+// of the south drought and wind stop them lower than the warmth would, and lower still where the summer is dry
+// (treelineOf() in ground/climate.js is its twin)
+float albumTreelineOf(vec4 clim) { float t = (mix(${f(WARM[0])}, ${f(WARM[1])}, clim.b) - ${f(TREE_WARM)}) / ${f(LAPSE)}; return (t < ${f(TREE_SOFT)} ? t : ${f(TREE_SOFT)} + (t - ${f(TREE_SOFT)}) * ${f(TREE_SOFT_K)}) - (1. - clim.a) * ${f(TREE_DRY)}; }
 `;
 
 // ---- chunks: the state of the natural cells of the world (chunks.js), read the same way by the ground, the trees,

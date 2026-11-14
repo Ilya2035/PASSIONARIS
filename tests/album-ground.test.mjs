@@ -57,9 +57,9 @@ test('ground climate: the baked map covers the square of the chunks and says wha
     assert.ok(summerAt(37.39, -5.98) < .3 && summerAt(43.36, -5.85) > .8 && summerAt(43.60, 1.44) > .55, 'Seville burns out in summer, Asturias stays green');
     // warmth and the line of the trees
     assert.ok(warmAt(40.42, -3.70) > 27 && warmAt(43.36, -5.85) < 22 && near(warmAt(40.42, -3.70, 1000), warmAt(40.42, -3.70) - 6.4, 1e-9));
-    const tl = { cantabria: treelineAt(43.36, -5.85), pyrenees: treelineAt(42.63, .66), nevada: treelineAt(37.05, -3.35) };
-    assert.ok(tl.cantabria > 1450 && tl.cantabria < 1850 && tl.pyrenees > 2150 && tl.pyrenees < 2450 && tl.nevada > 2400 && tl.nevada < 2800, JSON.stringify(tl));
-    assert.ok(tl.cantabria < tl.pyrenees && tl.pyrenees < tl.nevada, 'the line of the trees rises to the south');
+    const tl = { cantabria: treelineAt(43.36, -5.85), pyrenees: treelineAt(42.63, .66), nevada: treelineAt(37.05, -3.35), guadarrama: treelineAt(40.79, -4) };
+    assert.ok(tl.cantabria > 1450 && tl.cantabria < 1850 && tl.pyrenees > 2150 && tl.pyrenees < 2450 && tl.nevada > 2000 && tl.nevada < 2450, JSON.stringify(tl));
+    assert.ok(tl.cantabria < tl.pyrenees && tl.guadarrama > 1950 && tl.guadarrama < 2200, 'the line of the trees rises from the ocean inland; a dry summer, not the cold, stops the pines of the Guadarrama under its summits (2428 m)');
     // a place above its country is wetter, one below it a little drier, within limits
     assert.ok(wetAt(40.8, -4, 2000, 1000) > wetAt(40.8, -4, 1000, 1000) + .1 && wetAt(40.8, -4, 300, 1000) < wetAt(40.8, -4, 1000, 1000));
     assert.ok(wetRise(1e5) <= .2 && wetRise(-1e5) >= -.06 && wetRise(0) === 0);
@@ -159,7 +159,7 @@ test('ground aspect: pages of the group «Земля», knobs, and the rules in 
   const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8'), main = terrain.slice(terrain.lastIndexOf('void main() {'));   // the pixel shader's
   assert.equal(main.split('texDetail(').length - 1, 1, 'one read of the grain for a pixel');
   // what is remembered from the ground shader until the last aspect: two numbers (more of them slowed the whole shader down)
-  assert.ok(terrain.includes('float gRise, gTreeline;') && !/\bvec[34] g[A-Z]\w* *[;=]/.test(terrain), 'no vector kept for the aspects');
+  assert.ok(terrain.includes('float gRise, gTreeline, gSummer;') &&!/\bvec[34] g[A-Z]\w* *[;=]/.test(terrain), 'no vector kept for the aspects');
   const code = ground.glsl.replace(/\/\/[^\n]*/g, '');
   for (const word of ['patch', 'sample', 'filter', 'input', 'output', 'common', 'active', 'smooth', 'flat']) assert.ok(!new RegExp(`\\b${word}\\b`).test(code), `reserved word ${word}`);
   for (const [o, c] of ['()', '{}', '[]']) assert.equal(code.split(o).length, code.split(c).length, `balanced ${o}${c}`);
@@ -176,7 +176,9 @@ test('ground grid: the levels are kept apart by a step under the finer one, neve
 test('ground shader: the edge of the snow is crisp, follows the small relief and is never thinner than a pixel', () => {
   const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
   assert.ok(terrain.includes('sb = max(40., fwidth(hl) * 1.5);'), 'a band of 80 m of height, or what one pixel spans');
-  assert.ok(terrain.includes('float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 260.)'), 'the slope with the small relief of the pixel');
+  assert.ok(terrain.includes('float snowW = smoothstep(snowline - sb, snowline + sb, hl - gyS * 320.) * bare;'), 'the slope with the small relief of the pixel; no snow on a wall');
+  assert.ok(terrain.includes('land = mix(land, vec3(.80, .83, .88) * (.97 + .06 * n3), snowW);') && terrain.includes('mix(vec3(1.), vec3(.86, .97, 1.2), snowW)'), 'snow is painted under white, so its lit and shaded faces differ; in the shade it is blue');
+  assert.ok(terrain.includes('amb = mix(amb, .5 + .5 * amb, cover * .7);'), 'a forest in the shade is not black');
   assert.ok(!terrain.includes('smoothstep(snowline - 90., snowline + 110.'), 'not the band of 200 m: the snow lay like cotton wool');
 });
 
@@ -186,8 +188,9 @@ test('mountains: relief the height data cannot hold is added to the slope, never
   const vert = terrain.slice(terrain.indexOf('const VERT'), terrain.indexOf('const FRAG_SRC'));
   assert.ok(!vert.includes('ribs(') && !vert.includes('vnoise'), 'the grid of the ground is lifted by the height data alone: roads and houses stand on it');
   assert.ok(glsl.includes('vec3 vnoiseD(vec2 p) {'), 'a noise that gives its slope in one call');
-  assert.ok(terrain.includes('vec3 ribs(vec2 pk, vec2 d, float f) {'), 'ribs and gullies down the fall line');
-  assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / 700.) * (.8 * uCrisp * own * smoothstep('), 'the forms of the data are sharpened against the land smoothed over 700 m');
+  assert.ok(terrain.includes('vec3 ribs(vec2 pk, vec2 d, float f, float w) {') && terrain.includes('ra = sqrt(ta * ta + .03)'), 'ribs and gullies down the fall line; their fold is rounded, or every flank is a flat facet');
+  assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * (.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far);'), 'near, the forms of the data are sharpened against the land smoothed over 700 m; from afar the small forms are calmed');
+  assert.ok(terrain.includes('nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(heightLod(ll, 6.), 0.)) / 900., -1., 1.) * .25 * far;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
   assert.ok(terrain.includes('float slopeD = length(g + gm);'), 'the slope with the added relief');
   assert.ok(/steep = smoothstep\([^;]*slopeD\);/.test(terrain), 'rock goes by the slope of the pixel, with its ribs');
   assert.ok(terrain.includes('float solid = smoothstep(.55, 1.05, slopeD + crest * .25 + rib * .15);'), 'solid rock on walls and crests, scree below them');
