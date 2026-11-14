@@ -28,7 +28,7 @@ import { kmOf, llOf } from '../chunks.js';
 import { KN as FN, KKM as FKM } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { HISTORIC } from './historic.js';
-import { shapeLegs, legKey, finePoints, fineSteps, thin, cellXY, DIRS, FW } from './shape.js';
+import { shapeLegs, legKey, finePoints, fineSteps, thin, cellXY, cellChunk, DIRS, FW } from './shape.js';
 
 const X0 = -880, Y0 = 3880, LAND = 0;
 export const STEEP = [28, 520];                    // a slope s (rise over run) makes a step 1 + 28 s + 520 s² times dearer
@@ -305,6 +305,19 @@ export function passesOf(G, legs, heightAt = null) {
     const [x, y] = fine ? cellXY(p[top]) : xyOf(p[top]); out.push({ x, y, h: Math.round(h), name: L.pass ? L.pass.name : '', kind: L.kind, a: L.a, b: L.b, rank: L.pass ? 0 : L.kind === 0 ? 1 : 2, leg: i });
   });
   return out.sort((p, q) => p.rank - q.rank || q.h - p.h || p.leg - q.leg);
+}
+// The pairs of districts whose common boundary a road crosses — for whoever marks the boundaries that no road goes
+// over (the walls of the division). A leg is followed along its fine way where it has one, else chunk by chunk. The
+// two districts of a leg are not always such a pair: the leg of a pass of history joins districts that do not touch,
+// and any leg may cut the corner of a third district on its way. → Set of a · 65536 + b, a < b
+export function crossedPairs(div, legs) {
+  const out = new Set(), cells = div.cells;
+  for (const L of legs) {
+    if (L.kind === 3 || !L.path) continue; let last = -1;
+    const step = d => { if (d < 0) return; if (last >= 0 && d !== last) out.add(Math.min(d, last) * 65536 + Math.max(d, last)); last = d; };
+    if (L.fine) for (const c of L.fine) step(cells[cellChunk(c)]); else for (const t of L.path) step(cells[t]);
+  }
+  return out;
 }
 // what the rest of the album asks of a network: its numbers and the places where it crosses rivers
 function finishNet(div, centres, legs, lines, capitals, extra, passes = []) {

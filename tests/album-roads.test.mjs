@@ -13,9 +13,9 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns, encodeNet, decodeNet, netHead, netSignature,
-  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom, fineCache } from '../src/album/roads/routes.js';
+  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom, fineCache, crossedPairs } from '../src/album/roads/routes.js';
 import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
-import { FINE, cellXY, climbs, finePoints } from '../src/album/roads/shape.js';
+import { FINE, cellXY, cellChunk, climbs, finePoints } from '../src/album/roads/shape.js';
 import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
@@ -284,6 +284,15 @@ test('roads: a pass of history — the great road is led over that very point; e
   const mainOf = n => new Set(n.legs.filter(M => M.kind === 0).map(M => M.a * 65536 + M.b)), was = mainOf(plain), now = mainOf(late);
   for (const k of was) assert.ok(now.has(k), 'a main road stays a main road');
   assert.ok(now.size > was.size && late.passes.some(q => q.name === 'Высокий' && q.kind === 0));
+  // the boundaries the roads cross: every change of district along a road as it is drawn, and nothing else
+  { const crossed = crossedPairs(div, net.legs), want = new Set();
+    for (const M of net.legs) { if (M.kind === 3) continue; const ds = (M.fine ? Array.from(M.fine, cellChunk) : M.path).map(t => div.cells[t]).filter(d => d >= 0); for (let k = 1; k < ds.length; k++) if (ds[k] !== ds[k - 1]) want.add(Math.min(ds[k], ds[k - 1]) * 65536 + Math.max(ds[k], ds[k - 1])); }
+    assert.deepEqual([...crossed].sort((p, q) => p - q), [...want].sort((p, q) => p - q)); assert.ok(crossed.size > 20);
+    for (const k of crossed) { const a = Math.floor(k / 65536), b = k % 65536; assert.ok(a < b && div.kinds[a] === LAND && div.kinds[b] === LAND, 'a road crosses from land to land'); }
+    // the road of the pass crosses the ridge between two districts on its two sides — whichever districts its leg joins
+    const ds = Array.from(L.fine, cellChunk).map(t => div.cells[t]), over = []; for (let k = 1; k < ds.length; k++) if (ds[k] !== ds[k - 1]) over.push([ds[k - 1], ds[k]]);
+    assert.ok(over.length >= 1 && over.every(([a, b]) => crossed.has(Math.min(a, b) * 65536 + Math.max(a, b))));
+    assert.equal(crossedPairs(div, net.legs.map(M => ({ ...M, kind: 3 }))).size, 0, 'no roads, no boundary crossed'); }
   // the fan of cheapest ways from a point agrees with the way found between two points
   { const a = c.texel[L.a], stamp = fanFrom(G, pt, 60), cost = G.done[a] === stamp ? G.g[a] : NaN, leg = legBetween(G, pt, a); assert.ok(Math.abs(cost - leg.cost) < 1e-6 * leg.cost, cost + ' against ' + leg.cost); }
 });
@@ -319,6 +328,10 @@ test('roads of the album: main roads reach the towns of the provinces, lesser ro
     const pts = finePoints(L, real.centres), hs = pts.map(q => { const g = llOf(q[0], q[1]); return data.base.at(g.lat, g.lon); }); let all = 0, steep = 0;
     for (let k = 1; k < pts.length; k++) { const run = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); all += run; if (Math.abs(hs[k] - hs[k - 1]) / (run * 1000) > FINE.grade[0] * 1.3) steep += run; }
     assert.ok(Math.max(...hs) < hOf('Сомпорт') + 30 && steep < all * .1, 'the shaped road of Somport: top ' + Math.round(Math.max(...hs)) + ' m, ' + (100 * steep / all).toFixed(0) + ' % of it steep'); }
+  // some boundaries between districts that have no leg of their own are crossed by a road all the same (the road of a pass
+  // joins districts that do not touch; a leg cuts the corner of a third district): crossedPairs() names them
+  { const crossed = crossedPairs(real, net.legs), has = new Set(net.legs.map(L => L.a * 65536 + L.b)); let bare = 0; for (const k of crossed) if (!has.has(k)) bare++;
+    assert.ok(crossed.size > 2000 && bare > 10 && bare < crossed.size * .5, crossed.size + ' boundaries crossed, ' + bare + ' of them between districts without a leg'); }
   // the network of the plains is the one the owner approved: against the ways without their passes nearly every leg is of the same kind
   { const bare = HISTORIC.filter(r => !r.after).map(r => ({ name: r.name, way: r.way.filter(p => p.length === 2) })), old = roadNetwork(real, real.centres, data.vectors.places, undefined, { historic: bare, heightAt: null });
     const kinds = new Map(old.legs.map(L => [L.a * 65536 + L.b, L.kind])); let same = 0, lost = 0;

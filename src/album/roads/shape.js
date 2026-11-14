@@ -36,6 +36,7 @@ const MID = DIRS.map(([x, y]) => (Math.abs(x) === 2 ? [x / 2, 0, x / 2, y] : Mat
 export const cellOf = (x, y) => Math.floor((y - Y0) / F) * FW + Math.floor((x - X0) / F);
 export const cellXY = c => [X0 + (c % FW + .5) * F, Y0 + (Math.floor(c / FW) + .5) * F];
 const chunkOf = (i, j) => Math.floor(j / K) * KN + Math.floor(i / K);
+export const cellChunk = c => chunkOf(c % FW, Math.floor(c / FW));     // the chunk a fine cell lies in
 
 // The real courses of the rivers on the fine cells: for every chunk, a bit for each of its K × K cells that a river
 // at least `min` km wide runs through. courses: decodeCourses() of water/courses.js

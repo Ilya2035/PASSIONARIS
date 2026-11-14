@@ -7,7 +7,7 @@
 // of a settlement — inside, the streets of the settlement take over — and where it meets a river there is a bridge
 // or a ford (roads/crossings.js).
 import { makeRibbons, smoothLine } from './ribbon.js';
-import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature, fineCache } from '../roads/routes.js';
+import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature, fineCache, crossedPairs } from '../roads/routes.js';
 import { riverCrossings, squareBridges, cutAtTowns, townIndex, nearIndex, BRIDGE } from '../roads/crossings.js';
 import { sheetPull } from '../aspects/water.js';
 import { riverDrawn } from './rivers.js';
@@ -108,7 +108,9 @@ export default async function init(album) {
     const s = net.stats, nb = fords.filter(f => f.type === 'bridge').length;
     album.roadNet = { main: s.main, minor: s.lesser, tracks: s.track, km: s.km, crossings: net.crossings, impassable: s.hard, lines: net.lines, legs: net.legs, stats: s, capitals: net.capitals, fords, version,
       // the passes: { x, y (flat km), h (metres), name, kind (of the road), a, b (districts), rank (0 a pass of history, 1 of a main road, 2 other), leg }
-      passes: net.passes, fromFile: from === 'from the file',
+      passes: net.passes,
+      // the pairs of districts whose common boundary a road crosses: Set of a · 65536 + b, a < b (no wall of the division stands there)
+      crossed: crossedPairs(div, net.legs), fromFile: from === 'from the file',
       // km from a point of the flat km plane to the nearest road as it is drawn (1e9 when none within 300 m): for whoever must keep off the roads
       near: (x, y) => (near ||= nearIndex(drawn.map(l => l.km), 2, .3))(x, y),
       signature: () => netSignature(div, div.centres, net.capitals),
