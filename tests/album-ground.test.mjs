@@ -159,3 +159,11 @@ test('ground aspect: pages of the group «Земля», knobs, and the rules in 
   for (const word of ['patch', 'sample', 'filter', 'input', 'output', 'common', 'active', 'smooth', 'flat']) assert.ok(!new RegExp(`\\b${word}\\b`).test(code), `reserved word ${word}`);
   for (const [o, c] of ['()', '{}', '[]']) assert.equal(code.split(o).length, code.split(c).length, `balanced ${o}${c}`);
 });
+
+test('ground grid: the levels are kept apart by a step under the finer one, never by a shift in depth', () => {
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8').replace(/\/\/[^\n]*/g, '');
+  // (the finishing pass shades by depth: a level pushed back in depth drew a thin dark line along its whole border)
+  assert.ok(!/polygonOffset/.test(terrain), 'no level is pushed back in depth');
+  assert.ok(/if \(max\(d\.x, d\.y\) < uFine\.z\) h -= uCell \* \.9;/.test(terrain), 'the step under the finer level');
+  assert.ok(/fine \? fine\.half - c \* 1\.5 : 0/.test(terrain), 'the step begins between two rows of vertices: no rounding decides which row steps down');
+});

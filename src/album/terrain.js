@@ -28,9 +28,16 @@ void main() {
   vec2 off = grid * uCell;                                         // km east, north of the level centre
   vec2 ll = uCentre + vec2(off.y / KM, off.x / (KM * COSREF));
   float h = max(heightLod(ll, uLod), 0.) * uExag / 1000.;
-  if (uFine.z > 0.) {                                              // under the finer level: step down out of its way
+  // Under the finer level this level steps down out of its way: that alone keeps the two apart. The levels are not
+  // pushed back in depth as well (they were, by polygonOffset): at the border of a level the depth then jumped by half
+  // the span of a pixel, and the shading of the finishing pass (post.js) drew that jump as a thin dark line along
+  // every border — nested squares on the sea from on high and under a tilted camera.
+  // The step begins a cell and a half inside the border of the finer level (uFine.z falls between two rows of
+  // vertices, so no rounding decides it): the outer row under the finer level lies at its true height and backs the
+  // seam, the wall of the step stands one cell further in, where nothing sees it.
+  if (uFine.z > 0.) {
     vec2 d = abs(vec2((ll.y - uFine.y) * KM * COSREF, (ll.x - uFine.x) * KM));
-    if (max(d.x, d.y) < uFine.z) h -= uCell * .45;
+    if (max(d.x, d.y) < uFine.z) h -= uCell * .9;
   }
   vLL = ll; vPos = worldOf(ll, h);
   gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.);
@@ -342,7 +349,7 @@ export class Terrain {
     for (let l = 0; l < LEVELS; l++) {
       const mat = new ShaderMaterial({
         uniforms: { ...this.u, uCentre: { value: new Vector2() }, uCell: { value: 1 }, uFine: { value: new Vector3() }, uLod: { value: 0 } },
-        vertexShader: VERT, fragmentShader: FRAG, polygonOffset: l > 0, polygonOffsetFactor: l * .5, polygonOffsetUnits: l * 8,
+        vertexShader: VERT, fragmentShader: FRAG,                   // no polygonOffset: see the step in the vertex shader
       });
       const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = l - 20;
       scene.add(mesh); this.levels.push(mesh);
@@ -370,7 +377,7 @@ export class Terrain {
       const c = c0 * 2 ** l, u = this.levels[l].material.uniforms, sLat = 2 * c / KM_PER_DEG, sLon = 2 * c / (KM_PER_DEG * COS_REF);
       const lat = Math.round(s.lat / sLat) * sLat, lon = Math.round(s.lon / sLon) * sLon;
       u.uCentre.value.set(lat, lon); u.uCell.value = c; u.uLod.value = Math.max(0, Math.log2(c / .234));
-      u.uFine.value.set(fine ? fine.lat : 0, fine ? fine.lon : 0, fine ? fine.half - c : 0);
+      u.uFine.value.set(fine ? fine.lat : 0, fine ? fine.lon : 0, fine ? fine.half - c * 1.5 : 0);
       this.levels[l].visible = !fine || fine.half < 2600;
       fine = { lat, lon, half: M / 2 * c };
     }
