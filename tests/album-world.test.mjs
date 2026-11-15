@@ -228,3 +228,12 @@ test('world: three variants of the ground shader, and the polygon keeps the one 
     assert.deepEqual(zonesOf(40, mid[1] + 360 - 170, 20, 175), [true, true, true], 'a square that reaches the polygon across the line of 180°');
   }
 });
+
+test('the copies of the heights made for textures are let go once the video card has them', () => {
+  const data = read('../src/album/data.js');
+  assert.ok(data.includes('export const sentOnce = t => { t.onUpdate = () => { t.image.data = null; t.onUpdate = null; }; return t; };'));
+  // the base, the detail and the world map: all three go through it; the climate of the world does not — the weather reads its bytes (sky/weather.js)
+  assert.equal(data.split('return sentOnce(t);').length - 1, 2, 'heightTexture() and worldHeightTexture()');
+  const clim = data.slice(data.indexOf('function worldClimateTexture'), data.indexOf('function worldClimateTexture') + 500);
+  assert.ok(clim.length > 100 && !clim.includes('sentOnce'), 'the climate of the world keeps its array');
+});

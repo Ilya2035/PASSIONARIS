@@ -18,13 +18,19 @@ async function gunzipU16(url) {
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return new Uint16Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
 }
+// A copy of the heights made for a texture — half floats — is needed only until the video card has it. three.js
+// keeps the array of a DataTexture for as long as the texture lives; nothing here sends a height texture twice, so
+// the array is let go right after the first upload (the renderer calls onUpdate when it has sent the texture). Now
+// that is 55 MB of the base and 67 MB of the world map; with the base of stage 3 (8192 × 12288) it is 200 MB.
+// (After a lost WebGL context such a texture cannot be sent again: the page has to be loaded anew.)
+export const sentOnce = t => { t.onUpdate = () => { t.image.data = null; t.onUpdate = null; }; return t; };
 function heightTexture(u16, w, h) {
   const hf = new Uint16Array(u16.length);
   for (let i = 0; i < u16.length; i++) hf[i] = DataUtils.toHalfFloat(u16[i] / 4 - 8192);
   const t = new DataTexture(hf, w, h, RedFormat, HalfFloatType);
   t.internalFormat = 'R16F'; t.magFilter = LinearFilter; t.minFilter = LinearMipmapLinearFilter; t.generateMipmaps = true;
   t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true;
-  return t;
+  return sentOnce(t);
 }
 // The heights of a window of fine tiles (ground/fine.js) as a texture: m is metres, n points a side. Whole floats
 // where the video card can smooth them — it nearly always can. A half float holds a height above 2048 m only to 2 m;
@@ -58,7 +64,7 @@ function worldHeightTexture(h, w, rows) {
   const t = new DataTexture(hf, w, rows, RedFormat, HalfFloatType);
   t.internalFormat = 'R16F'; t.magFilter = LinearFilter; t.minFilter = LinearMipmapLinearFilter; t.generateMipmaps = true;
   t.wrapS = RepeatWrapping; t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true;
-  return t;
+  return sentOnce(t);
 }
 function worldClimateTexture(c) {
   const t = new DataTexture(c.data, c.w, c.h, RGBAFormat, UnsignedByteType);
