@@ -38,7 +38,7 @@
     { "id": "utrecht", "name": "Утрехт", "region": "westeurope", "land": "gelre", "iso": ["NL-UT"], "admin": ["NLD-3484"], "town": "Утрехт", "at": [[52.1, 5.2]] },
     { "id": "guelders", "name": "Гелдерн", "region": "westeurope", "land": "gelre", "iso": ["NL-GE"], "admin": ["NLD-896"], "town": "Арнем", "at": [[52.05, 5.9]] },
     { "id": "overijssel", "name": "Оверэйсел", "region": "westeurope", "land": "gelre", "iso": ["NL-OV"], "admin": ["NLD-899"], "town": "Зволле", "at": [[52.45, 6.3]] },
-    { "id": "flevoland", "name": "Флеволанд", "region": "westeurope", "land": "gelre", "iso": ["NL-FL"], "admin": ["NLD-902"], "town": "Лелистад", "at": [[52.5, 5.55]] },
+    { "id": "flevoland", "name": "Флеволанд", "region": "westeurope", "land": "gelre", "iso": ["NL-FL"], "admin": ["NLD-902"], "town": "Лелистад", "at": [[52.5, 5.55], [52.71, 5.75]] },
 
     { "id": "friesland", "name": "Фрисландия", "region": "westeurope", "land": "frisia", "iso": ["NL-FR"], "admin": ["NLD-895"], "town": "Леуварден", "at": [[53.1, 5.8]] },
     { "id": "groningen", "name": "Гронинген", "region": "westeurope", "land": "frisia", "iso": ["NL-GR"], "admin": ["NLD-897"], "town": "Гронинген", "at": [[53.25, 6.7]] },
