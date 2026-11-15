@@ -7,7 +7,7 @@ import { Chunks, CHANNELS, CHUNK_KM, CI0, llOf } from '../src/album/chunks.js';
 import water, { WATER_CORE, SHEET_FRAG, sheetPull, SHEET_PULL, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
-import { riverSheets, riverGeneral, riverFar, riverDrawn, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT, MID } from '../src/album/layers/rivers.js';
+import { riverSheets, riverGeneral, riverFar, riverDrawn, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT, MID, BED, FLOW } from '../src/album/layers/rivers.js';
 import { decodeCourses, encodeCourses, mainRivers, rankOf, widthCode, widthOf } from '../src/album/water/courses.js';
 import { statSync } from 'node:fs';
 import { fillHollows } from '../src/album/water/hollows.js';
@@ -305,4 +305,14 @@ test('water: rivers from the middle heights — a small river is thin and soft, 
   const src = f => readFileSync(new URL('../src/album/layers/' + f, import.meta.url), 'utf8');
   assert.ok(/depthWrite: false/.test(src('rivers.js')) && !/depthWrite: pass/.test(src('rivers.js')) && /depthWrite: false/.test(src('lakes.js')));
   assert.ok(/renderOrder = ground \? -7 : 5/.test(src('ribbon.js')) && /renderOrder = -4/.test(src('roads.js')), 'roads −7, rivers −5, bridges −4');
+});
+
+test('rivers: near the ground a river lies in a bed with banks, and its water runs', () => {
+  // room for two banks beside the water of any river, a couple of pixels each; they are drawn once the sheet is a few pixels wide
+  assert.ok(BED.banks >= 3 && BED.banks <= 6 && BED.from[0] < BED.from[1] && BED.from[1] <= BED.banks + MIN_PX * .42 + .5, JSON.stringify(BED));
+  // the current: a few metres a second, seen from a few km up and gone before the middle heights begin; soft
+  assert.ok(FLOW.speed > .001 && FLOW.speed < .012 && FLOW.near[1] < FLOW.near[0] && FLOW.near[0] <= .07 && FLOW.streak > .05 && FLOW.streak <= .4 && FLOW.glint > 0 && FLOW.glint <= 1, JSON.stringify(FLOW));
+  // the water itself is as wide as it was — the bridges and the roads on the banks are fitted to it (riverDrawn)
+  const pxOf = h => 2 * h * Math.tan(16 * Math.PI / 180) / 900;
+  for (const [real, h] of [[.005, 6], [.03, 6], [.15, 10], [.03, 60]]) { const px = pxOf(h), f = riverFar(px), s2 = Math.min(1, real / .16), least = (.42 + .58 * Math.sqrt(s2)) * (1 - f.lean) + (MID.least[0] + (MID.least[1] - MID.least[0]) * s2) * f.lean; assert.ok(Math.abs(riverDrawn(real, px) - Math.max(real, px * f.minPx * least)) < 1e-12); }
 });
