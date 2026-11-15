@@ -20,10 +20,20 @@
 const GLSL = /* glsl */`
 uniform float uDryK, uGrainK, uCrisp;   // uCrisp: how much relief is added to what the height data holds (terrain.js)
 // nz: the shared noises of 38, 7 and 1 km; wet, px, hl, slope, pk: as in Px (the wetness already knows the slope and
-// the hollow); summer: 0 a summer without water .. 1 a green one (albumClimate().a)
-vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk) {
+// the hollow); summer: 0 a summer without water .. 1 a green one (albumClimate().a); wild: 0 in the polygon .. 1 on the
+// plain land of the world beyond it
+vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk, float wild) {
   // ---- noises and weights first
   float g2 = vnoise(pk / 23. + 31.), fine = .5, bush = 0.;
+  // Beyond the polygon the land is seen from the height of continents. There the soils and the seas of sand go in
+  // regions of hundreds of km, as they do on the Earth (the ergs and the stony plateaux of the Sahara); with the
+  // patches of tens of km alone a desert seen from 2000 km was a camouflage cloth. Those patches stay as the ragged
+  // edge of the regions, and fade once they are a pixel or two across.
+  if (wild > 0.) {
+    float nearK = smoothstep(3., .8, px);
+    g2 = mix(g2, vnoise(pk / 310. + 11.) * .7 + mix(.5, g2, nearK) * .3, wild);
+    nz.x = mix(nz.x, vnoise(pk / 420. + 57.) * .7 + mix(.5, nz.x, nearK) * .3, wild);
+  }
   if (px < .12) fine = mix(.5, vnoise(mat2(.8, -.6, .6, .8) * pk / .21 + 5.), smoothstep(.12, .04, px));
   if (px < .02) bush = smoothstep(.80, .92, vnoise(pk / .017 + 3.)) * smoothstep(.02, .009, px) * smoothstep(.10, .22, wet);   // bushes one by one, in the near view
   // (the patches of a kilometre are for the near and middle heights: from 300 km up they would speckle the whole

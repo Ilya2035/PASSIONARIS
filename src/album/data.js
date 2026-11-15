@@ -1,15 +1,16 @@
 // Loads what scripts/album/fetch-data.mjs baked into public/album-data/ (heights, vectors) and the part of the ground
 // that lies in the repository, public/assets/album/ground/: the climate (scripts/album/bake-ground.mjs) and the grain
 // of the ground (scripts/album/bake-ground-tiles.mjs).
-import { DataTexture, RedFormat, HalfFloatType, FloatType, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, DataUtils, TextureLoader } from 'three';
+import { DataTexture, RedFormat, RGBAFormat, HalfFloatType, FloatType, UnsignedByteType, NoColorSpace, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, RepeatWrapping, DataUtils, TextureLoader } from 'three';
 import { mercX, mercY, distKm } from './geo.js';
 import { decodeTile, windowFor, windowRect, joinWindow, tilesOf, FINE_Z, WIN } from './ground/fine.js';
 import { despike } from './ground/despike.js';
 import { loadCourses, mainRivers } from './water/courses.js';
 import { fillHollows } from './water/hollows.js';
-import { decodeClimate, useClimate } from './ground/climate.js';
+import { decodeClimate, useClimate, decodeWorldClimate, ICE_STEP } from './ground/climate.js';
+import { WMAP_W, WMAP_H, decodeWorldHeights, raiseIce, capSouth, joinHeights } from './ground/world.js';
 
-const BASE = 'album-data/', GROUND = 'assets/album/ground/';
+const BASE = 'album-data/', GROUND = 'assets/album/ground/', WORLD = 'assets/map/height.delta.bin.gz';
 // the grain of the ground: the layers of the ground texture, in their order there (terrain.js)
 export const GROUND_TILES = ['heath', 'steppe', 'stone', 'dunes'];
 async function gunzipU16(url) {
@@ -46,24 +47,69 @@ function fineTexture(m, n) {
   t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true;
   return t;
 }
+// ---- the whole Earth beyond the polygon (ground/world.js): its heights and its climate as textures. Both wrap round
+// the Earth from east to west and stop at the poles.
+// (The heights are whole metres; as half floats they are exact up to 2048 m and go by 2 and 4 m above — far finer
+// than a map with a point every 4.9 km needs. A table turns them: 33 million calls of a function would take seconds.)
+function worldHeightTexture(h, w, rows) {
+  const half = new Uint16Array(65536), hf = new Uint16Array(h.length);
+  for (let v = -32768; v < 32768; v++) half[v & 65535] = DataUtils.toHalfFloat(v);
+  for (let i = 0; i < h.length; i++) hf[i] = half[h[i] & 65535];
+  const t = new DataTexture(hf, w, rows, RedFormat, HalfFloatType);
+  t.internalFormat = 'R16F'; t.magFilter = LinearFilter; t.minFilter = LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.wrapS = RepeatWrapping; t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true;
+  return t;
+}
+function worldClimateTexture(c) {
+  const t = new DataTexture(c.data, c.w, c.h, RGBAFormat, UnsignedByteType);
+  t.colorSpace = NoColorSpace; t.magFilter = LinearFilter; t.minFilter = LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.wrapS = RepeatWrapping; t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true;
+  return t;
+}
+// → { h: Int16 metres, w, rows, tex, clim: the climate as a texture or null }, or null when the height map is missing
+// (then everything beyond the polygon is deep sea, as before)
+async function loadWorld() {
+  try {
+    const r = await fetch(WORLD);
+    if (!r.ok) throw new Error(`${WORLD}: ${r.status}`);
+    const h = decodeWorldHeights(new Int16Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()));
+    if (h.length !== WMAP_W * WMAP_H) throw new Error(`${WORLD}: ${h.length} points`);
+    let clim = null, iced = false;
+    try {
+      const c = await fetch(GROUND + 'world.bin.gz');
+      if (c.ok) {
+        const d = decodeWorldClimate(await new Response(c.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+        if (d) { clim = worldClimateTexture(d); raiseIce(h, d.ice, d.w, d.h, ICE_STEP); iced = true; }   // the ice sheets: the map holds the rock under them
+      }
+    } catch (e) { console.warn('[album] no climate of the world:', e.message); }
+    if (!iced) capSouth(h);                                         // (without the ice the copied rows round the south pole are a fan of ridges)
+    return { h, w: WMAP_W, rows: WMAP_H, tex: worldHeightTexture(h, WMAP_W, WMAP_H), clim };
+  } catch (e) { console.warn('[album] no heights of the world:', e.message); return null; }
+}
 // rect of a baked mosaic in normalised Web-Mercator: (u0, v0, 1/width, 1/height); uv = (merc − u0v0) * inv
 const rectOf = m => { const n = 2 ** m.z; return [m.x0 / n, m.y0 / n, n * 256 / m.w, n * 256 / m.h]; };
 
 export async function loadData(onProgress = () => {}) {
+  const worldJob = loadWorld();                                     // (36 MB: read while everything else loads)
   const meta = await (await fetch(BASE + 'meta.json')).json();
   onProgress('высоты региона');
   const raw = await gunzipU16(BASE + meta.base.file);
   despike(raw, meta.base.w, meta.base.h);                           // needles and wells of broken points on the coast (ground/despike.js)
   fillHollows(raw, meta.base.w, meta.base.h);                       // dips below zero that the sea cannot reach are land, not ponds of sea
   const base = { ...meta.base, raw, rect: rectOf(meta.base), tex: heightTexture(raw, meta.base.w, meta.base.h) };
-  // bilinear height in metres on the CPU (roads, towns, rivers, picking)
-  base.at = (lat, lon) => {
+  // bilinear height in metres on the CPU (roads, towns, rivers, picking): inside the polygon; base.at itself, set
+  // below, answers for the whole Earth
+  const regionAt = (lat, lon) => {
     const x = Math.max(0, Math.min(base.w - 1.001, (mercX(lon) - base.rect[0]) * base.rect[2] * base.w - 0.5));
     const y = Math.max(0, Math.min(base.h - 1.001, (mercY(lat) - base.rect[1]) * base.rect[3] * base.h - 0.5));
     const i = x | 0, j = y | 0, fx = x - i, fy = y - j, k = j * base.w + i;
     const a = raw[k], b = raw[k + 1], c = raw[k + base.w], d = raw[k + base.w + 1];
     return ((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy) / 4 - 8192;
   };
+  onProgress('высоты мира');
+  const world = await worldJob;
+  // the height of any place of the Earth, m: the polygon's own inside it, the world map beyond (ground/world.js)
+  base.at = joinHeights(regionAt, world?.h || null);
   onProgress('реки и поселения');
   const vectors = await (await fetch(BASE + 'vectors.json')).json();
   // the real courses of the rivers (the water work); those who only ask where a river runs get the greater ones as lines
@@ -145,5 +191,5 @@ export async function loadData(onProgress = () => {}) {
   }
   // resolves when no window is being built (captures wait for it after a jump of the camera)
   const fineIdle = () => (busy ? new Promise(r => idle.push(r)) : Promise.resolve());
-  return { meta, base, vectors, courses, tex, ground, climate, detail, detailFor, fineIdle, places: meta.places };
+  return { meta, base, world, vectors, courses, tex, ground, climate, detail, detailFor, fineIdle, places: meta.places };
 }

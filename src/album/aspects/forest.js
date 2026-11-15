@@ -265,7 +265,10 @@ float forestCover(Px p) {
   if (p.px < .5) fPat += albumRough(p.pk) * smoothstep(.5, .2, p.px) * smoothstep(.3, .16, abs(albumMargin(fFc, uForestK, fPat)));   // fades in toward the edge: no step in the noise
   if (have < .999 && have > .001 && fFade > 0.) fOwn = albumOrderOwn(p.pk, p.px);
   fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade, albumSoft(p.px));
-  fFarm = 0.; if (fStand.x > .003) fFarm = setFarm(p.pk);
+  fFarm = 0.;
+#if ZONE != 3
+  if (fStand.x > .003) fFarm = setFarm(p.pk);                        // (beyond the polygon nobody ploughs: terrain.js, ZONE)
+#endif
   return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);
 }
 
@@ -304,7 +307,11 @@ void aspForest(Px p, inout Land L) {
     // of the shading — the same line pushed the whole ground shader off its edge of speed: 165 → 238 ms a frame.)
     vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) * .7, .34) * (.08 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
     if (edgy > 0. && dot(vs, vs) > px * px * .25) {
+#if ZONE != 3
       float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
+#else
+      float top = forestNear(pk + vs, 0., px, have, p.cC.rg, p.wet) * part;
+#endif
       flank = clamp(dens - top, 0., 1.); dens = top;
     }
   }

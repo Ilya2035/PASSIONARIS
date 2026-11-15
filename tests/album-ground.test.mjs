@@ -124,7 +124,7 @@ test('ground shader: the grain lies on the land at fixed sizes, nothing is switc
   for (const name of ['tGrass', 'tDry', 'tRock', 'tSand', 'tSnow', 'tForest']) assert.match(src, new RegExp(`#define ${name} \\d`), name);
   assert.ok(Math.max(...[...src.matchAll(/#define t(?:Grass|Dry|Rock|Sand|Snow|Forest) (\d)/g)].map(m => +m[1])) < GROUND_TILES.length, 'every name is a layer that exists');
   // the climate comes from the baked map; the wetness of a place also knows its slope and its hollow
-  for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk)', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
+  for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk, 1. - rg)', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
   // the square of the grain is laid as a patchwork — shifted from patch to patch, turned over in every other one —
   // so that its own shapes do not stand in rows; and it is weaker on level ground than on slopes
   for (const need of ['vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;', '{ gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }', 'gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope)));']) assert.ok(src.includes(need), need);
@@ -151,7 +151,7 @@ test('ground aspect: pages of the group «Земля», knobs, and the rules in 
   for (const id of ['ground-meseta', 'ground-meseta-200', 'ground-desert', 'ground-desert-200', 'ground-atlantic', 'ground-rif', 'ground-far']) assert.ok(mine.some(p => p.id === id), id);
   for (const pg of mine) { assert.equal(pg.group, 'Земля'); assert.ok(PAGES.includes(pg)); for (const k of Object.keys(pg.p || {})) assert.ok(keys.has(k), `${pg.id}: ${k}`); assert.ok(pg.cam.h >= 20 && pg.cam.h <= 2000); }
   for (const key of ['dry', 'grain']) { const d = DEFS.find(x => x.key === key); assert.ok(d && ground.uniforms[d.uniform], key); assert.equal(ground.uniforms[d.uniform].value, d.value); }
-  assert.ok(ground.glsl.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk)'));
+  assert.ok(ground.glsl.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk, float wild)'));
   // the desert: mineral soils that follow the relief — pale fill in the basins and on the floors of valleys
   for (const need of ['float arid = 1. - smoothstep(.11 * uDryK, .25 * uDryK, wet), low = clamp((gRise - hl) / 140., -1., 1.);', 'arid * clamp(conc, 0., 1.) * .6']) assert.ok(ground.glsl.includes(need), need);
   // the ground shader is kept short: the grain is read once for a pixel and shared, the bare ground asks for no texture of its own
@@ -189,8 +189,8 @@ test('mountains: relief the height data cannot hold is added to the slope, never
   assert.ok(!vert.includes('ribs(') && !vert.includes('vnoise'), 'the grid of the ground is lifted by the height data alone: roads and houses stand on it');
   assert.ok(glsl.includes('vec3 vnoiseD(vec2 p) {'), 'a noise that gives its slope in one call');
   assert.ok(terrain.includes('vec3 ribs(vec2 pk, vec2 d, float f, float w) {') && terrain.includes('ra = sqrt(ta * ta + .03)'), 'ribs and gullies down the fall line; their fold is rounded, or every flank is a flat facet');
-  assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * (.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far);'), 'near, the forms of the data are sharpened against the land smoothed over 700 m; from afar the small forms are calmed');
-  assert.ok(terrain.includes('nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(textureLod(uBase, bu, 6.).r, 0.)) / 900., -1., 1.) * .25 * far;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
+  assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * ((.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far) * rg);'), 'near, the forms of the data are sharpened against the land smoothed over 700 m; from afar the small forms are calmed');
+  assert.ok(terrain.includes('nl = max(sun.z + (nl - sun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(textureLod(uBase, bu, 6.).r, 0.)) / 900., -1., 1.) * .25 * far * rg;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
   assert.ok(terrain.includes('float slopeD = length(g + gm);'), 'the slope with the added relief');
   assert.ok(/steep = smoothstep\([^;]*slopeD\);/.test(terrain), 'rock goes by the slope of the pixel, with its ribs');
   assert.ok(terrain.includes('float solid = smoothstep(.55, 1.05, slopeD + crest);') && terrain.includes('crest = crest * .25 + rib * .15;'), 'solid rock on walls and crests, scree below them; one number is kept for it');

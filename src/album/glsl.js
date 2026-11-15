@@ -1,7 +1,8 @@
 // Shared GLSL of the album: geometry of the sphere patch, height sampling, noise.
-import { R, CENTRE, KM_PER_DEG, COS_REF } from './geo.js';
+import { R, CENTRE, KM_PER_DEG, COS_REF, BBOX } from './geo.js';
 import { FN, FKM } from './chunks.js';
 import { WARM, LAPSE, TREE_WARM, TREE_SOFT, TREE_SOFT_K, TREE_DRY, WET_RISE, WET_RISE_MIN, WET_RISE_MAX } from './ground/climate.js';
+import { REGION_FADE, WORLD_LOD0 } from './ground/world.js';
 
 const f = n => Number(n).toFixed(8);
 const D = Math.PI / 180;
@@ -22,12 +23,15 @@ vec3 worldOf(vec2 ll, float hKm) {
   float fi = radians(ll.x), dl = radians(ll.y - LON0), cf = cos(fi), sf = sin(fi), cd = cos(dl), r = RKM + hKm;
   return vec3(r * cf * sin(dl), r * (sf * S0 + cf * cd * C0) - RKM, -r * (sf * C0 - cf * cd * S0));
 }
-vec2 merc(vec2 ll) { float fi = radians(ll.x); return vec2((ll.y + 180.) / 360., (1. - log(tan(fi) + 1. / cos(fi)) / PI) * .5); }
-// 1 inside the mapped region, fading to 0 just outside it
-float inRegion(vec2 ll) {
-  vec2 a = smoothstep(vec2(35.05, -10.15), vec2(35.25, -9.95), ll) * (1. - smoothstep(vec2(44.75, 4.45), vec2(44.95, 4.65), ll));
-  return a.x * a.y;
-}
+// (the projection has no pole: past 85° the latitude is held, so that a point there reads the edge of a texture and
+// not a number that is no number)
+vec2 merc(vec2 ll) { float fi = radians(clamp(ll.x, -85., 85.)); return vec2((ll.y + 180.) / 360., (1. - log(tan(fi) + 1. / cos(fi)) / PI) * .5); }
+// How deep inside the polygon a point lies, degrees; negative outside it. The polygon is BBOX of geo.js: the part of
+// the Earth that is worked out in detail. Beyond it lies the plain land and sea of the world.
+float regionEdge(vec2 ll) { vec2 a = min(ll - vec2(${f(BBOX.lat0)}, ${f(BBOX.lon0)}), vec2(${f(BBOX.lat1)}, ${f(BBOX.lon1)}) - ll); return min(a.x, a.y); }
+// 1 inside the polygon, fading to 0 over ${REGION_FADE}° beyond it. (The fade used to begin inside: whatever stood in the last
+// kilometres before the border sank with it.)
+float inRegion(vec2 ll) { return smoothstep(${f(-REGION_FADE)}, 0., regionEdge(ll)); }
 float detailWeight(vec2 m) {
   if (uDetOn < .5) return 0.;
   vec2 ud = (m - uDetRect.xy) * uDetRect.zw, e = min(ud, 1. - ud);
@@ -45,11 +49,34 @@ float detailWeight(vec2 m) {
 // tiles in the mountains every 57 or 115 m (ground/fine.js). How many times finer than the base they are is read off
 // uDetRect: every such square is 2048 points a side, so log2(uDetRect.z) − 6 is 3, 2 or 1 — the levels of detail the
 // fine heights have below the base.
+// Beyond the polygon the height is that of the map of the whole Earth (tWorld: a point every 0.044°, 4.9 km at the
+// equator), joined to the heights of the polygon over the ${REGION_FADE}° outside its border. A shader that wants it defines
+// ALBUM_WORLD as 1 before this text and has tWorld among its uniforms (album.terrain.u); without it everything
+// beyond the polygon is deep sea, as it was — nothing but the ground itself is drawn there. (ALBUM_WORLD 2: the
+// world map alone, for a shader that draws nothing of the polygon; 0: the maps are declared and heightLod() is the
+// polygon's own — the ground shader has such variants, terrain.js.)
+#ifdef ALBUM_WORLD
+uniform sampler2D tWorld, tWorldClim;
+// (lod: of the mosaic of the polygon, 0 = 230 m; a point of the world map is ${WORLD_LOD0.toFixed(2)} levels coarser)
+float worldLod(vec2 ll, float lod) { return textureLod(tWorld, vec2(ll.y / 360. + .5, .5 - ll.x / 180.), max(lod - ${f(WORLD_LOD0)}, 0.)).r; }
+// the whole Earth beyond the polygon (ground/climate.js, world.bin.gz): r the share of a lake, g wet, b the warmest
+// month at sea level on its own wider scale (WARM_WORLD), a the summer
+vec4 worldClimate(vec2 ll) { return textureLod(tWorldClim, vec2(ll.y / 360. + .5, .5 - ll.x / 180.), 0.); }
+#endif
 float heightLod(vec2 ll, float lod) {
+#if defined(ALBUM_WORLD) && ALBUM_WORLD == 2
+  return worldLod(ll, lod);
+#else
   vec2 m = merc(ll);
   float hb = textureLod(uBase, (m - uBaseRect.xy) * uBaseRect.zw, lod).r, w = detailWeight(m);
   if (w > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + log2(uDetRect.z) - 6. - (uDetOn - 1.) * (1. - min(lod * 8., 1.)))).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
+#if defined(ALBUM_WORLD) && ALBUM_WORLD == 1
+  float rg = inRegion(ll);
+  return rg < 1. ? mix(worldLod(ll, lod), hb, rg) : hb;
+#else
   return mix(-3200., hb, inRegion(ll));
+#endif
+#endif
 }
 // (The whole part of p meets only the fraction of each factor: far from the origin — and the album lies 4000 km north
 // of it — p × 456.21 has no bits left for a fraction of its own, and every fine noise ran in stripes from north to south.)

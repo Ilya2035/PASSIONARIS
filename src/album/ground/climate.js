@@ -49,44 +49,56 @@ export function decodeClimate(buf) {
   return { n, x0: dv.getFloat32(8, true), y0: dv.getFloat32(12, true), km: dv.getFloat32(16, true), data: u.subarray(HEAD, HEAD + n * n * 4) };
 }
 
-// ---- the climate of the whole Earth (scripts/album/bake-world-climate.mjs → public/assets/album/ground/world.bin.gz):
-// the same four numbers by the same rule, on a plain grid of latitude and longitude — WORLD_W × WORLD_H cells of
-// 0.18°, rows from the north pole, the first cell of a row at 180° W. The ground shader reads it beyond the polygon.
+// ---- the whole Earth beyond the polygon (scripts/album/bake-world-climate.mjs → public/assets/album/ground/world.bin.gz):
+// the climate by the same rule on a plain grid of latitude and longitude — WORLD_W × WORLD_H cells of 0.18°, rows
+// from the north pole, the first cell of a row at 180° W — and two things the height map of the world lacks.
 // The file, after gunzip:
-//   bytes 0..3   'PGW1'
+//   bytes 0..3   'PGW2'
 //   Uint16 × 2   cells in a row (w), rows (h)
-//   4 × w × h bytes: the year, wet, warm and summer of every cell (the scales of the polygon: YEAR, 0..1, WARM, 0..1),
-//                    one number after another, each row written as the differences along it (modulo 256) — smooth
-//                    fields pack several times smaller that way
-export const WORLD_MAGIC = 'PGW1', WORLD_W = 2048, WORLD_H = 1024;
-const WHEAD = 8;
-export function encodeWorldClimate({ w, h, year, wet, warm, summer }) {
-  const n = w * h, out = new Uint8Array(WHEAD + n * 4), dv = new DataView(out.buffer);
+//   5 × w × h bytes, one number after another, each row written as the differences along it (modulo 256) — smooth
+//   fields pack several times smaller that way:
+//     lake     share of the cell under a lake, 0 .. 1 (the lakes of the world map: Baikal, Victoria, the Great Lakes)
+//     wet      as in the polygon, 0 .. 1
+//     warm     the warmest month at sea level on WARM_WORLD — wider than WARM: the polar seas freeze near 0 °C
+//     summer   as in the polygon, 0 .. 1
+//     ice      the surface of the ice sheets, in steps of ICE_STEP m; 0 where there is none. The height map of the
+//              world holds the rock under the ice of Greenland and of the Antarctic, much of it under the sea.
+// The ground shader reads the first four as one texture; the album lifts the heights of the world to the fifth.
+export const WORLD_MAGIC = 'PGW2', WORLD_W = 2048, WORLD_H = 1024, WARM_WORLD = [-5, 45], ICE_STEP = 16;
+const WHEAD = 8, WPLANES = 5;
+export function encodeWorldClimate({ w, h, lake, wet, warm, summer, ice }) {
+  const n = w * h, out = new Uint8Array(WHEAD + n * WPLANES), dv = new DataView(out.buffer);
   for (let i = 0; i < 4; i++) out[i] = WORLD_MAGIC.charCodeAt(i);
   dv.setUint16(4, w, true); dv.setUint16(6, h, true);
   const byte = (v, lo, hi) => Math.max(0, Math.min(255, Math.round((v - lo) / (hi - lo) * 255)));
-  [[year, ...YEAR], [wet, 0, 1], [warm, ...WARM], [summer, 0, 1]].forEach(([a, lo, hi], p) => {
+  [[lake, 0, 1], [wet, 0, 1], [warm, ...WARM_WORLD], [summer, 0, 1], [ice, 0, 255 * ICE_STEP]].forEach(([a, lo, hi], p) => {
     for (let j = 0, o = WHEAD + p * n; j < h; j++) for (let i = 0, prev = 0; i < w; i++, o++) { const b = byte(a[j * w + i], lo, hi); out[o] = (b - prev) & 255; prev = b; }
   });
   return out;
 }
-// the gunzipped file → { w, h, data: bytes w × h × 4 — year, wet, warm, summer of every cell, as a texture takes them }
+// the gunzipped file → { w, h, data: bytes w × h × 4 — lake, wet, warm, summer of every cell, as a texture takes them;
+// ice: bytes w × h, the surface of the ice in steps of ICE_STEP m }
 export function decodeWorldClimate(buf) {
   const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   if (u.length < WHEAD || String.fromCharCode(u[0], u[1], u[2], u[3]) !== WORLD_MAGIC) return null;
   const dv = new DataView(u.buffer, u.byteOffset, u.byteLength), w = dv.getUint16(4, true), h = dv.getUint16(6, true), n = w * h;
-  if (u.length < WHEAD + n * 4) return null;
-  const data = new Uint8Array(n * 4);
-  for (let p = 0; p < 4; p++) for (let j = 0, o = WHEAD + p * n; j < h; j++) for (let i = 0, prev = 0; i < w; i++, o++) { prev = (prev + u[o]) & 255; data[(j * w + i) * 4 + p] = prev; }
-  return { w, h, data };
+  if (u.length < WHEAD + n * WPLANES) return null;
+  const data = new Uint8Array(n * 4), ice = new Uint8Array(n);
+  for (let p = 0; p < WPLANES; p++) for (let j = 0, o = WHEAD + p * n; j < h; j++) for (let i = 0, prev = 0; i < w; i++, o++) { prev = (prev + u[o]) & 255; if (p < 4) data[(j * w + i) * 4 + p] = prev; else ice[j * w + i] = prev; }
+  return { w, h, data, ice };
 }
-// The line of lasting snow by the climate, m: where the warmest month is no warmer than SNOW_WARM °C — and the year
-// no warmer than SNOW_YEAR °C. The first is the rule of the lands with a winter (snow falls in winter and must outlast
-// the summer); the second is the rule of the tropics, where there is no winter and snow lies only where it freezes
-// all year. Alps about 2350 m, Norway 1400, Iceland 1150, Tibet 5150, Kilimanjaro 4500; all of Svalbard, Greenland
-// and the Antarctic lie above it. (The polygon keeps its own line by latitude, which the owner approved.)
-export const SNOW_WARM = 8, SNOW_YEAR = -3;
-export const snowlineOf = (warm, year) => Math.max((warm - SNOW_WARM) / LAPSE, (year - SNOW_YEAR) / LAPSE);
+// The line of lasting snow by the climate, m: where the warmest month is no warmer than SNOW_WARM °C. That is the
+// rule of the wet lands with a winter — snow falls in winter and must outlast the summer. Two things lift it:
+//   • the dry heat of the great highlands. Where the warmest month, brought down to sea level, is 26 °C and more —
+//     Tibet, the Pamir, Iran, the Altiplano, the Rockies — little snow falls and the Sun takes it: the line stands
+//     up to SNOW_DRY °C of warmth higher (whole from 36 °C). By the first rule alone all of Tibet was white;
+//   • no winter. Between the tropics snow lies only where it freezes all year: SNOW_TROPIC °C higher, coming down
+//     to the rule of the winter lands between 10° and 30° of latitude.
+// Alps about 2450 m, Norway 1550, Caucasus 3000, Altai 3500, Colorado 4600, Tibet 5950, Kilimanjaro 4750; Svalbard,
+// Greenland and the Antarctic lie above it whole. (The polygon keeps its own line by latitude, which the owner
+// approved.)
+export const SNOW_WARM = 8, SNOW_DRY = 6, SNOW_TROPIC = 6;
+export const snowlineOf = (warm, lat) => (warm - SNOW_WARM + SNOW_DRY * ss(26, 36, warm) + SNOW_TROPIC * (1 - ss(10, 30, Math.abs(lat)))) / LAPSE;
 
 // ---- the climate in use: one for the page (the album sets it once the file is read; tests set their own)
 let CLIM = null;
@@ -136,6 +148,10 @@ export function yearAt(lat, lon, h = 0) { const c = climateAt(lat, lon); return 
 export const TREE_WARM = 9.5, TREE_SOFT = 2200, TREE_SOFT_K = .35, TREE_DRY = 1200;
 export const treelineOf = (warm, summer = 1) => { const t = (warm - TREE_WARM) / LAPSE; return (t < TREE_SOFT ? t : TREE_SOFT + (t - TREE_SOFT) * TREE_SOFT_K) - (1 - summer) * TREE_DRY; };
 export function treelineAt(lat, lon) { const c = climateAt(lat, lon); return c ? treelineOf(c[2], c[1]) : 2150; }
+// Beyond the polygon the line goes by warmth alone, lower for a dry summer (summer: no greener than the year is wet,
+// as the shader takes it): the slow rise above TREE_SOFT is the rule of the sierras of Spain, and on the high lands
+// of the world it left Tibet, the Altiplano and the Rockies bare from 3800 m.
+export const worldTreelineOf = (warm, summer = 1) => (warm - TREE_WARM) / LAPSE - (1 - summer) * TREE_DRY;
 
 // ---- the climate as the shaders read it: one picture of n × n texels over the square of the chunks, 4 bytes each —
 // mean height of the land around / 4096 m (counted here, from the heights of the album), wet, warm, summer
