@@ -132,6 +132,18 @@ export function landNear(at, x, y) {
   }
   return null;
 }
+// The same for the edge of the worked land (from stage 3 it has one — the Rhine at Koblenz, whose point stands on the
+// river itself): where(x, y) → does the square kilometre of the point belong to a district? A place that does not is
+// moved to the nearest dry ground that does, DISTRICT_NEAR km at the most; none there — no settlement.
+export const DISTRICT_NEAR = 2;
+export function districtNear(at, where, x, y) {
+  if (where(x, y)) return [x, y];
+  for (let r = .25; r <= DISTRICT_NEAR + 1e-9; r += .25) for (let a = 0; a < 16; a++) {
+    const px = x + r * Math.cos(a * .3927), py = y + r * Math.sin(a * .3927);
+    if (at(px, py) > 2 && where(px, py)) return [px, py];
+  }
+  return null;
+}
 // the chunks that can be reached from `home` over land in `steps` steps without crossing a river greater than `ford`
 export function reachOf(ch, home, steps, ford) {
   const seen = new Map([[home, 0]]), q = [home];
@@ -152,6 +164,8 @@ export function reachOf(ch, home, steps, ford) {
 //               byte, people, cls, ploughed (km² of its fields),
 //               town (true: the town of its district), merged (the places of the towns it has taken in),
 //               village (true: it lies in the fine grid), fine (its square of the fine grid) }] }
+// farm: { ground (farmGround()), ha, where(x, y) → the square kilometre of the point belongs to a district (may be
+//         left out) — a settlement is founded only in a district: districtNear() }
 export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) {
   const n = ch.count, built = new Float32Array(n), fields = new Float32Array(n), keep = new Float32Array(n).fill(1), taken = new Set(), takenFine = new Set(), byGrid = new Map(), towns = [];
   const ground = farm.ground || farmGround(ch, at), run = farmRun(ground), perPerson = (farm.ha ?? HA_PER_PERSON) / 100;
@@ -169,8 +183,8 @@ export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) 
   for (const index of order) {
     const pl = places[index]; let vil = !!pl.village, R = Math.min(vil ? VILLAGE_RMAX : RCAP, (pl.r ?? fullRadius(pl.pop)) * growth);
     if (R < .04) continue;
-    const dry = landNear(at, ...kmOf(pl.lat, pl.lon)); if (!dry) continue;
-    let [x, y] = dry;
+    const dry = landNear(at, ...kmOf(pl.lat, pl.lon)), inside = dry && farm.where ? districtNear(at, farm.where, dry[0], dry[1]) : dry; if (!inside) continue;
+    let [x, y] = inside;
     for (let pass = 0; pass < 3; pass++) {                          // off the river: the houses reach the bank and stop there
       const d = river(x, y), need = R * 1.1 + .03; if (d >= need) break;
       const e = .05, gx = river(x + e, y) - river(x - e, y), gy = river(x, y + e) - river(x, y - e), gl = Math.hypot(gx, gy); if (gl < 1e-6) break;
@@ -178,7 +192,7 @@ export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) 
       x = nx; y = ny;
     }
     const p = llOf(x, y), home = ch.at(p.lat, p.lon);
-    if (home < 0 || ch.kind[home] !== 1) continue;
+    if (home < 0 || ch.kind[home] !== 1 || (farm.where && !farm.where(x, y))) continue;
     const gi = Math.floor((x - GX0) / GK), gj = Math.floor((y - GY0) / GK); let fine = -1, sx = 0, sy = 0;
     if (!vil) {
       [sx, sy] = towardWater(at, river, x, y, R);                   // where the middle of the town lies: toward the water

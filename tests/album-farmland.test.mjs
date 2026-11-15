@@ -247,7 +247,7 @@ test('farmland of the album: a few chunks by every village, the plains by the to
   const rd = f => JSON.parse(readFileSync(join(ROOT, f), 'utf8'));
   const lakes = rd('public/assets/album/water/lakes.json').lakes.filter(l => !l.shoal && l.ring), sitesFile = join(ROOT, 'public/assets/album/town/sites.json.gz');
   const osm = existsSync(sitesFile) ? decodeSites(JSON.parse(gunzipSync(readFileSync(sitesFile)))) : [];
-  const world = new Chunks(data.base.at, data.vectors.rivers, lakes);
+  const world = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);   // (data.worked: the mask of the worked land at stage 3, as the album gives it; null at stage 2)
   const div = buildDivision(world, { lands: rd('public/assets/album/division/lands.json'), admin: rd('public/assets/album/division/admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], size: 20, rivers: data.vectors.rivers });
   const own = data.vectors.places.map(p => { const [x, y] = kmOf(p.lat, p.lon); return { x, y, pop: p.pop, name: p.name }; });
   const sites = [...own, ...osm.filter(s => { const [x, y] = kmOf(s.lat, s.lon); return !own.some(o => Math.hypot(o.x - x, o.y - y) < 6); })];

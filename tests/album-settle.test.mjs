@@ -11,7 +11,7 @@ import settle from '../src/album/aspects/settle.js';
 import { RMAX, CELL, LOBE, GN, GNY, GK, GX0, GY0, CULTURES, CULTURE_N, MEDINA, inAfrica, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
   RULES_GLSL, PALETTE_GLSL, MAT, FARM_PIECE, FARM_TURNS } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
-import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
+import { growTowns, districtNear, DISTRICT_NEAR, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
 import { planLobe, planShowcase, ROW, FLAG_WATER, FLAG_ATL, FLAG_MAG, MAG_KINDS } from '../src/album/town/plan.js';
 import { mirrorSettle, mirrorFarm, farmAt, settleUniforms } from '../src/album/town/state.js';
 import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2, YARD_FARM } from '../src/album/town/yards.js';
@@ -221,6 +221,17 @@ test('beyond the worked land — from stage 3 chunks stand only under its mask �
   const g = farmGround(half, at); assert.ok(g.room(squareOf(-205, 4405)) > 0); assert.equal(g.room(squareOf(-50, 4405)), 0);
   const big = growTowns(half, [place(-108, 4405, 3000000)], 3, at, undefined, { ground: g }); let east = 0, west = 0;
   for (const c of big.farm.list) { if (g.cell[c] === NONE) east++; else west++; } assert.ok(west > 50, `${west} chunks ploughed`); assert.equal(east, 0, 'a chunk beyond the worked land is ploughed');
+  // The edge of the districts (the Rhine at Koblenz: the point of the place stands on worked land, its square
+  // kilometre belongs to no district). A settlement is founded only in a district: a place just outside is moved to
+  // the nearest dry ground inside, a place far outside is not founded.
+  { const where = (x, y) => x < -200, wide = () => true;
+    assert.deepEqual(districtNear(at, where, -205, 4405), [-205, 4405]); assert.equal(districtNear(at, where, -195, 4405), null); assert.equal(DISTRICT_NEAR, 2);
+    const moved = districtNear(at, where, -199.4, 4405); assert.ok(moved && moved[0] < -200 && Math.hypot(moved[0] + 199.4, moved[1] - 4405) <= 1, `moved to ${moved}`);
+    const edge = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at, undefined, { where });
+    assert.deepEqual(edge.towns.map(t => t.index).sort(), [0, 2]); assert.ok(edge.towns.every(t => t.x < -200), 'every settlement stands in a district');
+    const free = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at), all = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at, undefined, { where: wide });
+    assert.equal(free.towns.length, 3); assert.deepEqual(all.towns.map(t => [t.index, t.x, t.y, t.R]), free.towns.map(t => [t.index, t.x, t.y, t.R]), 'where every square has a district — the present polygon — nothing changes'); }
+  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /where = cellsOf \? \(x, y\) => \{ const c = squareOf\(x, y\); return c >= 0 && cellsOf\[c\] >= 0; \} : null;/);
   // no yard stands beyond it, though every chunk is «ploughed» in this test
   const ctx = { ...yardCtx([]), cell: half.cell, land: c => half.kind[c] === 1 };
   assert.equal(yardsAround(ctx, -50, 4405, 4).length, 0); assert.ok(yardsAround(ctx, -205, 4405, 4).length > 20);
@@ -739,6 +750,15 @@ test('settle names: every name of a settlement is Russian — transcribed by rul
   assert.deepEqual(['Echternach', 'Esch-sur-Alzette', 'Diekirch', 'Differdange'].map(n => T.langAt('LUX-1', 6.1, 49.7, n)), ['de', 'fr', 'de', 'fr']);
   assert.equal(T.langAt('BEL-3', NaN, NaN, 'Kortrijk'), 'nl', 'with no position, Belgium by the spelling'); assert.equal(T.langAt('BEL-3', NaN, NaN, 'Tournai'), 'fr');
   assert.equal(T.langAt('ESP-5833', -3.7, 40.4, 'Madrid'), 'es'); assert.equal(T.langAt('FRA-5298', 1.4, 43.6, 'Toulouse'), 'fr');
+  // The places of the album itself (Natural Earth) come under English names, whatever the land — «Cologne», «Munich»,
+  // «The Hague» — and many lie beyond the worked land, where no unit says the language: their own list, asked before
+  // the rules. It is never asked for a settlement of OpenStreetMap: a village of Gascony is called Cologne too.
+  for (const [name, ru] of Object.entries({ Cologne: 'Кёльн', Munich: 'Мюнхен', 'The Hague': 'Гаага', Nice: 'Ницца', Tours: 'Тур', Florence: 'Флоренция', Genoa: 'Генуя', 'Zürich': 'Цюрих', 'Düsseldorf': 'Дюссельдорф', Hamburg: 'Гамбург',
+    'Kingston upon Hull': 'Кингстон-апон-Халл', 'Southend-on-Sea': 'Саутенд-он-Си', London: 'Лондон', Fez: 'Фес', Basel: 'Базель' })) assert.equal(T.placeRussian(name, 'es'), ru, name);
+  assert.equal(T.placeRussian('Granada', 'es'), 'Гранада'); assert.equal(T.placeRussian('Мадрид', 'es'), 'Мадрид'); assert.equal(T.placeRussian('Zuera', 'es'), 'Суэра', 'a place the list does not know goes by the rules');
+  assert.equal(T.toRussian('Cologne', 'fr'), 'Колонь', 'the village of Gascony keeps its own name'); assert.equal(T.toRussian('Florence', 'fr'), 'Флоранс');
+  for (const k of ['cologne', 'nice', 'tours', 'florence', 'munich', 'reading', 'stoke', 'como']) assert.ok(!(k in T.EXONYMS) && k in T.PLACE_NAMES, k);
+  assert.match(readFileSync(new URL('../scripts/album/russify-names.mjs', import.meta.url), 'utf8'), /names\[key\] = placeRussian\(key, langAt\(unitAt\(pl\.lon, pl\.lat\), pl\.lon, pl\.lat, key\)\);/);
   const unitAt = T.unitFinder({ 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } });
   assert.equal(unitAt(1, 1), 'ESP-1'); assert.equal(unitAt(-2, 1), 'PRT-2'); assert.equal(unitAt(-.8, 1), 'PRT-2', 'a place on the shore takes the nearest unit');
   // records: the Russian name, and the name of the data as the sixth number

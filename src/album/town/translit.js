@@ -249,6 +249,26 @@ export function guessLang(lang, name) {
 
 // A name in Russian. lang: one of LANG_IDS (or 'va', 'nav': see guessLang). A name already in Russian letters is
 // returned as it is.
+// THE PLACES OF THE ALBUM ITSELF (Natural Earth: public/album-data/vectors.json) come under their English names —
+// «Cologne», «Munich», «The Hague», «Florence» — whatever the language of the land, and many lie beyond the worked
+// land, where no unit says what the language is. The rules of a language cannot read those. EXONYMS must not hold
+// them either: it is asked for every settlement of OpenStreetMap, and a village of Gascony is called Cologne too.
+// So the places of the album have a list of their own, asked before the rules — placeRussian() — and never for the
+// settlements. (Names the rules or EXONYMS already give rightly are not repeated here.)
+export const PLACE_NAMES = {
+  basel: 'Базель', bielefeld: 'Билефельд', birmingham: 'Бирмингем', blackpool: 'Блэкпул', bologna: 'Болонья', bournemouth: 'Борнмут', bradford: 'Брадфорд', braunschweig: 'Брауншвейг', brighton: 'Брайтон',
+  cagliari: 'Кальяри', cologne: 'Кёльн', dusseldorf: 'Дюссельдорф', fez: 'Фес', florence: 'Флоренция', frankfurt: 'Франкфурт-на-Майне', freiburg: 'Фрайбург', furth: 'Фюрт', genoa: 'Генуя', hamburg: 'Гамбург',
+  hanover: 'Ганновер', heidelberg: 'Гейдельберг', karlsruhe: 'Карлсруэ', 'kingston upon hull': 'Кингстон-апон-Халл', lausanne: 'Лозанна', leeds: 'Лидс', leicester: 'Лестер', liverpool: 'Ливерпуль',
+  luzern: 'Люцерн', mannheim: 'Мангейм', melun: 'Мелён', munich: 'Мюнхен', munster: 'Мюнстер', nice: 'Ницца', nottingham: 'Ноттингем', nurnberg: 'Нюрнберг', plymouth: 'Плимут', portsmouth: 'Портсмут',
+  reading: 'Рединг', sheffield: 'Шеффилд', southampton: 'Саутгемптон', 'southend-on-sea': 'Саутенд-он-Си', stoke: 'Сток-он-Трент', stuttgart: 'Штутгарт', swansea: 'Суонси', 'the hague': 'Гаага', tours: 'Тур',
+  wiesbaden: 'Висбаден', zurich: 'Цюрих', bern: 'Берн', geneva: 'Женева', milan: 'Милан', turin: 'Турин', london: 'Лондон', dublin: 'Дублин', cardiff: 'Кардифф', bristol: 'Бристоль', manchester: 'Манчестер',
+  coventry: 'Ковентри', verona: 'Верона', como: 'Комо', augsburg: 'Аугсбург', bremen: 'Бремен', dortmund: 'Дортмунд', duisburg: 'Дуйсбург', essen: 'Эссен', kassel: 'Кассель', wuppertal: 'Вупперталь',
+  naples: 'Неаполь', rome: 'Рим', venice: 'Венеция', marseille: 'Марсель', bordeaux: 'Бордо', toulouse: 'Тулуза', lisbon: 'Лиссабон', seville: 'Севилья', tangier: 'Танжер', tripoli: 'Триполи',
+};
+export function placeRussian(name, lang = 'es') {
+  const raw = String(name || '').trim();
+  return (hasLatin(raw) && !hasCyrillic(raw) && PLACE_NAMES[bare(cleanName(raw))]) || toRussian(name, lang);
+}
 export function toRussian(name, lang = 'es') {
   const raw = String(name || '').replace(/[‎‏]/g, '').trim();
   // (a Russian name of the data with a stray Latin letter in it: «A Корунья»)

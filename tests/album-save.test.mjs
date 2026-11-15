@@ -80,7 +80,7 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   const rd = f => JSON.parse(readFileSync(join(ROOT, f), 'utf8'));
   const lakes = rd('public/assets/album/water/lakes.json').lakes.filter(l => !l.shoal && l.ring), sitesFile = join(ROOT, 'public/assets/album/town/sites.json.gz');
   const osm = existsSync(sitesFile) ? decodeSites(JSON.parse(gunzipSync(readFileSync(sitesFile)))) : [];
-  const ch = new Chunks(data.base.at, data.vectors.rivers, lakes);
+  const ch = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);   // (data.worked: the mask of the worked land at stage 3, as the album gives it; null at stage 2)
   const div = buildDivision(ch, { lands: rd('public/assets/album/division/lands.json'), admin: rd('public/assets/album/division/admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], size: 20, rivers: data.vectors.rivers });
   const own = data.vectors.places.map(p => { const [x, y] = kmOf(p.lat, p.lon); return { x, y, pop: p.pop, name: p.name }; });
   const sites = [...own, ...osm.filter(s => { const [x, y] = kmOf(s.lat, s.lon); return !own.some(o => Math.hypot(o.x - x, o.y - y) < 6); })];
@@ -89,7 +89,8 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   const at = (x, y) => data.base.at(y / 111.195, x / (111.195 * Math.cos(40 * Math.PI / 180)));
   const districtOf = (x, y) => { const tx = Math.floor((x - KX0) / FKM), ty = Math.floor((y - KY0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FNY ? -1 : div.cells[ty * FN + tx]; };
   let landKm2 = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) landKm2 += div.area[d];
-  const model = growTowns(ch, places, 1, at);
+  // (as the album founds them: only where the square kilometre belongs to a district — at stage 3 the worked land has an edge, and Koblenz stands on it)
+  const model = growTowns(ch, places, 1, at, undefined, { where: (x, y) => districtOf(x, y) >= 0 });
   // the yards among the fields, as the album draws them (town/yards.js), each at its place in a square kilometre of its district
   const patches = patchIndex(model.towns.map(t => ({ x: t.x, y: t.y, r: t.R }))), manner = new Uint8Array(ch.count);
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); manner[k] = cultureAt(c.lat, c.lon); }
@@ -113,8 +114,9 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   const file = await encodeSave({ meta: { t: 0, name: 'album' }, sections }), back = unpackLand((await decodeSave(file)).sections);
   assert.equal(back.settlements.length, world.settlements.length); assert.deepEqual(back.roads, world.roads);
   assert.equal(b.settlements, world.settlements.length * 8); assert.equal(b.districts, div.count * 9);
-  // the yards the album draws: some twenty thousand in the chunks of farmland, every one kept, under a byte each
-  assert.ok(yards.length > 15000 && yards.length < 30000, `${yards.length} yards among the fields`); assert.equal(world.farmsteads.length, yards.length, 'every yard has its place in the save');
+  // the yards the album draws: two or three to a hundred square kilometres of land (some twenty thousand on the
+  // present polygon), in the chunks of farmland, every one kept, under a byte each
+  assert.ok(yards.length > .01 * landKm2 && yards.length < .05 * landKm2, `${yards.length} yards among the fields of ${Math.round(landKm2)} km² of land`); assert.equal(world.farmsteads.length, yards.length, 'every yard has its place in the save');
   assert.equal(back.farmsteads.length, yards.length); assert.ok(b.farmsteads > 0 && b.farmsteads < yards.length, `${b.farmsteads} bytes for ${yards.length} yards`);
   { const key = f => f.district * 1e7 + f.chunk * 16 + f.slot, sent = new Set(world.farmsteads.map(key)); assert.equal(sent.size, yards.length); assert.ok(back.farmsteads.every(f => sent.has(key(f)))); }
   // every land district ploughs its first sixty chunks and stands farmsteads on them, four to a chunk and then

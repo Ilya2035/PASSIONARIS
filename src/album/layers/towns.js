@@ -190,7 +190,9 @@ export default async function init(album) {
     const dv = album.division, dvN = dv ? dv.version : -1;
     // (the chunks the division marks as bog are never ploughed: its reason № 4, km.js SETTLE_WHY)
     if (groundOf !== dvN) { groundOf = dvN; const why = dv?.settleFacts?.()?.why; ground = farmGround(ch, at, dv ? { cls: dv.chunkFacts().cls, hgt: dv.data.raster.hgt, bog: why ? why.map(w => (w === 4 ? 1 : 0)) : null } : null, k => ch.getNatural('swamp', k), lineXY); }
-    model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1), { ground, ha: haSeen }); farmN++;
+    // (a settlement is founded only where its square kilometre belongs to a district: at the edge of the worked land a place is moved in, grow.js districtNear)
+    const cellsOf = dv?.data?.cells, where = cellsOf ? (x, y) => { const c = squareOf(x, y); return c >= 0 && cellsOf[c] >= 0; } : null;
+    model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1), { ground, ha: haSeen, where }); farmN++;
     for (let k = 0; k < ch.count; k++) {
       const b = model.built[k], f = model.fields[k], keep = model.keep[k];
       if (!(b > 0 || f > 0 || keep < 1)) continue;
