@@ -15,6 +15,7 @@ import { wallsOf } from './walls.js';
 import { chunkEdges } from './edges.js';
 import { chunkLevels, mainThrough, INFRA_CAN, ROAD_KIND } from './infra.js';
 import { nameDistricts } from './names.js';
+import { loadCells } from './bake.js';
 import { districtByLines } from './border.js';
 import { pickGround } from '../pick.js';
 import { kmOf } from '../chunks.js';
@@ -27,7 +28,8 @@ const load = async name => (await fetch(`assets/album/division/${name}`)).json()
 
 export async function startDivision(album, U) {
   const ch = album.chunks, p = album.params, data = album.data, dom = album.renderer.domElement;
-  const [lands, admin, osmSites] = await Promise.all([load('lands.json'), load('admin.json'), loadSites()]);
+  // (the texels of the districts of 20 km come baked, division/bake.js: the page reads them instead of working them out)
+  const [lands, admin, osmSites, baked20] = await Promise.all([load('lands.json'), load('admin.json'), loadSites(), loadCells(20)]);
   // where people settled, the most important first: the places the album draws (where their houses really stand: a
   // settlement by a river is moved off the water), then the real towns and villages of the region (town/sites.js)
   const founded = new Map((album.layers.towns?.model?.()?.towns || []).map(t => [t.index, t]));
@@ -77,7 +79,7 @@ export async function startDivision(album, U) {
   }
   function use(size) {
     if (!cache.has(size)) {
-      const div = buildDivision(ch, { ...opts, size });
+      const div = buildDivision(ch, { ...opts, size, baked: size === 20 ? baked20 : null });
       // where nobody can settle, chunk by chunk (km.js; the bogs of the swamp work); the place of the town of every land
       // district (centres.js); the names: a historical land, the town, or the sides of the world (names.js)
       div.settle = kmSettle(div, data.base.at, settleOpts());
@@ -93,7 +95,7 @@ export async function startDivision(album, U) {
     places?.dispose(); places = createPlaces(album, cur.div);
     const s = levelSizes(cur.div.size); U.uDivSize.value.set(s.district, s.province, s.region);
     paintState(true);
-    console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions, ${cur.div.moved.length} slopes moved to their valleys (${cur.div.ms.toFixed(0)} ms)`);
+    console.log(`[album] division ${size} km: ${cur.div.count} districts, ${cur.div.provinceCount} provinces, ${cur.div.regionCount} regions, ${cur.div.moved.length} slopes moved to their valleys (${cur.div.ms.toFixed(0)} ms${cur.div.baked ? ', baked texels' : ''})`);
     for (const f of listeners) f(api);
   }
   // the state of history shown (knob «Деление: государство»): one bit per chunk in the texture

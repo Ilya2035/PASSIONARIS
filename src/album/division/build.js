@@ -278,8 +278,10 @@ function weight(ch, kind, k) {
 // ---- the division
 // ch: album.chunks; lands: lands.json, admin: admin.json (public/assets/album/division/); heightAt(lat, lon) metres;
 // lakes: [{ ring }]; size: district size in km (20, 30, 50, 100) — a district is about size² km² of middling land.
-// rivers: [{ pts, rank }] — the outlines of districts run along them (cells.js)
-export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20, rivers = [] } = {}) {
+// rivers: [{ pts, rank }] — the outlines of districts run along them (cells.js); baked: the texels of the districts
+// as division/bake-cells.mjs baked them (division/bake.js), or null — taken when they are of the same land; keepClaim:
+// keep the texels as the claim gives them, before the borders move a few (div.claim: what is baked)
+export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20, rivers = [], baked = null, keepClaim = false } = {}) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const n = ch.count, sizes = levelSizes(size), T = size ** 2;
   const kind = chunkKinds(ch, lakes), rel = linkRelief(ch, heightAt);
@@ -382,7 +384,7 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   // district was laid out from, and what the other aspects still ask by.
   // The borders are then drawn once as smooth lines along the rivers and the crests (border.js), and every chunk goes
   // to the district its seed lies in by those lines: the chunks of a district are what is drawn as the district.
-  { const c = districtCells(ch, div, { heightAt, rivers }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, mtn: c.mtn, heightAt };
+  { const c = districtCells(ch, div, { heightAt, rivers, baked }); div.cells = c.cells; div.provCells = c.prov; div.provChunks = c.prov0; div.raster = { hgt: c.hgt, riv: c.riv, mtn: c.mtn, heightAt }; div.stamp = c.stamp; div.baked = c.baked; if (keepClaim) div.claim = Int32Array.from(c.cells);
     div.geo = borderGeometry(div, rivers);
     for (let t = 0; t < div.cells.length; t++) { const d = div.cells[t]; if (d >= 0 && div.kinds[d] === LAND) div.provCells[t] = div.province[d]; }
     kmData(div); }

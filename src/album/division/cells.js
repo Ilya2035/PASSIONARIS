@@ -192,11 +192,13 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
 }
 
 // ch: the chunks; div: the division of the chunk graph (district per chunk, kinds, province, cx, cy);
-// heightAt(lat, lon) → metres; rivers as for riverRaster
+// heightAt(lat, lon) → metres; rivers as for riverRaster; baked: the texels as division/bake-cells.mjs baked them
+// ({ stamp, cells, prov }, division/bake.js) — taken as they are when their stamp is the stamp of what they would be
+// worked out from now (cellsStamp below), worked out anew otherwise
 // → { cells: Int32Array FN × FNY, the district of every texel (−1 none); prov: the province of every land texel;
 //     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land;
-//     mtn: how much of a mountain every texel is (mountainRaster) }
-export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
+//     mtn: how much of a mountain every texel is (mountainRaster); stamp: cellsStamp(); baked: true when read }
+export function districtCells(ch, div, { heightAt = null, rivers = [], baked = null } = {}) {
   const n = FN * FNY, cell = cellsOfChunks(ch).cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
   for (let ty = 0, t = 0; ty < FNY; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG;
@@ -208,8 +210,13 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
       if (heightAt) hgt[t] = Math.max(0, heightAt(lat, (X0 + (tx + .5) * FKM) / (KM_PER_DEG * COS_REF)));
     }
   }
-  const riv = riverRaster(rivers), crest = crestRaster(hgt, prov0), mtn = mountainRaster(hgt, prov0);
-  const count = div.count, prov = provinceCells(prov0, hgt, riv, crest, div.provinces.length);
+  const riv = riverRaster(rivers), mtn = mountainRaster(hgt, prov0), stamp = cellsStamp(div, prov0, hgt, riv);
+  // (the claim below is the dear part of the division: 2–3 s on the polygon of today, about 9 s on that of stage 3)
+  if (baked) {
+    if (baked.stamp === stamp && baked.cells.length === n) return { cells: baked.cells, prov: baked.prov, prov0, hgt, riv, mtn, stamp, baked: true };
+    console.warn(`[album] division: the baked texels are of other land (stamp ${baked.stamp}, now ${stamp}) — worked out anew; bake them again: node src/album/division/bake-cells.mjs`);
+  }
+  const crest = crestRaster(hgt, prov0), count = div.count, prov = provinceCells(prov0, hgt, riv, crest, div.provinces.length);
   // the heart of a district to begin with: the texel of its own, inside its province as it is drawn now, nearest to
   // its middle, off the rivers if it can be
   const seed = new Int32Array(count).fill(-1), best = new Float64Array(count).fill(Infinity);
@@ -273,7 +280,26 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
   }
   if (MOUNTAIN.vote) valleyVote(out, prov, seed, mtn, catchmentUnits(hgt, prov0), div);
   tidyPieces(out, prov, seed, div);
-  return { cells: out, prov, prov0, hgt, riv, mtn };
+  return { cells: out, prov, prov0, hgt, riv, mtn, stamp, baked: false };
+}
+
+// The stamp of everything the texels of a division are worked out from: the size of the raster, the districts of the
+// natural cells (their kinds, provinces, middles), the provinces of the texels by their cells, the heights and the
+// rivers of the texels, the numbers of the rules above. Two 32-bit hashes of the bytes, as 16 hex digits. The heights
+// go in to a quarter of a metre: Node and the page differ in the last bit of Math.tan and Math.log, and so in the last
+// bit of a height now and then — nothing the division sees. (A change
+// of the way the texels are worked out that keeps all of it is caught by the test that bakes them anew,
+// tests/album-division-bake.test.mjs; CELLS_RULE is raised with such a change.)
+export const CELLS_RULE = 1;
+export function cellsStamp(div, prov0, hgt, riv) {
+  let a = 0x811c9dc5, b = 0x27d4eb2f;
+  const word = w => { a = Math.imul(a ^ w, 0x01000193); b = Math.imul((b ^ w) + 0x9e3779b9 | 0, 0x85ebca6b); b ^= b >>> 13; };
+  const words = x => { const u = new Uint32Array(x.buffer, x.byteOffset, x.byteLength >> 2); for (let i = 0; i < u.length; i++) word(u[i]); for (let i = u.length * 4; i < x.byteLength; i++) word(new Uint8Array(x.buffer, x.byteOffset, x.byteLength)[i]); };
+  const json = JSON.stringify([CELLS_RULE, FN, FNY, X0, Y0, FKM, div.count, div.provinces.length, RIVER_TOLL, CREST_TOLL, CLIMB, MOUNTAIN, SMOOTH_KM, GAIN, ROUNDS, TIDY]);
+  for (let i = 0; i < json.length; i++) word(json.charCodeAt(i));
+  const q = new Int32Array(hgt.length); for (let t = 0; t < q.length; t++) q[t] = Math.round(hgt[t] * 4);
+  for (const x of [div.district, div.kinds, div.province, Float64Array.from(div.cx), Float64Array.from(div.cy), prov0, q, riv]) { word(x.length); words(x); }
+  return ((a >>> 0).toString(16).padStart(8, '0')) + ((b >>> 0).toString(16).padStart(8, '0'));
 }
 
 // Every mountain catchment, within each province it spans, goes whole to the district that holds the most of it, or to
