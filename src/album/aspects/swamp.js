@@ -5,8 +5,9 @@
 // Which swamp grows at a place is not stored: it follows from the height, the wetness and the sea (swampKind).
 
 import { FKM, FNX, FNY, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
-import { BBOX } from '../geo.js';
+import { BBOX, STAGE } from '../geo.js';
 import { wetAt as climateWet } from '../ground/climate.js';
+import { DRY_LAND } from '../ground/despike.js';
 
 // ---- rules on the CPU: the same numbers as in the GLSL below, for the natural state, the map of swamps, the tests
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -14,17 +15,37 @@ const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), X0 = CI0 * CHUNK_KM, Y0
 // the CPU twin of albumWet() in glsl.js, without its noise: 0 desert .. 1 Atlantic forest — the baked climate of the
 // ground (ground/climate.js); without its file, the formula the album began with
 export const wetAt = (lat, lon, h) => climateWet(lat, lon, h);
+// ---- STAGE 3: the rule on the large polygon (France, the Low Countries, the Maghreb). The rule was set on Iberia,
+// where cold wet ground is mountain and level wet ground hardly exists; on the plains of the north both are the
+// whole country, and by the numbers of Iberia 30 % of the chunks of France held swamp, most of it brown raised bog
+// (16.11.2026; with the numbers below 12 %, and nothing moves in Iberia). What differs at stage 3:
+//   • the temperature. The stand-in runs about 2 °C under the baked mean of the year, alike from the Sahara to the
+//     Loire — the thresholds are on its scale — but north of T_BEND_LAT it fell too fast: 3.6 °C under at 53° N.
+//     From there it falls T_BEND °C a degree slower;
+//   • raised bog. On low ground it needs a colder year (BOG_LOW °C against BOG_WARM), unless the climate is of the
+//     wettest (BOG_WET) or the ground is upland (BOG_HILL, m): the mires of the valleys of Picardy and of the Paris
+//     basin are reed fen and alder carr, those of Holland, of the Ardennes and of the Massif Central are peat bog;
+//   • the cold wet uplands (MIRE) and the level ground of a wet climate (humid) — see naturalSwamp();
+//   • the tide: the Channel and the North Sea have it (swampTide);
+//   • land lifted from below the sea — polders, salt pans — holds no swamp by the rule (naturalSwamp).
+const S3 = STAGE >= 3;
+export const T_BEND = S3 ? .28 : 0, T_BEND_LAT = 47.5;
+export const BOG_WARM = 11.5, BOG_LOW = S3 ? 9.5 : BOG_WARM, BOG_WET = [.86, .95], BOG_HILL = [250, 450];
+// the wetlands of the list that belong to the polygon of this stage (an entry of a later stage carries "stage")
+export const wetlandsOfStage = (list, stage = STAGE) => list.filter(w => (w.stage || 2) <= (stage >= 3 ? 3 : 2));
 // mean temperature of the year, °C (the same stand-in as the data mode of terrain.js)
-export const tempAt = (lat, h) => 17.5 - (lat - 38) * .75 - h * .0062;
+export const tempAt = (lat, h) => 17.5 - (lat - 38) * .75 + Math.max(lat - T_BEND_LAT, 0) * T_BEND - h * .0062;
+// the warmest year a raised bog still grows in, °C on the scale of tempAt()
+export const bogWarmAt = (wet, h) => BOG_LOW + (BOG_WARM - BOG_LOW) * Math.max(ss(BOG_WET[0], BOG_WET[1], wet), ss(BOG_HILL[0], BOG_HILL[1], h));
 // which swamp grows here; the four shares add up to 1
 //   salt  the lowest ground, where the sea reaches: tidal marsh, mud, salt
 //   bog   cold and wet: raised and blanket peat bog
 //   carr  warm and wet: flooded forest
 //   fen   the rest: reed and sedge marsh
 export function swampKind(lat, lon, h) {
-  const wet = wetAt(lat, lon, h), salt = 1 - ss(3, 8, h);
+  const wet = wetAt(lat, lon, h), salt = 1 - ss(3, 8, h), tb = bogWarmAt(wet, h);
   let rest = 1 - salt;
-  const bog = rest * ss(11.5, 9, tempAt(lat, h)) * ss(.56, .70, wet); rest -= bog;
+  const bog = rest * ss(tb, tb - 2.5, tempAt(lat, h)) * ss(.56, .70, wet); rest -= bog;
   const carr = rest * ss(.58, .70, wet);
   return { bog, fen: rest - carr, salt, carr };
 }
@@ -38,6 +59,7 @@ export function swampIron(swamp, lat, lon, h) {
   return v < .03 ? 0 : Math.min(1, v);
 }
 
+const MIRE = S3 ? { wet: [.82, .96], t: [8, 6], share: .06 } : { wet: [.72, .92], t: [9.5, 7], share: .09 };
 const inside = (poly, lat, lon) => {
   let c = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -64,7 +86,7 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
   }
   // how much of the chunk is flat ground (water stands on it) and gentle ground (a blanket of peat holds on it):
   // the share of neighbouring points inside the chunk that differ by less than 9 m, and by less than 55 m
-  const tex = new Uint32Array(n), pairs = new Uint32Array(n), fl = new Uint32Array(n), ge = new Uint32Array(n);
+  const tex = new Uint32Array(n), pairs = new Uint32Array(n), fl = new Uint32Array(n), ge = new Uint32Array(n), lifted = new Uint32Array(n);
   for (let ty = 0, t = 0; ty < FNY; ty++) for (let tx = 0; tx < FNX; tx++, t++) {
     const k = cell[t], h = hgt[t]; tex[k]++;
     if (h <= 0) continue;
@@ -74,10 +96,16 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
       const g = hgt[m]; if (g <= 0) continue;
       const dh = Math.abs(g - h); pairs[k]++;
       if (dh < 1e-6 && h > 8) continue;              // a dead-level surface inland is a reservoir in the height data, not land
+      // (stage 3) dead-level ground at exactly DRY_LAND m is land the base lifted from below the sea (liftDryLand,
+      // ground/despike.js): a polder behind its dikes, a salt pan of the desert. It is dry by the hand of man or by
+      // the Sun, and no marsh of nature lies on it — by the rule alone all of Holland was one marsh.
+      if (S3 && dh < 1e-6 && Math.abs(h - DRY_LAND) < .01) { lifted[k]++; continue; }
       if (dh < 9) fl[k]++; if (dh < 55) ge[k]++;
     }
   }
   const flat = k => pairs[k] ? fl[k] / pairs[k] : 0, gentle = k => pairs[k] ? ge[k] / pairs[k] : 0;
+  // (for the wetlands known by name lifted land is level ground like any other: the Camargue lies on it)
+  const flatNamed = k => pairs[k] ? (fl[k] + lifted[k]) / pairs[k] : 0;
   // a river along the border of the chunk floods its plain; where the sea is a neighbour too, that is a river mouth
   const riv = new Float32Array(n), mouth = new Float32Array(n);
   for (let k = 0; k < n; k++) {
@@ -95,15 +123,21 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
     const low = h - s / a, level = ss(.55, .95, flat(k)), basin = ss(10, -30, low);
     const coast = ss(9, 2, h) * level;                                               // level ground at the height of the sea
     const flood = riv[k] * level * ss(20, -5, low);                                 // the flood plain of a river
-    const humid = ss(.56, .74, wet) * level * (.45 + .55 * basin);                  // level, badly drained ground in a wet climate
-    const mire = ss(.72, .92, wet) * ss(9.5, 7, tempAt(c.lat, h)) * ss(.5, .9, gentle(k));      // cold wet uplands
-    const v = Math.max(coast * .5, flood * .25, humid * .22, mire * .09) + mouth[k] * .12 * level;
+    // level, badly drained ground in a wet climate. (Stage 3: in a hollow only — lower than the land around it. Any
+    // level ground counted in Iberia, where a wet plain is a rarity; in France it is half the country, and the chalk
+    // and limestone of its plains drain well. Its wet plains are in the list by name: the Sologne, the Brenne.)
+    const humid = ss(.56, .74, wet) * level * (S3 ? ss(2, -25, low) : .45 + .55 * basin);
+    // cold wet uplands: a blanket of peat. (Stage 3: wetter and colder — the Ardennes, the Vosges, the high plateaux
+    // of the Massif Central, not every hill north of the Loire; and a smaller share of them: from 150 km the plateau
+    // of the Ardennes was all ochre blots.)
+    const mire = ss(MIRE.wet[0], MIRE.wet[1], wet) * ss(MIRE.t[0], MIRE.t[1], tempAt(c.lat, h)) * ss(.5, .9, gentle(k));
+    const v = Math.max(coast * .5, flood * .25, humid * .22, mire * MIRE.share) + mouth[k] * .12 * level;
     out[k] = v < .04 ? 0 : Math.min(.95, v);
   }
   // the wetlands known by name: a disc of their area (or an outline) laid over the chunks it covers, land only. Steep
   // ground holds half of it; what it does not hold lies on the level chunks beside it, so the area is kept.
   const PEAK = .85, TKM2 = FKM * FKM;
-  const fit = k => { const c = ch.centre(k); return .5 + .5 * Math.max(ss(.3, .8, flat(k)), ss(11.5, 9, tempAt(c.lat, ch.height[k])) * ss(.4, .8, gentle(k))); };
+  const fit = k => { const c = ch.centre(k); return .5 + .5 * Math.max(ss(.3, .8, flatNamed(k)), ss(11.5, 9, tempAt(c.lat, ch.height[k])) * ss(.4, .8, gentle(k))); };
   const clampX = v => Math.max(0, Math.min(FNX - 1, Math.floor(v))), clampY = v => Math.max(0, Math.min(FNY - 1, Math.floor(v)));
   for (const w of wetlands) {
     const acc = new Map(), R = w.poly ? 0 : Math.sqrt(w.km2 / (Math.PI * PEAK)), wx = w.lon * KMD * COS, wy = w.lat * KMD;
@@ -157,13 +191,16 @@ float swampSlope(vec2 ll, float hs) {
 }
 // which swamp grows here: x raised bog, y reed fen, z salt marsh, w flooded forest; the four add up to 1
 vec4 swampKind(vec2 ll, float hs, float wet) {
-  float t = 17.5 - (ll.x - 38.) * .75 - hs * .0062, salt = 1. - smoothstep(3., 8., hs), rest = 1. - salt;
-  float bog = rest * smoothstep(11.5, 9., t) * smoothstep(.56, .70, wet); rest -= bog;
+${S3 ? `  float t = 17.5 - (ll.x - 38.) * .75 + max(ll.x - ${T_BEND_LAT.toFixed(1)}, 0.) * ${T_BEND} - hs * .0062, salt = 1. - smoothstep(3., 8., hs), rest = 1. - salt;
+  float tb = ${BOG_LOW.toFixed(1)} + ${(BOG_WARM - BOG_LOW).toFixed(1)} * max(smoothstep(${BOG_WET[0]}, ${BOG_WET[1]}, wet), smoothstep(${BOG_HILL[0].toFixed(1)}, ${BOG_HILL[1].toFixed(1)}, hs));   // (the warmest year of a raised bog: bogWarmAt)
+  float bq = clamp((tb - t) * .4, 0., 1.), bog = rest * bq * bq * (3. - 2. * bq) * smoothstep(.56, .70, wet); rest -= bog;` : `  float t = 17.5 - (ll.x - 38.) * .75 - hs * .0062, salt = 1. - smoothstep(3., 8., hs), rest = 1. - salt;
+  float bog = rest * smoothstep(11.5, 9., t) * smoothstep(.56, .70, wet); rest -= bog;`}
   float carr = rest * smoothstep(.58, .70, wet);
   return vec4(bog, rest - carr, salt, carr);
 }
-// 1 on the coasts of the ocean, where the tide comes in twice a day; 0 on the Mediterranean
-float swampTide(vec2 ll) { return max(1. - smoothstep(-5.9, -5.3, ll.y), smoothstep(42.9, 43.2, ll.x) * (1. - smoothstep(-.6, .4, ll.y))); }
+// 1 on the coasts of the ocean, where the tide comes in twice a day; 0 on the Mediterranean${S3 ? `
+// (stage 3: the Channel and the North Sea — everything north of the Loire; the Mediterranean ends at 43.8° N)` : ''}
+float swampTide(vec2 ll) { return ${S3 ? 'max(smoothstep(46.5, 47.5, ll.x), ' : ''}max(1. - smoothstep(-5.9, -5.3, ll.y), smoothstep(42.9, 43.2, ll.x) * (1. - smoothstep(-.6, .4, ll.y)))${S3 ? ')' : ''}; }
 // the pattern the share of the chunk is compared with: 0..1, evenly spread; n2, n3 = the shared noises of 7 and 1 km
 float swampField(vec2 pk, float n2, float n3, float px) {
   float nz = px < 2.6 ? mix(.5, swampNoise(pk / 2.7 + 61.), smoothstep(2.6, 1., px)) : .5;
@@ -209,7 +246,10 @@ void aspSwamp(Px p, inout Land L) {
   fSwampW = m; if (m < .004) return;
   float z = clamp(d * 2., 0., 1.);                                                    // 0 the edge of the swamp .. 1 its heart
   float glade = kind.w * smoothstep(.15, .5, z) * .85; kind.w -= glade; kind.y += glade;   // the heart of a flooded forest is open reed and water
-  float tide = swampTide(p.ll), ice = p.cB.r, snow = p.cB.g, cold = max(ice, snow), mott = p.n3;
+${S3 ? `  // (stage 3) where the forest is felled a flooded forest is a reed fen too: without its trees the black litter under
+  // them lay as a dark blot among the fields (the lead on Paris from 20 km, 16.11.2026)
+  float felled = kind.w * (1. - smoothstep(.12, .45, L.cover)); kind.w -= felled; kind.y += felled;
+` : ''}  float tide = swampTide(p.ll), ice = p.cB.r, snow = p.cB.g, cold = max(ice, snow), mott = p.n3;
   float lvl = .5 + uSwampWater + p.cB.b;                                              // water level: 1 is the usual one; a flood of the chunk raises it
   float flats = kind.z * smoothstep(2.2, .5, hk);                                     // the lowest salt marsh: flats the sea covers
   float cw = dot(kind, vec4(.3, 1., 1.3, .8)) * lvl * (1. + flats * .5);              // how wide the creeks are
@@ -308,7 +348,7 @@ export default {
   async init(album) {
     const ch = album.chunks, p = album.params;
     let wetlands = [];
-    try { wetlands = (await (await fetch('assets/album/swamp/wetlands.json')).json()).wetlands; } catch (e) { console.warn('[album] swamp: no list of wetlands,', e.message); }
+    try { wetlands = wetlandsOfStage((await (await fetch('assets/album/swamp/wetlands.json')).json()).wetlands); } catch (e) { console.warn('[album] swamp: no list of wetlands,', e.message); }
     const natural = naturalSwamp(ch, album.data.base.at, { wetlands });
     for (let k = 0; k < ch.count; k++) ch.setNatural('swamp', k, natural[k]);
     const centres = Array.from({ length: ch.count }, (_, k) => ch.centre(k));

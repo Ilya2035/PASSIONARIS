@@ -3,12 +3,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import swamp, { wetAt, tempAt, swampKind, swampIron, naturalSwamp, SWAMP_RULES } from '../src/album/aspects/swamp.js';
+import swamp, { wetAt, tempAt, swampKind, swampIron, naturalSwamp, SWAMP_RULES, wetlandsOfStage, bogWarmAt, T_BEND, T_BEND_LAT, BOG_WARM, BOG_LOW } from '../src/album/aspects/swamp.js';
 import { Chunks } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
-import { BBOX, mercX, mercY } from '../src/album/geo.js';
+import { BBOX, BBOXES, STAGE, mercX, mercY } from '../src/album/geo.js';
+import { decodeWorked } from '../src/album/worked.js';
+import { useClimate, decodeClimate } from '../src/album/ground/climate.js';
 
-const LIST = JSON.parse(fs.readFileSync(new URL('../public/assets/album/swamp/wetlands.json', import.meta.url), 'utf8')).wetlands;
+// ALL: the file; LIST: the wetlands of the polygon of this stage, as the page takes them
+const ALL = JSON.parse(fs.readFileSync(new URL('../public/assets/album/swamp/wetlands.json', import.meta.url), 'utf8')).wetlands, LIST = wetlandsOfStage(ALL);
+const S3 = STAGE >= 3;
 const top = k => Object.entries(k).sort((a, b) => b[1] - a[1])[0][0];
 // a small world for the rules: sea in the west, a level plain at the height of the sea, a level plain inland, steep hills
 // in the east; a dead-level "reservoir" inland in the north
@@ -38,18 +42,46 @@ test('swamp kinds: the four shares add up to 1 and follow height, wetness and th
 });
 
 test('swamp rules: the numbers on the CPU are the numbers of the shader', () => {
-  for (const s of ['smoothstep(3., 8., hs)', 'smoothstep(11.5, 9., t)', 'smoothstep(.56, .70, wet)', 'smoothstep(.58, .70, wet)', '17.5 - (ll.x - 38.) * .75 - hs * .0062']) assert.ok(SWAMP_RULES.includes(s), `shader rule: ${s}`);
-  const js = swampKind.toString() + tempAt.toString();
-  for (const s of ['ss(3, 8, h)', 'ss(11.5, 9,', 'ss(.56, .70, wet)', 'ss(.58, .70, wet)', '17.5 - (lat - 38) * .75 - h * .0062']) assert.ok(js.includes(s), `CPU rule: ${s}`);
+  const stage = S3 ? ['17.5 - (ll.x - 38.) * .75 + max(ll.x - 47.5, 0.) * 0.28 - hs * .0062', 'float tb = 9.5 + 2.0 * max(smoothstep(0.86, 0.95, wet), smoothstep(250.0, 450.0, hs));', 'float bq = clamp((tb - t) * .4, 0., 1.), bog = rest * bq * bq * (3. - 2. * bq) * smoothstep(.56, .70, wet);']
+    : ['smoothstep(11.5, 9., t)', '17.5 - (ll.x - 38.) * .75 - hs * .0062'];
+  for (const s of ['smoothstep(3., 8., hs)', 'smoothstep(.56, .70, wet)', 'smoothstep(.58, .70, wet)', ...stage]) assert.ok(SWAMP_RULES.includes(s), `shader rule: ${s}`);
+  const js = swampKind.toString() + tempAt.toString() + bogWarmAt.toString();
+  for (const s of ['ss(3, 8, h)', 'ss(tb, tb - 2.5, tempAt(lat, h))', 'ss(.56, .70, wet)', 'ss(.58, .70, wet)', '17.5 - (lat - 38) * .75 + Math.max(lat - T_BEND_LAT, 0) * T_BEND - h * .0062', 'BOG_LOW + (BOG_WARM - BOG_LOW) * Math.max(ss(BOG_WET[0], BOG_WET[1], wet), ss(BOG_HILL[0], BOG_HILL[1], h))']) assert.ok(js.includes(s), `CPU rule: ${s}`);
   for (const f of ['vec4 swampKind(vec2 ll, float hs, float wet)', 'float swampDepth(', 'float swampTreeless(float s, vec2 pk, vec2 ll, float wet, float n2, float n3)', 'float swampTide(vec2 ll)']) assert.ok(SWAMP_RULES.includes(f), f);
   assert.ok(!/uniform|dFdx|fwidth|texDetail/.test(SWAMP_RULES), 'the shared rules need nothing but COMMON: a vertex shader can use them');
   // what the settlements call from the vertex shader of their yards (layers/towns.js, v0.6.140): a contract
   for (const f of ['float swampHeight(vec2 ll)', 'float swampSlope(vec2 ll, float hs)', 'float swampField(vec2 pk, float n2, float n3, float px)', 'float swampDepth(float s, float f, vec2 ll, float hs, float slope, float bog)']) assert.ok(SWAMP_RULES.includes(f), `the settlements call it: ${f}`);
 });
 
+test('the rule of each stage: stage 2 is the rule Iberia was set by, stage 3 adds what the plains of the north need', () => {
+  const src = fs.readFileSync(new URL('../src/album/aspects/swamp.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  // the text of stage 2 stays in the source as it was, and everything new hangs on the switch
+  assert.ok(src.includes('const S3 = STAGE >= 3;'));
+  assert.ok(src.includes('  float t = 17.5 - (ll.x - 38.) * .75 - hs * .0062, salt = 1. - smoothstep(3., 8., hs), rest = 1. - salt;\n  float bog = rest * smoothstep(11.5, 9., t) * smoothstep(.56, .70, wet); rest -= bog;\`}'), 'the shader of stage 2');
+  assert.ok(src.includes("float swampTide(vec2 ll) { return ${S3 ? 'max(smoothstep(46.5, 47.5, ll.x), ' : ''}max(1. - smoothstep(-5.9, -5.3, ll.y), smoothstep(42.9, 43.2, ll.x) * (1. - smoothstep(-.6, .4, ll.y)))${S3 ? ')' : ''}; }"), 'the tide');
+  for (const part of ['T_BEND = S3 ? .28 : 0, T_BEND_LAT = 47.5', 'BOG_WARM = 11.5, BOG_LOW = S3 ? 9.5 : BOG_WARM, BOG_WET = [.86, .95], BOG_HILL = [250, 450]', 'const MIRE = S3 ? { wet: [.82, .96], t: [8, 6], share: .06 } : { wet: [.72, .92], t: [9.5, 7], share: .09 };', 'Math.max(coast * .5, flood * .25, humid * .22, mire * MIRE.share) + mouth[k] * .12 * level;',
+    'const humid = ss(.56, .74, wet) * level * (S3 ? ss(2, -25, low) : .45 + .55 * basin);']) assert.ok(src.includes(part), part);
+  assert.equal(T_BEND_LAT, 47.5); assert.equal(BOG_WARM, 11.5);
+  if (!S3) {
+    assert.equal(T_BEND, 0); assert.equal(BOG_LOW, BOG_WARM);
+    assert.equal(tempAt(52, 100), 17.5 - 14 * .75 - .62); assert.equal(bogWarmAt(.6, 20), 11.5);
+    assert.ok(SWAMP_RULES.includes('float swampTide(vec2 ll) { return max(1. - smoothstep(-5.9, -5.3, ll.y), smoothstep(42.9, 43.2, ll.x) * (1. - smoothstep(-.6, .4, ll.y))); }') && !SWAMP_RULES.includes('float tb'));
+  } else {
+    assert.equal(T_BEND, .28); assert.equal(BOG_LOW, 9.5);
+    assert.ok(Math.abs(tempAt(52, 0) - (17.5 - 14 * .75 + 4.5 * .28)) < 1e-9, 'north of 47.5° the year cools more slowly'); assert.equal(tempAt(43.5, 800), 17.5 - 5.5 * .75 - 800 * .0062);
+    assert.equal(bogWarmAt(.6, 20), 9.5, 'a lowland of an ordinary wet climate: a raised bog needs a colder year'); assert.equal(bogWarmAt(.96, 20), 11.5, 'the wettest climate'); assert.equal(bogWarmAt(.6, 500), 11.5, 'the uplands: as in Iberia');
+    assert.ok(SWAMP_RULES.includes('return max(smoothstep(46.5, 47.5, ll.x), max(1. - smoothstep(-5.9, -5.3, ll.y)'), 'the Channel and the North Sea have a tide');
+  }
+  // Iberia is south of the bend, and its bogs are of the uplands or of the wettest climate: nothing of it moves
+  assert.equal(tempAt(43.47, 800), 17.5 - 5.47 * .75 - 800 * .0062);
+  assert.equal(bogWarmAt(.95, 0), 11.5); assert.equal(bogWarmAt(0, 450), 11.5);
+});
+
 test('swamp aspect: the contract function, its uniforms, knobs and pages', () => {
   assert.match(swamp.glsl, /void aspSwamp\(Px p, inout Land L\)/);
   for (const use of ['p.cA.a', 'p.cB.r', 'p.cB.g', 'p.cB.b', 'L.gloss', 'L.cover', 'L.col']) assert.ok(swamp.glsl.includes(use), `uses ${use}`);
+  // (stage 3) a flooded forest whose trees are felled is drawn as a reed fen
+  assert.equal(swamp.glsl.includes('float felled = kind.w * (1. - smoothstep(.12, .45, L.cover)); kind.w -= felled; kind.y += felled;'), S3);
   const declared = [...swamp.glsl.matchAll(/uniform float ([^;]+);/g)].flatMap(m => m[1].split(',').map(s => s.trim()));
   assert.ok(declared.length > 0);
   for (const u of declared) assert.ok(swamp.uniforms[u], `uniform ${u} has a value`);
@@ -84,6 +116,18 @@ test('natural swamp: level ground at the sea and in the wet takes it; hills, the
     if (ch.kind[k] === 0) assert.equal(nat[k], 0, 'a chunk of water holds no swamp');
     const c = ch.centre(k); if (c.lat > BBOX.lat1 + .1 || c.lat < BBOX.lat0 - .1) assert.equal(nat[k], 0, 'nothing outside the region of the album');
   }
+});
+
+test('stage 3: land lifted from below the sea holds no swamp by the rule; a wetland of the list still lies on it', () => {
+  // the coastal plain of the small world as a polder: dead-level ground at exactly 1 m, as liftDryLand leaves it
+  const polder = (lat, lon) => lon >= -8 && lon < -7.2 ? 1 : world(lat, lon);
+  const ch = new Chunks(polder), nat = naturalSwamp(ch, polder, {}), k = ch.at(40, -7.6);
+  if (S3) assert.equal(nat[k], 0, 'a polder is dry behind its dikes: no marsh of nature');
+  else assert.ok(nat[k] >= .3, `stage 2: level ground at the height of the sea, as ever: ${nat[k]}`);
+  const named = naturalSwamp(ch, polder, { wetlands: [{ name: 'x', lat: 40, lon: -7.6, km2: 300 }] });
+  assert.ok(named[k] > .8, `a wetland known by name lies there in full: ${named[k]}`);
+  const src = fs.readFileSync(new URL('../src/album/aspects/swamp.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(src.includes('if (S3 && dh < 1e-6 && Math.abs(h - DRY_LAND) < .01) { lifted[k]++; continue; }') && src.includes("import { DRY_LAND } from '../ground/despike.js';"));
 });
 
 test('natural swamp: a wetland of the list lays its area over the chunks it covers', () => {
@@ -130,17 +174,26 @@ test('bog iron: fresh mires of a humid climate hold it; salt marsh, dry fens and
 });
 
 test('the list of wetlands: every entry is complete and inside the region; the named ones are there', () => {
-  assert.ok(LIST.length >= 80, `${LIST.length} wetlands`);
+  const first = ALL.filter(w => !w.stage);
+  assert.ok(first.length >= 80, `${first.length} wetlands`);
+  // an entry of stage 3 says so; the page takes the entries of its own stage and of the stages before it
+  assert.deepEqual(wetlandsOfStage(ALL, 2), first); assert.deepEqual(wetlandsOfStage(ALL, 3), ALL); assert.equal(LIST.length, S3 ? ALL.length : first.length);
+  assert.ok(ALL.length - first.length >= 40, `${ALL.length - first.length} wetlands of stage 3`);
   const names = new Set();
-  for (const w of LIST) {
+  for (const w of ALL) {
     assert.ok(w.name && !names.has(w.name), `name: ${w.name}`); names.add(w.name);
-    assert.ok(w.lat >= BBOX.lat0 && w.lat <= BBOX.lat1 && w.lon >= BBOX.lon0 && w.lon <= BBOX.lon1, `${w.name}: inside the region`);
+    assert.ok(w.stage === undefined || w.stage === 3, `${w.name}: stage`);
+    if (w.stage) assert.ok(w.unv === true && w.src, `${w.name}: an entry of stage 3 is an estimate and names an article`);
+    const box = BBOXES[w.stage || 2];
+    assert.ok(w.lat >= box.lat0 && w.lat <= box.lat1 && w.lon >= box.lon0 && w.lon <= box.lon1, `${w.name}: inside the region of its stage`);
+    if (w.poly) for (const [la, lo] of w.poly) assert.ok(la >= box.lat0 && la <= box.lat1 && lo >= box.lon0 && lo <= box.lon1, `${w.name}: the outline inside the region`);
     assert.ok(['bog', 'fen', 'salt', 'carr'].includes(w.type), `${w.name}: type`);
     assert.ok(typeof w.src === 'string', `${w.name}: source`);
     if (w.poly) assert.ok(w.share > 0 && w.share < 1 && w.poly.length >= 3, `${w.name}: outline`); else assert.ok(w.km2 > 0 && w.km2 < 3000, `${w.name}: area`);
   }
-  for (const part of ['Гвадалквивир', 'Эбро', 'Альбуфера Валенсии', 'Ланды', 'Даймьель', 'Ла-Ханда', 'Антела', 'Тежу', 'Саду', 'Авейру', 'Нарбонн', 'Шистрал']) assert.ok(LIST.some(w => w.name.includes(part)), part);
-  assert.ok(LIST.filter(w => w.src).length >= LIST.length - 3, 'almost every entry names its source');
+  for (const part of ['Гвадалквивир', 'Эбро', 'Альбуфера Валенсии', 'Ланды', 'Даймьель', 'Ла-Ханда', 'Антела', 'Тежу', 'Саду', 'Авейру', 'Нарбонн', 'Шистрал']) assert.ok(first.some(w => w.name.includes(part)), part);
+  for (const part of ['Пуатевен', 'Солонь', 'долины Соммы', 'Камарг, восточная', 'Высокие Фани', 'Буртанг', 'Гарба', 'Макта']) assert.ok(ALL.some(w => w.stage === 3 && w.name.includes(part)), part);
+  assert.ok(ALL.filter(w => w.src).length >= ALL.length - 3, 'almost every entry names its source');
 });
 
 test('swamp init: lays the natural state, the frost demonstration and the map of swamps over the chunks', async () => {
@@ -182,17 +235,37 @@ test('natural swamp on the real heights: the known swamps are where they should 
   const rivers = JSON.parse(fs.readFileSync(new URL('../public/album-data/vectors.json', import.meta.url), 'utf8')).rivers;
   // the chunks as the album builds them (main.js): the lakes of the water aspect are cut out of the land
   const lakes = (JSON.parse(fs.readFileSync(new URL('../public/assets/album/water/lakes.json', import.meta.url), 'utf8')).lakes || []).filter(l => !l.shoal && l.ring);
-  const ch = new Chunks(at, rivers, lakes), nat = naturalSwamp(ch, at, { wetlands: LIST });
+  // (stage 3: chunks lie on the worked land only, and the rule reads the baked climate, as on the page — without it
+  // the stand-in formula of Iberia answers, and north of the Pyrenees and in the Sahara it knows nothing)
+  let worked = null;
+  if (S3) {
+    const gun = name => { const g = zlib.gunzipSync(fs.readFileSync(new URL('../public/assets/album/' + name, import.meta.url))); return g.buffer.slice(g.byteOffset, g.byteOffset + g.byteLength); };
+    worked = decodeWorked(gun('worked.bin.gz')); useClimate(decodeClimate(gun('ground/climate.bin.gz')));
+  }
+  let ch, nat;
+  try { ch = worked ? new Chunks(at, rivers, lakes, worked.at) : new Chunks(at, rivers, lakes); nat = naturalSwamp(ch, at, { wetlands: LIST }); } finally { if (S3) useClimate(null); }
   const near = (lat, lon) => { const k = ch.at(lat, lon); return Math.max(nat[k], ...ch.neighbours(k).map(m => nat[m])); };
   for (const [name, lat, lon, min] of [['Guadalquivir', 37, -6.25, .7], ['Daimiel', 39.14, -3.7, .6], ['Ebro delta', 40.7, .75, .5], ['Albufera', 39.33, -.35, .5], ['Landes', 44.2, -.7, .3], ['Xistral', 43.47, -7.6, .25],
     ['Antela', 42.08, -7.75, .25], ['Tagus', 38.92, -8.92, .5], ['La Janda', 36.25, -5.85, .4], ['Aveiro', 40.68, -8.67, .4]]) assert.ok(near(lat, lon) >= min, `${name}: ${near(lat, lon).toFixed(2)}`);
-  let land = 0, wet = 0, area = 0, iron = 0;
+  let land = 0, wet = 0, area = 0, iron = 0, plainLand = 0, plainWet = 0;
   for (let k = 0; k < ch.count; k++) {
     if (ch.kind[k] !== 1) { assert.equal(nat[k], 0); continue; }
-    land++; if (nat[k] > 0) { wet++; area += nat[k] * ch.area[k]; const c = ch.centre(k); if (swampIron(nat[k], c.lat, c.lon, ch.height[k]) > 0) iron++; }
+    const c = ch.centre(k), plain = c.lat > 47.6 && c.lat < 50.2 && c.lon > .3 && c.lon < 5.2;      // the plains of the north of France
+    land++; if (plain) plainLand++;
+    if (nat[k] > 0) { wet++; if (plain) plainWet++; area += nat[k] * ch.area[k]; if (swampIron(nat[k], c.lat, c.lon, ch.height[k]) > 0) iron++; }
   }
-  assert.ok(wet / land > .03 && wet / land < .09, `swamp in ${(100 * wet / land).toFixed(1)} % of the land chunks`);
-  assert.ok(area > 5000 && area < 14000, `${area.toFixed(0)} km² of swamp`);
-  assert.ok(iron > 60 && iron < wet * .6, `${iron} chunks with bog iron`);
+  // (stage 3: the low lands of the North Sea, the Atlantic marshes and the wet plains of France — the share of the
+  // whole polygon is higher than that of Iberia and the south of France)
+  const lim = S3 ? { share: [.05, .11], area: [18000, 40000], iron: 150 } : { share: [.03, .09], area: [5000, 14000], iron: 60 };
+  assert.ok(wet / land > lim.share[0] && wet / land < lim.share[1], `swamp in ${(100 * wet / land).toFixed(1)} % of the land chunks`);
+  assert.ok(area > lim.area[0] && area < lim.area[1], `${area.toFixed(0)} km² of swamp`);
+  assert.ok(iron > lim.iron && iron < wet * .6, `${iron} chunks with bog iron`);
+  if (S3) {
+    for (const [name, lat, lon, min] of [['Marais poitevin', 46.33, -.9, .5], ['Camargue', 43.5, 4.55, .5], ['Sologne', 47.5, 1.9, .1], ['Somme', 50.0, 2.1, .1], ['Hautes Fagnes', 50.52, 6.1, .3], ['Gharb', 34.6, -6.3, .2], ['Macta', 35.65, -.1, .5]]) assert.ok(near(lat, lon) >= min, `${name}: ${near(lat, lon).toFixed(2)}`);
+    // by the numbers of Iberia four chunks of ten held swamp here (42.7 %; now 9.0 %) — a veil of brown bog over the Paris basin (16.11.2026)
+    assert.ok(plainLand > 800 && plainWet / plainLand < .25, `the plains of the north of France: swamp in ${(100 * plainWet / plainLand).toFixed(1)} % of ${plainLand} chunks`);
+    assert.ok(near(48.2, 1.7) < .1, `no marsh on the chalk of the Beauce: ${near(48.2, 1.7)}`);
+    const polder = nat[ch.at(52.45, 5.5)]; assert.ok(polder < .05, `no marsh of nature on the polders of Flevoland: ${polder}`);
+  }
   for (const [lat, lon] of [[41.3, -6.3], [39.75, -6.9], [38.2, -7.5], [41.3, .2]]) assert.ok(near(lat, lon) < .15, `no marsh on the reservoir at ${lat}, ${lon}: ${near(lat, lon)}`);
 });
