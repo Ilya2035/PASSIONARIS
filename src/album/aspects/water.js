@@ -390,9 +390,11 @@ vec3 aspWater(Px p) {
     if (wD > 0.) { float hd = textureLod(uDet, (m - uDetRect.xy) * uDetRect.zw, max(0., lod + log2(uDetRect.z) - 6.)).r; hS = mix(hC, hd > .6 ? hd : min(hC, -1.5), wD); }
     // On a flat floor the charts give whole metres in blocks a kilometre or two wide. A metre or two of water drawn
     // as it is makes a lattice of pale squares over a whole shallow sea — the IJsselmeer, the bays of a delta (the
-    // owner: «рябь, сетка из голубого и синего»). So a flat floor is shown no shallower than 5 m; the pale shallows
-    // stay where the bottom really rises to a shore, and at the waterline itself.
-    w.depth = mix(w.depth, max(-hS, 5. * fl), .65 * smoothstep(14., 6., w.depth) * smoothstep(0., 1.2, w.depth));
+    // owner: «рябь, сетка из голубого и синего»). So a flat floor is shown no shallower than 5 m, and by its smoothed
+    // depth alone; a lone shallow point of the chart out in such water is no shore (the smoothed bottom is under
+    // water there) and goes the same way. The pale shallows stay where the bottom really rises to a shore, and at
+    // the waterline itself.
+    w.depth = mix(w.depth, max(-hS, 5. * fl), mix(.65, 1., fl) * smoothstep(14., 6., w.depth) * smoothstep(0., 1.2, max(w.depth, -hS * fl)));
   }
   return waterLit(w);
 }`;
