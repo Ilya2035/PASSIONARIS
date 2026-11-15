@@ -8,11 +8,11 @@
 // And what the weather (sky/weather.js) needs: how much of the sky the clouds cover, how hard it rains, how much fog
 // the hour has left.
 import { Vector3, Vector4, BackSide } from 'three';
-import { frame } from '../geo.js';
+import { frame, BBOX } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, lightHour } from '../sky/astro.js';
 import { GLOBE, globeAmount, globeDim, frameSunUp, raiseSun } from '../sky/globe.js';
-import { WX, needClouds, needFog, cloudOffset, rainCover, rainMask, fogByHour, fogNumbers, snowNumbers, HILL_FILL, capBank } from '../sky/weather.js';
+import { WX, needClouds, needFog, needClimate, precOf, climateNow, cloudOffset, growOffset, cellOffset, rainCover, rainMask, fogByHour, fogByHeight, fogNumbers, snowNumbers, HILL_FILL, capBank } from '../sky/weather.js';
 
 const MAP_LIGHT = sunAt(0);
 
@@ -36,7 +36,7 @@ export default {
     { key: 'dayRun', label: 'Ход суток', group: 'light', type: 'toggle', value: 0, map: 'Ход суток' },
     { key: 'clouds', label: 'Облака', group: 'light', type: 'toggle', value: 0, map: 'Облака' },
     { key: 'cloudCover', label: 'Облачность', group: 'light', min: .05, max: 1, step: .05, value: .45 },
-    { key: 'cloudShift', label: 'Сдвиг облаков по ветру', group: 'light', min: 0, max: 8192, step: 16, value: 0, unit: ' км' },
+    { key: 'cloudShift', label: 'Сдвиг облаков по ветру', group: 'light', min: 0, max: 32768, step: 16, value: 0, unit: ' км' },
     { key: 'rain', label: 'Дождь', group: 'light', type: 'toggle', value: 0, map: 'Дождь' },
     { key: 'rainForce', label: 'Сила дождя', group: 'light', min: .1, max: 1, step: .05, value: .6 },
     { key: 'fog', label: 'Туман (утром; к полудню рассеивается)', group: 'light', type: 'toggle', value: 0, map: 'Туман' },
@@ -62,18 +62,20 @@ export default {
     { id: 'sky-earth-night', group: 'Небо и свет', title: 'Вся Земля: ночь', note: 'Кнопка «Ночь»: под камерой полночь, шар тёмный, у края виден серп дня.', p: { light: 'night' }, cam: cam(P.all, 20000, 0, 0) },
     { id: 'sky-terminator', group: 'Небо и свет', title: 'Край дня с 3000 км', note: 'Вечер над Испанией с 3000 км: на западе, над океаном, ещё светло, на востоке уже темнеет. Свет считается для каждого места своего.', p: { light: 'evening' }, cam: cam(P.all, 3000, 30, 0) },
     { id: 'sky-clouds', group: 'Небо и свет', title: 'Облака и их тени', note: 'Вид с 700 км: облака и тени от них на земле. Сколько облаков — ручка «Облачность». Вблизи облака тают, тени остаются.', p: { clouds: 1 }, cam: cam(P.all, 700, 35, 0) },
-    { id: 'sky-rain', group: 'Небо и свет', title: 'Дождь с высоты', note: 'Взгляд от Валенсии на север: над горами идёт дождь. Туча тяжёлая и серая, под её ближним краем висит серая завеса дождя с полосами, земля под ней тёмная, мокрая. Туча уходит на восток и оставляет за собой мокрый след. Переключатель «Дождь», ручка «Сила дождя».', p: { rain: 1 }, cam: cam(P.rain, 220, 74, 0) },
-    { id: 'sky-rain-200', group: 'Небо и свет', title: 'Дождь с игровой высоты', note: 'Тот же дождь с 200 км: дождевая туча как на снимке со спутника — белая, плотная, с буграми, светлыми со стороны Солнца. Обычные облака вокруг неё полупрозрачные. Ближе 120 км туча тает, чтобы карта под дождём читалась.', p: { rain: 1 }, cam: cam([40.0, -0.9], 200, 40, 0) },
-    { id: 'sky-rain-near', group: 'Небо и свет', title: 'Дождь вблизи', note: 'Край дождя с 28 км: справа льёт — видны тонкие линии дождя, земля мокрая и тёмная; слева сухо. Вблизи облака не рисуются, остаются их тень и сам дождь.', p: { rain: 1 }, cam: cam(P.rainEdge, 28, 66, 80) },
-    { id: 'sky-overcast', group: 'Небо и свет', title: 'Пасмурное небо под тучей', note: 'Предгорья Пиренеев, взгляд на север вдоль земли. Над хребтом стоит туча, и небо над горизонтом серое, а не ясное: светлее у тонкого края тучи, темнее под её серединой и там, где льёт. Светлая полоса у самого горизонта — там туча кончается.', p: { rain: 1, cloudShift: 1312 }, cam: cam([42.2, .3], 20, 84, 0) },
-    { id: 'sky-snow', group: 'Небо и свет', title: 'Снегопад в Пиренеях', note: 'Туча стоит над хребтом. Выше линии снегопада идёт снег: склоны белеют, лес под снегом серо-синий. Ниже той же линии идёт дождь: долины тёмные, мокрые. Линия снегопада на 900 м ниже вечного снега; её двигает ручка «Снеговая линия». Тучу двигает ручка «Сдвиг облаков по ветру».', p: { rain: 1, cloudShift: 1312 }, cam: cam([42.7, .3], 60, 45, 0) },
-    { id: 'sky-snow-near', group: 'Небо и свет', title: 'Снегопад вблизи: Ането', note: 'С 20 км: над белыми склонами падают снежинки, в долине под ними — линии дождя. Граница снега идёт по высоте склона.', p: { rain: 1, cloudShift: 1312 }, cam: cam(P.pyr, 20, 60, 0) },
-    { id: 'sky-snow-200', group: 'Небо и свет', title: 'След снегопада с 200 км', note: 'Туча уходит на восток, за ней на горах остаётся белый след длиной больше ста километров; равнина под той же тучей только мокрая.', p: { rain: 1, cloudShift: 1312 }, cam: cam([42.7, .3], 200, 25, 0) },
+    { id: 'sky-rain', group: 'Небо и свет', title: 'Дождь с высоты', note: 'Взгляд от Валенсии на север: над горами идёт дождь. Туча тяжёлая и серая, под её ближним краем висит серая завеса дождя с полосами, земля под ней тёмная, мокрая. Туча уходит на восток и оставляет за собой мокрый след. Переключатель «Дождь», ручка «Сила дождя».', p: { rain: 1, cloudShift: 8208 }, cam: cam(P.rain, 220, 74, 0) },
+    { id: 'sky-rain-200', group: 'Небо и свет', title: 'Дождь с игровой высоты', note: 'Тот же дождь с 200 км: дождевая туча как на снимке со спутника — белая, плотная, с буграми, светлыми со стороны Солнца. Обычные облака вокруг неё полупрозрачные. Ближе 120 км туча тает, чтобы карта под дождём читалась.', p: { rain: 1, cloudShift: 1216 }, cam: cam([40.0, -0.9], 200, 40, 0) },
+    { id: 'sky-rain-near', group: 'Небо и свет', title: 'Дождь вблизи', note: 'Край дождя с 28 км: справа льёт — видны тонкие линии дождя, земля мокрая и тёмная; слева сухо. Вблизи облака не рисуются, остаются их тень и сам дождь.', p: { rain: 1, cloudShift: 112 }, cam: cam(P.rainEdge, 28, 66, 80) },
+    { id: 'sky-overcast', group: 'Небо и свет', title: 'Пасмурное небо под тучей', note: 'Предгорья Пиренеев, взгляд на север вдоль земли. Над хребтом стоит туча, и небо над горизонтом серое, а не ясное: светлее у тонкого края тучи, темнее под её серединой и там, где льёт. Светлая полоса у самого горизонта — там туча кончается.', p: { rain: 1, cloudShift: 7856 }, cam: cam([42.2, .3], 20, 84, 0) },
+    { id: 'sky-snow', group: 'Небо и свет', title: 'Снегопад в Пиренеях', note: 'Туча стоит над хребтом. Выше линии снегопада идёт снег: склоны белеют, лес под снегом серо-синий. Ниже той же линии идёт дождь: долины тёмные, мокрые. Линия снегопада на 900 м ниже вечного снега; её двигает ручка «Снеговая линия». Тучу двигает ручка «Сдвиг облаков по ветру».', p: { rain: 1, cloudShift: 7856 }, cam: cam([42.7, .3], 60, 45, 0) },
+    { id: 'sky-snow-near', group: 'Небо и свет', title: 'Снегопад вблизи: Ането', note: 'С 20 км: над белыми склонами падают снежинки, в долине под ними — линии дождя. Граница снега идёт по высоте склона.', p: { rain: 1, cloudShift: 7856 }, cam: cam(P.pyr, 20, 60, 0) },
+    { id: 'sky-snow-200', group: 'Небо и свет', title: 'След снегопада с 200 км', note: 'Туча уходит на восток, за ней на горах остаётся белый след длиной больше ста километров; равнина под той же тучей только мокрая.', p: { rain: 1, cloudShift: 7984 }, cam: cam([42.7, .3], 200, 25, 0) },
     { id: 'sky-fog', group: 'Небо и свет', title: 'Утренний туман в долине Эбро', note: 'Половина седьмого утра: туман лежит в долине и над водой, холмы стоят из него островами. К полудню он рассеивается — следующая страница. Переключатель «Туман», ручка «Сколько тумана».', p: { fog: 1, hour: 6.5 }, cam: cam(P.zar, 40, 65, 300) },
     { id: 'sky-fog-late', group: 'Небо и свет', title: 'Туман уходит: половина девятого', note: 'То же место через два часа: туман редеет и держится только в самых низких местах и над рекой. К полудню его не будет.', p: { fog: 1, hour: 8.5 }, cam: cam(P.zar, 40, 65, 300) },
     { id: 'sky-valley-clouds', group: 'Небо и свет', title: 'Облака в горных долинах', note: 'Половина седьмого утра в Пиренеях: долины залиты облаком, гребни и вершины стоят над ним. Это тот же «Туман»: в горах он заполняет долины до половины их глубины. К полудню рассеивается.', p: { fog: 1, hour: 6.5 }, cam: cam([42.7, .3], 60, 45, 0) },
     { id: 'sky-caps', group: 'Небо и свет', title: 'Шапки облаков на гребнях', note: 'Ането с 20 км, облака включены: высокие гребни носят шапки облаков, долины под ними открыты. Сколько гребней в шапках — ручка «Облачность».', p: { clouds: 1, cloudCover: .7 }, cam: cam(P.pyr, 20, 60, 0) },
-    { id: 'sky-fog-far', group: 'Небо и свет', title: 'Туман с высоты: долины Дуэро', note: 'Семь утра, вид с 500 км: туман заполняет долины рек и повторяет их рисунок, как на снимке со спутника.', p: { fog: 1, hour: 7 }, cam: cam(P.duero, 500, 0, 0) },
+    { id: 'sky-fog-high', group: 'Небо и свет', title: 'Туман с высоты не виден', note: 'То же утро и тот же туман, вид с 300 км: тумана нет. Туман — погода вблизи: с 70 км высоты камеры он редеет, с 260 км его не видно вовсе.', p: { fog: 1, hour: 6.5 }, cam: cam(P.zar, 300, 30, 0) },
+    { id: 'sky-earth-clouds', group: 'Небо и свет', title: 'Вся Земля: облака по климату', note: 'Шар с 20 000 км, облака включены. Сколько облаков над местом — по его климату в этом месяце: над Сахарой небо чистое, над северной Атлантикой и у экватора облачно. Месяц берётся из ручки «День года».', p: { light: 'day', clouds: 1 }, cam: cam([25, 5], 20000, 0, 0) },
+    { id: 'sky-earth-rain', group: 'Небо и свет', title: 'Вся Земля: где идут дожди', note: 'То же с дождём: тёмные тучи стоят там, где в этом месяце дождливо, — у экватора и в умеренных широтах; над пустынями их нет.', p: { light: 'day', rain: 1 }, cam: cam([25, 5], 20000, 0, 0) },
   ],
   async init(album) {
     const { SkyDome } = await import('../sky/dome.js');
@@ -85,6 +87,10 @@ export default {
     let clock = null, drift = 0, rainT = 40;                        // the hour while the day runs; how far the clouds have drifted, km; the time of the falling rain, s
     const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const sync = () => { album.cam.edgePan = !!p.get('edgePan') && !album.shot; };
+    // the open climate of the world, for the clouds: read once, when the clouds are first switched on
+    const fetchPrec = () => fetch('assets/climate/normals-open.bin.gz').then(r => { if (!r.ok) throw new Error(`normals-open: ${r.status}`); return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }).then(precOf);
+    // the fog and the caps of the crests lie on the album's own land: there is nothing of them to draw far from it
+    const nearLand = c => c.lat > BBOX.lat0 - 6 && c.lat < BBOX.lat1 + 6 && c.lon > BBOX.lon0 - 8 && c.lon < BBOX.lon1 + 8;
     p.on(sync); sync();
     const layer = { id: 'sky', dome, hour: 0, update(dt, _t, c) {
       const s = c.s, yday = p.get('yday'), phase = p.get('moon'), f = frame(s.lat, s.lon);
@@ -95,6 +101,7 @@ export default {
       const here = hour ? sunDir(hour, yday, s.lat) : null;
       if (here) T.uSun.value.set(...here); else T.uSun.value.copy(MAP_LIGHT);   // hour 0: the cartographer's light
       const sun = T.uSun.value; world(sun.x, sun.y, sun.z, f, sunW);          // (the real Sun, as a direction of the world)
+      { const k = Math.hypot(sun.x, sun.y) || 1; WX.uSunMap.value.set(sun.x / k, -sun.y / k); }   // (and its side on the map of the weather: east, south)
       // Day and night on the ball (sky/globe.js): from a height the frame is drawn with the highest Sun in view, and
       // every pixel is then dimmed to the light of its own place. Only with a real Sun and in the natural look.
       const eye = c.alt ?? s.h, ball = here && T.uStyle.value === 0 ? globeDim(eye) : 0;
@@ -113,22 +120,26 @@ export default {
       const natural = T.uStyle.value === 0, force = p.get('rainForce'), rain = !!p.get('rain') && natural;
       const cover = natural ? Math.max(p.get('clouds') ? p.get('cloudCover') : 0, rain ? rainCover(force) : 0) : 0;
       if (!album.shot) { drift += dt * p.get('play') * .9; rainT = (rainT + dt * p.get('play')) % 1000; }
-      const off = cloudOffset(drift + p.get('cloudShift'));
-      cloud.set(cover, off[0], off[1], 4 + 3 * T.uExag.value);
+      // (the clouds go with the wind; what makes them grow and melt slides the other way, the cells of rain lag behind)
+      const way = drift + p.get('cloudShift'), off = cloudOffset(way), grow = growOffset(way), cell = cellOffset(way);
+      cloud.set(cover, off[0], off[1], 4 + 3 * T.uExag.value); WX.uGrow.value.set(grow[0], grow[1], cell[0], cell[1]);
+      // how much cloud a place has, and how willingly it rains there, goes by its climate
+      if (cover > 0) needClimate(yday, fetchPrec);
       // the lines of falling rain show near the ground only: from a height rain is a grey curtain under its cloud
       WX.uRain.value.set(rain ? force : 0, rainMask(force), rainT, 1 - ss(60, 220, s.h));
       // above the line of snowfall it snows (the line follows the snow line of the ground: the look, «Снеговая линия»)
       if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); } else WX.uSnowF.value.w = 0;
       // fog: what the hour has left of it (thickest at dawn, gone by noon)
-      const rise = sunTimes(yday, s.lat)?.rise ?? 6, fog = p.get('fog') && natural ? p.get('fogAmount') * fogByHour(hour, rise) : 0;
+      // (and what the height of the camera leaves of it: fog is weather seen from near, from a height there is none)
+      const rise = sunTimes(yday, s.lat)?.rise ?? 6, low = natural && nearLand(s) ? fogByHeight(s.h) : 0, fog = p.get('fog') ? p.get('fogAmount') * fogByHour(hour, rise) * low : 0;
       // (clouds in the mountains: with the fog the deep valleys fill with cloud; with the clouds on, high crests wear caps)
-      const caps = natural && p.get('clouds') ? p.get('cloudCover') : 0;
+      const caps = p.get('clouds') && low > 0 ? p.get('cloudCover') : 0;
       if (fog > .02 || caps > 0) {
         const f = fogNumbers(fog > .02 ? fog : 0), k = T.uExag.value / 1000; needFog(album.data.base.at);
         WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); WX.uLow.value.set(fog > .02 ? HILL_FILL * Math.min(1, fog / .7) : 0, caps > 0 ? 1 : 0, capBank(caps), fog > .02 ? 1 : 0);
       } else WX.uFog.value.x = 0;
       if (cover > 0 || fog > .02) needClouds();
-      layer.weather = { cover, rain: rain ? force : 0, fog, caps };
+      layer.weather = { cover, rain: rain ? force : 0, fog, caps, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
       dome.update(c.cam, album.renderer.domElement.height);
     } };
     return layer;
