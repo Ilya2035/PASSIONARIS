@@ -318,7 +318,10 @@ void aspForest(Px p, inout Land L) {
   if (dens < .003 && coverS < .003 && flank < .003) return;
 
   // ---- what stands here: kind and age of the forest at this place, from the state of the chunk
-  float st = px < 2.5 ? mix(.5, vnoise(pk / 2.6 + 11.), smoothstep(2.5, 1., px)) : .5, tree = st * .6 + p.n2 * .4;
+  // (The noise of the stands is two noises laid together, each read on a grid turned by its own angle. One noise
+  // read along the axes of the map shows its square cells: where the forest stands whole — in the natural state,
+  // beyond the polygon — the lighter stands were rectangles and stairs. The lead on v0.6.114, 15.11.2026.)
+  float st = px < 2.5 ? mix(.5, .5 + (vnoise(mat2(.8, -.6, .6, .8) * pk / 2.1 + 11.) + vnoise(mat2(.28, .96, -.96, .28) * pk / 3.7 + 47.) - 1.) * .7, smoothstep(2.5, 1., px)) : .5, tree = st * .6 + p.n2 * .4;
   vec2 nh = p.n.xy / max(length(p.n.xy), 1e-4);
   float rel = (p.hl - gRise) / 300.;
   float con = albumConifer(p.cA.g, st, p.n2, rel, -nh.y * smoothstep(.05, .3, p.slope), p.slope);

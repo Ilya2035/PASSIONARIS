@@ -18,6 +18,7 @@ import { GROUND_TILES } from './data.js';
 import { CLIM_N, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K } from './ground/climate.js';
 import { stepTable } from './ground/steps.js';
 import { REGION_FADE, STATE_FADE, WORLD_LOD0 } from './ground/world.js';
+import { GLOBE, GLOBE_GLSL } from './sky/globe.js';
 
 const M = 160, LEVELS = 9;
 const POLE_LAT = 88;   // a level of the grid is drawn only if it ends short of this latitude
@@ -115,6 +116,9 @@ ${CHUNK_GLSL}
 ${LIGHT}
 uniform float uTime, uShade, uSnow, uForestK, uSeason;
 uniform int uGrid, uData;
+#if ZONE != 1
+${GLOBE_GLSL}   // the day and night of the ball: uGlobe, globeRelight(), globeRelightOwn() — for the last line of main()
+#endif
 // The grain of the ground: squares of real ground about 10 km across, seen from a satellite, with their broad tones
 // taken out (scripts/album/bake-ground-tiles.mjs). They are layers of one texture: a pixel shader may read only 16
 // textures, and the aspects need some of them. The names are layer numbers for texDetail():
@@ -367,8 +371,10 @@ void main() {
   float lod0 = log2(max(px, .234) / .234);
   // (The Sun is one for the whole frame, in the polygon and beyond it: uSun, as east, north, up. From a height the
   // sky draws the frame with the highest Sun in view and then dims every place to its own light in the finishing
-  // pass — sky/globe.js. The ground must not count the Sun of the place itself as well: for a day, v0.6.114, the
-  // land beyond the polygon did, and from on high it was dimmed twice.)
+  // pass — sky/globe.js. In v0.6.114 the land beyond the polygon turned its slopes and cast its shadows by the Sun
+  // of the place itself; its sea hardly darkened by night, slopes of the night side caught sunlight, and by evening
+  // and by night the polygon stood out as a dark rectangle. What the finishing pass expects beyond the polygon is
+  // settled at the end of main().)
   vec2 sd = normalize(uSun.xy + 1e-4); float tanEl = uSun.z / max(1e-3, length(uSun.xy));
   // Shadows cast by the relief are for the near and middle heights: there a shadow lies in its valley and shows
   // the shape of the mountain. From afar the same shadows are dark blots inside a range that no shape explains (the
@@ -569,7 +575,9 @@ void main() {
   if (rgW < 1.) {
     float lw2 = clamp(px / 28., .004, .25);
     lakeA = smoothstep(.5 - lw2, .5 + lw2, worldClimate(ll).r) * (1. - rgW);
-    if (lakeA > 0.) p.h = -6. - 60. * smoothstep(.5, 1., worldClimate(ll).r);
+    // (a lake begins at the depth the sea of the world begins at, 14.5 m: begun at 6 m, every lake had a pale rim
+    // with a white line of surf in places, and a lake cut off from the sea — the IJsselmeer — was a pale ring in it)
+    if (lakeA > 0.) p.h = -14.5 - 52. * smoothstep(.5, 1., worldClimate(ll).r);
     // (The water work smooths the bottom of the shallows from the heights of the polygon; far from it those are
     // read off the edge of their texture, and the bays of the world came out speckled with surf. Beyond the
     // polygon the sea is never shallower than the depth from which that smoothing begins.)
@@ -634,7 +642,23 @@ void main() {
 
 #endif
   // ---- air between the eye and the ground, then the finish shared by everything
-  gl_FragColor = vec4(albumFinish(albumAir(col, vPos)), 1.);
+  col = albumAir(col, vPos);
+#if ZONE != 1
+  // Beyond the polygon the ground hands the picture over so that the sky treats it as it treats the polygon. The
+  // land is drawn with the one Sun of the frame everywhere. The finishing pass of the sky (post.js) then dims the
+  // polygon by «light of the place / light of the frame» (globeRelight), and the land beyond it by «light of the
+  // place / what level land draws under the Sun of the place» (globeRelightOwn, since v0.6.116: in v0.6.114 the
+  // ground lit that land by the Sun of the place). So the picture goes out times the first measure over the second
+  // — over the very mix of the two that the pass lays in the band of the border — and what the pass leaves is the
+  // first measure alone, on both sides. Both are the sky's own functions (sky/globe.js), not copies: counted here
+  // by a formula of its own («level land under the Sun of the place over the same under the Sun of the frame»),
+  // the two sides parted by a sixth in the evening, when the sky's light of a low Sun and that formula disagree.
+  // Near the ground, where the pass leaves the frame alone (uGlobe.x = 0), nothing is done.
+  // (the weight of the polygon and the upward direction are counted again here: carried through the aspects they
+  // would be two more numbers held all the way — docs/album/ground.md, «Скорость»)
+  float rgL = REGION(ll); if (rgL < 1. && uGlobe.x > 0.) { vec3 upL = normalize(vPos + vec3(0., RKM, 0.)), asPolygon = globeRelight(upL); col *= asPolygon / mix(globeRelightOwn(upL), asPolygon, rgL); }
+#endif
+  gl_FragColor = vec4(albumFinish(col), 1.);
 }`;
 // The numbers written as the edges of smoothstep() go into a table (the uniform uStep) before the shader is compiled:
 // with them in its code the shader ran 40 % slower on a weak video card. Why and how: ground/steps.js.
@@ -680,7 +704,7 @@ export class Terrain {
       // the whole Earth beyond the polygon (ground/world.js); without the files: deep sea and a mild climate
       tWorld: { value: data.world?.tex || flat(RedFormat, new Float32Array([-3200])) }, tWorldClim: { value: data.world?.clim || flat(RGBAFormat, new Uint8Array([128, 128, 128, 255])) },
       uStep: { value: GROUND_STEPS.table },
-      ...chunks.uniforms, ...ASPECT_UNIFORMS,
+      ...chunks.uniforms, ...ASPECT_UNIFORMS, ...GLOBE,
     };
     // A grid is drawn by the three variants of the shader (ZONE), each cut to its own part of the Earth — or by the
     // one variant that draws everything, where the video card cannot cut. this.levels: the first of them for

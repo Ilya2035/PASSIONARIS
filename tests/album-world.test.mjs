@@ -174,6 +174,11 @@ test('world: the ground shader draws the Earth beyond the polygon by the rules o
   assert.ok(terrain.includes('if (rg < 1.) g *= 1. + 2. * (1. - rg);') && terrain.includes('gm += ((fa.yz * RA) * (-.175 * ta / ra) + (fb.yz * RB) * (-.14 * tb / rb) + (fd.yz * RC) * (-.31 * td / rd * fine)) * sw;'), 'the coarse heights of the world: a steeper slope and ridges by rule');
   assert.ok(terrain.includes('lakeA = smoothstep(.5 - lw2, .5 + lw2, worldClimate(ll).r) * (1. - rgW);') && terrain.includes('if (h0 < 25. || lakeA > 0.) sea = aspWater(p);'), 'the lakes of the world');
   assert.ok(terrain.includes('worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) - .5) * 500.'), 'the ice of the polar seas');
+  assert.ok(terrain.includes('if (lakeA > 0.) p.h = -14.5 - 52. * smoothstep(.5, 1., worldClimate(ll).r);'), 'a lake of the world is no shallower than its sea: no pale rim round it');
+  // no noise of a large size is read along the axes of the map: its square cells show as rectangles from afar
+  const forest = read('../src/album/aspects/forest.js');
+  assert.ok(forest.includes('vnoise(mat2(.8, -.6, .6, .8) * pk / 2.1 + 11.) + vnoise(mat2(.28, .96, -.96, .28) * pk / 3.7 + 47.)') && !forest.includes('vnoise(pk / 2.6 + 11.)'), 'the stands of the forest');
+  assert.ok(ground.includes('vnoise(mat2(.83, .56, -.56, .83) * pk / 310. + 11.)') && ground.includes('vnoise(mat2(.37, -.93, .93, .37) * pk / 420. + 57.)'), 'the regions of soil of the deserts');
   assert.ok(ground.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk, float wild) {') && terrain.includes('conc, pk, 1. - rg);'), 'the bare ground is told that it lies beyond the polygon');
   // nothing of the world is carried through the aspects: how far inside the polygon a pixel lies is counted again where it is needed
   const main = terrain.slice(terrain.lastIndexOf('void main() {')), after = main.slice(main.indexOf('aspForest(p, L);'));
@@ -194,7 +199,7 @@ test('world: three variants of the ground shader, and the polygon keeps the one 
   assert.ok(terrain.includes('#if ZONE == 1\n#define ALBUM_WORLD 0\n#define REGION(ll) 1.\n#define STATE(ll) 1.\n#elif ZONE == 3\n#define ALBUM_WORLD 2\n#define REGION(ll) 0.\n#define STATE(ll) 0.\n#else\n#define ALBUM_WORLD 1\n#define REGION(ll) inRegion(ll)'));
   const main = terrain.slice(terrain.lastIndexOf('void main() {'), terrain.indexOf('// The numbers written as the edges of smoothstep()')).replace(/\/\/[^\n]*/g, '');
   assert.ok(!main.includes('inRegion(') && !main.includes('regionEdge('), 'the shader asks REGION() and STATE() only: inside the polygon and beyond it they are numbers, and the rules of the other side fall out when it is compiled');
-  assert.equal(main.split('REGION(ll)').length - 1, 3, 'at the top, at the snow and at the lakes: never carried through the aspects');
+  assert.equal(main.split('REGION(ll)').length - 1, 4, 'at the top, at the snow, at the lakes and at the light of the place: never carried through the aspects');
   assert.ok(terrain.includes('cw.r = max(worldLod(ll, ${(WORLD_LOD0 + 2).toFixed(2)}), 0.) / 4096.; clim = mix(cw, clim, rg);'), 'the country round a place beyond the polygon: the world map smoothed over 20 km');
   assert.ok(main.includes('if (rsW < 1.) p.cB = mix(vec4(0., 0., 0., .30 + .13 * smoothstep(200., 3000., -h0)), p.cB, rsW);'), 'the sea beyond the chunks is not becalmed');
   // inside the polygon heightLod() is the polygon's own, beyond it the world's alone

@@ -61,6 +61,13 @@ test('swamp aspect: the contract function, its uniforms, knobs and pages', () =>
   assert.deepEqual(a, b, 'the seam is shown from the same place with and without the grid');
 });
 
+test('swamp from 20 km: an edge of a few pixels, tussocks without a checker', () => {
+  const src = fs.readFileSync(new URL('../src/album/aspects/swamp.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(src.includes('float swE = clamp(px * 1.2, .012, .07);') && src.includes('float m = mix(smoothstep(-swE, swE, d), clamp(s * 1.05, 0., 1.) * step(slope, .05), far);'), 'the edge is as wide as the pixels allow, never wider than .07');
+  assert.ok(src.includes('if (s * 1.05 - f + .3 < -.07 && far <= 0.) return;'), 'the early way out keeps the widest edge');
+  assert.ok(src.includes('swampNoise(pk / .085 + 3.)') && !src.includes('vnoise(pk / .085 + 3.)'), 'the tussocks: a noise without the square grain');
+});
+
 test('natural swamp: level ground at the sea and in the wet takes it; hills, the sea and reservoirs do not', () => {
   const ch = new Chunks(world), nat = naturalSwamp(ch, world, {});
   assert.equal(nat.length, ch.count);

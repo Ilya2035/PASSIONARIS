@@ -34,8 +34,10 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   // regions, and fade once they are a pixel or two across.
   if (wild > 0. && px > .35) {
     float farK = wild * smoothstep(.35, 1.4, px), nearK = smoothstep(3., .8, px);
-    g2 = mix(g2, vnoise(pk / 310. + 11.) * .7 + mix(.5, g2, nearK) * .3, farK);
-    nz.x = mix(nz.x, vnoise(pk / 420. + 57.) * .7 + mix(.5, nz.x, nearK) * .3, farK);
+    // (each noise on a grid turned by its own angle: read along the axes of the map, the regions of the Sahara had
+    // straight edges running north–south and east–west — the lead on v0.6.114)
+    g2 = mix(g2, vnoise(mat2(.83, .56, -.56, .83) * pk / 310. + 11.) * .7 + mix(.5, g2, nearK) * .3, farK);
+    nz.x = mix(nz.x, vnoise(mat2(.37, -.93, .93, .37) * pk / 420. + 57.) * .7 + mix(.5, nz.x, nearK) * .3, farK);
   }
   if (px < .12) fine = mix(.5, vnoise(mat2(.8, -.6, .6, .8) * pk / .21 + 5.), smoothstep(.12, .04, px));
   if (px < .02) bush = smoothstep(.80, .92, vnoise(pk / .017 + 3.)) * smoothstep(.02, .009, px) * smoothstep(.10, .22, wet);   // bushes one by one, in the near view

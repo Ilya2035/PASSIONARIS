@@ -197,7 +197,10 @@ void aspSwamp(Px p, inout Land L) {
   float hk = hs + (p.n2 - .5) * 3. + (p.n3 - .5) * 1.5;                               // a little unevenness, so the kinds do not change along the cells of the height data
   vec4 kind = swampKind(p.ll, hk, p.wet);
   float d = swampDepth(s, f, p.ll, hs, slope, kind.x);
-  float m = mix(smoothstep(-.07, .07, d), clamp(s * 1.05, 0., 1.) * step(slope, .05), far);
+  // (The edge of the swamp is a few pixels wide, and no wider than it was. With one width at every height a small
+  // swamp seen from 20 km was a blurred blot — the lead on the flood plain of the Ebro at Zaragoza, 15.11.2026.)
+  float swE = clamp(px * 1.2, .012, .07);
+  float m = mix(smoothstep(-swE, swE, d), clamp(s * 1.05, 0., 1.) * step(slope, .05), far);
   fSwampW = m; if (m < .004) return;
   float z = clamp(d * 2., 0., 1.);                                                    // 0 the edge of the swamp .. 1 its heart
   float glade = kind.w * smoothstep(.15, .5, z) * .85; kind.w -= glade; kind.y += glade;   // the heart of a flooded forest is open reed and water
@@ -220,7 +223,8 @@ void aspSwamp(Px p, inout Land L) {
   water = mix(z * (pa * .5 + .05 * cw) * lvl, water, near);                           // what is left of the water when it is smaller than a pixel
 
   // ---- what grows
-  float fine = px < .12 ? mix(.5, vnoise(pk / .085 + 3.), smoothstep(.12, .04, px)) : .5;   // tussocks and hummocks
+  // tussocks and hummocks: the noise without the square grain (vnoise here was a checker of 85 m all over the swamp)
+  float fine = px < .12 ? mix(.5, clamp(.5 + (swampNoise(pk / .085 + 3.) - .5) * 1.6, 0., 1.), smoothstep(.12, .04, px)) : .5;
   vec3 vBog = mix(vec3(.46, .37, .18), vec3(.36, .37, .16), mott);                    // ochre moss and deer grass
   vBog = mix(vBog, vec3(.33, .22, .17), smoothstep(.52, .8, fine) * .6);              // russet hummocks of heather
   vBog = mix(vBog, vec3(.49, .46, .17), smoothstep(.38, .12, fine) * z * .55);        // bright wet moss in the hollows
