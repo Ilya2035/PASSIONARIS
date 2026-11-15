@@ -306,7 +306,7 @@ export function nearestPiece(geo, x, y, wet) {
 export function borderGeometry(div, rivers = null) {
   const geo = borderLines(div.cells, div.kinds, div.province, div.region, rivers);
   Object.assign(geo, squareLists(geo));
-  const n = FN * FNY, cells = div.cells, kinds = div.kinds, centre = new Int32Array(n).fill(-1), wetOf = d => (kinds[d] === LAND ? 0 : 1);
+  const n = FN * FNY, cells = div.cells, kinds = div.kinds, centre = new Int16Array(n).fill(-1), wetOf = d => (kinds[d] === LAND ? 0 : 1);
   // the middle of every square: by the nearest line, if one is near; else by the squares about it that no line comes
   // near — they hang together inside one district, and most of them already lie in it
   for (let t = 0; t < n; t++) {

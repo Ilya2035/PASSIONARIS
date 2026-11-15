@@ -21,7 +21,7 @@ export function encodeCells({ size, stamp, cells, prov, width, height }) {
   return out;
 }
 
-// buf: ArrayBuffer of the unpacked file → { size, stamp, n, width, height, cells: Int32Array, prov: Int32Array }, or
+// buf: ArrayBuffer of the unpacked file → { size, stamp, n, width, height, cells: Int16Array, prov: Int16Array }, or
 // null when it is not such a file
 export function decodeCells(buf) {
   if (!buf || buf.byteLength < 8) return null;
@@ -29,7 +29,7 @@ export function decodeCells(buf) {
   let head; try { head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len))); } catch { return null; }
   if (head.magic !== MAGIC) return null;
   const at = 4 + Math.ceil(len / 4) * 4, n = head.n; if (at + n * 4 > buf.byteLength) return null;
-  return { ...head, cells: Int32Array.from(new Int16Array(buf, at, n)), prov: Int32Array.from(new Int16Array(buf, at + n * 2, n)) };
+  return { ...head, cells: new Int16Array(buf.slice(at, at + n * 2)), prov: new Int16Array(buf.slice(at + n * 2, at + n * 4)) };
 }
 
 // in the page: the baked texels of districts of this size, or null when there are none

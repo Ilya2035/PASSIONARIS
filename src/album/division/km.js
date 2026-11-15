@@ -229,7 +229,7 @@ export const ORDER_WEIGHT = [0, 1, 1.15, 1.5, 2.4, 6];   // how much farther a c
 //     first: Uint32Array (count + 1: where the chunks of a district begin in list), rank: Int32Array (the place of a
 //     chunk in its district, −1 for water) }
 export function districtOrder(div, facts) {
-  const count = div.count, n = KN * KNY, cells = div.cells, cen = div.centres, first = new Uint32Array(count + 1), key = new Float32Array(n), rank = new Int32Array(n).fill(-1);
+  const count = div.count, n = KN * KNY, cells = div.cells, cen = div.centres, first = new Uint32Array(count + 1), key = new Float32Array(n), rank = new Int16Array(n).fill(-1);   // (a district has some hundreds of chunks)
   for (let c = 0; c < n; c++) { const d = cells[c]; if (d >= 0 && div.kinds[d] === LAND) first[d + 1]++; }
   for (let d = 0; d < count; d++) first[d + 1] += first[d];
   const list = new Uint32Array(first[count]), at = Uint32Array.from(first.subarray(0, count));

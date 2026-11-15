@@ -166,7 +166,7 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
   const before = census(prov0), keep = new Uint8Array(provinceCount), dist = new Float64Array(n), heap = new Heap(1 << 16);
   let out = prov0;
   for (let pass = 0; pass < 3; pass++) {
-    const label = new Int32Array(n).fill(-1); dist.fill(Infinity); heap.clear();
+    const label = new Int16Array(n).fill(-1); dist.fill(Infinity); heap.clear();
     for (let t = 0; t < n; t++) { const p = prov0[t]; if (p >= 0 && (keep[p] || d[t] > belt(p))) { label[t] = p; dist[t] = 0; } }
     for (let t = 0; t < n; t++) if (label[t] >= 0 && dist[t] === 0) {                 // the rim of a core
       const tx = t % FN, ty = (t - tx) / FN;
@@ -199,7 +199,9 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
 //     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land;
 //     mtn: how much of a mountain every texel is (mountainRaster); stamp: cellsStamp(); baked: true when read }
 export function districtCells(ch, div, { heightAt = null, rivers = [], baked = null } = {}) {
-  const n = FN * FNY, cell = cellsOfChunks(ch).cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
+  // (the district and the province of a texel are 16-bit: there are some thousands of each, and on the lattice of stage 3
+  // a 32-bit number a square would hold 21 MB an array for nothing)
+  const n = FN * FNY, cell = cellsOfChunks(ch).cell, out = new Int16Array(n).fill(-1), prov0 = new Int16Array(n).fill(-1), hgt = new Float32Array(n);
   for (let ty = 0, t = 0; ty < FNY; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG;
     for (let tx = 0; tx < FN; tx++, t++) {
