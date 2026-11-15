@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { russifySites, toRussian, guessLang, langOfUnit, unitFinder, hasLatin, hasCyrillic } from '../../src/album/town/translit.js';
+import { russifySites, toRussian, langAt, unitFinder, hasLatin, hasCyrillic } from '../../src/album/town/translit.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..'), TOWN = join(ROOT, 'public', 'assets', 'album', 'town');
 const units = JSON.parse(readFileSync(join(ROOT, 'public', 'assets', 'album', 'division', 'admin.json'), 'utf8')).units;
@@ -30,7 +30,7 @@ if (existsSync(vectors)) {
   const unitAt = unitFinder(units), names = { ...old };
   for (const pl of JSON.parse(readFileSync(vectors, 'utf8')).places || []) {
     const key = String(pl.name || '').replace(/[‎‏]/g, '').trim(); if (!key || hasCyrillic(key)) continue;
-    names[key] = toRussian(key, guessLang(langOfUnit(unitAt(pl.lon, pl.lat)), key));
+    names[key] = toRussian(key, langAt(unitAt(pl.lon, pl.lat), pl.lon, pl.lat, key));
   }
   const sorted = Object.fromEntries(Object.entries(names).sort((a, b) => a[0].localeCompare(b[0])));
   writeFileSync(out, JSON.stringify({ v: 1, about: 'Russian names for the places of the album (Natural Earth) the data names in Latin letters; made by scripts/album/russify-names.mjs', names: sorted }, null, 1) + '\n');

@@ -7,7 +7,8 @@
 // page. A name that already has a Russian form in the data keeps it; a well-known name is taken from EXONYMS; any
 // other is transcribed word by word by the rules of its language:
 //   es Spanish · gl Galician · ast Asturian · eu Basque · ca Catalan · pt Portuguese · fr French ·
-//   ar the Latin spelling of Arabic and Berber names of the Maghreb (it follows French habits)
+//   ar the Latin spelling of Arabic and Berber names of the Maghreb (it follows French habits) ·
+//   nl Dutch · de German · en English (the Channel Islands) — for the lands the polygon grows into
 // The words of a name are joined with hyphens, as Russian maps write foreign names (Ла-Пуэбла-де-Альфинден); articles
 // and prepositions inside a name are written small.
 // The rules are those of the reference tables of practical transcription, simplified where a rule needs the stress
@@ -127,6 +128,48 @@ const AR = compile([
 const AR_SMALL = { el: 'эль', al: 'эль', bel: 'бель', ben: 'бен', bou: 'бу', de: 'де', ou: 'у', ed: 'эд', ech: 'эш', es: 'эс', ez: 'эз', er: 'эр', et: 'эт' };
 const arWord = w => run(w.replace(new RegExp(`(?<=[^${AV}])e$`, 'u'), ''), AR);
 
+// ---- German (the left bank of the Rhine, Luxembourg, the east of Belgium)
+const DV = 'aeiouyäöü', DC = `[^${DV}]`;
+const DE = compile([
+  ['tzsch|tsch|zsch', 'ч'], ['sch', 'ш'], ['chs', 'кс'], ['ch', 'х'], [`(?<=[${DV}])ck(?=[${DV}])`, 'кк'], ['ck', 'к'], ['ph', 'ф'], ['qu', 'кв'], ['th', 'т'], ['tz', 'ц'],
+  // the second half of a name that begins with st, sp: Neustadt → Нойштадт, Oberstein → Оберштайн
+  ['stra(?:ss|ß)e', 'штрассе'], ['stadt', 'штадт'], ['stein', 'штайн'], ['stedt', 'штедт'], ['stätt', 'штетт'], ['stett', 'штетт'], ['stuhl', 'штуль'], ['strom', 'штром'], ['spitz', 'шпиц'],
+  ['rh', 'р'], ['tion', 'цион'], ['ss|ß', 'с'], [`${S}sp`, 'шп'], [`${S}st`, 'шт'], [`s(?=[${DV}])`, 'з'],
+  ['z', 'ц'], ['v', 'ф'],
+  ['jä', 'йе'], ['ja', 'я'], ['je', 'е'], ['jö', 'йё'], ['jo', 'йо'], ['jü', 'ю'], ['ju', 'ю'], ['j', 'й'],
+  ['[ae][iy]', 'ай'], ['eu|äu', 'ой'], ['ie', 'и'], ['au', 'ау'], ['aa', 'а'], ['ee', 'е'], ['oo', 'о'],
+  [`(?<=[${DV}])h`, ''], ['h', 'х'],                                // a mute h after a vowel; elsewhere it sounds
+  [`${S}ä`, 'э'], ['ä', 'е'], [`${S}ö`, 'э'], ['ö', 'ё'], [`${S}ü`, 'и'], ['ü', 'ю'],
+  ['c(?=[eiäöy])', 'ц'],
+  [`${S}e`, 'э'], ['(?<=[aouäöü])e', 'э'],
+  [`ll(?=${DC}|${E})`, 'лль'], [`l(?=${DC}|${E})`, 'ль'],
+]);
+const DE_SMALL = { am: 'ам', an: 'ан', der: 'дер', die: 'ди', dem: 'дем', den: 'ден', im: 'им', in: 'ин', bei: 'бай', ob: 'об', zu: 'цу', zur: 'цур', zum: 'цум', vor: 'фор', auf: 'ауф', und: 'унд', von: 'фон', unter: 'унтер', ober: 'обер' };
+
+// ---- Dutch (the Netherlands, Flanders)
+const NL = compile([
+  [`sch${E}`, 'с'], ['sch', 'сх'], ['sj', 'ш'], ['tj', 'ч'], ['ch', 'х'], ['ck', 'к'], ['ph', 'ф'], ['th', 'т'], ['qu', 'кв'],
+  [`burgh?${E}`, 'бург'],                                            // Middelburg → Мидделбург, as the maps write it
+  ['aai', 'ай'], ['ooi', 'ой'], ['oei', 'уй'], ['eeuw', 'еув'], ['ieuw', 'иув'], ['eeu', 'еу'], ['ieu', 'иу'],
+  ['aa', 'а'], [`${S}ee`, 'э'], ['ee', 'е'], ['oo', 'о'], ['uu', 'ю'], ['oe', 'у'], ['ou|au', 'ау'],
+  [`${S}(?:ei|ij)`, 'эй'], ['ei|ij|ey', 'ей'], [`${S}eu`, 'э'], ['eu', 'ё'], ['ie', 'и'], ['u[iy]', 'ёй'], ['ai', 'ай'], ['oi', 'ой'],
+  ['ja', 'я'], ['je', 'е'], ['jo', 'йо'], ['ju', 'ю'], ['j', 'й'],
+  ['h', 'х'], ['c(?=[eiy])', 'с'], ['z', 'з'], ['w', 'в'], ['v', 'в'],
+  [`${S}u`, 'у'], ['u', 'ю'],
+  [`${S}e`, 'э'], ['(?<=[aou])e', 'э'],
+]);
+const NL_SMALL = { de: 'де', den: 'ден', der: 'дер', het: 'хет', in: 'ин', op: 'оп', te: 'те', ten: 'тен', ter: 'тер', van: 'ван', bij: 'бей', en: 'эн', aan: 'ан', "'s": 'с', "'t": 'т' };
+
+// ---- English, for the few names of the Channel Islands: rough rules, the well-known names are in EXONYMS
+const EN = compile([
+  ['tch', 'ч'], ['sh', 'ш'], ['ch', 'ч'], ['th', 'т'], ['ph', 'ф'], ['ck', 'к'], ['wh', 'у'], ['qu', 'кв'], ['igh', 'ай'], ['tion', 'шен'],
+  [`aye${E}`, 'ей'], [`a(?=[^aeiouy]e${E})`, 'ей'],                  // Braye → Брей, Vale → Вейл
+  ['ee|ea', 'и'], ['oo', 'у'], ['ou', 'ау'], ['ow', 'оу'], ['a[iy]|ey', 'ей'], ['oy|oi', 'ой'], ['au|aw', 'о'],
+  ['j', 'дж'], ['g(?=[eiy])', 'дж'], ['c(?=[eiy])', 'с'], ['h', 'х'],
+  [`(?<=[^aeiouy])e${E}`, ''], [`y${E}`, 'и'], [`${S}e`, 'э'], ['w(?=[aeiouy])', 'у'],
+]);
+const EN_SMALL = { of: 'оф', the: 'те', on: 'он', in: 'ин', and: 'энд', le: 'ле', la: 'ла', de: 'де', du: 'дю' };
+
 const LANGS = {
   // (a mute h at the head of a word is dropped; inside a word it stays to keep two vowels apart: Lahiguera → Лаигера)
   es: { word: w => run(w.replace(/^h/, ''), ES), small: ES_SMALL },
@@ -137,6 +180,9 @@ const LANGS = {
   pt: { word: w => run(w, PT), small: PT_SMALL },
   fr: { word: frWord, small: FR_SMALL },
   ar: { word: arWord, small: AR_SMALL },
+  nl: { word: w => run(w, NL), small: NL_SMALL },
+  de: { word: w => run(w, DE), small: DE_SMALL },
+  en: { word: w => run(w, EN), small: EN_SMALL },
 };
 export const LANG_IDS = Object.keys(LANGS);
 
@@ -150,6 +196,27 @@ export const EXONYMS = { algiers: 'Алжир', alger: 'Алжир', oran: 'Ор
   eivissa: 'Ивиса', ibiza: 'Ивиса', elx: 'Эльче', elche: 'Эльче', alacant: 'Аликанте', alicante: 'Аликанте', 'donostia': 'Сан-Себастьян', pamplona: 'Памплона', iruna: 'Памплона', bilbo: 'Бильбао', bilbao: 'Бильбао',
   'vitoria-gasteiz': 'Витория', gasteiz: 'Витория', andorra: 'Андорра', 'andorra la vella': 'Андорра-ла-Велья', lleida: 'Льейда', girona: 'Жирона', perpignan: 'Перпиньян', bayonne: 'Байонна', rodez: 'Родез', foix: 'Фуа',
   apt: 'Апт', gap: 'Гап', 'saint-gaudens': 'Сен-Годенс', pezenas: 'Пезенас', lisle: 'Лиль' };
+// …of the lands the polygon grows into (Western Europe, the whole Maghreb). Only names no village is likely to share:
+// a village «Bruges» stands in the Pyrenees, and is Брюж, not Брюгге.
+Object.assign(EXONYMS, {
+  paris: 'Париж', marseille: 'Марсель', lyon: 'Лион', lille: 'Лилль', reims: 'Реймс', strasbourg: 'Страсбург', nantes: 'Нант', rouen: 'Руан', 'le havre': 'Гавр', orleans: 'Орлеан', nancy: 'Нанси', metz: 'Мец',
+  dijon: 'Дижон', rennes: 'Ренн', caen: 'Кан', amiens: 'Амьен', toulon: 'Тулон', grenoble: 'Гренобль', 'saint-etienne': 'Сент-Этьен', calais: 'Кале',
+  dunkerque: 'Дюнкерк', mulhouse: 'Мюлуз', besancon: 'Безансон', 'le mans': 'Ле-Ман', angers: 'Анже', limoges: 'Лимож', 'clermont-ferrand': 'Клермон-Ферран', poitiers: 'Пуатье', versailles: 'Версаль', monaco: 'Монако',
+  bruxelles: 'Брюссель', brussel: 'Брюссель', brussels: 'Брюссель', antwerpen: 'Антверпен', gent: 'Гент', brugge: 'Брюгге', liege: 'Льеж', luik: 'Льеж', namur: 'Намюр',
+  charleroi: 'Шарлеруа', leuven: 'Лёвен', ieper: 'Ипр', oostende: 'Остенде', mechelen: 'Мехелен', tournai: 'Турне',
+  amsterdam: 'Амстердам', rotterdam: 'Роттердам', "'s-gravenhage": 'Гаага', 'den haag': 'Гаага', "'s-hertogenbosch": 'Хертогенбос', 'den bosch': 'Хертогенбос', utrecht: 'Утрехт', maastricht: 'Маастрихт',
+  groningen: 'Гронинген', eindhoven: 'Эйндховен', nijmegen: 'Неймеген', haarlem: 'Харлем', leiden: 'Лейден', delft: 'Делфт', arnhem: 'Арнем', breda: 'Бреда', tilburg: 'Тилбург', vlissingen: 'Флиссинген',
+  luxembourg: 'Люксембург', luxemburg: 'Люксембург', letzebuerg: 'Люксембург', 'esch-sur-alzette': 'Эш-сюр-Альзетт',
+  koln: 'Кёльн', aachen: 'Ахен', moers: 'Мёрс', eupen: 'Эйпен', bonn: 'Бонн', trier: 'Трир', mainz: 'Майнц', koblenz: 'Кобленц', saarbrucken: 'Саарбрюккен', saarlouis: 'Саарлуи', kaiserslautern: 'Кайзерслаутерн', ludwigshafen: 'Людвигсхафен',
+  'ludwigshafen am rhein': 'Людвигсхафен-на-Рейне', worms: 'Вормс', speyer: 'Шпайер', neuss: 'Нойс', krefeld: 'Крефельд', monchengladbach: 'Мёнхенгладбах', kleve: 'Клеве', duren: 'Дюрен',
+  tunis: 'Тунис', 'le kef': 'Эль-Кеф', 'el kef': 'Эль-Кеф', tozeur: 'Таузар', jendouba: 'Джендуба', tataouine: 'Татавин', sfax: 'Сфакс', sousse: 'Сус', kairouan: 'Кайруан', bizerte: 'Бизерта', gabes: 'Габес', gafsa: 'Гафса', nabeul: 'Набуль', monastir: 'Монастир', hammamet: 'Хаммамет',
+  casablanca: 'Касабланка', rabat: 'Рабат', marrakech: 'Марракеш', marrakesh: 'Марракеш', agadir: 'Агадир', essaouira: 'Эс-Сувейра', kenitra: 'Кенитра', 'el jadida': 'Эль-Джадида',
+  'beni mellal': 'Бени-Меллаль', ouarzazate: 'Варзазат', constantine: 'Константина', annaba: 'Аннаба', setif: 'Сетиф', batna: 'Батна', biskra: 'Бискра', skikda: 'Скикда', jijel: 'Джиджель',
+  'saint helier': 'Сент-Хелиер', 'st helier': 'Сент-Хелиер', 'st. helier': 'Сент-Хелиер', 'saint peter port': 'Сент-Питер-Порт', 'st peter port': 'Сент-Питер-Порт', 'st. peter port': 'Сент-Питер-Порт',
+  'saint anne': 'Сент-Анн', 'st anne': 'Сент-Анн', 'saint sampson': 'Сент-Сампсон', 'st sampson': 'Сент-Сампсон', 'saint saviour': 'Сент-Сейвьер', 'saint brelade': 'Сент-Брелад', 'saint aubin': 'Сент-Обин',
+  'saint clement': 'Сент-Клемент', 'saint john': 'Сент-Джон', 'saint mary': 'Сент-Мэри', 'saint martin': 'Сент-Мартин', 'saint lawrence': 'Сент-Лоренс', 'saint ouen': 'Сент-Уэн', 'saint peter': 'Сент-Питер',
+  'saint andrew': 'Сент-Эндрю', grouville: 'Грувиль', torteval: 'Тортеваль', gorey: 'Гори', jersey: 'Джерси', guernsey: 'Гернси', alderney: 'Олдерни', sark: 'Сарк',
+});
 // names the data has in Arabic letters only (transcribed by hand)
 const ARABIC = { 'عزيز': 'Азиз', 'حاسي فدول': 'Хасси-Фдуль', 'الزبيرية': 'Эз-Зубейрия', 'سغوان': 'Сегуан', 'مجبر': 'Меджбер', 'بوجبهة البرج': 'Буджебха-эль-Бордж', 'سيدي زيان': 'Сиди-Зиян' };
 const AR_LETTERS = { 'ا': 'а', 'أ': 'а', 'إ': 'и', 'آ': 'а', 'ب': 'б', 'ت': 'т', 'ث': 'с', 'ج': 'дж', 'ح': 'х', 'خ': 'х', 'د': 'д', 'ذ': 'з', 'ر': 'р', 'ز': 'з', 'س': 'с', 'ش': 'ш', 'ص': 'с', 'ض': 'д', 'ط': 'т', 'ظ': 'з', 'ع': 'а',
@@ -173,6 +240,10 @@ export function guessLang(lang, name) {
   const s = cleanName(name).toLowerCase();
   if (lang === 'va') return /ny|ç|tx|l·l|[àèò]|ig$|^x|(^| )(i|els|les|dels)( |$)|[dl]'/.test(s) ? 'ca' : /ñ|ch|[áéíóú]|(^| )(y|del|los|las)( |$)|j|ue|ie/.test(s) ? 'es' : 'ca';
   if (lang === 'nav') return /tx|tz|ts|k|x|rr.*a$|eta$|aga$/.test(s) && !/ñ|ll|[áéíóú]|(^| )(de|del|la|el)( |$)/.test(s) ? 'eu' : 'es';
+  // Luxembourg writes its names in French or in German; Belgium, where nothing says where the place lies (langAt),
+  // in French or in Dutch
+  if (lang === 'lu') return /[éèêàç]|-sur-|ange$|ville|ou|eau|court|saint/.test(s) ? 'fr' : 'de';
+  if (lang === 'be') return /[éèêàçùûôî]|eau|ou|ville|court|-sur-|-l[ae]s?-|saint|qu|ies$|ont$/.test(s) ? 'fr' : /ij|oe|uu|aa|ee|oo|sch|kk|w|k|gem$|hem$|beke$|dorp|burg|veld|hout|zele$|laar$|dijk|sint/.test(s) ? 'nl' : 'fr';
   return lang;
 }
 
@@ -201,6 +272,9 @@ export function toRussian(name, lang = 'es') {
     if (id === 'fr' && (w === 'saint' || w === 'st')) { out.push(vowelNext ? 'Сент' : 'Сен'); return; }
     if (id === 'fr' && (w === 'sainte' || w === 'saintes' || w === 'ste')) { out.push('Сент'); return; }
     if (id === 'pt' && w === 'são') { out.push('Сан'); return; }
+    if (id === 'en' && (w === 'saint' || w === 'st' || w === 'st.')) { out.push('Сент'); return; }
+    if (id === 'de' && (w === 'sankt' || w === 'st' || w === 'st.')) { out.push('Санкт'); return; }
+    if (id === 'nl' && (w === 'sint' || w === 'st' || w === 'st.')) { out.push('Синт'); return; }
     const small = L.small[w];
     if (small !== undefined) { out.push(first ? cap(small) : small); return; }
     out.push(cap(L.word(w)));
@@ -210,9 +284,19 @@ export function toRussian(name, lang = 'es') {
 
 // ---- the language of a place from the modern unit it lies in (public/assets/album/division/admin.json: the key of a
 // unit is «ESP-5827», its country and its number in Natural Earth)
-const COUNTRY = { ESP: 'es', PRT: 'pt', FRA: 'fr', AND: 'ca', MAR: 'ar', DZA: 'ar', GIB: 'es' };
+// (BEL, LUX: 'be', 'lu' — the language goes by where the place lies and how its name is written: langAt, guessLang)
+const COUNTRY = { ESP: 'es', PRT: 'pt', FRA: 'fr', AND: 'ca', MAR: 'ar', DZA: 'ar', GIB: 'es', TUN: 'ar', MCO: 'fr', NLD: 'nl', DEU: 'de', BEL: 'be', LUX: 'lu', JEY: 'en', GGY: 'en', GBR: 'en' };
 const SPAIN = { 5827: 'gl', 5832: 'gl', 5838: 'gl', 5840: 'gl', 5805: 'ast', 5809: 'ca', 5820: 'ca', 5831: 'ca', 5846: 'ca', 5808: 'ca', 5814: 'va', 5849: 'va', 5803: 'va', 5823: 'nav', 5851: 'nav', 5801: 'nav', 5837: 'nav' };
 export const langOfUnit = id => { const [c, n] = String(id || '').split('-'); return (c === 'ESP' && SPAIN[n]) || COUNTRY[c] || 'es'; };
+// The language of a name of unit `id` at (lon, lat). Belgium has three: Dutch north of the language border (about
+// 50.74° N), French south of it and in Brussels, German in the east by the border (Eupen, Sankt Vith).
+export function langAt(id, lon, lat, name = '') {
+  const lang = langOfUnit(id);
+  if (lang !== 'be' || !Number.isFinite(lat)) return guessLang(lang, name);
+  if (lon > 5.95 && lat < 50.72 && lat > 50.1) return 'de';
+  if (lat > 50.76 && lat < 50.92 && lon > 4.24 && lon < 4.49) return 'fr';                 // Brussels
+  return lat > 50.74 ? 'nl' : 'fr';
+}
 // units: admin.json's { id: { rings: [[[lon, lat] …] …] } } → (lon, lat) → the id of the unit the point lies in; a
 // point in none (a place on the very shore) takes the unit whose outline comes nearest
 export function unitFinder(units) {
@@ -235,7 +319,7 @@ export function russifySites(sites, units) {
   const out = sites.map(s => {
     const name = s[5] || s[4] || '';                               // (a record transcribed before is transcribed anew from the name it kept)
     if (!name || (hasCyrillic(name) && !hasLatin(name))) { kept++; return s.slice(0, 5); }
-    const lang = guessLang(langOfUnit(unitAt(s[0] / 1e4, s[1] / 1e4)), name);
+    const lang = langAt(unitAt(s[0] / 1e4, s[1] / 1e4), s[0] / 1e4, s[1] / 1e4, name);
     byLang[lang] = (byLang[lang] || 0) + 1;
     return [s[0], s[1], s[2], s[3], toRussian(name, lang), name];
   });

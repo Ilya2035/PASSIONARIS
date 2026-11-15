@@ -10,14 +10,13 @@
 //
 // The patches live in a grid of the settlement work's own (state.js): squares of 10 km, one patch at most in each.
 // It is only a way to find the patches near a point; chunks have natural outlines and are not these squares.
-import { CHUNK_KM, CI0, CJ0 } from '../chunks.js';
-import * as CH from '../chunks.js';
+import { CHUNK_KM, CNX, CNY, CI0, CJ0 } from '../chunks.js';
 import { KN, KNY, KKM, KX0, KY0 } from '../division/km.js';
 
 // (The grids lie over the rectangle of the natural cells of chunks.js and grow with the polygon: nothing here knows
-// its size. The cells may be a square, CN × CN, or a rectangle, CNX × CNY — as in division/km.js. In every grid the
-// first name is its WIDTH and the step from a row to the next — GN, VN, KN; the second its height — GNY, VNY, KNY.)
-export const GK = CHUNK_KM, GN = CH.CNX ?? CH.CN, GNY = CH.CNY ?? CH.CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;   // the grid of patches: GN × GNY squares of GK km from (GX0, GY0)
+// its size: the cells are CNX wide and CNY high. In every grid the first name is its WIDTH and the step from a row
+// to the next — GN, VN, KN; the second its height — GNY, VNY, KNY.)
+export const GK = CHUNK_KM, GN = CNX, GNY = CNY, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;   // the grid of patches: GN × GNY squares of GK km from (GX0, GY0)
 // The villages between the centres of districts (villages.js) lie in a finer grid of their own, laid from the same
 // corner: VN × VN squares of VK km, one village at most in each. A village and its fields never reach farther than
 // one square, so a point of the ground looks at the 3 × 3 squares around it, as in the coarse grid.

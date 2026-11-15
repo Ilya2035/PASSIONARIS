@@ -11,7 +11,7 @@
 // A yard is drawn as a block of its own (layers/towns.js), like the blocks of a settlement. The ground shader knows
 // nothing of yards, so they cost the land nothing; the price is that the fine noise of the fields cannot be read
 // here, and now and then a yard stands on the rough pasture beside a field instead of on the field.
-import { FKM, FN } from '../chunks.js';
+import { FKM, FNX, FNY } from '../chunks.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
 import { GK, GN, GNY, GX0, GY0, CELL, CULTURES, FARM_SHARP, FARM_BESIDE, FARM_PIECE, FARM_TURNS, lobesToward, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
 import { KIND } from './shapes.js';
@@ -86,8 +86,8 @@ export function yardAt(ctx, i, j) {
   const K = ctx.density ?? 1, h0 = cellHash(i, j, 0, 21);
   if (h0 * 16 >= K * YARDS_PER_KM2[2]) return null;                 // no manner of building is that dense: most places end here
   const x = GX0 + (i + .5) * YARD_STEP + (cellHash(i, j, 0, 22) - .5) * JITTER, y = GY0 + (j + .5) * YARD_STEP + (cellHash(i, j, 0, 23) - .5) * JITTER;
-  const tx = Math.floor((x - GX0) / FKM), ty = Math.floor((y - GY0) / FKM); if (tx < 0 || ty < 0 || tx >= FN || ty >= FN) return null;
-  const c = ctx.cell[ty * FN + tx]; if (!ctx.land(c)) return null;
+  const tx = Math.floor((x - GX0) / FKM), ty = Math.floor((y - GY0) / FKM); if (tx < 0 || ty < 0 || tx >= FNX || ty >= FNY) return null;   // (the raster of the outlines: FNX wide, FNY high)
+  const c = ctx.cell[ty * FNX + tx]; if (!ctx.land(c)) return null;
   const kx = Math.floor(i / YARD_SIDE), ky = Math.floor(j / YARD_SIDE);
   if (ctx.farmSquare && !(ctx.farmSquare(kx, ky) >= YARD_FARM)) return null;
   if (ctx.landSquare && !ctx.landSquare(kx, ky)) return null;
@@ -125,8 +125,8 @@ export function planYards(ctx, ti, tj) {
 // every yard of the map, for the save and the notes: [{ i, j, x, y, kind }]. Only the tiles where a yard can stand
 // are looked at: those of the chunks that have fields.
 export function allYards(ctx) {
-  const tiles = new Set(), T = YARD_TILE * YARD_STEP, TN = Math.ceil(FN * FKM / T), out = [];
-  const add = (x0, y0, x1, y1) => { for (let tj = Math.max(0, Math.floor((y0 - GY0) / T)); tj <= Math.min(TN - 1, Math.floor((y1 - GY0) / T)); tj++) for (let ti = Math.max(0, Math.floor((x0 - GX0) / T)); ti <= Math.min(TN - 1, Math.floor((x1 - GX0) / T)); ti++) tiles.add(tj * TN + ti); };
+  const tiles = new Set(), T = YARD_TILE * YARD_STEP, TN = Math.ceil(FNX * FKM / T), TNY = Math.ceil(FNY * FKM / T), out = [];   // the tiles: TN wide, TNY high
+  const add = (x0, y0, x1, y1) => { for (let tj = Math.max(0, Math.floor((y0 - GY0) / T)); tj <= Math.min(TNY - 1, Math.floor((y1 - GY0) / T)); tj++) for (let ti = Math.max(0, Math.floor((x0 - GX0) / T)); ti <= Math.min(TN - 1, Math.floor((x1 - GX0) / T)); ti++) tiles.add(tj * TN + ti); };
   // (without farmSquare a yard may stand in the chunk next to a ploughed one: the fields of a chunk reach a little
   // into the chunks around it — state.js farmAt)
   const e = ctx.farmSquare ? 0 : KKM;

@@ -637,6 +637,22 @@ test('settle names: every name of a settlement is Russian — transcribed by rul
   // the language of a place: by its modern unit; the Valencian and the Basque lands by the spelling of the name
   assert.deepEqual(['ESP-5833', 'ESP-5827', 'ESP-5809', 'PRT-746', 'FRA-5298', 'AND-4876', 'DZA-2195', 'MAR-1445', 'ESP-5805'].map(T.langOfUnit), ['es', 'gl', 'ca', 'pt', 'fr', 'ca', 'ar', 'ar', 'ast']);
   assert.equal(T.guessLang('va', 'Xàtiva'), 'ca'); assert.equal(T.guessLang('va', 'Orihuela'), 'es'); assert.equal(T.guessLang('nav', 'Getxo'), 'eu'); assert.equal(T.guessLang('nav', 'Tudela'), 'es'); assert.equal(T.guessLang('pt', 'x'), 'pt');
+  // the lands the polygon grows into: German, Dutch, English (the Channel Islands); the new countries
+  const more = { de: { 'Neustadt an der Weinstraße': 'Нойштадт-ан-дер-Вайнштрассе', 'Bingen am Rhein': 'Бинген-ам-Райн', 'Zweibrücken': 'Цвайбрюккен', 'Idar-Oberstein': 'Идар-Оберштайн', 'Euskirchen': 'Ойскирхен', 'Jülich': 'Юлих',
+      'Sankt Wendel': 'Санкт-Вендель', 'Bad Kreuznach': 'Бад-Кройцнах', 'Pirmasens': 'Пирмазенс', 'Völklingen': 'Фёльклинген', 'Köln': 'Кёльн', 'Echternach': 'Эхтернах', 'Eupen': 'Эйпен', 'Zell': 'Целль', 'Brühl': 'Брюль' },
+    nl: { 'Leeuwarden': 'Леуварден', 'Kortrijk': 'Кортрейк', 'IJmuiden': 'Эймёйден', 'Sint-Niklaas': 'Синт-Никлас', 'Zwolle': 'Зволле', 'Enschede': 'Энсхеде', 'Roeselare': 'Руселаре', 'Turnhout': 'Тюрнхаут', 'Middelburg': 'Мидделбург',
+      'Bergen op Zoom': 'Берген-оп-Зом', 'Schiedam': 'Схидам', 'Goes': 'Гус', "'s-Hertogenbosch": 'Хертогенбос', 'Den Haag': 'Гаага', 'Brugge': 'Брюгге', 'Capelle aan den IJssel': 'Капелле-ан-ден-Эйссел' },
+    en: { 'Saint Helier': 'Сент-Хелиер', 'St Peter Port': 'Сент-Питер-Порт', 'Saint John': 'Сент-Джон', 'Vale': 'Вейл', 'Braye': 'Брей', 'Trinity': 'Тринити' },
+    fr: { 'Liège': 'Льеж', 'Charleroi': 'Шарлеруа', 'Esch-sur-Alzette': 'Эш-сюр-Альзетт', 'Paris': 'Париж', 'Monaco': 'Монако' }, ar: { 'Tunis': 'Тунис', 'Kairouan': 'Кайруан', 'Le Kef': 'Эль-Кеф', 'Sidi Bouzid': 'Сиди-Бузид' } };
+  for (const [lang, list] of Object.entries(more)) for (const [name, ru] of Object.entries(list)) assert.equal(T.toRussian(name, lang), ru, `${lang}: ${name}`);
+  // (a famous name is given only where no village is likely to bear it too: Bruges of the Pyrenees is Брюж, Beja of Portugal Бежа)
+  assert.equal(T.toRussian('Bruges', 'fr'), 'Брюж'); assert.equal(T.toRussian('Beja', 'pt'), 'Бежа'); assert.equal(T.toRussian('Mons', 'fr'), 'Мон');
+  assert.deepEqual(['TUN-1', 'MCO-1', 'NLD-7', 'DEU-12', 'BEL-3', 'LUX-1', 'JEY-1', 'GGY-1'].map(T.langOfUnit), ['ar', 'fr', 'nl', 'de', 'be', 'lu', 'en', 'en']);
+  // Belgium by where the place lies: Dutch in the north, French in the south and in Brussels, German in the east; Luxembourg by the spelling
+  assert.deepEqual([[3.72, 51.05, 'Gent'], [5.57, 50.63, 'Liège'], [4.35, 50.85, 'Bruxelles'], [6.03, 50.63, 'Eupen'], [5.34, 50.93, 'Hasselt'], [3.39, 50.6, 'Tournai']].map(a => T.langAt('BEL-3', ...a)), ['nl', 'fr', 'fr', 'de', 'nl', 'fr']);
+  assert.deepEqual(['Echternach', 'Esch-sur-Alzette', 'Diekirch', 'Differdange'].map(n => T.langAt('LUX-1', 6.1, 49.7, n)), ['de', 'fr', 'de', 'fr']);
+  assert.equal(T.langAt('BEL-3', NaN, NaN, 'Kortrijk'), 'nl', 'with no position, Belgium by the spelling'); assert.equal(T.langAt('BEL-3', NaN, NaN, 'Tournai'), 'fr');
+  assert.equal(T.langAt('ESP-5833', -3.7, 40.4, 'Madrid'), 'es'); assert.equal(T.langAt('FRA-5298', 1.4, 43.6, 'Toulouse'), 'fr');
   const unitAt = T.unitFinder({ 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } });
   assert.equal(unitAt(1, 1), 'ESP-1'); assert.equal(unitAt(-2, 1), 'PRT-2'); assert.equal(unitAt(-.8, 1), 'PRT-2', 'a place on the shore takes the nearest unit');
   // records: the Russian name, and the name of the data as the sixth number
