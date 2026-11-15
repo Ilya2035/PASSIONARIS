@@ -374,7 +374,8 @@ test('roads of the album: main roads reach the towns of the provinces, lesser ro
 
 test('roads: the real settlement sites, the pages and the switches of the map', () => {
   const f = new URL('../public/assets/album/town/sites.json.gz', import.meta.url), sites = decodeSites(JSON.parse(gunzipSync(readFileSync(f))));
-  assert.ok(statSync(f).size < 4e5, 'the file stays small'); assert.ok(sites.length > 5000, sites.length + ' sites');
+  // the size is counted per site, so the check holds for the polygon of either stage: a site takes about 24 bytes
+  assert.ok(statSync(f).size < sites.length * 34, 'the file stays small: ' + statSync(f).size + ' bytes for ' + sites.length + ' sites'); assert.ok(sites.length > 5000, sites.length + ' sites');
   assert.deepEqual(SITE_KINDS, ['city', 'town', 'village']);
   for (let i = 0; i < sites.length; i++) { const s = sites[i]; assert.ok(s.lat > BBOX.lat0 && s.lat < BBOX.lat1 && s.lon > BBOX.lon0 && s.lon < BBOX.lon1 && s.pop >= 400 && s.kind >= 0 && s.kind <= 2); if (i) assert.ok(s.pop <= sites[i - 1].pop, 'the most populous first'); }
   assert.ok(sites.slice(0, 40).some(s => /Madrid|Мадрид/.test(s.name)) && sites.slice(0, 40).some(s => /Barcelona|Барселона/.test(s.name)));
