@@ -8,12 +8,12 @@ import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
-import { KN, KX0, KY0, squareOf, kmFacts, kmData } from '../src/album/division/km.js';
+import { KN, KNY, KX0, KY0, squareOf, kmFacts, kmData } from '../src/album/division/km.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { decodeSites } from '../src/album/town/sites.js';
-import { GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, TOWN_R, CULTURES, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, peopleOf, classOf, RULES_GLSL } from '../src/album/town/rules.js';
+import { GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, TOWN_R, CULTURES, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, peopleOf, classOf, RULES_GLSL } from '../src/album/town/rules.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE, PER, DENSE, GAP, NEAR, MOST, MADE_R, MADE_POP, GOOD, TOO_HIGH, SWAMP } from '../src/album/town/villages.js';
 import { growTowns, centrePlaces, fullRadius, FIELD_FLOOR, KEEP_OFF } from '../src/album/town/grow.js';
 import { mirrorSettle, mirrorVillages, packAtlas, settleBytes, atlasBytes, villageBytes, settleTex } from '../src/album/town/state.js';
@@ -31,7 +31,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // column 630.
 const I0 = 600, J0 = 600, D = 20;
 function madeDiv() {
-  const n = KN * KN, cells = new Int32Array(n).fill(2), hgt = new Float32Array(n), riv = new Uint8Array(n), cls = new Uint8Array(n);
+  const n = KN * KNY, cells = new Int32Array(n).fill(2), hgt = new Float32Array(n), riv = new Uint8Array(n), cls = new Uint8Array(n);
   for (let j = J0; j < J0 + D; j++) for (let i = I0; i < I0 + 2 * D; i++) {
     const c = j * KN + i, d = i < I0 + D ? 0 : 1; cells[c] = d; hgt[c] = d ? 400 + (i - I0 - D) * 30 : 200;
     cls[c] = d === 0 ? 1 : i >= I0 + 30 ? 5 : 2; if (i === I0 + 25) riv[c] = 2;
@@ -155,16 +155,16 @@ test('villages: their patches lie in the fine grid of the one settlement texture
   const m = growTowns(ch, places, 1, at), by = Object.fromEntries(m.towns.map(t => [t.index, t])); write(m);
   assert.equal(m.towns.length, 5);
   // the coarse grid knows the town alone: a village gives no patch there, and a cell with only a village in it none either
-  const coarse = new Uint8Array(GN * GN * 4), r = mirrorSettle(ch, m.towns, coarse);
+  const coarse = new Uint8Array(GN * GNY * 4), r = mirrorSettle(ch, m.towns, coarse);
   assert.equal(r.lobes.length, 1); assert.ok(Math.abs(r.lobes[0].r - by[0].R) < .02);
-  let held = 0; for (let g = 0; g < GN * GN; g++) if (coarse[g * 4 + 2]) held++; assert.equal(held, 1);
+  let held = 0; for (let g = 0; g < GN * GNY; g++) if (coarse[g * 4 + 2]) held++; assert.equal(held, 1);
   // the fine grid: one square a village — its place in the square, its radius, its manner and who is near
-  const fine = new Uint8Array(VN * VN * 4), v = mirrorVillages(ch, m.towns, r.lobes, fine);
+  const fine = new Uint8Array(VN * VNY * 4), v = mirrorVillages(ch, m.towns, r.lobes, fine);
   assert.ok(v.changed); assert.equal(v.lobes.length, 4); assert.equal(mirrorVillages(ch, m.towns, r.lobes, fine).changed, false, 'nothing changed, nothing to send');
   for (const i of [1, 2, 3, 4]) {
     const t = by[i], o = t.fine * 4, [bx, by2] = fineBytes(t.x, t.y), L = v.lobes.find(l => l.fine === t.fine);
     assert.deepEqual([fine[o], fine[o + 1], fine[o + 2]], [bx, by2, radiusByte(t.R)]);
-    assert.ok(Math.hypot(L.x - t.x, L.y - t.y) < VK / 256 && Math.abs(L.r - t.R) < .006 && L.k === GN * GN + t.fine && L.home === t.home && L.cul === CULTURES.med);
+    assert.ok(Math.hypot(L.x - t.x, L.y - t.y) < VK / 256 && Math.abs(L.r - t.R) < .006 && L.k === GN * GNY + t.fine && L.home === t.home && L.cul === CULTURES.med);
     assert.deepEqual([L.vx, L.vy], [t.fine % VN, Math.floor(t.fine / VN)]);
   }
   // the two villages in neighbouring squares know of each other; the far one stands alone
@@ -175,7 +175,7 @@ test('villages: their patches lie in the fine grid of the one settlement texture
   assert.ok(LA.rivals.includes(LB) && LB.rivals.includes(LA) && !LA.rivals.includes(r.lobes[0])); assert.equal(v.lobes.find(l => l.fine === C.fine).rivals.length, 0);
   assert.ok(v.lobes.find(l => l.fine === Dv.fine).rivals.includes(r.lobes[0]), 'a village knows the town beside it');
   // the texture holds both grids below the rows of the chunks of 1 km²: the fine one, and the coarse one beside it
-  assert.equal(settleTex.image.width, TEX_W); assert.equal(settleTex.image.height, TEX_H); assert.equal(atlasBytes.length, TEX_W * TEX_H * 4); assert.equal(villageBytes.length, VN * VN * 4);
+  assert.equal(settleTex.image.width, TEX_W); assert.equal(settleTex.image.height, TEX_H); assert.equal(atlasBytes.length, TEX_W * TEX_H * 4); assert.equal(villageBytes.length, VN * VNY * 4);
   assert.deepEqual([TEX_W, TEX_H, FINE_AT, COARSE_AT], [KN, KN + VN, [0, KN], [VN, KN]]); assert.ok(COARSE_AT[0] + GN <= TEX_W && FINE_AT[1] + VN <= TEX_H, 'both grids fit beside each other');
   mirrorSettle(ch, m.towns); mirrorVillages(ch, m.towns, r.lobes); packAtlas();
   const g = r.lobes[0].k; assert.equal(atlasBytes[((COARSE_AT[1] + Math.floor(g / GN)) * TEX_W + COARSE_AT[0] + g % GN) * 4 + 2], settleBytes[g * 4 + 2]);
@@ -194,9 +194,10 @@ test('villages: the ground shader reads both grids; a village has no mark from a
   assert.match(RULES_GLSL, /#define SET_VN 512/); assert.match(RULES_GLSL, /#define SET_VK 2\.50/);
   const g = settle.glsl;
   assert.match(g, /texelFetch\(tSettle, c \+ \(fine \? SET_FINE : SET_COARSE\), 0\)/, 'each grid at its own place in the texture');
-  assert.match(RULES_GLSL, new RegExp(`#define SET_FINE ivec2\\(0, ${KN}\\)`)); assert.match(RULES_GLSL, new RegExp(`#define SET_COARSE ivec2\\(${VN}, ${KN}\\)`));
+  assert.match(RULES_GLSL, new RegExp(`#define SET_FINE ivec2\\(0, ${KNY}\\)`)); assert.match(RULES_GLSL, new RegExp(`#define SET_COARSE ivec2\\(${VN}, ${KNY}\\)`));   // (below the KNY rows of the chunks)
   assert.match(g, /setSquares\(code, c0, false/); assert.match(g, /setSquares\(vcode, v0, true/);
   assert.match(g, /ck = village \? SET_GN \* SET_GNY \+ bc\.y \* SET_VN \+ bc\.x/);   // (a grid has a width and a height: no square is assumed)
+  assert.match(readFileSync(new URL('../src/album/town/state.js', import.meta.url), 'utf8'), /xx < n && yy < ny \?/, 'the towns of the squares around are looked for n wide and ny high');
   assert.match(g, /bool small = village \|\| r < SET_TOWN_R;/); assert.match(g, /if \(small\) tm \*= 1\. - setStep\(uSetA\.zw, px \/ max\(r, \.02\)\);/, 'a village melts into the land from afar: no mark');
   assert.match(g, /mt = m \+ \(small \? 0\. : max\(0\., uSetB\.x \* px - r\)\)/, 'only a place of a thousand people and more has a mark from afar');   // (uSetB.x: 2.2 pixels, by the width of a pixel — town/state.js MARK_PX)
   assert.ok(Math.abs(TOWN_R - .2523) < 1e-3 && peopleOf(TOWN_R) >= 999 && peopleOf(TOWN_R) <= 1001 && classOf(peopleOf(TOWN_R + .01)) === 1 && classOf(peopleOf(TOWN_R - .01)) === 0);

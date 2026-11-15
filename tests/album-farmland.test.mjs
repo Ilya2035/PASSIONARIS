@@ -37,7 +37,7 @@ test('farmland: a settlement ploughs a hectare a person — the chunks around it
   const m = growTowns(ch, [place(-205, 4405, 650000)], 1, at), t = m.towns[0], f = m.farm;
   assert.equal(HA_PER_PERSON, 1); assert.ok(Math.abs(t.ploughed - t.people / 100) < .01, `${t.people} people, ${t.ploughed.toFixed(2)} km² of fields`);
   // the state: a byte a chunk, the list of the chunks that have fields, their sum
-  assert.equal(f.km.length, KN * KN); assert.ok(f.list.length > t.ploughed && f.list.length < t.ploughed * 2.2, `${f.list.length} chunks for ${t.ploughed.toFixed(0)} km²`);
+  assert.equal(f.km.length, KN * KNY); assert.ok(f.list.length > t.ploughed && f.list.length < t.ploughed * 2.2, `${f.list.length} chunks for ${t.ploughed.toFixed(0)} km²`);
   assert.ok(f.list.every((c, i) => f.km[c] > 0 && (i === 0 || c > f.list[i - 1])), 'the list is the chunks with fields, in rising order');
   let n = 0, sum = 0; for (let c = 0; c < f.km.length; c++) if (f.km[c]) { n++; sum += f.km[c] / 255; } assert.equal(n, f.list.length);
   assert.ok(Math.abs(sum - t.ploughed) < f.list.length / 255 && Math.abs(f.area - t.ploughed) < 1e-3, 'the bytes add up to the fields');
@@ -111,7 +111,7 @@ test('farmland: only ground that can be ploughed — not the sea, not a ridge; w
 
 test('farmland: the ground by its class, its height and its swamps; the cells a settlement can walk to', () => {
   // a made-up division: level ground west of column 640, hills (class 3) to 650, mountains beyond; high ground north of row 610
-  const n = KN * KN, cls = new Uint8Array(n), hgt = new Float32Array(n);
+  const n = KN * KNY, cls = new Uint8Array(n), hgt = new Float32Array(n);
   for (let j = 560; j < 660; j++) for (let i = 560; i < 720; i++) { const c = j * KN + i; cls[c] = i < 640 ? 1 : i < 650 ? 3 : 5; hgt[c] = j >= 630 ? 2000 : j >= 610 ? 1500 : 300; }
   const flat = () => 300, world = new Chunks(() => 300), g = farmGround(world, flat, { cls, hgt });
   assert.equal(g.room(600 * KN + 600), FARM_CAP[1]); assert.equal(g.room(600 * KN + 645), FARM_CAP[3]); assert.equal(g.room(600 * KN + 660), 0); assert.equal(g.room(100 * KN + 100), 0, 'water');
@@ -135,13 +135,13 @@ test('farmland: the ground by its class, its height and its swamps; the cells a 
 
 test('farmland: the chunks in the settlement texture — the share, the seed, and what the chunks around hold', () => {
   assert.deepEqual([TEX_W, TEX_H], [KN, KN + VN]); assert.equal(settleTex.image.width, KN); assert.equal(settleTex.image.height, KN + VN);
-  assert.equal(farmBytes.length, KN * KN * 4); assert.equal(farmBytes.buffer, atlasBytes.buffer); assert.equal(farmBytes.byteOffset, 0, 'the chunks are the first rows of the texture');
-  assert.ok(FINE_AT[1] >= KN && COARSE_AT[1] >= KN && COARSE_AT[0] >= FINE_AT[0] + VN && COARSE_AT[0] + GN <= TEX_W, 'the grids of the settlements lie below the chunks, side by side');
-  const out = new Uint8Array(KN * KN * 4), m = growTowns(ch, [place(-205, 4405, 650000)], 1, at), f = m.farm, t = m.towns[0];
+  assert.equal(farmBytes.length, KN * KNY * 4); assert.equal(farmBytes.buffer, atlasBytes.buffer); assert.equal(farmBytes.byteOffset, 0, 'the chunks are the first rows of the texture');
+  assert.ok(FINE_AT[1] >= KNY && COARSE_AT[1] >= KNY && COARSE_AT[0] >= FINE_AT[0] + VN && COARSE_AT[0] + GN <= TEX_W && FINE_AT[1] + VNY <= TEX_H && COARSE_AT[1] + GNY <= TEX_H, 'the grids of the settlements lie below the chunks, side by side');
+  const out = new Uint8Array(KN * KNY * 4), m = growTowns(ch, [place(-205, 4405, 650000)], 1, at), f = m.farm, t = m.towns[0];
   assert.ok(mirrorFarm(f, out).changed);
   // R the share; G, B where the seed of the chunk stands in its square (the chunk of a point is the nearest seed)
   for (const c of f.list) assert.equal(out[c * 4], f.km[c]);
-  let held = 0; for (let c = 0; c < KN * KN; c++) if (out[c * 4]) held++; assert.equal(held, f.list.length);
+  let held = 0; for (let c = 0; c < KN * KNY; c++) if (out[c * 4]) held++; assert.equal(held, f.list.length);
   for (const [i, j] of [[0, 0], [675, 525], [1279, 1279], [300, 900]]) {
     const o = (j * KN + i) * 4, s = seedOf(i, j);
     assert.ok(Math.abs(out[o + 1] / 255 - (s[0] - KX0 - i)) < .003 && Math.abs(out[o + 2] / 255 - (s[1] - KY0 - j)) < .003, 'the seed, to a few metres');
@@ -151,7 +151,7 @@ test('farmland: the chunks in the settlement texture — the share, the seed, an
   const home = sq(t.x, t.y), far = sq(t.x + 40, t.y), edge = f.list.find(c => f.km[c] < 255);
   assert.equal(out[home * 4 + 3], 255); assert.equal(out[far * 4 + 3], 0); assert.equal(out[edge * 4 + 3], 128);
   const outside = [...f.list].map(c => c + 1).find(c => f.km[c] === 0); assert.equal(out[outside * 4 + 3], 128, 'a chunk without fields beside one with fields');
-  for (let c = 0; c < KN * KN; c += 7) { const a = out[c * 4 + 3]; assert.ok(a === 0 || a === 128 || a === 255); if (a === 0) assert.equal(out[c * 4], 0); }
+  for (let c = 0; c < KN * KNY; c += 7) { const a = out[c * 4 + 3]; assert.ok(a === 0 || a === 128 || a === 255); if (a === 0) assert.equal(out[c * 4], 0); }
   // what the shader reads at a point (farmAt is its twin): the chunk of the point, the step to the next softened
   assert.equal(farmAt(t.x, t.y, out), 1); assert.equal(farmAt(t.x + 40, t.y, out), 0); assert.equal(farmAt(-1e4, 0, out), 0);
   const ei = edge % KN, ej = Math.floor(edge / KN), es = seedOf(ei, ej); assert.ok(Math.abs(farmAt(es[0], es[1], out) - f.km[edge] / 255) < .25, 'at the seed of a chunk, mostly its own share');
@@ -163,18 +163,18 @@ test('farmland: the chunks in the settlement texture — the share, the seed, an
   }
   // only what changed is touched: the fields gone, the texture is clean again but for the seeds
   assert.equal(mirrorFarm(f, out).changed, true); const less = growTowns(ch, [place(-205, 4405, 650000)], .3, at).farm; mirrorFarm(less, out);
-  held = 0; for (let c = 0; c < KN * KN; c++) if (out[c * 4]) held++; assert.equal(held, less.list.length); assert.equal(out[edge * 4], less.km[edge]);
-  mirrorFarm(null, out); for (let c = 0; c < KN * KN; c += 3) assert.ok(out[c * 4] === 0 && out[c * 4 + 3] === 0); assert.ok(out[home * 4 + 1] > 0, 'the seeds stay');
+  held = 0; for (let c = 0; c < KN * KNY; c++) if (out[c * 4]) held++; assert.equal(held, less.list.length); assert.equal(out[edge * 4], less.km[edge]);
+  mirrorFarm(null, out); for (let c = 0; c < KN * KNY; c += 3) assert.ok(out[c * 4] === 0 && out[c * 4 + 3] === 0); assert.ok(out[home * 4 + 1] > 0, 'the seeds stay');
 });
 
 test('farmland: a cell ploughed by hand gives its share to every chunk in it; the fields of a district are those of its chunks', () => {
   const g = farmGround(ch, at), m = growTowns(ch, [place(-205, 4405, 650000)], 1, at, undefined, { ground: g }), f = m.farm, cellOf = cellsOfChunks(ch).cell;
   assert.equal(farmWithCells(g, f, new Map()), f);
   const cell = cellOf[sq(-150, 4405)], bare = cellOf[sq(-205, 4405)], w = farmWithCells(g, f, new Map([[cell, .6], [bare, 0]]));
-  for (let c = 0; c < KN * KN; c++) { if (cellOf[c] === cell) assert.equal(w.km[c], 153); else if (cellOf[c] === bare) assert.equal(w.km[c], 0); else if (w.km[c] !== f.km[c]) assert.fail('a chunk of another cell changed'); }
+  for (let c = 0; c < KN * KNY; c++) { if (cellOf[c] === cell) assert.equal(w.km[c], 153); else if (cellOf[c] === bare) assert.equal(w.km[c], 0); else if (w.km[c] !== f.km[c]) assert.fail('a chunk of another cell changed'); }
   assert.ok(w.list.every((c, i) => w.km[c] > 0 && (i === 0 || c > w.list[i - 1])) && w.list.length !== f.list.length); assert.equal(f.km[sq(-150, 4405)], 0, 'the state of the model is left as it was');
   // districts: two halves of the land, west and east of the town
-  const cells = new Int32Array(KN * KN); const col = Math.floor(-205 - KX0); for (let c = 0; c < cells.length; c++) cells[c] = c % KN < col ? 0 : 1;
+  const cells = new Int32Array(KN * KNY); const col = Math.floor(-205 - KX0); for (let c = 0; c < cells.length; c++) cells[c] = c % KN < col ? 0 : 1;
   const per = farmOfDistricts(f, cells, 2); assert.ok(per[0] > 10 && per[1] > 10 && Math.abs(per[0] + per[1] - f.area) < f.list.length / 255);
   // the save counts the fields of a district the same way
   const world = landOfAlbum({ div: { count: 2, cells }, model: m, places: [place(-205, 4405, 650000)], legs: [], districtOf: x => (x < -205 ? 0 : 1), cellOf });
@@ -185,7 +185,7 @@ test('farmland: a cell ploughed by hand gives its share to every chunk in it; th
   assert.deepEqual([...farmRank(order, some, .5)].map((v, c) => [c, v]).filter(e => e[1] >= 0), [[3, 0], [7, 1], [9, 0]]); assert.deepEqual([...farmRank(order, some)].filter(v => v >= 0).length, 4);
   // the texture of the division can carry the fields of every chunk, for the check view
   const div = { count: 2, cells, kinds: [0, 0], colour: { district: [0, 1], province: [0], region: [0] }, province: [0, 0], region: [0], cx: [-300, -100], cy: [4405, 4405], chunks: [[0], [1]] };
-  const a = packDivision(ch, div, null, { cls: new Uint8Array(KN * KN).fill(1) }, f.km), home = sq(-205, 4405);
+  const a = packDivision(ch, div, null, { cls: new Uint8Array(KN * KNY).fill(1) }, f.km), home = sq(-205, 4405);
   assert.equal((a[home * 4 + 1] >>> 8) & 255, 255); assert.equal(a[home * 4 + 1] & 7, 1); assert.equal((a[sq(-150, 4405) * 4 + 1] >>> 8) & 255, 0);
 });
 
@@ -266,7 +266,7 @@ test('farmland of the album: a few chunks by every village, the plains by the to
   assert.ok(f3.list.filter(c => f3.km[c] === 255).length > 50000, 'tens of thousands of chunks of farmland from edge to edge');
   assert.ok(one.ms < 2500 && three.ms < 4000, `the model: ${one.ms} ms at growth 1, ${three.ms} ms at growth 3`);
   // the chunk a point lies in is the chunk whose fields are read there
-  const zar = one.m.towns.filter(t => !t.village).sort((a, b) => b.people - a.people)[0], out = new Uint8Array(KN * KN * 4); mirrorFarm(f, out);
+  const zar = one.m.towns.filter(t => !t.village).sort((a, b) => b.people - a.people)[0], out = new Uint8Array(KN * KNY * 4); mirrorFarm(f, out);
   for (let n = 0; n < 200; n++) { const x = zar.x + (kmHash(n, 1, 77) - .5) * 30, y = zar.y + (kmHash(n, 2, 77) - .5) * 30, c = chunkAt(div.cells, x, y); if (c < 0) continue;
     // (where the nine chunks around the square of the point hold the same, its chunk is one of them)
     const o = squareOf(x, y) * 4; if (out[o + 3] === 255) assert.equal(farmAt(x, y, out), f.km[c] / 255); if (out[o + 3] === 0) { assert.equal(farmAt(x, y, out), 0); assert.equal(f.km[c], 0); } }

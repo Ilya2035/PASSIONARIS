@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, kmOf } from '../src/album/chunks.js';
-import { KN, KX0, KY0, squareOf, kmFacts } from '../src/album/division/km.js';
+import { KN, KNY, KX0, KY0, squareOf, kmFacts } from '../src/album/division/km.js';
 import { buildDivision } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
@@ -26,7 +26,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const I0 = 600, J0 = 600, D = 20, ROW = J0 + 10;
 const x = k => KX0 + k + .5, y = k => KY0 + k + .5;
 function land() {
-  const n = KN * KN, cells = new Int32Array(n).fill(2), hgt = new Float32Array(n), riv = new Uint8Array(n), cls = new Uint8Array(n);
+  const n = KN * KNY, cells = new Int32Array(n).fill(2), hgt = new Float32Array(n), riv = new Uint8Array(n), cls = new Uint8Array(n);
   for (let j = J0; j < J0 + D; j++) for (let i = I0; i < I0 + 2 * D; i++) {
     const c = j * KN + i, d = i < I0 + D ? 0 : 1; cells[c] = d; hgt[c] = d ? 400 + (i - I0 - D) * 8 : 200; cls[c] = d ? 2 : 1; if (i === I0 + 32) riv[c] = 2;
   }
@@ -76,7 +76,7 @@ test('tracks: every place of a district has its way to the road of the district 
 });
 
 test('tracks: a district without a road — the ways lead to its centre; a place that stands on the road chunk', () => {
-  const { div, facts, G } = land(), none = new Uint8Array(KN * KN);
+  const { div, facts, G } = land(), none = new Uint8Array(KN * KNY);
   const sites = [{ x: x(I0 + 10), y: y(ROW), pop: 40000, name: 'Центр' }, ...sitesOf([[I0 + 4, J0 + 3], [I0 + 16, J0 + 16]])];
   const list = districtSites(div, facts, sites), tree = districtTracks(div, G, list, 0, none);
   assert.equal(tree.roads, 0);
@@ -123,7 +123,7 @@ test('tracks: drawn for the settled villages only — from the last houses, ever
   const nearTrack = trackIndex(four), mid = far.pts[far.pts.length >> 1];
   assert.ok(nearTrack(mid[0], mid[1]) < 1e-6 && nearTrack(mid[0] + .05, mid[1]) < .06 && nearTrack(mid[0] + .05, mid[1]) > .01); assert.equal(nearTrack(x(I0 + 18), y(J0 + 18)), 1e9, 'far from every track');
   // a town at the centre: a way that ends there stops at its first houses
-  const none = new Uint8Array(KN * KN), toCentre = districtTracks(div, G, list, 0, none), town = trackLines(toCentre, p => (p === 0 ? .8 : p === 4 ? R : 0));
+  const none = new Uint8Array(KN * KNY), toCentre = districtTracks(div, G, list, 0, none), town = trackLines(toCentre, p => (p === 0 ? .8 : p === 4 ? R : 0));
   assert.equal(town.length, 1); const te = town[0].pts[town[0].pts.length - 1]; assert.ok(Math.abs(Math.hypot(te[0] - x(I0 + 10), te[1] - y(ROW)) - .8) < .02);
 });
 

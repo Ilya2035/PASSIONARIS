@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { packLand, unpackLand, landBytes, landOfAlbum, farmsteadsOfAlbum, farmRank, peopleCode, peopleOf, LAND_FORMAT, GENERATOR, STRUCTURES, ROAD_LEVELS, EXCEPTIONS, MAX_IN_DISTRICT, YARD_CHUNKS, YARD_SLOTS, YARD_LIST, YARD_LIST_CHUNKS } from '../src/album/save/land.js';
 import { encodeSave, decodeSave } from '../src/save/saveSystem.js';
 import { Chunks, kmOf } from '../src/album/chunks.js';
-import { KN as FN, KKM as FKM, kmOrder, kmData, cellsOfChunks } from '../src/album/division/km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0, KY0, kmOrder, kmData, cellsOfChunks } from '../src/album/division/km.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { roadNetwork } from '../src/album/roads/routes.js';
@@ -87,14 +87,14 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
   div.centres = districtCentres(div, sites);
   const net = roadNetwork(div, div.centres, data.vectors.places), places = centrePlaces(data.vectors.places, div, sites);
   const at = (x, y) => data.base.at(y / 111.195, x / (111.195 * Math.cos(40 * Math.PI / 180)));
-  const districtOf = (x, y) => { const tx = Math.floor((x + 880) / FKM), ty = Math.floor((y - 3880) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FN ? -1 : div.cells[ty * FN + tx]; };
+  const districtOf = (x, y) => { const tx = Math.floor((x - KX0) / FKM), ty = Math.floor((y - KY0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FNY ? -1 : div.cells[ty * FN + tx]; };
   let landKm2 = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) landKm2 += div.area[d];
   const model = growTowns(ch, places, 1, at);
   // the yards among the fields, as the album draws them (town/yards.js), each at its place in a square kilometre of its district
   const patches = patchIndex(model.towns.map(t => ({ x: t.x, y: t.y, r: t.R }))), manner = new Uint8Array(ch.count);
   for (let k = 0; k < ch.count; k++) { const c = ch.centre(k); manner[k] = cultureAt(c.lat, c.lon); }
   const landSquare = (kx, ky) => { const d = div.cells[ky * FN + kx]; return d >= 0 && div.kinds[d] === LAND; };
-  const farmTex = new Uint8Array(FN * FN * 4); mirrorFarm(model.farm, farmTex);
+  const farmTex = new Uint8Array(FN * FNY * 4); mirrorFarm(model.farm, farmTex);
   const yards = allYards({ cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y, farmTex), farmList: model.farm.list, farmSquare: (kx, ky) => model.farm.km[ky * FN + kx] / 255, culture: c => manner[c], patches, density: 1, landSquare, env: { at, river: () => 1e9, swamp: () => 0 } });
   // every yard is one of the sixteen places of a chunk of farmland; the chunks of farmland of a district are numbered
   // from its centre outward — which chunks are farmland is worked out from the settlements, so the save keeps two

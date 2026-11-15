@@ -181,7 +181,7 @@ export function mirrorSettle(ch, towns = [], out = settleBytes, more = out === s
   }
   for (const L of lobes) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dy) continue;
-    const xx = L.gx + dx, yy = L.gy + dy, R = xx >= 0 && yy >= 0 && xx < n && yy < n ? byG.get(yy * n + xx) : null;
+    const xx = L.gx + dx, yy = L.gy + dy, R = xx >= 0 && yy >= 0 && xx < n && yy < ny ? byG.get(yy * n + xx) : null;   // (n wide, ny high)
     if (R) L.rivals.push(R);
   }
   return { lobes, changed };

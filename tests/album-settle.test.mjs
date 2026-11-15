@@ -6,7 +6,7 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 import settle from '../src/album/aspects/settle.js';
-import { RMAX, CELL, GN, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
+import { RMAX, CELL, GN, GNY, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
   RULES_GLSL, PALETTE_GLSL, MAT, FARM_PIECE, FARM_TURNS } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
@@ -14,7 +14,7 @@ import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.
 import { mirrorSettle, mirrorFarm, farmAt, settleUniforms } from '../src/album/town/state.js';
 import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2, YARD_FARM } from '../src/album/town/yards.js';
 import { farmsteadsOfAlbum, packLand, unpackLand, landBytes } from '../src/album/save/land.js';
-import { KN, squareOf, districtOrder } from '../src/album/division/km.js';
+import { KN, KNY, squareOf, districtOrder } from '../src/album/division/km.js';
 
 // a flat land 300 m high with the sea east of x = 100 km and a steep ridge west of x = −400 km
 const at = (x, y) => (x > 100 ? -50 : x < -400 ? 300 + (-400 - x) * 600 : 300);
@@ -23,7 +23,7 @@ const ch = new Chunks((lat, lon) => at(...kmOf(lat, lon)));             // one w
 const place = (x, y, pop) => ({ ...llOf(x, y), pop });
 const rows = flat => Array.from({ length: flat.length / ROW }, (_, i) => flat.slice(i * ROW, i * ROW + ROW));
 const clear = () => { for (let k = 0; k < ch.count; k++) { ch.set('built', k, 0); ch.set('culture', k, 0); } };
-const blank = () => new Uint8Array(GN * GN * 4);
+const blank = () => new Uint8Array(GN * GNY * 4);
 const S = cellSize(20);
 // where a block of the plan stands, km
 const centreOf = r => { const c = Math.cos(r[2]), s = Math.sin(r[2]); return [r[0] + (c * r[4] - s * r[5]) * S, r[1] + (s * r[4] + c * r[5]) * S]; };
@@ -272,7 +272,7 @@ const yardsAround = (ctx, x, y, km = 8) => {
 const yardCtx = (list, extra = {}) => ({ cell: ch.cell, land: c => ch.kind[c] === 1, farm: () => 1, culture: () => CULTURES.med, patches: patchIndex(list), env, density: 1, S: CELL, ...extra });
 // a town as the model founds it, with the fields it ploughs: its patch and what a yard must know of its chunks
 function ploughedTown(x, y, pop = 650000) {
-  const m = growTowns(ch, [place(x, y, pop)], 1, at), t = m.towns[0], bytes = new Uint8Array(KN * KN * 4); mirrorFarm(m.farm, bytes);
+  const m = growTowns(ch, [place(x, y, pop)], 1, at), t = m.towns[0], bytes = new Uint8Array(KN * KNY * 4); mirrorFarm(m.farm, bytes);
   return { L: { x: t.x, y: t.y, r: t.R, th: .4 }, m, farm: (px, py) => farmAt(px, py, bytes), farmList: m.farm.list };
 }
 
@@ -364,7 +364,7 @@ test('yards in the save: a chunk of 1 km² and one of its sixteen places; the ch
   assert.equal(all.length, around.length); assert.ok(all.length > 100 && all.every(y => Math.hypot(y.x - L.x, y.y - L.y) < 12));
   // two districts of land, west and east of the line x = −205 (column 675 of the lattice of chunks), each with its
   // centre 3 km from the line; east of column 980 the sea
-  const cells = new Int32Array(KN * KN), cls = new Uint8Array(KN * KN).fill(1);
+  const cells = new Int32Array(KN * KNY), cls = new Uint8Array(KN * KNY).fill(1);
   for (let c = 0; c < cells.length; c++) { const i = c % KN; cells[c] = i >= 980 ? 2 : i < 675 ? 0 : 1; }
   const div = { count: 3, cells, kinds: [0, 0, 2], cx: [L.x - 3, L.x + 3, 300], cy: [L.y, L.y, L.y] };
   const steepOne = squareOf(L.x - 5, L.y); cls[steepOne] = 4;                       // one chunk of steep ground among the level ones
@@ -563,20 +563,20 @@ test('settle wall, gates and streets: a town has main streets along its roads, a
   const beach = (x, y) => (x > 100 ? -5 : x > 99.8 ? .5 : 300), port = rows(planLobe(patch(99.4, 4405, .5), S, { ...env, at: beach })).filter(r => KINDS[r[3]] === 'pier');
   assert.ok(port.length >= 2 && port.every(r => Math.abs(r[0] - 100) < .03), `${port.length} piers at the water`);
   // ---- the gates in the texture
-  const lobes = [L, patch(-305, 4405, .32), patch(-105, 4405, .2)], G = new Uint8Array(GN * GN * 4);   // (three squares of the grid)
+  const lobes = [L, patch(-305, 4405, .32), patch(-105, 4405, .2)], G = new Uint8Array(GN * GNY * 4);   // (three squares of the grid)
   assert.ok(mirrorGates(lobes, o => (o === L ? [.2, 1.8, 3.4, 5, 5.9] : [.3, 2.4])));
   assert.equal(lobes[0].gates.length, 4, 'at most four'); assert.equal(lobes[1].gates.length, 2); assert.equal(lobes[2].gates.length, 0, 'a village has no main streets');
   assert.deepEqual([...G.subarray(L.k * 4, L.k * 4 + 4)], [0, 0, 0, 0], 'a block of bytes is written only when it is the one named');
   assert.ok(mirrorGates(lobes, o => (o === L ? [.2, 1.8, 3.4, 5] : [.3, 2.4]), G)); assert.deepEqual([...G.subarray(L.k * 4, L.k * 4 + 4)], [.2, 1.8, 3.4, 5].map(R.gateByte));
   assert.ok(!mirrorGates(lobes, o => (o === L ? [.2, 1.8, 3.4, 5] : [.3, 2.4]), G), 'nothing changed');
   assert.ok(R.VN + 3 * GN <= R.TEX_W && R.MORE_AT[0] === R.COARSE_AT[0] + GN && R.GATES_AT[0] === R.MORE_AT[0] + GN, 'three blocks of the coarse grid lie side by side under the chunks');
-  const atlas = new Uint8Array(R.TEX_W * R.TEX_H * 4), more = new Uint8Array(GN * GN * 4); more[L.k * 4] = 200; packAtlas(settleBytes, villageBytes, atlas, more, G);
+  const atlas = new Uint8Array(R.TEX_W * R.TEX_H * 4), more = new Uint8Array(GN * GNY * 4); more[L.k * 4] = 200; packAtlas(settleBytes, villageBytes, atlas, more, G);
   const texel = (at, k) => ((at[1] + ((k / GN) | 0)) * R.TEX_W + at[0] + k % GN) * 4;
   assert.equal(atlas[texel(R.MORE_AT, L.k)], 200); assert.equal(atlas[texel(R.GATES_AT, L.k)], R.gateByte(.2));
   mirrorGates(lobes, () => []);                                    // (the gates of the texture itself, left as they were found)
   assert.match(settle.glsl, /SET_GATES/); assert.match(RULES_GLSL, /float setWall\(float r, float th, float a\)/); assert.match(settle.glsl, /setWall\(r, th, atan\(dc\.y, dc\.x\)\)/);
   for (const id of ['city-sea', 'city-inland', 'city-capital', 'city-small', 'city-village', 'city-45']) assert.ok(settle.pages.some(p => p.id === id), id);
-  assert.ok(gateBytes.length === GN * GN * 4 && moreBytes.length === GN * GN * 4);
+  assert.ok(gateBytes.length === GN * GNY * 4 && moreBytes.length === GN * GNY * 4);
 });
 
 test('settle scale bar: a round length, cut into equal pieces — the real size of the towns can be read off the screen', async () => {
