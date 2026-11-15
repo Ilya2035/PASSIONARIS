@@ -323,7 +323,8 @@ const data = loadAlbumData(ROOT), skip = !data && 'public/album-data/ is not the
 test('roads of the album: main roads reach the towns of the provinces, lesser roads every district', { skip }, () => {
   const rd = f => JSON.parse(readFileSync(join(ROOT, f), 'utf8'));
   const lakes = rd('public/assets/album/water/lakes.json').lakes.filter(l => !l.shoal && l.ring), osm = decodeSites(JSON.parse(gunzipSync(readFileSync(join(ROOT, 'public/assets/album/town/sites.json.gz')))));
-  const world = new Chunks(data.base.at, data.vectors.rivers, lakes);
+  // (data.worked: the mask of the worked land — at stage 3 the loaders give it and only the worked land has chunks)
+  const world = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);
   const real = buildDivision(world, { lands: rd('public/assets/album/division/lands.json'), admin: rd('public/assets/album/division/admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], size: 20, rivers: data.vectors.rivers });
   const own = data.vectors.places.map(p => { const [x, y] = kmOf(p.lat, p.lon); return { x, y, pop: p.pop, name: p.name }; });
   real.centres = districtCentres(real, [...own, ...osm.filter(s => { const [x, y] = kmOf(s.lat, s.lon); return !own.some(o => Math.hypot(o.x - x, o.y - y) < 6); })]);

@@ -35,8 +35,24 @@ const RU = { Ebro: 'Эбро', Tajo: 'Тахо', Tejo: 'Тежу', Duero: 'Ду�
   // the rest of France (the region grows to the north: docs/album/water.md, «Подготовка к большому полигону»)
   Seine: 'Сена', Loire: 'Луара', Saône: 'Сона', Marne: 'Марна', Oise: 'Уаза', Aisne: 'Эна', Somme: 'Сомма', Meuse: 'Мёз', Moselle: 'Мозель', Rhin: 'Рейн', Yonne: 'Йонна', Aube: 'Об', Eure: 'Эр', Orne: 'Орн',
   Allier: 'Алье', Cher: 'Шер', Indre: 'Эндр', Vienne: 'Вьенна', Creuse: 'Крёз', Charente: 'Шаранта', Sarthe: 'Сарта', Mayenne: 'Майенна', Loir: 'Луар', Vilaine: 'Вилен', Isère: 'Изер', Durance: 'Дюранс', Doubs: 'Ду',
-  Ain: 'Эн', Drôme: 'Дром', Ardèche: 'Ардеш', Var: 'Вар', Meurthe: 'Мёрт', Escaut: 'Шельда', Corrèze: 'Коррез', Vézère: 'Везер', Isle: 'Иль', Truyère: 'Трюйер', Gard: 'Гар', Arve: 'Арв' };
-const bare = n => n.replace(/^(r[íi]o|riu|rivi[èe]re|fleuve|oued|wadi|la|le|el|l')\s+/i, '').replace(/^(d[e']|du|des|de la)\s*/i, '').trim();
+  Ain: 'Эн', Drôme: 'Дром', Ardèche: 'Ардеш', Var: 'Вар', Meurthe: 'Мёрт', Escaut: 'Шельда', Corrèze: 'Коррез', Vézère: 'Везер', Isle: 'Иль', Truyère: 'Трюйер', Gard: 'Гар', Arve: 'Арв',
+  // stage 3 (15.11.2026): the rest of France and Iberia by their greater rivers, the Low Countries and the Rhine, the Maghreb
+  Maine: 'Мен', 'Petit Rhône': 'Малая Рона', 'Gaves Réunis': 'Гав-Реюни', 'Grand Hers': 'Большой Эр', Agoût: 'Агу', 'Sèvre Niortaise': 'Севр-Ньортез', 'Sèvre Nantaise': 'Севр-Нантез', Oust: 'Уст', Clain: 'Клен',
+  Douze: 'Дуз', Vire: 'Вир', Argens: 'Аржанс', Sélune: 'Селюн', Gartempe: 'Гартамп', Chiers: 'Шьер', Sauldre: 'Содр', Verdon: 'Вердон', Drac: 'Драк', Arc: 'Арк', Loing: 'Луэн', Armançon: 'Армансон', Sioule: 'Сиуль',
+  Thouet: 'Туэ', Blavet: 'Блаве', Aulne: 'Он', Rance: 'Ранс', Canche: 'Канш', Authie: 'Оти', Ognon: 'Оньон', Loue: 'Лу', Cèze: 'Сез', Ill: 'Иль', Sarre: 'Саар', Sambre: 'Самбра', Lys: 'Лис',
+  Arlanzón: 'Арлансон', Ulla: 'Улья', Eresma: 'Эресма', Órbigo: 'Орбиго', Águeda: 'Агеда', Chanza: 'Чанса', Guadalén: 'Гвадален', 'Noguera Pallaresa': 'Ногера-Пальяреса', Tambre: 'Тамбре', Carrión: 'Каррион',
+  Záncara: 'Санкара', Almonte: 'Альмонте', Alcanadre: 'Альканадре', Sabor: 'Сабор', Valderaduey: 'Вальдерадуэй', Cigüela: 'Сигуэла', Sella: 'Селья', Narcea: 'Нарсеа',
+  Rhein: 'Рейн', Rijn: 'Рейн', Maas: 'Маас', Mosel: 'Мозель', Saar: 'Саар', Nahe: 'Наэ', Ahr: 'Ар', Erft: 'Эрфт', Rur: 'Рур', Roer: 'Рур', Agger: 'Аггер', Sauer: 'Зауэр', Sûre: 'Сюр', Ourthe: 'Урт', Semois: 'Семуа',
+  Schelde: 'Шельда', Leie: 'Лис', Waal: 'Ваал', Lek: 'Лек', IJssel: 'Эйссел', Linge: 'Линге', Noord: 'Норд', 'Bergsche Maas': 'Бергсе-Маас', Haringvliet: 'Харингвлит',
+  Sebou: 'Себу', Drâa: 'Драа', Draa: 'Драа', 'Al Abid': 'Эль-Абид', Souss: 'Сус', Dades: 'Дадес', Ouargha: 'Уэрга', Ouergha: 'Уэрга', Grou: 'Гру', Nfiss: 'Нфис', Ziz: 'Зиз', Gheris: 'Герис', Beht: 'Бехт', Massa: 'Масса',
+  Tensift: 'Тенсифт', 'Oum Er-Rbia': 'Умм-эр-Рбия', 'Oum Er Rbia': 'Умм-эр-Рбия', 'Bou Regreg': 'Бу-Регрег', Loukkos: 'Лукос', Zouzfana: 'Зузфана', Akka: 'Акка',
+  Chlef: 'Шелифф', Soummam: 'Суммам', Djedi: 'Джеди', Isser: 'Иссер', Bousselem: 'Бу-Селлам', Tafna: 'Тафна', Sahel: 'Сахель', Seybouse: 'Сейбуз', Rhumel: 'Руммель', Medjerda: 'Меджерда', Mejerda: 'Меджерда' };
+// The name of a river without what stands around it in OpenStreetMap: «L'Adour», «Río Miño / Rio Minho», «La Loire -
+// Bras Saint-Jean», «Oued Sebou ⴰⵙⵉⴼ ⵏ ⵙⴱⵓ واد سبو», «Ebro ibaia» → Adour, Miño, Loire, Sebou, Ebro. The first of two
+// names, Latin letters only, no word for «river» and no article before it. (An article is a word of its own: «du»
+// used to be cut off the Duero and the Durance, and they went without their Russian names.)
+const bare = n => n.normalize('NFC').split(/\s+[\/\-–—]\s+/)[0].replace(/[\u0590-\u08FF\u2D30-\u2D7F\uFB1D-\uFEFF]+/g, ' ').replace(/\s+/g, ' ').trim()
+  .replace(/^(r[íi]o|r[íi]u|riu|rivi[èe]re|fleuve|oued|wadi|assif|la|le|les|el)\s+/i, '').replace(/^l['’]\s*/i, '').replace(/^(de la|des|du|de)\s+/i, '').replace(/^d['’]\s*/i, '').replace(/\s+ibaia$/i, '').trim();
 const KX = KM_PER_DEG * COS_REF / 1e6, KY = KM_PER_DEG / 1e6;      // microdegrees → flat km
 { const fault = extractsFault(); if (fault) { console.error(fault); process.exit(1); } }   // files cut for the region of another stage have half of the rivers
 const rd = (name, what) => JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, `${name}.${what}.json.gz`))));

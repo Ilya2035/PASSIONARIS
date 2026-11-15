@@ -4,12 +4,17 @@
 // from the open height data of the album (AWS Terrain Tiles): the basin around each lake is filled up to its water
 // level and the shore of that pool is the outline. Reservoirs are left out: in 5000 BC there were none.
 //   node scripts/album/water-lakes.mjs [--print]      (needs public/album-data/, see scripts/album/fetch-data.mjs)
+// The list is one for every stage of the polygon: a lake outside the rectangle of the heights that are read (the
+// bbox of their meta.json) is left out. PASSIONARIS_ALBUM_DATA: another folder of the data (the heights of the next
+// stage lie beside those of today); PASSIONARIS_LAKES_OUT: another file to write — to try a bake without touching
+// the file in git.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-const DATA = join(ROOT, 'public', 'album-data'), OUT = join(ROOT, 'public', 'assets', 'album', 'water');
+const DATA = process.env.PASSIONARIS_ALBUM_DATA || join(ROOT, 'public', 'album-data'), OUT = join(ROOT, 'public', 'assets', 'album', 'water');
+const OUT_FILE = process.env.PASSIONARIS_LAKES_OUT || join(OUT, 'lakes.json');
 const KM = 111.195, D = Math.PI / 180;
 
 // level: metres above the sea of the bottom of the basin in the height data (null = the height at the centre); rise:
@@ -34,6 +39,23 @@ export const LAKES = [
   { id: 'ebro-shoal', name: 'Отмели дельты Эбро', lat: 40.7, lon: .76, level: .6, depth: 2, shoal: 1, note: 'не озеро: море поверх шума в подробных высотах дельты',
     outline: [[.62, 40.85], [.80, 40.88], [.97, 40.76], [.95, 40.60], [.79, 40.51], [.63, 40.51], [.54, 40.60], [.54, 40.76]] },
   { id: 'biscarrosse', name: 'Озеро Бискаррос и Парантис', lat: 44.345, lon: -1.175, level: null, rise: 1.2, r: 9, depth: 20, since: -1000, note: 'подпружено дюнами Ландов; моложе 5000 г. до н. э.' },
+  // ---- the lands of stage 3 (15.11.2026): the rest of France, the left bank of the Rhine, the Maghreb. The Low
+  // Countries had no lake of size in 5000 BC (the IJsselmeer and the meres of Holland are younger). The chotts and
+  // sebkhas of the Maghreb are salt flats, dry for most of the year: land, not lakes.
+  { id: 'leman', name: 'Женевское озеро', lat: 46.45, lon: 6.55, level: null, rise: 1.5, r: 46, depth: 310, note: 'ледниковое, самое большое озеро Альп; южный берег — Савойя' },
+  { id: 'bourget', name: 'Озеро Бурже', lat: 45.73, lon: 5.87, level: null, rise: 3, r: 12, depth: 145, note: 'ледниковое, самое большое естественное озеро Франции' },
+  { id: 'annecy', name: 'Озеро Анси', lat: 45.86, lon: 6.17, level: null, rise: 3, r: 10, depth: 82, note: 'ледниковое' },
+  { id: 'aiguebelette', name: 'Озеро Эгбелет', lat: 45.55, lon: 5.80, level: null, rise: 1.2, r: 3.5, depth: 71, note: 'ледниковое' },
+  { id: 'paladru', name: 'Озеро Паладрю', lat: 45.455, lon: 5.535, level: null, rise: 4, r: 4, depth: 36, note: 'ледниковое' },
+  { id: 'saint-point', name: 'Озеро Сен-Пуэн', lat: 46.815, lon: 6.31, level: null, rise: 4, r: 5, depth: 43, note: 'озеро Юры на реке Ду' },
+  { id: 'grand-lieu', name: 'Озеро Гран-Льё', lat: 47.09, lon: -1.68, level: 1, oval: [4.6, 3.6, 10], depth: 3, note: 'мелкое равнинное озеро у устья Луары, зимой разливается' },
+  { id: 'hourtin', name: 'Озеро Уртен и Каркан', lat: 45.18, lon: -1.10, level: null, rise: 1.2, r: 11, depth: 11, since: -1000, note: 'подпружено дюнами Медока; моложе 5000 г. до н. э.' },
+  { id: 'lacanau', name: 'Озеро Лакано', lat: 44.975, lon: -1.125, level: null, rise: 1.2, r: 6, depth: 8, since: -1000, note: 'подпружено дюнами Медока; моложе 5000 г. до н. э.' },
+  { id: 'laach', name: 'Лаахское озеро', lat: 50.412, lon: 7.27, level: null, rise: 6, r: 2.4, depth: 51, note: 'кальдера вулкана в Айфеле; извергался около 10 900 г. до н. э.' },
+  { id: 'oubeira', name: 'Озеро Убейра', lat: 36.85, lon: 8.385, level: null, rise: 1.2, r: 4.5, depth: 4, note: 'пресное озеро у Эль-Калы' },
+  { id: 'fetzara', name: 'Озеро Фетзара', lat: 36.79, lon: 7.51, level: null, rise: 1, r: 13, depth: 2, note: 'мелкое озеро-болото у Аннабы' },
+  { id: 'sidi-ali', name: 'Озеро Сиди-Али', lat: 33.075, lon: -5.0, level: 2080, oval: [1.6, .55, 60], depth: 36, note: 'горное озеро Среднего Атласа' },
+  { id: 'isli', name: 'Озеро Исли', lat: 32.218, lon: -5.545, level: 2270, oval: [1.0, .75, 0], depth: 92, note: 'горное озеро Высокого Атласа у Имильшиля' },
 ];
 
 const meta = JSON.parse(readFileSync(join(DATA, 'meta.json'), 'utf8')), b = meta.base;
@@ -102,14 +124,17 @@ function trace(lake) {
   return { ring: out, area: area * step * step, level: Math.round(top * 10) / 10, N, inside };
 }
 
-const lakes = [];
+// (the rectangle of the heights: meta.bbox; the oldest data had none — then every lake of the list is in)
+const box = meta.bbox, inBox = l => !box || (l.lat > box.lat0 && l.lat < box.lat1 && l.lon > box.lon0 && l.lon < box.lon1);
+const lakes = []; let out = 0;
 for (const lake of LAKES) {
+  if (!inBox(lake)) { out++; continue; }
   const t = lake.outline ? { ring: lake.outline, level: lake.level, area: shoelace(lake) } : lake.oval ? oval(lake) : trace(lake);
   console.log(`${lake.id.padEnd(14)} level ${String(t.level).padStart(7)} m  area ${t.area.toFixed(1).padStart(6)} km²  ${t.ring.length} points`);
   if (process.argv.includes('--print') && t.inside) { const s = Math.ceil(t.N / 70); for (let j = 0; j < t.N; j += s * 2) { let row = ''; for (let i = 0; i < t.N; i += s) row += t.inside[j * t.N + i] ? '#' : '.'; console.log(row); } }
   const { r, rise, level, oval: _, outline: __, ...rest } = lake;
   lakes.push({ ...rest, level: t.level, area: Math.round(t.area * 10) / 10, ring: t.ring });
 }
-mkdirSync(OUT, { recursive: true });
-writeFileSync(join(OUT, 'lakes.json'), JSON.stringify({ about: 'Natural lakes of the album region, 5000 BC. Own list; outlines traced from AWS Terrain Tiles heights by scripts/album/water-lakes.mjs.', lakes }));
-console.log(`→ ${join(OUT, 'lakes.json')}: ${lakes.length} lakes`);
+mkdirSync(dirname(OUT_FILE), { recursive: true });
+writeFileSync(OUT_FILE, JSON.stringify({ about: 'Natural lakes of the album region, 5000 BC. Own list; outlines traced from AWS Terrain Tiles heights by scripts/album/water-lakes.mjs.', lakes }));
+console.log(`→ ${OUT_FILE}: ${lakes.length} lakes${out ? ', ' + out + ' of the list lie outside these heights' : ''}${meta.stage ? ' (the heights of stage ' + meta.stage + ')' : ''}`);

@@ -10,7 +10,7 @@ import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
 import { riverSheets, riverGeneral, riverFar, riverDrawn, MIN_PX, SHOW, GEN, FAR_PX, FAR_SHOW, FAR_TINT, MID, BED, FLOW } from '../src/album/layers/rivers.js';
 import { decodeCourses, encodeCourses, mainRivers, rankOf, widthCode, widthOf } from '../src/album/water/courses.js';
 import { statSync } from 'node:fs';
-import { fillHollows } from '../src/album/water/hollows.js';
+import { fillHollows, dryBasins } from '../src/album/water/hollows.js';
 import { gunzipSync } from 'node:zlib';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS } from '../src/album/params.js';
@@ -161,7 +161,7 @@ test('water: lakes — a small open list of natural lakes with outlines inside t
   for (const l of lakes) {
     assert.ok(l.id && l.name && !ids.has(l.id)); ids.add(l.id);
     assert.ok(!/водохранилищ|embalse|reservoir/i.test(l.name + (l.note || '')), `${l.id}: no reservoirs in 5000 BC`);
-    assert.ok(l.ring.length >= (l.shoal ? 6 : 20) && l.depth > 0 && l.level >= 0 && l.area > .3 && l.area < (l.shoal ? 2500 : 120), l.id);
+    assert.ok(l.ring.length >= (l.shoal ? 6 : 20) && l.depth > 0 && l.level >= 0 && l.area > .3 && l.area < (l.shoal ? 2500 : 700), l.id);   // (the largest: the Lake of Geneva, 580 km²)
     for (const [lon, lat] of l.ring) assert.ok(lon > BBOX.lon0 && lon < BBOX.lon1 && lat > BBOX.lat0 && lat < BBOX.lat1, `${l.id}: inside the region`);
     const g = lakeGrid(l), c = Math.cos(l.lat * Math.PI / 180), ring = l.ring.map(p => [(p[0] - l.lon) * 111.195 * c, (p[1] - l.lat) * 111.195]);
     assert.ok(g.idx.length >= 6 && g.idx.every(i => i >= 0 && i < g.n) && g.n < 60000, `${l.id}: a sound grid`);
@@ -205,7 +205,8 @@ test('water: rivers — real courses with their width, drawn at their real size,
 
 test('water: the baked rivers of the region — thousands of kilometres of real courses, the great rivers the widest', () => {
   const f = new URL('../public/assets/album/water/rivers.bin.gz', import.meta.url), u = gunzipSync(readFileSync(f));
-  assert.ok(u.length < 12e6 && statSync(f).size < 6e6, 'the file stays small enough for the repository');
+  // (2.5 MB on the polygon of stage 2; 5.7 MB on that of stage 3 — 12 284 rivers, 1.8 million points)
+  assert.ok(u.length < 16e6 && statSync(f).size < 8e6, 'the file stays small enough for the repository');
   const c = decodeCourses(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength));
   assert.match(c.source, /OpenStreetMap/);
   assert.ok(c.rivers.length > 800, c.rivers.length + ' rivers');
@@ -226,6 +227,24 @@ test('water: a dip below sea level that the sea cannot reach is land; the sea an
   assert.equal(fillHollows(raw, w, h, 60), 4);
   assert.equal(raw[5 * w + 20], SEA + 2); assert.equal(raw[14 * w + 16], SEA - 8); assert.equal(raw[20 * w + 30], SEA - 12); assert.equal(raw[3], SEA - 80);
   assert.equal(fillHollows(raw, w, h, 60), 0, 'nothing left to raise');
+});
+
+test('water: far inland a deep basin below the sea is dry land, with the flats beside it; a lagoon by the sea and a shallow mere stay', () => {
+  const w = 120, h = 40, SEA = 32768, raw = new Uint16Array(w * h).fill(SEA + 400), FAR = 20;
+  const put = (x0, y0, x1, y1, v) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) raw[y * w + x] = v; };
+  put(0, 0, 4, 39, SEA - 80);                 // the sea along the west edge
+  put(8, 5, 19, 16, SEA - 12);                // a lagoon of 144 cells behind its bar, three cells from the sea
+  put(70, 10, 89, 19, SEA - 60);              // a chott: 200 cells, 15 m below the sea, 65 cells inland
+  put(93, 12, 95, 14, SEA - 6);               // a salt flat beside it, a metre and a half below the sea
+  put(30, 30, 35, 33, SEA - 6);               // a mere as shallow, far from the sea and far from the chott
+  assert.equal(dryBasins(raw, w, h, FAR), 200 + 9, 'the chott and the flat beside it');
+  assert.equal(raw[15 * w + 80], SEA + 2); assert.equal(raw[13 * w + 94], SEA + 2, 'half a metre over the sea');
+  assert.equal(raw[10 * w + 12], SEA - 12, 'the lagoon stays'); assert.equal(raw[31 * w + 32], SEA - 6, 'the mere stays: no depression, nobody says it is dry'); assert.equal(raw[3], SEA - 80);
+  assert.equal(dryBasins(raw, w, h, FAR), 0, 'nothing left to raise');
+  // a basin that is not deep enough is left alone, and so is the flat beside it
+  put(70, 10, 89, 19, SEA - 60); put(93, 12, 95, 14, SEA - 6); assert.equal(dryBasins(raw, w, h, FAR, 20), 0); assert.equal(raw[15 * w + 80], SEA - 60);
+  // by the sea a basin as deep is a lagoon
+  put(8, 5, 19, 16, SEA - 60); assert.equal(dryBasins(raw, w, h, FAR), 209); assert.equal(raw[10 * w + 12], SEA - 60);
 });
 
 test('water: the album shows it — pages for every state, from 20, 200 and 500 km, and knobs for the model', () => {
