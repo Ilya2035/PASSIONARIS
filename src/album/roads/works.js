@@ -19,7 +19,7 @@ export const WORKS = {
   stone: { H: 5.5, thick: 1.3, camber: 1.3, ramp: .014, every: .016, top: 0xb3a68b, side: 0x8d826d, rail: 0xa39781 },
   timber: { H: 3.2, thick: .45, camber: 0, ramp: .010, every: .007, top: 0x94795a, side: 0x6c553a, rail: 0x57422d },
   foot: { H: 2.4, thick: .3, camber: 0, ramp: .007, every: .006, top: 0x8c7355, side: 0x65503a, rail: 0x57422d, narrow: .45 },
-  ferry: { hut: [0xc7bea6, 0x8a5a41], wood: 0x7a6248, boat: 0x4a3a2b },
+  ferry: { hut: [0xc7bea6, 0x8a5a41], wood: 0x7a6248, boat: 0x4a3a2b, px: 5 },   // px: the least length of the hut on the screen
   abut: .012,                        // km of deck on each bank (crossings.js, BRIDGE.abut)
 };
 const rgb = c => [(c >> 16 & 255) / 255, (c >> 8 & 255) / 255, (c & 255) / 255];
@@ -105,7 +105,9 @@ export function makeWorks(album, list, { wide = 2 } = {}) {
         float real = aD.z * uRiver.z, s2 = clamp(real / .16, 0., 1.);
         float water = max(real, uRiver.x * mix(mix(.42, 1., sqrt(s2)), mix(uRiverLeast.x, uRiverLeast.y, s2), uRiver.y));
         float reach = water * .5 * aD.w + ${WORKS.abut.toFixed(3)} + uPx * .5;
-        float roadReal = aR.x * uK, road = max(roadReal, aR.y * uPx), grow = clamp(road / max(roadReal, 1e-6), 1., 6.), zk = pow(grow, .6);   // drawn wider than life from high up, and a little taller
+        float roadReal = aR.x * uK, road = max(roadReal, aR.y * uPx), grow = clamp(road / max(roadReal, 1e-6), 1., 6.);                     // drawn wider than life from high up, and a little taller
+        if (aR.z < .5) grow = clamp(uPx * ${WORKS.ferry.px.toFixed(1)} / .009, grow, 8.);                                                   // the hut of a ferry (9 m long) is never under a few pixels
+        float zk = pow(grow, .6);
         vec2 al = aD.xy, ac = vec2(-aD.y, aD.x), p = al * (aP.x * reach + aQ.x * grow) + ac * (aP.y * road * uWide * .5 + aQ.y * grow);
         float cl = cos(radians(aC.x)); vec2 ll = aC + vec2(p.y / KM, p.x / (KM * cl)), e = al * reach;
         float hw = max(heightLod(aC, 0.), 0.);                                              // the water: the ground at the middle of the river

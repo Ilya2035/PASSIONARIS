@@ -176,18 +176,24 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         // metres the ground at the edge of the bed stands over the bed: the slope across the road; a spur cut through or a hollow filled; the bed itself, raised a little (over a bog: more)
         float dz = dot(slope, vAcross) * sg * vRoad * 1000. + (h0 - heightLod(vLL, 2.5)) * .5 - mix(uRaise, max(uRaise, 1.1), bog);
         float cut = step(0., dz);                                                                                  // 1 a cutting: the bank rises from the road · 0 it is built up and falls away
-        float bw = min(max(abs(dz) * .0026, 1.5 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel and a half
+        float bw = min(max(abs(dz) * .0026, 1.8 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel or two
         float off = abs(vX) - vRoad, bank = vol * min(1., uNear * 3.) * clamp(off / pk + .5, 0., 1.) * clamp((bw - off) / pk + .5, 0., 1.) * step(1e-6, bw);   // (the banks go with the cleared strip: beyond the room the ribbon keeps beside the road there is nothing to draw them on)
         vec3 nBed = normalize(vec3(-grade * uExag * uShade, 1.)), nBank = normalize(vec3(-(grade + vAcross * sg * mix(-.65, .84, cut)) * uExag * uShade, 1.));
         // the colours: the bed (over a bog — logs laid across, a dark gap between them when they can be seen); a cut bank is bare earth, a built one earth under grass; by a bog — the dark water of the ditch
         float per = max(.003, px * 4.), gap = bog * .24 * smoothstep(.2, .35, abs(fract(vDist / per) - .5));    // (a log is wider than life from higher up: never under a couple of pixels)
         vec3 cBed = mix(uColour, uLogCol, bog) * (1. - gap) * (1. - uDim * dim) * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5)));
-        vec3 cBank = mix(mix(uFillCol, uCutCol, cut), vec3(.16, .2, .17), bog * .85), cVerge = mix(uVergeCol, uRideCol, woods);
-        float soft = mix(1., uSoft, vol), wBed = core * soft, wBank = bank * (1. - core), wVerge = verge * (1. - core) * (1. - bank), cover = wBed + wBank + wVerge, a = cover * fade * (1. - .44 * uDim * dim * (1. - bank));
+        // A bank is the land itself, turned to the sun or away from it. So it is drawn as light or as shade laid over the
+        // land — it keeps the colour of the land it is made of — as strong as its slope takes more of the sun than the
+        // ground beside it, or less. A cutting shows bare earth besides; by a bog the ditch is dark water.
+        vec3 cVerge = mix(uVergeCol, uRideCol, woods), L0 = groundLit(gn, gs), LB = groundLit(nBank, gs);
+        float lr = dot(LB, vec3(.3, .6, .1)) / (dot(L0, vec3(.3, .6, .1)) + 1e-4), bare = max(bog * .9, cut * .4);
+        float aBank = mix(lr > 1. ? min((lr - 1.) * .9, .6) : min((1. - lr) * 1.3, .78), .8, bare);
+        vec3 lBank = mix(lr > 1. ? vec3(.97, .92, .78) * L0 * min(lr, 1.7) : vec3(.07, .07, .06) * L0, mix(uCutCol, vec3(.16, .2, .17), bog) * LB, bare);
+        float soft = mix(1., uSoft, vol), wBed = core * soft, wBank = bank * (1. - core) * aBank, wVerge = verge * (1. - core) * (1. - bank), cover = wBed + wBank + wVerge, a = cover * fade * (1. - .44 * uDim * dim * (1. - bank));
         if (a < .004) discard;
         vec3 col;
-        if (uStyle == 2 || uStyle == 3 || uStyle == 6) col = mix(pow((cBed * wBed + cBank * wBank + cVerge * wVerge) / max(cover, 1e-4) * (.35 + .65 * albumDay()), vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld));
-        else { vec3 L0 = groundLit(gn, gs); col = albumFinish(albumAir((cBed * mix(L0, groundLit(nBed, gs), vol) * wBed + cBank * groundLit(nBank, gs) * wBank + cVerge * L0 * wVerge) / max(cover, 1e-4), vWorld)); }
+        if (uStyle == 2 || uStyle == 3 || uStyle == 6) col = mix(pow((cBed * wBed + mix(uFillCol, uCutCol, cut) * wBank + cVerge * wVerge) / max(cover, 1e-4) * (.35 + .65 * albumDay()), vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld));
+        else col = albumFinish(albumAir((cBed * mix(L0, groundLit(nBed, gs), vol) * wBed + lBank * wBank + cVerge * L0 * wVerge) / max(cover, 1e-4), vWorld));
         gl_FragColor = vec4(col, a);
         gl_FragDepth = clamp(vZW.x / vZW.y * .5 + .5, 0., 1.);
       }`,
