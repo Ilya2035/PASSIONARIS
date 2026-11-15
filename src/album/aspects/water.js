@@ -367,11 +367,7 @@ vec3 aspWater(Px p) {
   w.px = (length(p.pdx) + length(p.pdy)) * .7;                       // measured along the ground: p.px jumps on the skirts between the levels of the grid
   w.depth = max(-p.h, 0.); w.surf = 1e3;
   w.cB.r *= inRegion(p.ll);                                         // the chunks end with the mapped region; no ice beyond it
-  // (Beyond the mapped region — the whole Earth is drawn since v0.6.114 — the heights of the region are not there to
-  // read: a look-up past the edge of the picture gave the bays of the world a speckle of surf. There the sea is the
-  // plain water of its depth: no surf, no smoothing of the bottom. Nothing else is read instead — three more
-  // look-ups in the shader of the ground cost a quarter of the frame.)
-  if (w.depth < 14. && regionEdge(p.ll) > 0.) {
+  if (w.depth < 14.) {
     // Surf breaks only where the bottom, smoothed over half a kilometre, really rises to a shore, and only in a
     // narrow band at the waterline. On a flat floor that the height data fills with noise (the shoals of a delta)
     // the sea stays calm and clean.
