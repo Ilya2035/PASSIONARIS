@@ -31,7 +31,7 @@
     { "id": "arlon", "name": "Бельгийский Люксембург", "region": "westeurope", "land": "luxland", "iso": ["BE-WLX"], "admin": ["BEL-3477"], "town": "Арлон", "at": [[49.95, 5.5]] },
     { "id": "luxembourg", "name": "Люксембург", "region": "westeurope", "land": "luxland", "iso": ["LU-D", "LU-G", "LU-L"], "admin": ["LUX-906", "LUX-907", "LUX-908"], "town": "Люксембург", "at": [[49.75, 6.1]] },
 
-    { "id": "zeeland", "name": "Зеландия", "region": "westeurope", "land": "holland", "iso": ["NL-ZE"], "admin": ["NLD-903"], "town": "Мидделбург", "at": [[51.5, 3.85]] },
+    { "id": "zeeland", "name": "Зеландия", "region": "westeurope", "land": "holland", "iso": ["NL-ZE"], "admin": ["NLD-903"], "town": "Мидделбург", "at": [[51.5, 3.85], [51.5, 3.61], [51.65, 3.92], [51.58, 4.1], [51.3, 3.85]] },
     { "id": "southholland", "name": "Южная Голландия", "region": "westeurope", "land": "holland", "iso": ["NL-ZH"], "admin": ["NLD-3485"], "town": "Гаага", "at": [[52, 4.55]] },
     { "id": "northholland", "name": "Северная Голландия", "region": "westeurope", "land": "holland", "iso": ["NL-NH"], "admin": ["NLD-3486"], "town": "Амстердам", "at": [[52.55, 4.85]] },
 

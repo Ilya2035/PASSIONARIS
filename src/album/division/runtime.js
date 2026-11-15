@@ -37,7 +37,7 @@ export async function startDivision(album, U) {
   // (a town the album draws is in the other list too, a kilometre or two away: left out there, or the district next
   // door would take the same town for its centre)
   const sites = [...own, ...osmSites.filter(s => { const [x, y] = kmOf(s.lat, s.lon); return !own.some(o => Math.hypot(o.x - x, o.y - y) < 6); })];
-  const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [] };
+  const opts = { lands, admin, heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], worked: data.worked || null };
   const cache = new Map();                              // size → { div, tex, state }: switching the size back costs nothing
   const listeners = [], labels = createLabels(album);
   let cur = null, hover = -1, sel = -1, last = null, down = null, shownVersion = -1, tick = 0, lines = null, farmShown = -1, pinned = -1, places = null, walls = null, wallsFor = null;

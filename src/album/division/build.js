@@ -7,8 +7,9 @@
 // which chunk belongs where roughly; the relief draws the border: a mountain range is never a unit but a border, each
 // slope goes with the valley it drains into, a whole valley is never cut. Plain JavaScript without the GPU: the page
 // and the tests run the same code, and the same chunks always give the same division.
-import { FKM, kmOf, llOf } from '../chunks.js';
+import { FKM, kmOf, llOf, NONE } from '../chunks.js';
 import { BBOX } from '../geo.js';
+import { WORKED_WATER } from '../worked.js';
 import { makeGraph, partition, tidy } from './graph.js';
 import { districtCells } from './cells.js';
 import { borderGeometry } from './border.js';
@@ -45,14 +46,31 @@ function minHeap() {
 }
 
 // ---- the kind of every chunk: land, sea or lake (a water chunk with no way over water to the edge of the map, or a
-// chunk a lake outline of the data covers at least half)
-export function chunkKinds(ch, lakes = []) {
+// chunk a lake outline of the data covers at least half). Under the mask of the worked land (stage 3) the chunks end
+// where the world begins (chunks.js NONE), and the open sea lies beyond the strip of sea along the coast: a water
+// chunk of the worked water (the mask: 2) that borders the world where the world is sea (heightAt ≤ 0 there) reaches it
+// too. A lake on the edge of the worked land — Léman — borders the world where it is land (the surface of a lake stands
+// above the sea), and stays one; so do the chotts of the Sahara, worked land below the sea (the mask: 1) next to the
+// rest of their depression in the world. worked: the mask (worked.js), when it is known.
+export function chunkKinds(ch, lakes = [], heightAt = null, worked = null) {
   const n = ch.count, kind = new Uint8Array(n);
   for (let k = 0; k < n; k++) kind[k] = ch.kind[k] ? LAND : SEA;
   const seen = new Uint8Array(n), queue = [];
-  const edge = t => { const k = ch.cell[t]; if (!ch.kind[k] && !seen[k]) { seen[k] = 1; queue.push(k); } };
+  const edge = t => { const k = ch.cell[t]; if (k < n && !ch.kind[k] && !seen[k]) { seen[k] = 1; queue.push(k); } };
   for (let i = 0; i < FNX; i++) { edge(i); edge((FNY - 1) * FNX + i); }
   for (let j = 0; j < FNY; j++) { edge(j * FNX); edge(j * FNX + FNX - 1); }
+  if (!ch.whole) {
+    const at = t => llOf(X0 + (t % FNX + .5) * FKM, Y0 + (Math.floor(t / FNX) + .5) * FKM);
+    const worldSea = t => { if (!heightAt) return true; const p = at(t); return heightAt(p.lat, p.lon) <= 0; };
+    const ownWater = t => { if (!worked) return true; const p = at(t); return worked(p.lat, p.lon) === WORKED_WATER; };
+    for (let t = 0; t < FNX * FNY; t++) {
+      const k = ch.cell[t]; if (k >= n || ch.kind[k] || seen[k]) continue;
+      const x = t % FNX, y = (t - x) / FNX;
+      if ((x > 0 && ch.cell[t - 1] === NONE && worldSea(t - 1)) || (x < FNX - 1 && ch.cell[t + 1] === NONE && worldSea(t + 1))
+        || (y > 0 && ch.cell[t - FNX] === NONE && worldSea(t - FNX)) || (y < FNY - 1 && ch.cell[t + FNX] === NONE && worldSea(t + FNX))) if (ownWater(t)) edge(t);
+    }
+  }
+  const starts = queue.length;
   for (let q = 0; q < queue.length; q++) for (const l of ch.links[queue[q]]) if (!ch.kind[l.k] && !seen[l.k]) { seen[l.k] = 1; queue.push(l.k); }
   for (let k = 0; k < n; k++) if (!ch.kind[k] && !seen[k]) kind[k] = LAKE;
   if (lakes.length) {
@@ -64,10 +82,17 @@ export function chunkKinds(ch, lakes = []) {
       for (let ty = Math.max(0, Math.floor((y0 - Y0) / FKM)); ty <= Math.min(FNY - 1, Math.floor((y1 - Y0) / FKM)); ty++)
         for (let tx = Math.max(0, Math.floor((x0 - X0) / FKM)); tx <= Math.min(FNX - 1, Math.floor((x1 - X0) / FKM)); tx++) {
           const p = llOf(X0 + (tx + .5) * FKM, Y0 + (ty + .5) * FKM);
-          if (pointInRing(p.lon, p.lat, ring)) inLake[ch.cell[ty * FNX + tx]] += FKM * FKM;
+          if (pointInRing(p.lon, p.lat, ring)) { const k = ch.cell[ty * FNX + tx]; if (k < n) inLake[k] += FKM * FKM; }
         }
     }
     for (let k = 0; k < n; k++) if (inLake[k] >= .5 * ch.area[k]) kind[k] = LAKE;
+    // the outlines of the lakes may cut a piece of sea off from the open sea: the IJsselmeer behind its dam is one water
+    // with the Waddenzee in the raster, and its outline makes most of it lake. What the open sea no longer reaches over
+    // the sea is lake too.
+    const reach = new Uint8Array(n), q2 = [];
+    for (let i = 0; i < starts; i++) { const k = queue[i]; if (kind[k] === SEA && !reach[k]) { reach[k] = 1; q2.push(k); } }
+    for (let q = 0; q < q2.length; q++) for (const l of ch.links[q2[q]]) if (kind[l.k] === SEA && !reach[l.k]) { reach[l.k] = 1; q2.push(l.k); }
+    for (let k = 0; k < n; k++) if (kind[k] === SEA && !reach[k]) kind[k] = LAKE;
   }
   return kind;
 }
@@ -199,7 +224,9 @@ function landProvinces(ch, kind, rel, lands, admin) {
     if (!changed) break;
   }
   // 4. every province hangs together: a piece cut off from the rest of its land (not an island) joins the land it
-  // shares the longest border with
+  // shares the longest border with. A piece that holds a point of its own province is a part of it, not a scrap, and
+  // stays: the islands of Zeeland, each tied to the mainland of another province, and Zeelandic Flanders.
+  const homes = new Set(); P.forEach((p, i) => { for (const a of p.at) { const k = anchorChunk(a); if (k >= 0) homes.add(i * n + k); } });
   for (let round = 0; round < 3; round++) {
     const comp = new Int32Array(n).fill(-1), comps = [];
     for (let s = 0; s < n; s++) {
@@ -211,7 +238,7 @@ function landProvinces(ch, kind, rel, lands, admin) {
     const biggest = new Map(); comps.forEach((c, i) => { if (!biggest.has(c.p) || comps[biggest.get(c.p)].area < c.area) biggest.set(c.p, i); });
     let changed = 0;
     comps.forEach((c, i) => {
-      if (biggest.get(c.p) === i) return;
+      if (biggest.get(c.p) === i || c.list.some(k => homes.has(c.p * n + k))) return;
       const border = new Map();
       for (const k of c.list) for (const l of ch.links[k]) if (kind[l.k] === LAND && prov[l.k] !== c.p) border.set(prov[l.k], (border.get(prov[l.k]) || 0) + l.km);
       if (!border.size) return;                                       // an island: it stays
@@ -281,10 +308,12 @@ function weight(ch, kind, k) {
 // rivers: [{ pts, rank }] — the outlines of districts run along them (cells.js); baked: the texels of the districts
 // as division/bake-cells.mjs baked them (division/bake.js), or null — taken when they are of the same land; keepClaim:
 // keep the texels as the claim gives them, before the borders move a few (div.claim: what is baked)
-export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20, rivers = [], baked = null, keepClaim = false } = {}) {
+// worked: the mask of the worked land (worked.js, data.worked at stage 3) — it tells the sea from the chotts at the edge
+// of the worked land; without it the mask the chunks were built with (ch.worked), if they keep it
+export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], size = 20, rivers = [], baked = null, keepClaim = false, worked = ch.worked ?? null } = {}) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const n = ch.count, sizes = levelSizes(size), T = size ** 2;
-  const kind = chunkKinds(ch, lakes), rel = linkRelief(ch, heightAt);
+  const kind = chunkKinds(ch, lakes, heightAt, worked), rel = linkRelief(ch, heightAt);
   const { prov: landProv, moved } = landProvinces(ch, kind, rel, lands, admin);
   const nLP = lands.provinces.length;
 
@@ -310,8 +339,18 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
   // 2. lakes: a lake is one district (a big one several), in the land around it
   const gk = new Int32Array(n); for (let k = 0; k < n; k++) gk[k] = kind[k] === LAKE ? 0 : -1;
   const lk = partition(g, gk, T, { iters: 8, minK: .25, maxK: 1.8 });
-  const lakeProv = label => { const km = new Map(); for (let k = 0; k < n; k++) if (lk.label[k] === label) for (const l of ch.links[k]) if (kind[l.k] === LAND) km.set(landProv[l.k], (km.get(landProv[l.k]) || 0) + l.km); let best = 0, bk = -1; for (const [p, v] of km) if (v > bk) { bk = v; best = p; } return best; };
+  const lakeProv = label => { const km = new Map(); for (let k = 0; k < n; k++) if (lk.label[k] === label) for (const l of ch.links[k]) if (kind[l.k] === LAND) km.set(landProv[l.k], (km.get(landProv[l.k]) || 0) + l.km); let best = -1, bk = -1; for (const [p, v] of km) if (v > bk) { bk = v; best = p; } return best; };
   const lakeP = Array.from({ length: lk.count }, (_, i) => lakeProv(i));
+  // a piece in the middle of a large lake has no shore of its own: it takes the province of a piece of the same lake
+  // next to it that has one (before, it fell to the first province of the list — Iberia — at stage 3 the IJsselmeer)
+  for (let more = lakeP.includes(-1); more;) {
+    more = false;
+    for (let k = 0; k < n; k++) {
+      const a = lk.label[k]; if (a < 0 || lakeP[a] >= 0) continue;
+      for (const l of ch.links[k]) { const b = lk.label[l.k]; if (b >= 0 && lakeP[b] >= 0) { lakeP[a] = lakeP[b]; more = true; break; } }
+    }
+  }
+  for (let i = 0; i < lakeP.length; i++) if (lakeP[i] < 0) lakeP[i] = 0;      // (a lake with no shore at all)
   take(lk.label, lk.count, k => lakeP[lk.label[k]]);
   const nLake = count;
 

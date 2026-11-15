@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, llOf, kmOf } from '../src/album/chunks.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
-import { KN as FN } from '../src/album/division/km.js';
+import { KN as FN, KNY as FNY } from '../src/album/division/km.js';
 import { catchmentUnits, mountainRaster, MOUNTAIN } from '../src/album/division/cells.js';
 import { impassablePairs, wallLines } from '../src/album/division/walls.js';
 import { districtCentres } from '../src/album/division/centres.js';
@@ -19,7 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // a made-up range: land x 100…159, y 100…139, the sea all round; two valleys along x (y 110 and 130) with a ridge
 // between them (y 120) and rims at the edges, all falling toward the sea at x 100
-const N = FN * FN, land = new Int32Array(N).fill(-1), hgt = new Float32Array(N);
+const N = FN * FNY, land = new Int32Array(N).fill(-1), hgt = new Float32Array(N);
 for (let y = 100; y < 140; y++) for (let x = 100; x < 160; x++) { const t = y * FN + x; land[t] = 0; hgt[t] = 5 + 15 * (x - 100) + 1000 * (1 + Math.cos(2 * Math.PI * (y - 100) / 20)); }
 const at = (x, y) => y * FN + x;
 
@@ -69,8 +69,8 @@ const data = loadAlbumData(ROOT);
 const skip = !data && 'public/album-data/ is not there';
 const real = data ? (() => {
   const json = f => JSON.parse(readFileSync(join(ROOT, 'public/assets/album/division', f), 'utf8'));
-  const ch = new Chunks(data.base.at, data.vectors.rivers);
-  return { div: buildDivision(ch, { lands: json('lands.json'), admin: json('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size: 20 }) };
+  const ch = new Chunks(data.base.at, data.vectors.rivers, [], data.worked);
+  return { div: buildDivision(ch, { lands: json('lands.json'), admin: json('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size: 20, worked: data.worked }) };
 })() : null;
 // the share of the length of the district borders in a box that runs within 750 m of a crest (a top of the heights
 // across the line, ±3 km, with the land 60 m lower on both sides within 1.5 km); the lines moved by (dx, dy) km show

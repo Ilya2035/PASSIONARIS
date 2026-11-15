@@ -1,9 +1,12 @@
 // The album's data read from disk in Node (tests, scripts): heights, rivers, lakes, places — what data.js loads in the
 // page, without textures. → null when public/album-data/ is not there (it is not in git: scripts/album/fetch-data.mjs).
+// At stage 3 (geo.js STAGE) it gives the mask of the worked land too, as data.js does: data.worked(lat, lon) → 0 the
+// world · 1 worked land · 2 its water (worked.js), the fourth argument of new Chunks(); at stage 2 data.worked is null.
 import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
-import { mercX, mercY } from '../geo.js';
+import { mercX, mercY, STAGE } from '../geo.js';
+import { decodeWorked } from '../worked.js';
 import { decodeCourses, mainRivers } from '../water/courses.js';
 import { fillHollows } from '../water/hollows.js';
 import { despike } from '../ground/despike.js';
@@ -17,8 +20,9 @@ export function loadAlbumData(root) {
   if (!existsSync(join(dir, meta.base.file))) return null;
   const buf = gunzipSync(readFileSync(join(dir, meta.base.file)));
   const raw = new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength / 2);
-  despike(raw, meta.base.w, meta.base.h);                           // as data.js does in the page: the needles and
-  fillHollows(raw, meta.base.w, meta.base.h);                       // wells of the coast, then the hollows
+  // as data.js does in the page: the needles and wells of the coast, then the hollows — unless the heights were baked
+  // already mended (meta.mended: the base of stage 3 is)
+  if (!meta.mended) { despike(raw, meta.base.w, meta.base.h); fillHollows(raw, meta.base.w, meta.base.h); }
   const b = meta.base, n = 2 ** b.z, rect = [b.x0 / n, b.y0 / n, n * 256 / b.w, n * 256 / b.h];
   const regionAt = (lat, lon) => {
     const x = Math.max(0, Math.min(b.w - 1.001, (mercX(lon) - rect[0]) * rect[2] * b.w - 0.5));
@@ -35,7 +39,14 @@ export function loadAlbumData(root) {
   // the real courses of the rivers, as data.js gives them to the page
   const rf = join(root, 'public', 'assets', 'album', 'water', 'rivers.bin.gz'); let courses = null;
   if (existsSync(rf)) { const u = gunzipSync(readFileSync(rf)); courses = decodeCourses(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength)); vectors.riversCoarse = vectors.rivers; vectors.rivers = mainRivers(courses); }
-  return { meta, base: { ...b, at, regionAt }, vectors, courses };
+  return { meta, base: { ...b, at, regionAt }, vectors, courses, worked: STAGE >= 3 ? workedOf(root) : null };
+}
+// the mask of the worked land (public/assets/album/worked.bin.gz, scripts/album/bake-worked.mjs) as a function of a
+// point, or null when the file is not there
+export function workedOf(root) {
+  const f = join(root, 'public', 'assets', 'album', 'worked.bin.gz'); if (!existsSync(f)) return null;
+  const u = gunzipSync(readFileSync(f));
+  return decodeWorked(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength)).at;
 }
 // the world map of heights as data.js has it (ground/world.js), or null when it is not there (then beyond the polygon
 // all is deep sea, as in the page); read once a process (36 MB packed, 64 MB as heights). The steps and their order are

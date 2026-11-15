@@ -17,6 +17,9 @@ const list = name => lists.find(([f]) => f === `lands-${name}.json`)[1];
 const fr = list('france');
 // where the provinces of a list lie (their points), lat0, lat1, lon0, lon1
 const BOX = { 'lands-france.json': [41, 51.2, -5.2, 9.7], 'lands-benelux.json': [49, 53.6, 2.5, 8.6], 'lands-maghreb.json': [29, 37.5, -10.5, 11.7] };
+// lands.json before the release of stage 3, or after it, when join-lands.mjs has run: the tests hold for both
+const joined = lists.every(([, l]) => l.provinces.every(p => lands.provinces.some(q => q.id === p.id)));
+const pool = k => (joined ? lands[k] : [...lands[k], ...lists.flatMap(([, l]) => l[k] || [])]);   // all there will be
 
 test('lists: France — every department has its province, once', () => {
   // the departments the provinces of the south already reach (lands.json)
@@ -42,9 +45,8 @@ test('lists: the owner of 15.11.2026 — Corsica its own region, the Channel Isl
 });
 
 test('lists: codes, ids, lands, regions and points fit', () => {
-  const regions = new Set([...lands.regions, ...lists.flatMap(([, l]) => l.regions || [])].map(r => r.id));
-  const landIds = new Set([...lands.lands, ...lists.flatMap(([, l]) => l.lands)].map(l => l.id));
-  const ids = [...lands.provinces, ...lists.flatMap(([, l]) => l.provinces)].map(p => p.id), lids = [...lands.lands, ...lists.flatMap(([, l]) => l.lands)].map(l => l.id);
+  const regions = new Set(pool('regions').map(r => r.id)), landIds = new Set(pool('lands').map(l => l.id));
+  const ids = pool('provinces').map(p => p.id), lids = pool('lands').map(l => l.id);
   assert.deepEqual(ids.filter((x, i) => ids.indexOf(x) !== i), [], 'no province id twice');
   assert.deepEqual(lids.filter((x, i) => lids.indexOf(x) !== i), [], 'no land id twice');
   for (const [f, l] of lists) {
@@ -73,7 +75,8 @@ test('lists: a unit goes to two provinces only where a list shares it out', () =
 test('lists: joining changes lands.json once, and a second time nothing', () => {
   const before = JSON.stringify(lands), j = joinLands(lands, lists);
   assert.equal(JSON.stringify(lands), before, 'lands.json itself is not touched');
-  const n = k => lists.reduce((s, [, l]) => s + (l[k] || []).length, 0);
+  const n = k => (joined ? 0 : lists.reduce((s, [, l]) => s + (l[k] || []).length, 0));
+  if (joined) assert.deepEqual(j.log, [], 'lands.json is joined already: nothing more');
   assert.equal(j.lands.provinces.length, lands.provinces.length + n('provinces'));
   assert.equal(j.lands.lands.length, lands.lands.length + n('lands'));
   assert.equal(j.lands.seas.length, lands.seas.length + n('seas'));

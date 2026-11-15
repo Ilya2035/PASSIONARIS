@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Chunks, kmOf, llOf, FN, FKM, CN, CHUNK_KM, CI0, CJ0 } from '../src/album/chunks.js';
-import { KN, KKM, KX0, KY0, JITTER, kmHash, KM_GLSL, seedOf, squareOf, middleOf, chunkAt, cellsOfChunks, chunkFacts, districtBoxes, chunksOfDistrict, cellsOfDistrict, districtOrder,
+import { Chunks, kmOf, llOf, FN, FNY, FKM, CN, CNY, CHUNK_KM, CI0, CJ0 } from '../src/album/chunks.js';
+import { KN, KNY, KKM, KX0, KY0, rowScale, JITTER, kmHash, KM_GLSL, seedOf, squareOf, middleOf, chunkAt, cellsOfChunks, chunkFacts, districtBoxes, chunksOfDistrict, cellsOfDistrict, districtOrder,
   kmData, kmFacts, kmOrder, CLASS_SLOPE, CLASS_TITLE, HIGH_M, livingOf, ORDER_WEIGHT } from '../src/album/division/km.js';
 import { buildDivision, districtSummary, LAND } from '../src/album/division/build.js';
 import { packDivision } from '../src/album/division/gpu.js';
@@ -19,14 +19,14 @@ import { DEFS } from '../src/album/params.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('km: the lattice of chunks lies over the whole map; a seed stands in its own square; one hash for JS and GLSL', () => {
-  assert.equal(KKM, 1); assert.equal(KN * KKM, FN * FKM); assert.equal(KN * KKM, CN * CHUNK_KM); assert.equal(KX0, CI0 * CHUNK_KM); assert.equal(KY0, CJ0 * CHUNK_KM);
+  assert.equal(KKM, 1); assert.equal(KN * KKM, FN * FKM); assert.equal(KN * KKM, CN * CHUNK_KM); assert.equal(KNY * KKM, FNY * FKM); assert.equal(KNY * KKM, CNY * CHUNK_KM); assert.equal(KX0, CI0 * CHUNK_KM); assert.equal(KY0, CJ0 * CHUNK_KM);
   for (const [i, j] of [[0, 0], [5, 9], [640, 640], [1279, 1279], [311, 1040]]) {
     const [x, y] = seedOf(i, j), [mx, my] = middleOf(j * KN + i);
     assert.ok(Math.abs(x - mx) <= JITTER + 1e-9 && Math.abs(y - my) <= JITTER + 1e-9, 'the seed stands near the middle of its square');
     assert.equal(squareOf(x, y), j * KN + i); assert.equal(squareOf(mx, my), j * KN + i);
     for (const salt of [1, 2]) { const h = kmHash(i, j, salt); assert.ok(h >= 0 && h < 1 && Number.isInteger(h * 16777216), 'a number a float holds exactly'); }
   }
-  assert.equal(squareOf(KX0 - .1, KY0 + 5), -1); assert.equal(squareOf(KX0 + 5, KY0 + KN + .1), -1);
+  assert.equal(squareOf(KX0 - .1, KY0 + 5), -1); assert.equal(squareOf(KX0 + 5, KY0 + KNY + .1), -1); assert.equal(squareOf(KX0 + KN + .1, KY0 + 5), -1);
   // the seeds do not stand in rows: their places in the squares are spread evenly
   let sx = 0, sy = 0, n = 0; const tenths = new Uint32Array(10);
   for (let j = 300; j < 340; j++) for (let i = 500; i < 540; i++) { const [x, y] = seedOf(i, j), fx = x - KX0 - i, fy = y - KY0 - j; sx += fx; sy += fy; n++; tenths[Math.floor((fx - .5 + JITTER) / (2 * JITTER) * 10)]++; }
@@ -35,9 +35,9 @@ test('km: the lattice of chunks lies over the whole map; a seed stands in its ow
   assert.match(KM_GLSL, /0x27d4eb2du/); assert.match(KM_GLSL, /0x297a2d39u/); assert.ok(KM_GLSL.includes(`#define KM_JIT ${(2 * JITTER).toFixed(3)}`)); assert.ok(KM_GLSL.includes(`#define KM_N ${KN}`));
 });
 
-// a made-up division: two districts of land west and east of column 700, the sea east of column 760
+// a made-up division: two districts of land west and east of column 700, the sea east of column 760 (over all KNY rows)
 function madeDiv(heightAt = () => 100) {
-  const cells = new Int32Array(KN * KN), hgt = new Float32Array(KN * KN);
+  const cells = new Int32Array(KN * KNY), hgt = new Float32Array(KN * KNY);
   for (let c = 0; c < cells.length; c++) { const i = c % KN; cells[c] = i >= 760 ? 2 : i < 700 ? 0 : 1; }
   const div = { count: 3, cells, kinds: [0, 0, 2], cx: [KX0 + 650.5, KX0 + 730.5, KX0 + 900.5], cy: [KY0 + 600.5, KY0 + 600.5, KY0 + 600.5], raster: { hgt } };
   for (let j = 560; j < 640; j++) for (let i = 600; i < 760; i++) { const p = llOf(KX0 + i + .5, KY0 + j + .5); hgt[j * KN + i] = Math.max(0, heightAt(p.lat, p.lon)); }
@@ -87,20 +87,20 @@ test('km: five classes of ground by the most level quarter of the chunk; who can
   assert.ok(f.steep[at(54)] > .25, 'though its walls are steep: ' + f.steep[at(54)].toFixed(2));
   assert.equal(f.cls[at(52)], 5, 'the wall itself is mountain'); assert.equal(f.cls[at(65)], 5, 'above ' + HIGH_M + ' m a chunk is mountain however level');
   assert.equal(f.cls[at(165)], 0, 'a chunk of water has no class'); assert.equal(f.num[0], 0);
-  assert.equal(f.num.reduce((a, b) => a + b, 0), 160 * 80 + 0 * 0 + (KN * KN - 520 * KN - 160 * 80 - 0), 'every chunk of land is counted once');
+  assert.equal(f.num.reduce((a, b) => a + b, 0), 760 * KNY, 'every chunk of land is counted once');
   // without the heights between the middles only neighbours are compared: still level and steep are told apart
   const g = chunkFacts(div, null); assert.equal(g.cls[at(5)], 1); assert.ok(g.cls[at(45)] >= 4);
 });
 
 test('km: the chunks of a district, the cells under them, and the order a district takes up its land', () => {
   const div = madeDiv(), box = districtBoxes(div);
-  assert.deepEqual([...box.num], [700 * KN, 60 * KN, 520 * KN]); assert.deepEqual([box.x0[1], box.x1[1], box.y0[1], box.y1[1]], [700, 759, 0, KN - 1]);
-  assert.equal(kmData(div).box.num[1], 60 * KN); assert.equal(chunksOfDistrict(div, 1).length, 60 * KN); assert.ok(chunksOfDistrict(div, 1).every(c => div.cells[c] === 1));
+  assert.deepEqual([...box.num], [700 * KNY, 60 * KNY, (KN - 760) * KNY]); assert.deepEqual([box.x0[1], box.x1[1], box.y0[1], box.y1[1]], [700, 759, 0, KNY - 1]);
+  assert.equal(kmData(div).box.num[1], 60 * KNY); assert.equal(chunksOfDistrict(div, 1).length, 60 * KNY); assert.ok(chunksOfDistrict(div, 1).every(c => div.cells[c] === 1));
   // level ground near the centre first; where nobody can live comes last
   assert.ok(ORDER_WEIGHT[1] === 1 && ORDER_WEIGHT.slice(1).every((v, i, a) => !i || v > a[i - 1]));
-  const cls = new Uint8Array(KN * KN).fill(1), centre = squareOf(div.cx[1], div.cy[1]); cls[centre + 2] = 5;
+  const cls = new Uint8Array(KN * KNY).fill(1), centre = squareOf(div.cx[1], div.cy[1]); cls[centre + 2] = 5;
   const o = districtOrder(div, { cls });
-  assert.equal(o.list.length, 760 * KN); assert.deepEqual([o.first[0], o.first[1], o.first[2], o.first[3]], [0, 700 * KN, 760 * KN, 760 * KN]);
+  assert.equal(o.list.length, 760 * KNY); assert.deepEqual([o.first[0], o.first[1], o.first[2], o.first[3]], [0, 700 * KNY, 760 * KNY, 760 * KNY]);
   assert.equal(o.rank[centre], 0); assert.equal(o.list[o.first[1]], centre); assert.equal(o.rank[squareOf(KX0 + 900, KY0 + 600)], -1);
   assert.ok(o.rank[centre + 2] > o.rank[centre + 9], 'a mountain chunk two km from the centre waits until the level ground nine km away is taken');
   const part = o.list.subarray(o.first[1], o.first[2]); assert.equal(new Set(part).size, part.length);
@@ -114,30 +114,33 @@ const data = loadAlbumData(ROOT), skip = !data && 'public/album-data/ is not the
 test('km of the album: a district is about four hundred whole chunks; the plains are level, the ranges mountain, their valleys lived in', { skip }, () => {
   const rd = f => JSON.parse(readFileSync(join(ROOT, f), 'utf8'));
   const lakes = rd('public/assets/album/water/lakes.json').lakes.filter(l => !l.shoal && l.ring);
-  const ch = new Chunks(data.base.at, data.vectors.rivers, lakes);
-  const div = buildDivision(ch, { lands: rd('public/assets/album/division/lands.json'), admin: rd('public/assets/album/division/admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], size: 20, rivers: data.vectors.rivers });
-  assert.equal(div.cells.length, KN * KN);
-  // every chunk has a district; a land district is its chunks
+  const ch = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);
+  const div = buildDivision(ch, { lands: rd('public/assets/album/division/lands.json'), admin: rd('public/assets/album/division/admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], size: 20, rivers: data.vectors.rivers, worked: data.worked });
+  assert.equal(div.cells.length, KN * KNY);
+  // every chunk has a district; a land district is its chunks (at stage 3 only the worked land has chunks: chunks.js NONE)
+  const kc = cellsOfChunks(ch), owned = kc.cell.reduce((s, k) => s + (k < ch.count ? 1 : 0), 0);
+  assert.ok(data.worked ? owned < KN * KNY : owned === KN * KNY, 'a chunk of 1 km² wherever there is a natural cell, and only there');
   const num = kmData(div).box.num, land = []; let all = 0, landChunks = 0;
   for (let d = 0; d < div.count; d++) { all += num[d]; if (div.kinds[d] === LAND) { land.push(num[d]); landChunks += num[d]; } }
-  assert.equal(all, KN * KN, 'every chunk lies in a district'); land.sort((a, b) => a - b);
+  assert.equal(all, owned, 'every chunk lies in a district'); land.sort((a, b) => a - b);
   const mid = land[land.length >> 1], q = p => land[Math.floor(p * (land.length - 1))];
   assert.ok(mid > 370 && mid < 430, `a district has ${mid} chunks in the middle`); assert.ok(q(.05) > 220 && q(.95) < 620, `nine districts in ten have ${q(.05)} to ${q(.95)} chunks`);
   // the natural cells under the chunks: every chunk lies in one, and the cells of a district carry all its chunks
-  const kc = cellsOfChunks(ch); assert.equal(kc.cell.length, KN * KN); assert.equal(kc.count.reduce((a, b) => a + b, 0), KN * KN);
+  assert.equal(kc.cell.length, KN * KNY); assert.equal(kc.count.reduce((a, b) => a + b, 0), owned);
   const zar = div.cells[squareOf(...kmOf(41.65, -.89))], parts = cellsOfDistrict(div, ch, zar);
   assert.equal(parts.reduce((s, e) => s + e[1], 0), num[zar]); assert.ok(parts.length >= 3 && parts.length < 30);
   // what the chunks are like
   const f = kmFacts(div, data.base.at), share = [...f.num].map(v => v / landChunks);
   assert.equal(f.num.reduce((a, b) => a + b, 0), landChunks); assert.equal(f.num[0], 0);
-  assert.ok(share[1] > .2 && share[1] < .36 && share[2] > .28 && share[5] > .02 && share[5] < .09, 'shares of the classes: ' + share.map(v => (v * 100).toFixed(1)).join(' '));
+  assert.ok(share[1] > .2 && share[1] < .42 && share[2] > .28 && share[5] > .02 && share[5] < .09, 'shares of the classes: ' + share.map(v => (v * 100).toFixed(1)).join(' '));
   const clsAt = (lat, lon) => f.cls[chunkAt(div.cells, ...kmOf(lat, lon))];
   assert.equal(clsAt(41.65, -.89), 1, 'Zaragoza, the plain of the Ebro'); assert.equal(clsAt(39.2, -3), 1, 'La Mancha'); assert.equal(clsAt(37.19, -3.7), 1, 'the vega of Granada');
   assert.equal(clsAt(42.631, .657), 5, 'Aneto'); assert.equal(clsAt(37.053, -3.311), 5, 'Mulhacén');
   assert.ok(clsAt(42.604, .523) <= 3, 'the valley of Benasque can be lived in'); assert.ok(clsAt(42.432, 1.928) <= 2, 'the Cerdanya is level ground among the mountains');
   // a district of the plain and a district of the high Pyrenees
   const s = districtSummary(div, zar, ch), high = districtSummary(div, div.cells[squareOf(...kmOf(42.631, .657))], ch);
-  assert.equal(s.chunks, num[zar]); assert.equal(s.area, num[zar]); assert.ok(s.classes[1] / s.chunks > .4 && s.living[2] / s.chunks > .95, 'Zaragoza: ' + s.classes);
+  let zarArea = 0; for (let t = 0; t < div.cells.length; t++) if (div.cells[t] === zar) zarArea += rowScale(Math.floor(t / KN));   // its true area (km.js TRUE_SCALE)
+  assert.equal(s.chunks, num[zar]); assert.ok(Math.abs(s.area - zarArea) < 1e-6, s.area + ' km² against ' + zarArea); assert.ok(s.classes[1] / s.chunks > .4 && s.living[2] / s.chunks > .95, 'Zaragoza: ' + s.classes);
   assert.ok(high.classes[5] / high.chunks > .3 && high.living[2] > 20, 'the district of Aneto: ' + high.classes + '; lived on freely: ' + high.living[2]);
   // the order a district takes up its land begins at its centre
   div.centres = districtCentres(div, data.vectors.places.map(p => { const [x, y] = kmOf(p.lat, p.lon); return { x, y, pop: p.pop, name: p.name }; }));
@@ -145,7 +148,10 @@ test('km of the album: a district is about four hundred whole chunks; the plains
   const first = o.list[o.first[zar]], [fx, fy] = middleOf(first); assert.ok(Math.hypot(fx - div.centres.x[zar], fy - div.centres.y[zar]) < 2.5, 'the first chunk of the district of Zaragoza lies at its centre');
   // the texture of the division carries the district of every chunk and, when asked, what the chunk is like
   const a = packDivision(ch, div, null, f);
-  for (let c = 0; c < KN * KN; c += 7919) { assert.equal(a[c * 4], div.cells[c]); assert.equal(a[c * 4 + 1] & 7, f.cls[c]); assert.equal(a[c * 4 + 1] >> 3 & 3, livingOf(f.cls[c])); }
+  for (let c = 0; c < KN * KNY; c += 7919) {
+    assert.equal(a[c * 4], Math.max(0, div.cells[c])); assert.equal(a[c * 4 + 1] & 7, f.cls[c]); assert.equal(a[c * 4 + 1] >> 3 & 3, livingOf(f.cls[c]));
+    assert.equal(a[c * 4 + 3] >>> 31, div.cells[c] < 0 ? 1 : 0, 'a square with no district is marked for the shader');
+  }
   assert.equal(packDivision(ch, div)[squareOf(...kmOf(41.65, -.89)) * 4 + 1], 0, 'without the facts the texture says nothing of the chunks');
 });
 

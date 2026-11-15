@@ -20,8 +20,8 @@ const json = f => JSON.parse(readFileSync(join(ROOT, 'public/assets/album/divisi
 const data = loadAlbumData(ROOT); if (!data) { console.log('no album data (public/album-data)'); process.exit(1); }
 if (process.argv.includes('--old')) MOUNTAIN.vote = false;
 const lakes = (() => { try { return JSON.parse(readFileSync(join(ROOT, 'public/assets/album/water/lakes.json'), 'utf8')).lakes.filter(l => !l.shoal && l.ring); } catch { return []; } })();
-const ch = new Chunks(data.base.at, data.vectors.rivers, lakes);
-const div = buildDivision(ch, { lands: json('lands.json'), admin: json('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size: 20 });
+const ch = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);
+const div = buildDivision(ch, { lands: json('lands.json'), admin: json('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size: 20, worked: data.worked });
 const H = (x, y) => { const p = llOf(x, y); return data.base.at(p.lat, p.lon); };
 const RANGES = { 'Пиренеи': [42.25, 43.25, -2.0, 3.3], 'Кантабрийские горы': [42.6, 43.45, -7.3, -3.4], 'Центральная Кордильера': [40.0, 41.3, -7.6, -3.1], 'Сьерра-Невада': [36.85, 37.3, -3.75, -2.5] };
 const rangeOf = (x, y) => { const p = llOf(x, y); for (const [k, b] of Object.entries(RANGES)) if (p.lat >= b[0] && p.lat <= b[1] && p.lon >= b[2] && p.lon <= b[3]) return k; return null; };

@@ -13,11 +13,24 @@
 // The chunks themselves are never seen on the map (the owner: «чанки не видим сами по себе… только в dev-режиме»):
 // the knob «Чанки 1 км²» draws their outlines and what each is like, for checking.
 import { Vector2, Vector3 } from 'three';
-import { BBOX, KM_PER_DEG, COS_REF } from '../geo.js';
+import { BBOX, KM_PER_DEG, COS_REF, STAGE } from '../geo.js';
 import { KKM as FKM, KN as FN, KNY as FNY, KM_GLSL } from '../division/km.js';
 // the last texel of the lattice of chunks; written as one number while the lattice is a square (the shader the same,
 // letter for letter, as before the lattice could be a rectangle: the GPU compiler is touchy)
 const LAST = FN === FNY ? `${FN - 1}` : `${FN - 1}, ${FNY - 1}`;
+// At stage 3 (geo.js STAGE) there are chunks only under the mask of the worked land; where the lattice has no district
+// (the world, chunks.js NONE; division/gpu.js marks the square) the division draws nothing. At stage 2 every square has
+// a district, and the shader is the same, letter for letter, as before.
+const WORKED = STAGE >= 3;
+const WORKED_GLSL = WORKED ? `
+// stage 3: how much of the worked land there is at a point, 0..1 — the four squares around it (bit 31 of a: a square
+// with no district) weighed by nearness, so the division ends along a clean line, not in steps of a kilometre
+float divWorked(vec2 pk) {
+  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)} - .5, f = fract(t); ivec2 c = ivec2(floor(t)), L = ivec2(${LAST});
+  float a = float(1u - (texelFetch(tDiv, clamp(c, ivec2(0), L), 0).a >> 31u)), b = float(1u - (texelFetch(tDiv, clamp(c + ivec2(1, 0), ivec2(0), L), 0).a >> 31u));
+  float d = float(1u - (texelFetch(tDiv, clamp(c + ivec2(0, 1), ivec2(0), L), 0).a >> 31u)), e = float(1u - (texelFetch(tDiv, clamp(c + ivec2(1, 1), ivec2(0), L), 0).a >> 31u));
+  return mix(mix(a, b, f.x), mix(d, e, f.x), f.y);
+}` : '';
 import { emptyTexture } from '../division/gpu.js';
 import { NEAR_KM, MAX_FOURS, PIECE_KM, TIE_KM } from '../division/border.js';
 import { startDivision } from '../division/runtime.js';
@@ -34,7 +47,7 @@ const vec3 DIV_WATER[8] = vec3[8](vec3(.55, .70, .90), vec3(.45, .62, .86), vec3
 
 uvec4 divOf(float d) { int i = int(d + .5); return texelFetch(tDiv, ivec2(i % ${FN}, ${FNY} + i / ${FN}), 0); }
 // the district of a chunk of 1 km² (the outline of a district runs chunk by chunk: division/cells.js)
-float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${LAST})), 0).r); }
+float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${LAST})), 0).r); }${WORKED_GLSL}
 ${KM_GLSL}
 // The chunk of 1 km² a point of district d lies in (twin of chunkAt() in division/km.js): among the nine squares
 // around the point, those of the district; the nearest seed wins → km to the nearest side it shares with another
@@ -298,7 +311,9 @@ vec3 districtAt(vec2 pk) {
 void aspDivision(Px p, inout vec3 col, float landA) {
   if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0 && uDivSettle == 0 && uDivEdges == 0 && uDivInfra == 0)) return;
   float inR = inRegion(p.ll);                     // nothing is divided beyond the album's region
-  if (inR < .002) return;
+  if (inR < .002) return;${WORKED ? `
+  float wk = smoothstep(.3, .7, divWorked(p.pk));  // stage 3: only the worked land is divided
+  if (wk < .002) return;` : ''}
   vec3 cl = landA > .02 ? divLook(col, p.pk, p.px, false) : col;
   vec3 cw = landA < .98 ? divLook(col, p.pk, p.px, true) : col;
   // the districts end at the edge of the polygon: beyond it lies the land and the sea of the world, and the ground
@@ -306,7 +321,7 @@ void aspDivision(Px p, inout vec3 col, float landA) {
   // edge is told by the flat km of the point: any use of p.ll here, regionEdge() or another, made the whole ground
   // shader 15–30 % slower on the integrated GPU, the division off or on.
   vec2 eK = min(p.pk - vec2(${(BBOX.lon0 * KM_PER_DEG * COS_REF).toFixed(3)}, ${(BBOX.lat0 * KM_PER_DEG).toFixed(3)}), vec2(${(BBOX.lon1 * KM_PER_DEG * COS_REF).toFixed(3)}, ${(BBOX.lat1 * KM_PER_DEG).toFixed(3)}) - p.pk);
-  col = mix(col, mix(cw, cl, landA), inR * step(0., min(eK.x, eK.y)));
+  col = mix(col, mix(cw, cl, landA), inR${WORKED ? ' * wk' : ''} * step(0., min(eK.x, eK.y)));
 }`;
 
 const ZARAGOZA = [41.65, -0.89];                    // the town of the album data (vectors.places)

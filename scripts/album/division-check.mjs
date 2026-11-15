@@ -13,9 +13,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const json = f => JSON.parse(readFileSync(join(ROOT, 'public/assets/album/division', f), 'utf8'));
 const data = loadAlbumData(ROOT); if (!data) { console.log('no album data (public/album-data)'); process.exit(1); }
 const lakes = (() => { try { return JSON.parse(readFileSync(join(ROOT, 'public/assets/album/water/lakes.json'), 'utf8')).lakes.filter(l => !l.shoal && l.ring); } catch { return []; } })();
-const ch = new Chunks(data.base.at, data.vectors.rivers, lakes);
+const ch = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);
 const size = +process.argv[2] || 20, t0 = performance.now();
-const div = buildDivision(ch, { lands: json('lands.json'), admin: json('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size });
+const div = buildDivision(ch, { lands: json('lands.json'), admin: json('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size, worked: data.worked });
 const g = div.geo;
 console.log(`division ${size} km: ${div.count} districts, built in ${(performance.now() - t0).toFixed(0)} ms`);
 console.log(`borders: ${g.lines.length} lines, ${g.count} pieces; lists ${g.list.length} entries; squares with a list ${g.num.reduce((s, v) => s + (v > 0), 0)}; most fours ${g.num.reduce((m, v) => Math.max(m, v), 0)}; clipped ${g.over}`);

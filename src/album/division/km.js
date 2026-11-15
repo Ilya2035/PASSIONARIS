@@ -20,7 +20,7 @@
 // (cellsOfChunks). Plain JavaScript without the GPU: the same land always gives the same chunks.
 import { FKM, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
 import * as CH from '../chunks.js';
-import { KM_PER_DEG, COS_REF } from '../geo.js';
+import { KM_PER_DEG, COS_REF, STAGE } from '../geo.js';
 
 // (the lattice lies over the same rectangle of the Earth as the natural cells of chunks.js: its size and its corner
 // come from there, and grow with the polygon. The cells may be a square, CN × CN, or a rectangle, CNX × CNY; so may
@@ -31,9 +31,10 @@ export const KKM = 1, KN = CNX * CHUNK_KM / KKM, KNY = CNY * CHUNK_KM / KKM, KX0
 // The plane of kmOf keeps one east–west scale, that of latitude 40° (COS_REF): a square of the lattice is truly
 // cos(lat)/cos(40°) km wide — 0.78 km² in the Netherlands, 1.14 in the south of Morocco, 0.92–1.06 on the polygon of
 // today. TRUE_SCALE counts that in where it matters: the size of a district (the weight of a natural cell), the area
-// of a district, the slope of a chunk east–west. Off on the polygon of today (on, its districts and town places would
-// move a little); on with stage 3, when all is built anew. Off, the factor is 1 exactly and nothing changes.
-export const TRUE_SCALE = false;
+// of a district, the slope of a chunk east–west. Off on the polygon of stage 2 (on, its districts and town places
+// would move a little); on at stage 3 (geo.js STAGE), when all is built anew. Off, the factor is 1 exactly and nothing
+// changes.
+export const TRUE_SCALE = STAGE >= 3;
 export const scaleAt = lat => (TRUE_SCALE ? Math.cos(lat * Math.PI / 180) / COS_REF : 1);
 export const scaleOfY = y => scaleAt(y / KM_PER_DEG);                      // y: flat km north
 export const rowScale = j => scaleOfY(KY0 + (j + .5) * KKM);               // j: a row of the lattice

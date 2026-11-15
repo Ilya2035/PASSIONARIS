@@ -20,9 +20,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 export function nodeDivision(root = ROOT, size = 20, baked = null, keepClaim = false) {
   const data = loadAlbumData(root); if (!data) throw new Error('no album data (public/album-data)');
   const lakes = (() => { try { return JSON.parse(readFileSync(join(root, 'public/assets/album/water/lakes.json'), 'utf8')).lakes.filter(l => !l.shoal && l.ring); } catch { return []; } })();
-  const ch = new Chunks(data.base.at, data.vectors.rivers, lakes);
+  const ch = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked);
   const j = f => JSON.parse(readFileSync(join(root, 'public/assets/album/division', f), 'utf8'));
-  return { ch, data, div: buildDivision(ch, { lands: j('lands.json'), admin: j('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size, baked, keepClaim }) };
+  return { ch, data, div: buildDivision(ch, { lands: j('lands.json'), admin: j('admin.json'), heightAt: data.base.at, lakes: data.vectors.lakes || [], rivers: data.vectors.rivers || [], size, baked, keepClaim, worked: data.worked }) };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

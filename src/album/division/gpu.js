@@ -66,6 +66,9 @@ export function packDivision(ch, div, state = null, facts = null, farm = null, r
       a[o] = bitsOf(ax); a[o + 1] = bitsOf(ay); a[o + 2] = (fixOf(geo.seg[s * 4 + 2] - ax) | fixOf(geo.seg[s * 4 + 3] - ay) << 16) >>> 0; a[o + 3] = geo.lab[s];
     }
   }
+  // a square with no district — the world beyond the worked land at stage 3 (chunks.js NONE) — has bit 31 of a: the
+  // division is not drawn there (aspects/division.js divWorked). At stage 2 every square has a district.
+  if (div.cells) for (let t = 0; t < FN * FNY; t++) if (div.cells[t] < 0) a[t * 4 + 3] = (a[t * 4 + 3] | 0x80000000) >>> 0;
   if (facts) for (let t = 0; t < FN * FNY; t++) { const k = facts.cls[t]; a[t * 4 + 1] = k | livingOf(k) << 3; }
   if (farm) for (let t = 0; t < FN * FNY; t++) a[t * 4 + 1] |= farm[t] << 8;
   if (why) for (let t = 0; t < FN * FNY; t++) a[t * 4 + 1] |= why[t] << 16;
