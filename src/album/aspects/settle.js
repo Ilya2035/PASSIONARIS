@@ -25,12 +25,12 @@
 // one must be added, is called at the very head of aspSettle; and land-20 and land-far are timed before and after
 // every change. (Thresholds of smoothstep written in the code were a second, lesser cause; the build of the shader
 // now moves them into a table.)
-import { RULES_GLSL, PALETTE_GLSL } from '../town/rules.js';
+import { RULES_GLSL, PALETTE_GLSL, FARM_TURNS } from '../town/rules.js';
 import { settleUniforms } from '../town/state.js';
 
 const GLSL = /* glsl */`
 uniform sampler2D tSettle; uniform vec4 uSettle;   // cell of the lattice km · blocks standing 0..1 · height of houses × · settlements shown 0 / 1
-uniform vec4 uSetA, uSetB;                         // the rules that ask «is the thing still there», with the tilt of the camera in them (town/state.js, setTilt)
+uniform vec4 uSetA, uSetB, uSetC;                  // the rules that ask «is the thing still there», with the tilt and the height of the camera in them (town/state.js, setTilt)
 ${RULES_GLSL}
 ${PALETTE_GLSL}
 // The roof over point q of the bent lattice of a patch: how much of the pixel it covers. cls = class of the cell,
@@ -67,14 +67,23 @@ float setNoise(vec2 p) {
 // The furlong (a piece of ploughland) a point lies in. Furlongs lie like bricks, longer than wide, every row shifted
 // against the next; bend makes their edges not quite straight. Returns its id; f = the place inside it (0..1),
 // border = km to its edge.
+// The land is ploughed in PIECES a kilometre or two across (SET_PIECE km): in one piece the furlongs lie one way and
+// are of one size, in the next another way and of another size, and a balk or a path runs between the two. (The
+// owner, 15.11.2026: «поля огромные, но они должны быть разнобойки, не такие ровненькие» — one lattice of furlongs
+// ran from horizon to horizon, all of one size and all turned the same 30° against the compass.)
 vec2 setFurlong(vec2 pk, float fs, float bend, out vec2 f, out float border) {
-  vec2 q = vec2(.866 * pk.x + .5 * pk.y, -.5 * pk.x + .866 * pk.y) / fs + bend;     // the rows are turned against the compass
+  vec2 pc = pk / SET_PIECE + bend * 1.6; ivec2 blk = ivec2(floor(pc));
+  float hb = setHash(blk, 3, 41);
+  vec2 t = hb < .25 ? vec2(${FARM_TURNS[0].map(v => v.toFixed(3)).join(', ')}) : hb < .5 ? vec2(${FARM_TURNS[1].map(v => v.toFixed(3)).join(', ')}) : hb < .75 ? vec2(${FARM_TURNS[2].map(v => v.toFixed(3)).join(', ')}) : vec2(${FARM_TURNS[3].map(v => v.toFixed(3)).join(', ')});
+  fs *= .8 + .45 * fract(hb * 7.);
+  vec2 q = vec2(t.x * pk.x + t.y * pk.y, -t.y * pk.x + t.x * pk.y) / fs + bend;      // the rows are turned against the compass
   float row = floor(q.y);
   q.x = q.x * .62 + setHash(ivec2(7, int(row)), 3, 11);
   float col = floor(q.x);
   f = q - vec2(col, row);
-  border = min(min(f.x, 1. - f.x) * 1.6, min(f.y, 1. - f.y)) * fs;
-  return vec2(col, row);
+  vec2 fb = pc - vec2(blk);                                                          // …and the edge of the piece is an edge too
+  border = min(min(min(f.x, 1. - f.x) * 1.6, min(f.y, 1. - f.y)) * fs, min(min(fb.x, 1. - fb.x), min(fb.y, 1. - fb.y)) * SET_PIECE);
+  return vec2(col, row) + vec2(blk) * 37.;
 }
 // the colour of a field close by. Every colour is a tint of the ground the field was ploughed from, so the land keeps
 // its own grain and tone.
@@ -98,7 +107,7 @@ vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, flo
     float tv = clamp((.014 - px) * 200., 0., 1.);
     c = mix(vec3(.68, .61, .46), vec3(.31, .38, .21), smoothstep(.38, .26, length(fract(p.pk / .028 + h2) - .5)) * tv + .32 * (1. - tv));
   }
-  c = mix(ground, c, atl > .5 ? .58 : .62);
+  c = mix(ground, c, atl > .5 ? .58 : .62) * (.9 + .2 * h2);        // (no two furlongs quite of a tone)
   // the edge of a furlong: a balk or a trodden path, or a hedge in the wet lands
   vec3 bc = atl > .5 ? vec3(.26, .32, .18) : h3 > .62 ? vec3(.72, .66, .54) : vec3(.42, .43, .27);
   c = mix(c, bc, clamp(1.7 - border / max(.003, px * .6), 0., 1.) * (atl > .5 ? .3 + .45 * h2 : .5));
@@ -146,6 +155,12 @@ float setStep(vec2 ek, float x) { float t = clamp((x - ek.x) * ek.y, 0., 1.); re
 // under fields): only while a furlong is wider than a pixel or so; a land ploughed in earnest keeps its fields at any
 // height. The forest asks the very same (forestKeep), so a clearing and its fields come and go together.
 float setSeen(float px, float ploughed) { return ploughed >= .12 ? 1. : mix(setStep(uSetA.xy, px), 1., smoothstep(.03, .12, ploughed)); }
+// How much of a stand of forest the fields clear (the forest asks: forestKeep). farm: the share of the land under
+// fields (setFarm); pat: the patch noise of the forest, which moves the edge of a clearing in and out. Near, a chunk
+// under fields is cleared whole: fields with trees standing in them are what the owner asked not to see. From high
+// up the trees thin out as the fields thicken (uSetC.x: the share at which the land is clear, .2 near and .9 from
+// high up — town/state.js CLEAR), or every town sat in a pale patch with a crisp rim: «очень резко пересекаются».
+float setCleared(float farm, float pat) { return smoothstep(.04, uSetC.x, farm * (.45 + 1.1 * pat)); }
 // How much of the land at a point is under fields, 0..1: the state of the chunk of 1 km² the point lies in (the first
 // rows of the texture, a texel a chunk: town/state.js). The chunk of a point is the one whose seed is nearest, as in
 // the division (division/km.js); the step from a chunk to the next is softened, so the edge of the fields runs along
@@ -157,7 +172,7 @@ float setFarm(vec2 pk) {
   if (o.a < .25 || o.a > .75) return o.r;                              // no fields anywhere near, or the nine chunks around hold the same: by far the commonest
   // (the side of a chunk is a straight piece half-way between two seeds; the fields do not end on a straight line,
   // so the point is moved by a few hundred metres, this way and that, before its chunk is looked for)
-  vec2 f = t - vec2(c) + (vec2(vnoise(pk * .83 + 3.1), vnoise(pk * .83 + 57.9)) - .5) * SET_WARP; float sum = 0., all = 0.;
+  vec2 f = t - vec2(c) + (vec2(vnoise(pk * 1.9 + 3.1), vnoise(pk * 1.9 + 57.9)) - .5) * SET_WARP; float sum = 0., all = 0.;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
     vec4 q = texelFetch(tSettle, clamp(c + ivec2(i, j), ivec2(0), ivec2(SET_KN - 1)), 0);
     vec2 v = vec2(float(i), float(j)) + q.gb - f; float w = exp(-SET_SOFT * dot(v, v));
@@ -227,7 +242,9 @@ void aspSettle(Px p, inout Land L) {
     // how much of the land here is ploughed: the share of the chunk, more beside the houses, a little more or less
     // from place to place. Fields keep together: a chunk ploughed for the most part is ploughed whole, one ploughed
     // for the lesser part has its fields in a few clumps, and the edge of the fields is a furlong or two wide
-    float want = (farm + .45 * beside + (.5 - p.n2 * .6 - p.n3 * .4) * SET_UNEVEN - .5) * SET_SHARP + .5;
+    // (uSetB.y: FARM_BESIDE, uSetC.y: FARM_SHARP — both less from high up, town/state.js HIGH; the fields keep to
+    // level ground: SET_SLOPE)
+    float want = (farm + uSetB.y * beside + (.5 - p.n2 * .6 - p.n3 * .4) * SET_UNEVEN - p.slope * SET_SLOPE - .5) * uSetC.y + .5;
     if (want > 0.) {
       float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
       vec2 cid = vec2(0.), ff = vec2(.5);
@@ -241,7 +258,7 @@ void aspSettle(Px p, inout Land L) {
       // No field on a bog (the owner: «важно, чтобы чанки не перемешивались»): the swamp aspect, painted before this
       // one, leaves in fSwampW how much of the pixel it has painted; where half the pixel and more is bog there is no
       // field. Nothing is worked out for it here: see the note on the speed of this shader at the head of the file.
-      fm *= seen * clamp(1. - fSwampW * 2., 0., 1.);
+      fm *= seen * uSetB.w * clamp(1. - fSwampW * 2., 0., 1.);        // (uSetB.w: from high up the fields are painted less strongly)
       if (fm > .003) {
         vec3 fc = L.col;
         if (near > 0.) fc = setFields(p, L.col, atlF, cid, ff, border, fs);
@@ -319,7 +336,7 @@ void aspSettle(Px p, inout Land L) {
       col = mix(col, vec3(.47, .45, .42), clamp(1.5 - dw / max(SET_WALL_W * .5, px * .65), 0., 1.) * step(SET_GATE_W * .5, street) * told);   // grey stone, as the wall that stands on it
     }
   }
-  L.col = mix(L.col, col, tm); L.cover *= 1. - tm;
+  L.col = mix(L.col, col, tm * uSetB.z); L.cover *= 1. - tm;        // (uSetB.z: from high up a settlement is painted less strongly)
 }`;
 
 const ZAR = { lat: 41.65, lon: -.89 }, G = 'Города и дороги';

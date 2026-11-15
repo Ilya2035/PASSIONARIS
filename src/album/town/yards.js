@@ -13,7 +13,7 @@
 // here, and now and then a yard stands on the rough pasture beside a field instead of on the field.
 import { FKM, FN } from '../chunks.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
-import { GK, GN, GX0, GY0, CELL, CULTURES, FARM_SHARP, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
+import { GK, GN, GX0, GY0, CELL, CULTURES, FARM_SHARP, FARM_BESIDE, FARM_PIECE, FARM_TURNS, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
 import { KIND } from './shapes.js';
 import { FLAG_ATL } from './plan.js';
 
@@ -57,7 +57,7 @@ function nearest(patches, x, y) {
 // next to the houses is ploughed first
 export function ploughed(farm, m = -1e3, r = 0) {
   const W = fieldsBeyond(r), beside = r > 0 && m > -W - .3 ? Math.max(0, Math.min(1, 1 + m / W)) * Math.min(1, farm * 5) : 0;
-  return farm > .004 ? Math.max(0, Math.min(1, (farm + .45 * beside - .5) * FARM_SHARP + .5)) : 0;
+  return farm > .004 ? Math.max(0, Math.min(1, (farm + FARM_BESIDE * beside - .5) * FARM_SHARP + .5)) : 0;
 }
 // the ground a yard can stand on. env: at(x, y) → metres · river(x, y) → km to the bank of the nearest river ·
 // swamp(x, y) → 0..1 · road(x, y) → km to the nearest road (may be left out)
@@ -109,8 +109,10 @@ export function yardAt(ctx, i, j) {
     const cs = Math.cos(L.th), sn = Math.sin(L.th), dx = x - L.x, dy = y - L.y, q = bend(L, (cs * dx + sn * dy) / S, (-sn * dx + cs * dy) / S);
     if (Math.min(Math.abs(q[0] - .5), Math.abs(q[1] - .5)) * S < half + .012) return null;
   }
-  // Mediterranean yards stand along the furlongs (their rows are turned 30° against the compass); Atlantic ones any way
-  const t = cellHash(i, j, 0, 26), turn = atl ? t * 6.2831853 : .5236 + Math.floor(t * 4) * 1.5707963 + (cellHash(i, j, 0, 27) - .5) * .3;
+  // Mediterranean yards stand along the furlongs of their piece of land (rules.js FARM_PIECE: the rows of every piece
+  // are turned their own way against the compass — the ground shader, setFurlong); Atlantic ones any way
+  const t = cellHash(i, j, 0, 26), rows = FARM_TURNS[Math.min(3, Math.floor(cellHash(Math.floor(x / FARM_PIECE), Math.floor(y / FARM_PIECE), 3, 41) * 4))];
+  const turn = atl ? t * 6.2831853 : Math.atan2(rows[1], rows[0]) + Math.floor(t * 4) * 1.5707963 + (cellHash(i, j, 0, 27) - .5) * .3;
   return [x, y, turn, kind, 0, 0, 0, atl ? FLAG_ATL : 0, sx, sy, cellHash(i, j, 0, 28), 1];
 }
 // the yards of one tile of the plan (ti, tj: its number on the lattice of tiles of 4 km): rows for the blocks

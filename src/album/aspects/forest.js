@@ -241,7 +241,7 @@ float fFc, fPat, fFade, fOwn, fFarm; vec2 fStand;
 // was what slowed the ground shader down by a half — see docs/album/ground.md, «Скорость».)
 float forestKeep(float farm, float pat, float px, vec2 people, float wet) {
   float seen = setSeen(px, people.y);                                // (aspects/settle.js: the very rule the fields are drawn by)
-  return (1. - smoothstep(.04, .2, farm * (.45 + 1.1 * pat)) * seen) * (1. - smoothstep(.04, .25, people.x)) * albumClosure(wet);
+  return (1. - setCleared(farm, pat) * seen) * (1. - smoothstep(.04, .25, people.x)) * albumClosure(wet);   // (setCleared: aspects/settle.js — whole near, thinning from high up)
 }
 // On steep ground a wood opens up: single trees on the ledges among the rock, none on a wall. The slope is that of
 // the pixel (its normal), with the ribs and gullies the height data cannot hold: the wood runs up the gullies and

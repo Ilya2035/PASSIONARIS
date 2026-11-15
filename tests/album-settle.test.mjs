@@ -7,7 +7,7 @@ import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 import settle from '../src/album/aspects/settle.js';
 import { RMAX, CELL, GN, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
-  RULES_GLSL, PALETTE_GLSL, MAT } from '../src/album/town/rules.js';
+  RULES_GLSL, PALETTE_GLSL, MAT, FARM_PIECE, FARM_TURNS } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
 import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.js';
@@ -302,7 +302,10 @@ test('yards: sixteen places a square kilometre; a yard stands only in a chunk of
   const atl = yardsAround({ ...ctx, culture: () => CULTURES.atl }, L.x, L.y, 12);
   assert.ok(atl.length > yards.length * 1.4 && atl.length < yards.length * 2.8, `${atl.length} Atlantic yards against ${yards.length}`);
   assert.ok(atl.every(r => r[7] === 1) && new Set(atl.map(r => Math.round(r[2] * 4))).size > 12, 'Atlantic yards stand any way');
-  assert.ok(new Set(yards.map(r => Math.round(((r[2] - .5236) % 1.5707963 + 1.5707963) % 1.5707963 * 10))).size <= 6, 'Mediterranean yards stand along the furlongs');
+  // (the furlongs of every piece of land lie their own way — rules.js FARM_PIECE, FARM_TURNS: a yard is turned as the piece it stands in)
+  const rowsAt = r => { const t = FARM_TURNS[Math.min(3, Math.floor(cellHash(Math.floor(r[0] / FARM_PIECE), Math.floor(r[1] / FARM_PIECE), 3, 41) * 4))]; return Math.atan2(t[1], t[0]); };
+  assert.ok(new Set(yards.map(r => Math.round(((r[2] - rowsAt(r)) % 1.5707963 + 1.5707963) % 1.5707963 * 10))).size <= 6, 'Mediterranean yards stand along the furlongs');
+  assert.ok(new Set(yards.map(r => Math.round(rowsAt(r) * 100))).size >= 2 && FARM_TURNS.length === 4 && FARM_TURNS.every(t => Math.abs(Math.hypot(...t) - 1) < 2e-3), 'the pieces lie different ways');
   assert.equal(YARDS_PER_KM2[CULTURES.atl], 2 * YARDS_PER_KM2[CULTURES.med]);
   // nothing ploughed: no yards; a land ploughed from edge to edge has them without a settlement; the less of a
   // chunk is ploughed, the fewer
@@ -655,7 +658,7 @@ test('settle and the swamp: a chunk has one state — a chunk of bog is never pl
   // frame on built-in graphics (v0.6.56: land-20 297 → 419 ms)
   const gsl = settle.glsl, { default: swamp } = await import('../src/album/aspects/swamp.js');
   assert.match(swamp.glsl, /float fSwampW = 0\.;/); assert.match(swamp.glsl, /fSwampW = m; if \(m < \.004\) return;/);
-  assert.match(gsl, /fm \*= seen \* clamp\(1\. - fSwampW \* 2\., 0\., 1\.\);/);
+  assert.match(gsl, /fm \*= seen \* uSetB\.w \* clamp\(1\. - fSwampW \* 2\., 0\., 1\.\);/);
   assert.doesNotMatch(gsl, /swamp(Depth|Kind|Field|Slope|Height)\(/, 'no rule of the swamp is run a second time for the fields');
   assert.doesNotMatch(gsl, /smoothstep\([^;]*fSwampW/, 'and no smoothstep is spent on it');
   const { ASPECTS } = await import('../src/album/aspects/index.js'); assert.ok(ASPECTS.findIndex(a => a.id === 'swamp') < ASPECTS.findIndex(a => a.id === 'settle'), 'the swamp is painted before the settlements');
@@ -782,7 +785,36 @@ test('settle under a tilted camera: the fields, the clearing and the ground of a
   assert.match(g, /if \(small\) tm \*= 1\. - setStep\(uSetA\.zw, px \/ max\(r, \.02\)\);/); assert.match(g, /max\(0\., uSetB\.x \* px - r\)/);
   // …and nothing of the way to the eye is worked out in it: that tipped the ground shader into its slow mode
   assert.ok(!/p\.V\b|cameraPosition|vPos/.test(g.replace(/\/\/[^\n]*/g, '')), 'the way to the eye is not asked in the shader of the settlements');
-  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /setTilt\(cam\.s\.tilt\);/);
+  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /setTilt\(cam\.s\.tilt, undefined, cam\.s\.h\);/);
+});
+
+test('settle from high up: a town is drawn no larger than it is, settlements and fields are painted less strongly, the ring of fields round the houses goes', async () => {
+  const { Vector4 } = await import('three');
+  const { HIGH, highOf, setTilt, MARK_PX } = await import('../src/album/town/state.js');
+  const { FARM_BESIDE } = await import('../src/album/town/rules.js');
+  const u = { uSetA: { value: new Vector4() }, uSetB: { value: new Vector4() } }, B = u.uSetB.value;
+  // near, everything is as it was
+  for (const h of [0, 20, 45]) { setTilt(0, u, h); assert.ok(Math.abs(B.x - MARK_PX) < 1e-9 && Math.abs(B.y - FARM_BESIDE) < 1e-9 && B.z === 1 && B.w === 1, `from ${h} km nothing is taken away`); }
+  // each rule: all of it up to its first height, what is left of it from its second, steadily between
+  for (const [key, rule] of Object.entries(HIGH)) {
+    assert.ok(rule[0] >= 40 && rule[1] > rule[0] * 1.8 && rule[2] >= 0 && rule[2] < 1, key);
+    assert.equal(highOf(rule, rule[0]), 1); assert.ok(Math.abs(highOf(rule, rule[1]) - rule[2]) < 1e-9 && Math.abs(highOf(rule, 20000) - rule[2]) < 1e-9);
+    for (let h = rule[0]; h < rule[1]; h += (rule[1] - rule[0]) / 16) assert.ok(highOf(rule, h + 1) <= highOf(rule, h));
+  }
+  // from space: no town drawn larger than it is; a settlement at half strength at most, the fields at two thirds at most
+  setTilt(0, u, 1500); assert.equal(B.x, 0); assert.ok(B.z <= .6 && B.z >= .3 && B.w <= .7 && B.w >= .4 && B.y <= FARM_BESIDE * .3);
+  assert.ok(HIGH.mark[1] <= 500 && HIGH.beside[1] <= 250, 'the ring round a town is gone by 250 km, its enlarged mark by 500 km');
+  // the forest of a land under fields: cleared whole near, thinning as the fields thicken from high up
+  const { CLEAR } = await import('../src/album/town/state.js'); u.uSetC = { value: new Vector4() };
+  setTilt(0, u, 30); assert.ok(Math.abs(u.uSetC.value.x - CLEAR[0]) < 1e-9 && CLEAR[0] === .2); setTilt(0, u, 900); assert.ok(Math.abs(u.uSetC.value.x - CLEAR[1]) < 1e-9 && CLEAR[1] >= .7 && CLEAR[1] <= 1);
+  setTilt(0, u, 150); assert.ok(u.uSetC.value.x > CLEAR[0] && u.uSetC.value.x < CLEAR[1]);
+  // …and the tone of the fields follows the share of the chunk itself: no edge of furlongs from high up
+  setTilt(0, u, 30); assert.equal(u.uSetC.value.y, 2); setTilt(0, u, 900); assert.equal(u.uSetC.value.y, 1); assert.match(settle.glsl, /- p\.slope \* SET_SLOPE - \.5\) \* uSetC\.y \+ \.5;/); assert.ok(Math.abs(settleUniforms.uSetC.value.x - CLEAR[0]) < 1e-6, 'the ground starts as for a camera near the land');
+  // the tilt and the height are two things: each leaves the other alone
+  setTilt(85, u, 1500); assert.equal(B.x, 0); const z = B.z; setTilt(85, u, 20); assert.ok(B.z === 1 && z < 1 && B.x > 0 && B.x < MARK_PX * .2);
+  // the shader multiplies by what it is given and works out nothing more
+  const g = settle.glsl;
+  assert.match(g, /float want = \(farm \+ uSetB\.y \* beside/); assert.match(g, /fm \*= seen \* uSetB\.w \* clamp/); assert.match(g, /L\.col = mix\(L\.col, col, tm \* uSetB\.z\); L\.cover \*= 1\. - tm;/);
 });
 
 test('settle and the roads: the panel of a district says how far each settlement is from a main road', async () => {

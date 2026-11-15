@@ -35,8 +35,13 @@ export const MORE_AT = [VN + GN, KN], GATES_AT = [VN + 2 * GN, KN];
 // side — two or three furlongs, so the edge of the fields is an edge of furlongs and no straight line.
 export const FARM_SOFT = 4;
 export const FARM_WARP = .6;      // km: how far, at most, a point is moved by a smooth noise before its chunk is looked for (half of it each way)
-export const FARM_UNEVEN = .5;    // how much the share of ploughed land wanders from place to place inside a chunk (a quarter each way)
+export const FARM_UNEVEN = .8;    // how much the share of ploughed land wanders from place to place inside a chunk (.4 each way)
+export const FARM_SLOPE = 1.6;    // fields keep to level ground: a slope of one in ten takes .16 off the share ploughed there — the floor of a valley is ploughed, its sides are left
 export const FARM_SHARP = 2;      // fields keep together: the share of furlongs ploughed runs from none to all twice as fast as the share of the chunk
+export const FARM_PIECE = 1.7;     // km: the land is ploughed in pieces about this far across; in each the furlongs lie their own way and are of their own size
+// the ways the furlongs of a piece may lie: the cosine and sine of the turn of their rows against the compass (30°, 70°, −10°, −50°)
+export const FARM_TURNS = [[.866, .5], [.342, .940], [.985, -.174], [.643, -.766]];
+export const FARM_BESIDE = .45;   // the land next to the houses is ploughed first: this much is added to the share of its chunk right at the houses
 export const RMAX = 6;           // km: the largest radius a patch can have (a chunk built up from edge to edge)
 export const CELL = .085;        // km: one block with its street, as in life
 export const BEND = .35;         // how far the lattice is bent, in cells
@@ -270,7 +275,9 @@ export const RULES_GLSL = /* glsl */`
 #define SET_SOFT ${FARM_SOFT.toFixed(1)}
 #define SET_WARP ${(FARM_WARP / KKM).toFixed(3)}
 #define SET_UNEVEN ${FARM_UNEVEN.toFixed(3)}
+#define SET_SLOPE ${FARM_SLOPE.toFixed(2)}
 #define SET_SHARP ${FARM_SHARP.toFixed(2)}
+#define SET_PIECE ${FARM_PIECE.toFixed(2)}
 #define SET_TOWN_R ${TOWN_R.toFixed(4)}
 #define SET_BEND ${BEND.toFixed(3)}
 float setWob(vec2 pk) { return sin(pk.x * 9. + 1.3 * sin(pk.y * 7.)); }

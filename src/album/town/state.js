@@ -26,7 +26,7 @@
 // `built` > 0 has a patch: at the site and of the size the model of growth gave it, or, for a chunk built up by
 // anything else (a brush), in the middle of the chunk and of the area of its built share.
 import { DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
-import { CELL, GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, MORE_AT, GATES_AT, FARM_SOFT, STREETS_FROM, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, shiftByte, gateByte, gateOf, CULTURES } from './rules.js';
+import { CELL, GN, GK, GX0, GY0, VN, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, MORE_AT, GATES_AT, FARM_SOFT, FARM_BESIDE, FARM_SHARP, STREETS_FROM, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, shiftByte, gateByte, gateOf, CULTURES } from './rules.js';
 import { KN, KKM, KX0, KY0, JITTER, kmHash } from '../division/km.js';
 
 export const settleBytes = new Uint8Array(GN * GN * 4);              // the coarse grid
@@ -101,14 +101,38 @@ export function farmAt(x, y, bytes = farmBytes) {
 // SEEN: the size of a pixel, km, between which the fields of a land ploughed only here and there go; VILLAGE: the
 // same for the ground of a village, in its radii; MARK_PX: a town is never drawn smaller than this many pixels across.
 export const SEEN = [.075, .045], VILLAGE = [.6, 1.6], MARK_PX = 2.2;
+// ---- From high up the settlements and the fields are told less plainly. The owner, 15.11.2026: «С высоты должно быть
+// менее видно… сейчас города прям очень явно видны на рельефе. И их можно прямо из космоса увидеть… Но это должно
+// быть не так явно. Надо немного это распределить»; «очень высоко видна визуализация полей. Они прям очень резко
+// пересекаются». Each rule is [from km, to km, what is left of the thing at `to` and higher] by the height of the camera:
+//   mark    a town is drawn no larger than it is (MARK_PX goes to nothing): from space only the great cities are
+//           seen, as a change of the land — the dots of the map (layers/labels.js) say where the towns are
+//   town    how strongly the ground of a settlement is painted over the land
+//   fields  how strongly the fields are painted over the land
+//   beside  how much more the land next to the houses is ploughed than the rest of its chunk (rules.js FARM_BESIDE):
+//           near, the fields gather round the houses; from high up that was a pale ring with a crisp edge round
+//           every town, and the rings of neighbours cut across one another
+//   clear   (what is left: nothing) the share of fields at which the forest of the land is cleared whole runs from
+//           CLEAR[0] to CLEAR[1]: near, a chunk under fields has no trees — fields with trees standing in them are
+//           what the owner asked not to see; from high up the trees thin out as the fields thicken, or every town
+//           sat in a pale patch with a crisp rim, the edge of its clearing
+//   sharp   how fast the share of furlongs ploughed runs from none to all as the share of the chunk grows (rules.js
+//           FARM_SHARP): near, fields keep together and end at an edge of furlongs; from high up the tone of the
+//           fields follows the share itself, and the fields of a town fade out over all the land they thin out on
+export const HIGH = { mark: [150, 420, 0], town: [110, 520, .5], fields: [60, 300, .5], beside: [50, 200, .2], clear: [70, 300, 0], sharp: [60, 220, .5] };
+export const CLEAR = [.2, .9];
+export const highOf = (rule, hKm) => { const t = Math.max(0, Math.min(1, (hKm - rule[0]) / (rule[1] - rule[0]))); return 1 + (rule[2] - 1) * t * t * (3 - 2 * t); };
 export const acrossOf = tiltDeg => { const z = Math.max(.02, Math.cos(tiltDeg * Math.PI / 180)); return Math.SQRT2 * z / Math.sqrt(1 + z * z); };
-// uSetA: the two rules as (edge, 1 / (other edge − edge)) pairs for setStep() · uSetB.x: MARK_PX, uSetB.y: the share itself
-export const settleUniforms = { tSettle: { value: settleTex }, uSettle: { value: new Vector4(CELL, 1, 1.25, 0) }, uSetA: { value: new Vector4() }, uSetB: { value: new Vector4() } };
-// the tilt of the camera, degrees from straight down, written into the rules; → the share
-export function setTilt(tiltDeg = 0, u = settleUniforms) {
+// uSetA: the two rules as (edge, 1 / (other edge − edge)) pairs for setStep() · uSetB: MARK_PX · FARM_BESIDE · how
+// strongly a settlement is painted · how strongly the fields are — the last three as the height of the camera leaves
+// them · uSetC.x: the share of fields at which the forest is cleared whole (setCleared) · uSetC.y: FARM_SHARP
+export const settleUniforms = { tSettle: { value: settleTex }, uSettle: { value: new Vector4(CELL, 1, 1.25, 0) }, uSetA: { value: new Vector4() }, uSetB: { value: new Vector4() }, uSetC: { value: new Vector4(CLEAR[0], FARM_SHARP, 0, 0) } };
+// the tilt of the camera, degrees from straight down, and its height, km, written into the rules; → the share
+export function setTilt(tiltDeg = 0, u = settleUniforms, hKm = 0) {
   const k = acrossOf(tiltDeg);
   u.uSetA.value.set(SEEN[0] / k, k / (SEEN[1] - SEEN[0]), VILLAGE[0] / k, k / (VILLAGE[1] - VILLAGE[0]));
-  u.uSetB.value.set(MARK_PX * k, k, 0, 0);
+  u.uSetB.value.set(MARK_PX * k * highOf(HIGH.mark, hKm), FARM_BESIDE * highOf(HIGH.beside, hKm), highOf(HIGH.town, hKm), highOf(HIGH.fields, hKm));
+  u.uSetC?.value.set(CLEAR[1] + (CLEAR[0] - CLEAR[1]) * highOf(HIGH.clear, hKm), FARM_SHARP * highOf(HIGH.sharp, hKm), 0, 0);
   return k;
 }
 setTilt(0);

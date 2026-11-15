@@ -15,7 +15,7 @@ import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { packDivision } from '../src/album/division/gpu.js';
 import { decodeSites } from '../src/album/town/sites.js';
 import { GN, VN, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, FARM_WARP, FARM_UNEVEN, FARM_SHARP, RULES_GLSL } from '../src/album/town/rules.js';
-import { farmGround, farmRun, farmWithCells, farmOfDistricts, HA_PER_PERSON, FARM_CAP, FARM_HIGH, FARM_WET, FARM_REACH, FARM_LEAST } from '../src/album/town/farmland.js';
+import { farmGround, farmRun, farmWithCells, farmOfDistricts, HA_PER_PERSON, FARM_CAP, FARM_HIGH, FARM_WET, FARM_REACH, FARM_LEAST, FARM_PATCH, FARM_LOBES, FARM_CLIMB, FARM_FADE, farmPatch, farmWay, farmBand, farmShare } from '../src/album/town/farmland.js';
 import { growTowns, centrePlaces, reachOf, FIELD_FLOOR, FELL_FROM, FELL } from '../src/album/town/grow.js';
 import { districtSites, villagePlaces, GOOD } from '../src/album/town/villages.js';
 import { mirrorFarm, farmAt, farmBytes, atlasBytes, settleTex } from '../src/album/town/state.js';
@@ -43,10 +43,31 @@ test('farmland: a settlement ploughs a hectare a person — the chunks around it
   assert.ok(Math.abs(sum - t.ploughed) < f.list.length / 255 && Math.abs(f.area - t.ploughed) < 1e-3, 'the bytes add up to the fields');
   // whole chunks by the houses, parts at the rim, nothing far away; the nearer, the more
   const whole = f.list.filter(c => f.km[c] === 255), home = sq(t.x, t.y);
-  assert.equal(f.km[home], 255); assert.ok(whole.length > t.ploughed * .5 && whole.length < f.list.length, `${whole.length} chunks ploughed whole of ${f.list.length}`);
+  assert.equal(f.km[home], 255); assert.ok(whole.length > t.ploughed * .25 && whole.length < f.list.length, `${whole.length} chunks ploughed whole of ${f.list.length}`);
   const dist = c => Math.hypot(...seedOf(c % KN, Math.floor(c / KN)).map((v, i) => v - [t.x, t.y][i])), R = Math.sqrt(t.ploughed / Math.PI);
-  assert.ok(whole.every(c => dist(c) < R * 1.25) && [...f.list].every(c => dist(c) < R * 1.45 + 1), 'the fields lie around the houses');
-  assert.ok([...f.list].filter(c => dist(c) < R * .6).every(c => f.km[c] === 255), 'no gap in the fields near the houses'); assert.equal(f.km[sq(t.x + 3 * R, t.y)], 0);
+  assert.ok([...whole].every(c => dist(c) < R * 1.45) && [...f.list].every(c => dist(c) < R * 2.2 + 1), 'the fields lie around the houses');
+  assert.ok([...f.list].filter(c => dist(c) < R * .35).every(c => f.km[c] === 255), 'no gap in the fields near the houses'); assert.equal(f.km[sq(t.x + 3 * R, t.y)], 0);
+  // …but not in a ring (the owner, 15.11.2026: «поля… должны быть разнобойки… по местности… а так это маленькие
+  // кружочки»): they run out in tongues along the better land and leave the poorer land between the tongues
+  { let gap = 1e9; const i0 = Math.floor(t.x - KX0), j0 = Math.floor(t.y - KY0), n = Math.ceil(2 * R);
+    for (let dj = -n; dj <= n; dj++) for (let di = -n; di <= n; di++) { const c = (j0 + dj) * KN + i0 + di; if (!f.km[c]) gap = Math.min(gap, dist(c)); }
+    const reach = Math.max(...[...f.list].map(dist));
+    assert.ok(gap < R * .95 && reach > R * 1.5 && reach > gap * 1.8, `unploughed land from ${(gap / R).toFixed(2)} R, fields out to ${(reach / R).toFixed(2)} R`);
+    // …and they do not end at a line: the farther from the houses, the less of the land is ploughed
+    const ring = (a, b) => { let s = 0, n = 0; for (let dj = -n2; dj <= n2; dj++) for (let di = -n2; di <= n2; di++) { const c = (j0 + dj) * KN + i0 + di, d = dist(c); if (d >= a * R && d < b * R) { s += f.km[c] / 255; n++; } } return s / n; }, n2 = Math.ceil(2.2 * R);
+    const shares = [ring(0, .5), ring(.5, 1), ring(1, 1.5), ring(1.5, 2.2)];
+    assert.ok(shares[0] > .95 && shares[1] < shares[0] && shares[1] > .5 && shares[2] < shares[1] - .2 && shares[2] > .08 && shares[3] < shares[2] && shares[3] < .1, `the share of land ploughed, ring by ring outward: ${shares.map(v => v.toFixed(2)).join(' ')}`); }
+  // the lie of the land: a patch of good land counts as lying nearer and a patch of poor land farther; ground above
+  // the houses farther still, ground below them a little nearer
+  { let lo = 1, hi = 0, step = 0; for (let i = 600; i < 700; i++) for (let j = 600; j < 700; j++) { const v = farmPatch(i, j); lo = Math.min(lo, v); hi = Math.max(hi, v); step = Math.max(step, Math.abs(v - farmPatch(i + 1, j))); }
+    assert.ok(lo < .15 && hi > .85 && step < .5 && FARM_PATCH >= 2 && FARM_PATCH <= 5, 'good and poor land in patches a few kilometres across, with no step from a chunk to the next');
+    assert.ok(Math.abs(farmWay(640, 640, 0) - FARM_LOBES ** (1 - 2 * farmPatch(640, 640))) < 1e-9 && FARM_LOBES > 1.3 && FARM_LOBES <= 2.5);
+    assert.ok(Math.abs(farmWay(640, 640, FARM_CLIMB) / farmWay(640, 640, 0) - 2) < 1e-9, 'FARM_CLIMB metres up double the way');
+    assert.equal(farmWay(640, 640, -100), farmWay(640, 640, 0), 'ground below the houses lies no nearer');
+    // the fields thin out toward their edge: over a band FARM_FADE of the way wide, a chunk's width at the least
+    assert.ok(FARM_FADE >= .3 && FARM_FADE <= .9); assert.equal(farmBand(.8), KKM); assert.ok(Math.abs(farmBand(10) - 10 * FARM_FADE) < 1e-9);
+    assert.equal(farmShare(10, 10 - 5 * FARM_FADE), 1); assert.equal(farmShare(10, 10), .5); assert.equal(farmShare(10, 10 + 5 * FARM_FADE), 0);
+    for (let c = 0; c < 20; c += .5) assert.ok(farmShare(10, c + .5) <= farmShare(10, c) && farmShare(12, c) >= farmShare(10, c), 'the farther the less; fields that reach farther take no chunk back'); }
   // the same people, the same fields; more people, more fields, and the first fields stay
   const again = growTowns(ch, [place(-205, 4405, 650000)], 1, at); assert.deepEqual([...again.farm.list], [...f.list]); assert.ok(again.farm.list.every(c => again.farm.km[c] === f.km[c]));
   const half = growTowns(ch, [place(-205, 4405, 650000)], .5, at).farm; assert.ok(half.area < f.area * .5 && [...half.list].every(c => f.km[c] >= half.km[c]), 'a settlement that grows keeps the fields it had');
@@ -135,7 +156,8 @@ test('farmland: the chunks in the settlement texture — the share, the seed, an
   assert.equal(farmAt(t.x, t.y, out), 1); assert.equal(farmAt(t.x + 40, t.y, out), 0); assert.equal(farmAt(-1e4, 0, out), 0);
   const ei = edge % KN, ej = Math.floor(edge / KN), es = seedOf(ei, ej); assert.ok(Math.abs(farmAt(es[0], es[1], out) - f.km[edge] / 255) < .25, 'at the seed of a chunk, mostly its own share');
   { // from a chunk ploughed whole out into unploughed land the share falls steadily, over some hundreds of metres
-    const R = Math.sqrt(t.ploughed / Math.PI), v = []; for (let d = R - 2.5; d <= R + 3; d += .1) v.push(farmAt(t.x + d, t.y + .37, out));
+    // (from the houses themselves: the edge of the fields is no ring, it may lie anywhere between half the radius of that ring and half as far again)
+    const R = Math.sqrt(t.ploughed / Math.PI), v = []; for (let d = 0; d <= 2 * R + 3; d += .1) v.push(farmAt(t.x + d, t.y + .37, out));
     assert.equal(v[0], 1); assert.equal(v[v.length - 1], 0); let jump = 0; for (let i = 1; i < v.length; i++) jump = Math.max(jump, Math.abs(v[i] - v[i - 1]));
     assert.ok(jump < .45, `the greatest step in a hundred metres is ${jump.toFixed(2)}`); assert.ok(FARM_SOFT >= 2 && FARM_SOFT <= 8);
   }
@@ -172,7 +194,15 @@ test('farmland in the album: the shader draws the fields from the chunks; the kn
   for (const d of [`#define SET_KN ${KN}`, `#define SET_K0 vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})`, `#define SET_SOFT ${FARM_SOFT.toFixed(1)}`, `#define SET_WARP ${(FARM_WARP / KKM).toFixed(3)}`, `#define SET_UNEVEN ${FARM_UNEVEN.toFixed(3)}`, `#define SET_SHARP ${FARM_SHARP.toFixed(2)}`]) assert.ok(RULES_GLSL.includes(d), d);
   assert.match(g, /float setFarm\(vec2 pk\)/); assert.match(g, /if \(o\.a < \.25 \|\| o\.a > \.75\) return o\.r;/, 'one texel where the chunks around hold the same');
   assert.match(g, /exp\(-SET_SOFT \* dot\(v, v\)\)/); assert.match(g, /float farm = setFarm\(p\.pk\);/);
-  assert.match(g, /float want = \(farm \+ \.45 \* beside \+ \(\.5 - p\.n2 \* \.6 - p\.n3 \* \.4\) \* SET_UNEVEN - \.5\) \* SET_SHARP \+ \.5;/, 'the share of the chunk is the share of its furlongs');
+  // (uSetB.y: rules.js FARM_BESIDE, uSetC.y: FARM_SHARP — both less from high up; SET_SLOPE: the fields keep to level ground)
+  assert.match(g, /float want = \(farm \+ uSetB\.y \* beside \+ \(\.5 - p\.n2 \* \.6 - p\.n3 \* \.4\) \* SET_UNEVEN - p\.slope \* SET_SLOPE - \.5\) \* uSetC\.y \+ \.5;/, 'the share of the chunk is the share of its furlongs');
+  assert.match(RULES_GLSL, /#define SET_SLOPE 1\.60/); assert.match(RULES_GLSL, /#define SET_PIECE 1\.70/);
+  // the fields lie in pieces, each its own way and of its own size, with a balk between two pieces
+  assert.match(g, /vec2 pc = pk \/ SET_PIECE \+ bend \* 1\.6; ivec2 blk = ivec2\(floor\(pc\)\);/); assert.match(g, /float hb = setHash\(blk, 3, 41\);/);
+  assert.match(g, /fs \*= \.8 \+ \.45 \* fract\(hb \* 7\.\);/); assert.match(g, /return vec2\(col, row\) \+ vec2\(blk\) \* 37\.;/);
+  // how much of a stand the fields clear is said here and asked by the forest: whole near, thinning from high up
+  assert.match(g, /float setCleared\(float farm, float pat\) \{ return smoothstep\(\.04, uSetC\.x, farm \* \(\.45 \+ 1\.1 \* pat\)\); \}/);
+  assert.match(readFileSync(join(ROOT, 'src/album/aspects/forest.js'), 'utf8'), /return \(1\. - setCleared\(farm, pat\) \* seen\) \*/);
   assert.match(g, /step\(setHash\(ivec2\(cid\), 3, 14\), want\)/); assert.ok(!/fieldsV|setFieldsSeen|fld\./.test(g), 'no fields in rings around the houses any more');
   assert.match(g, /if \(uSettle\.w < \.5 \|\| p\.h < \.4\) return;/); assert.match(g, /float seen = setSeen\(px, p\.cC\.g\);/, 'a land ploughed here and there shows its fields only from near');
   assert.match(g, /float setSeen\(float px, float ploughed\) \{ return ploughed >= \.12 \? 1\./, '…by the rule the forest asks too (setSeen: by the width of a pixel, so a tilted camera takes no field away)');

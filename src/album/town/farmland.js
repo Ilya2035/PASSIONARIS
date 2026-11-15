@@ -24,6 +24,35 @@ export const FARM_WET = .9;                    // the share of swamp of the land
 export const FARM_REACH = [4, 30];             // km: how far from its houses a village, a town goes to plough
 export const FARM_LEAST = .004;                // km²: less than this left of a chunk is not worth the walk
 export const FARM_ROUGH = .3;                  // how uneven the edge of the fields of a settlement is (a share of the way to a chunk)
+// The fields of a settlement are not a ring around it (the owner, 15.11.2026: «поля огромные, но они должны быть
+// разнобойки, не такие ровненькие. Как-то больше по местности… А так это маленькие кружочки»). Two things besides the
+// class of the ground say how far a chunk counts as lying:
+// • the land is better here and poorer there, in patches a few kilometres across (FARM_PATCH km): good land counts as
+//   lying nearer, poor land farther, up to FARM_LOBES times each way — so the fields run out in tongues along the
+//   good land and leave the poor land between them;
+// • ground above the settlement counts as lying farther — FARM_CLIMB metres up double the way: the fields lie on the
+//   floor of the valley and below the houses, not up the slope.
+// And the fields do not end at a line (the owner of the fields seen from high up: «очень резко пересекаются… надо
+// немного это распределить»): the chunks well inside are ploughed as far as they can be, and from there outward
+// less and less — over a band FARM_FADE of the way to the edge wide (a chunk's width at the least). Near, that is
+// ploughland thinning out into pasture; from high up, a tone that fades instead of a patch with a rim.
+export const FARM_PATCH = 3.2, FARM_LOBES = 1.9, FARM_CLIMB = 90, FARM_FADE = .6;
+// the least a chunk can count as lying nearer than it does (good land, the luck of the chunk): how far beyond the
+// edge of the fields the land must be looked at
+const NEARER = (1 - FARM_ROUGH / 2) / FARM_LOBES;
+// how good the land of chunk (i, j) is for the plough beside its neighbours, 0 poor .. 1 good: a smooth noise
+export function farmPatch(i, j) {
+  const x = i * KKM / FARM_PATCH + 11.3, y = j * KKM / FARM_PATCH + 4.7, x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = kmHash(x0, y0, 31), b = kmHash(x0 + 1, y0, 31), c = kmHash(x0, y0 + 1, 31), d = kmHash(x0 + 1, y0 + 1, 31);
+  return (a + (b - a) * u) * (1 - v) + (c + (d - c) * u) * v;
+}
+// how many times farther a chunk counts as lying for the lie of its land: its patch of good or poor land (patch:
+// farmPatch() of the chunk, when the caller has it), and how far above the settlement it lies (dh, metres)
+export const farmWay = (i, j, dh = 0, patch = farmPatch(i, j)) => FARM_LOBES ** (1 - 2 * patch) * (dh > 0 ? 1 + dh / FARM_CLIMB : 1);
+// how wide the band is over which the fields thin out when they reach `far` km, and how much of a chunk that counts
+// as lying `cost` km away is ploughed then (before what the chunk has room for)
+export const farmBand = far => Math.max(KKM, FARM_FADE * far);
+export const farmShare = (far, cost) => Math.max(0, Math.min(1, (far - cost) / farmBand(far) + .5));
 
 const step = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // the class of the ground of a chunk when the land is not divided yet: from the height at its middle and around it
@@ -46,7 +75,7 @@ export function farmGround(ch, at, land = null, swamp = null) {
   // (the swamps are kept by the natural cells of 100 km²: a cell that is a third swamp leaves two thirds of each of
   // its chunks to the plough. Where exactly the wet ground lies the ground shader knows, and paints no field there.)
   const dry = new Float32Array(ch.count).fill(1); if (swamp) for (let k = 0; k < ch.count; k++) { const w = swamp(k); dry[k] = w >= FARM_WET ? 0 : 1 - w; }
-  const g = { cls, cell: cellOf.cell, count: cellOf.count, divided: !!land,
+  const g = { cls, cell: cellOf.cell, count: cellOf.count, divided: !!land, hgt: land ? land.hgt : null,
     // km² of chunk c that can be ploughed at all
     room(c) {
       let v = room[c]; if (v >= 0) return v;
@@ -63,7 +92,7 @@ export function farmGround(ch, at, land = null, swamp = null) {
 //   ground   farmGround()
 // → { claim(x, y, need, reach, ok) → km² taken; done() → the state of the chunks }
 export function farmRun(ground) {
-  const n = KN * KN, used = new Float32Array(n), felled = new Float32Array(ground.count.length), touched = [];
+  const n = KN * KN, used = new Float32Array(n), felled = new Float32Array(ground.count.length), touched = [], patch = new Float32Array(n).fill(-1);
   let keys = new Float64Array(256), cost = new Float32Array(256), room = new Float32Array(256), left = new Float32Array(256);
   return {
     // A settlement at (x, y) ploughs `need` km² of the good ground around it, no farther than `reach` km.
@@ -71,11 +100,13 @@ export function farmRun(ground) {
     // fells besides, as a share of what it ploughs (0 for a village: its fields are all it clears)
     claim(x, y, need, reach, ok = null, fell = 0) {
       if (!(need > 0)) return 0;
-      let rho = Math.min(reach, 1.2 + 1.4 * Math.sqrt(need / Math.PI)), m = 0, far = 0;
-      // How much the settlement ploughs when its fields reach `far` km: a chunk that lies nearer than that by half a
-      // chunk or more is ploughed as far as it can be, one that lies farther by as much not at all, those between
-      // in part. (The chunks are sorted by how far they count as lying.)
-      const sum = far => { let t = 0; for (let q = 0; q < m; q++) { const sh = (far - cost[q]) / KKM + .5; if (sh <= 0) break; t += Math.min(left[q], room[q] * Math.min(1, sh)); } return t; };
+      let rho = Math.min(reach, 1.5 + 3 * Math.sqrt(need / Math.PI)), m = 0, far = 0;
+      // (the height the settlement stands at: that of its own chunk, where the land is divided)
+      const hgt = ground.hgt, ci = Math.floor((x - KX0) / KKM), cj = Math.floor((y - KY0) / KKM), h0 = hgt && ci >= 0 && cj >= 0 && ci < KN && cj < KN ? hgt[cj * KN + ci] : 0;
+      // How much the settlement ploughs when its fields reach `far` km: a chunk that lies nearer than that by half the
+      // band is ploughed as far as it can be, one that lies farther by as much not at all, those between in part
+      // (farmShare). (The chunks are sorted by how far they count as lying.)
+      const sum = far => { let t = 0; const band = farmBand(far); for (let q = 0; q < m; q++) { const sh = (far - cost[q]) / band + .5; if (sh <= 0) break; t += Math.min(left[q], room[q] * Math.min(1, sh)); } return t; };
       for (;;) {
         const i0 = Math.max(0, Math.floor((x - rho - KX0) / KKM)), i1 = Math.min(KN - 1, Math.floor((x + rho - KX0) / KKM)), j0 = Math.max(0, Math.floor((y - rho - KY0) / KKM)), j1 = Math.min(KN - 1, Math.floor((y + rho - KY0) / KKM));
         const most = Math.max(0, (i1 - i0 + 1) * (j1 - j0 + 1));
@@ -85,19 +116,24 @@ export function farmRun(ground) {
           if (ground.room(c) - used[c] < FARM_LEAST) continue;
           if (ok && !ok.has(ground.cell[c])) continue;
           const d = Math.hypot(KX0 + (i + .5 + (kmHash(i, j, 1) - .5) * 2 * JITTER) * KKM - x, KY0 + (j + .5 + (kmHash(i, j, 2) - .5) * 2 * JITTER) * KKM - y); if (d > rho) continue;   // to the seed of the chunk
-          // how far the chunk counts as lying: broken ground lies farther, and no two chunks quite alike
-          keys[m++] = Math.round(d * ORDER_WEIGHT[ground.cls[c]] * (1 + (kmHash(i, j, 12) - .5) * FARM_ROUGH) * 1000) * 2097152 + c;
+          // how far the chunk counts as lying: broken ground lies farther, poor land and ground above the houses
+          // too (farmWay), and no two chunks quite alike
+          if (patch[c] < 0) patch[c] = farmPatch(i, j);
+          keys[m++] = Math.round(d * ORDER_WEIGHT[ground.cls[c]] * farmWay(i, j, hgt ? hgt[c] - h0 : 0, patch[c]) * (1 + (kmHash(i, j, 12) - .5) * FARM_ROUGH) * 1000) * 2097152 + c;
         }
         const part = keys.subarray(0, m).sort();
         for (let q = 0; q < m; q++) { const c = part[q] % 2097152; cost[q] = Math.floor(part[q] / 2097152) / 1000; room[q] = ground.room(c); left[q] = room[q] - used[c]; }
-        far = rho + .5 * KKM;
-        if (sum(far) >= need || rho >= reach) break;
+        // (every chunk that counts as lying within far + half the band has been looked at: none of them lies farther
+        // than rho from the houses)
+        far = Math.min(NEARER * rho - .5 * KKM, NEARER * rho / (1 + .5 * FARM_FADE));
+        if (sum(far) >= need) break;
+        if (rho >= reach) { far = (m ? cost[m - 1] : 0) / (1 - .5 * FARM_FADE) + KKM; break; }   // as far as it walks: all there is within reach, if need be
         rho = Math.min(reach, rho * 1.5);
       }
       if (sum(far) > need) { let lo = 0; for (let n = 0; n < 14; n++) { const mid = (lo + far) / 2; if (sum(mid) < need) lo = mid; else far = mid; } }
-      let got = 0;
+      let got = 0; const band = farmBand(far);
       for (let q = 0; q < m; q++) {
-        const sh = (far - cost[q]) / KKM + .5; if (sh <= 0) break;
+        const sh = (far - cost[q]) / band + .5; if (sh <= 0) break;
         const take = Math.min(left[q], room[q] * Math.min(1, sh), need - got); if (take < FARM_LEAST) continue;
         const c = keys[q] % 2097152;
         if (used[c] === 0) touched.push(c);

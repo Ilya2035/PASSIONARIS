@@ -485,7 +485,7 @@ export default async function init(album) {
     townOfChunk: c => { const n = own.owner.get(c); return n === undefined ? null : rowOf(model.towns[n]); },
     chunksOfTown: index => { const n = model.towns.findIndex(t => t.index === index), out = []; if (n >= 0) for (const [c, o] of own.owner) if (o === n) out.push(c); return out; },
     update(dt, t, cam) {
-      setTilt(cam.s.tilt);                                           // a tilted camera takes no field and no village away (town/state.js)
+      setTilt(cam.s.tilt, undefined, cam.s.h);                       // a tilted camera takes no field and no village away; from high up both are told less plainly (town/state.js)
       // the land has been divided (or divided anew): a settlement stands at the centre of every district
       const dv = album.division, vk = p.get('villages') ?? 1;
       if (dv && (dv.version !== divSeen || vk !== villSeen)) {
