@@ -93,17 +93,22 @@ export function chunksIn(sum, lat, lon, hLat, hLon, rect, nx = SNX, ny = SNY, km
   const w = nx + 1, n = sum[(b1 + 1) * w + a1 + 1] - sum[b0 * w + a1 + 1] - sum[(b1 + 1) * w + a0] + sum[b0 * w + a0];
   return n === 0 ? 'none' : n === (x1 - x0 + 1) * (y1 - y0 + 1) ? 'all' : 'some';
 }
-// which variants draw a block: [zone 1, zone 2, zone 3, zone 4]. One of them where the block lies whole in its part
-// of the Earth; on the rim of the rectangle of the heights — the full variant and the world, cut along the rim.
+// which variants draw a block: [zone 1, zone 2, zone 3, zone 4, zone 5]. Inside the rectangle of the heights, deeper
+// than the strip along its rim, ONE of three by what lies under the block: chunks everywhere — the fast variant;
+// none — the plain land; some — the edge of the worked land. A block on the rim is cut along it, as the levels of
+// stage 2 are: its part inside goes to one of the three, the strip to the full variant, what lies beyond to the world.
+// (Until v0.6.166 the full variant drew every block that touched the edge of the worked land or the rim, whole: from
+// 1700 km that was 94 blocks of the 297 in sight, most of them open sea a hundred kilometres off the coast.)
 export function blockZones(lat, lon, hLat, hLon, chunks) {
-  if (!touches(lat, lon, hLat, hLon, REGION_FADE + ZEPS)) return [false, false, true, false];
-  if (chunks === 'all' && within(lat, lon, hLat, hLon, -STATE_FADE[1] - ZEPS)) return [true, false, false, false];
-  if (chunks === 'none' && within(lat, lon, hLat, hLon, -ZEPS)) return [false, false, false, true];
-  return [false, true, !within(lat, lon, hLat, hLon, REGION_FADE - ZEPS), false];
+  if (!touches(lat, lon, hLat, hLon, REGION_FADE + ZEPS)) return [false, false, true, false, false];
+  const deep = within(lat, lon, hLat, hLon, -STATE_FADE[1] - ZEPS);                  // all of it lies deeper than the strip
+  const inner = deep || touches(lat, lon, hLat, hLon, ZEPS - STATE_FADE[1]);         // some of it does
+  return [inner && chunks === 'all', !deep, !within(lat, lon, hLat, hLon, REGION_FADE - ZEPS), inner && chunks === 'none', inner && chunks === 'some'];
 }
 // ---- what stage 3 adds to the text of the shaders (at stage 2 none of it is in them)
-// the full variant is not cut on its inner side: it draws whatever the fast one leaves, however deep inside
-export const S3_CLIP_INNER = '1.';
+// the variants that draw the inside of the rectangle are cut to it as the fast one is: the fast one, the plain land
+// and the edge of the worked land
+export const S3_CLIP_INSIDE = ' || uZone >= 4';
 // 1 where a chunk lies under the point, 0 where none does (chunks.js, NONE), joined smoothly between the texels of
 // the chunk raster — the edge of the worked land is a band of one texel, 1.25 km, along the outlines of the chunks
 export const S3_CHUNK_HERE = `
@@ -112,10 +117,18 @@ float chunkHere(vec2 pk) {
   vec4 id = vec4(chunkIdTexel(c), chunkIdTexel(c + ivec2(1, 0)), chunkIdTexel(c + ivec2(0, 1)), chunkIdTexel(c + ivec2(1, 1)));
   vec4 w = step(id, vec4(${(NONE - .5).toFixed(1)}));
   return mix(mix(w.x, w.y, f.x), mix(w.z, w.w, f.x), f.y);
-}`;
-// the state of the chunks holds where a chunk lies, and gives way to the natural state at the rim of the rectangle
-// as before
-export const S3_STATE = `min(smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll)), chunkHere(pk))`;
+}
+float gState = 1.;                                                 // STATE of this pixel: counted once, at the top of main()`;
+// The state of the chunks holds where a chunk lies, and gives way to the natural state at the rim of the rectangle
+// as before. It is counted once for a pixel (S3_STATE_SET, laid into main() where the place is known) and read
+// wherever STATE(ll) stands: the edge of the worked land asks only where a chunk lies, the full variant — the rim too.
+export const S3_STATE = 'gState';
+export const S3_STATE_SET = `
+#if ZONE == 5
+  gState = chunkHere(pk);
+#elif ZONE == 2 || ZONE == 0
+  gState = min(smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll)), chunkHere(pk));
+#endif`;
 // a texture of one point, for a map that is missing
 const flat = (format, data) => { const t = new DataTexture(data, 1, 1, format, data instanceof Float32Array ? FloatType : UnsignedByteType); t.colorSpace = NoColorSpace; t.needsUpdate = true; return t; };
 const f1 = n => Number(n).toFixed(1);
@@ -151,8 +164,8 @@ void main() {
   //   1 inside the polygon, from ${STATE_FADE[1]}° inside its border   2 the border, out to ${REGION_FADE}° beyond it   3 the world beyond
   vec4 dz = vec4(ll - vec2(${f1(BBOX.lat0)}, ${f1(BBOX.lon0)}), vec2(${f1(BBOX.lat1)}, ${f1(BBOX.lon1)}) - ll), c4 = vec4(1.);   // degrees inside each side of the polygon
   float dm = min(min(dz.x, dz.y), min(dz.z, dz.w)), c5 = 1.;
-  if (uZone == 1) c4 = dz - ${(STATE_FADE[1] - ZEPS).toFixed(4)};
-  else if (uZone == 2) { c4 = dz + ${(REGION_FADE + ZEPS).toFixed(4)}; c5 = ${STAGE >= 3 ? S3_CLIP_INNER : `${(STATE_FADE[1] + ZEPS).toFixed(4)} - dm`}; }
+  if (uZone == 1${STAGE >= 3 ? S3_CLIP_INSIDE : ''}) c4 = dz - ${(STATE_FADE[1] - ZEPS).toFixed(4)};
+  else if (uZone == 2) { c4 = dz + ${(REGION_FADE + ZEPS).toFixed(4)}; c5 = ${(STATE_FADE[1] + ZEPS).toFixed(4)} - dm; }
   else if (uZone == 3) c5 = ${(ZEPS - REGION_FADE).toFixed(4)} - dm;
   gl_ClipDistance[0] = c4.x; gl_ClipDistance[1] = c4.y; gl_ClipDistance[2] = c4.z; gl_ClipDistance[3] = c4.w; gl_ClipDistance[4] = c5;
 #endif
@@ -171,6 +184,9 @@ const FRAG_SRC = /* glsl */`
 //   4  (stage 3) the plain land of the world on the detailed heights of the rectangle — the south of England, Italy,
 //      the Sahara: the heights and the climate of the polygon, and no chunks under it. The shader of zone 1 without
 //      the state of the chunks and the parts that live on it: the natural state everywhere.
+//   5  (stage 3) the edge of the worked land inside the rectangle: the shader of zone 1, which also asks every pixel
+//      whether a chunk lies under it (chunkHere) and lets the state of the chunks give way to the natural one there.
+//      Nothing of the world is in it. Most of what it draws is open sea, where the chunks end off the coast.
 //   0  the whole Earth by one variant (all of the shader), where the video card cannot cut the grids.
 // REGION(ll): 1 inside the polygon .. 0 beyond it; STATE(ll): 1 the state of the chunks .. 0 the natural state.
 #if ZONE == 1
@@ -185,6 +201,10 @@ const FRAG_SRC = /* glsl */`
 #define ALBUM_WORLD 0
 #define REGION(ll) 1.
 #define STATE(ll) 0.
+#elif ZONE == 5
+#define ALBUM_WORLD 0
+#define REGION(ll) 1.
+#define STATE(ll) gState
 #else
 #define ALBUM_WORLD 1
 #define REGION(ll) inRegion(ll)
@@ -364,7 +384,7 @@ void main() {
   // steeper there — for the light, the rock, the ribs and the forest alike; the height is not touched.)
   if (rg < 1.) g *= 1. + 2. * (1. - rg);
   float slope = length(g), hl = max(h0, 0.);
-  vec2 pk = vec2(lon * KM * COSREF, lat * KM);                      // flat km coordinates for patterns
+  vec2 pk = vec2(lon * KM * COSREF, lat * KM);                      // flat km coordinates for patterns${STAGE >= 3 ? S3_STATE_SET : ''}
   // ---- the relief the height data cannot hold. The data has a point every 230 m and joins them smoothly: every
   // mountain came out rounded, like wax that has run (the lead on Aneto and the Picos, 14.11.2026). Three things are
   // added to the slope the light and the rock are worked out from; the height itself is not touched, so a road, a
@@ -781,7 +801,7 @@ export class Terrain {
     // A grid is drawn by the three variants of the shader (ZONE), each cut to its own part of the Earth — or by the
     // one variant that draws everything, where the video card cannot cut. this.levels: the first of them for
     // every level (the others share its uniforms); this.zoned: all of them, [level][variant].
-    const clip = clipOk(), ZONES = clip ? (blocky ? [1, 2, 3, 4] : [1, 2, 3]) : [0];
+    const clip = clipOk(), ZONES = clip ? (blocky ? [1, 2, 3, 4, 5] : [1, 2, 3]) : [0];
     this.clip = clip;
     // stage 3: where the chunks lie (zonesOf3)
     if (STAGE >= 3) { this.chunkSum = chunkSums(chunks.stateCell); this.chunkRect = { x0: cr.x, y0: cr.y }; }
@@ -823,8 +843,9 @@ export class Terrain {
     ggeo.setAttribute('position', new BufferAttribute(new Float32Array(gn * 3), 3)); ggeo.setAttribute('grid', new BufferAttribute(ggrid, 2)); ggeo.setIndex(new BufferAttribute(gidx, 1));
     this.globes = grids(ggeo, { uCentre: { value: new Vector2(0, 0) }, uCell: { value: KM_PER_DEG }, uFine: { value: new Vector3() }, uLod: { value: Math.log2(KM_PER_DEG / .234) } }, -11);
     this.globe = this.globes[0];
-    // (stage 3: the grid of the whole ball is drawn inside the rectangle by the full variant alone — the fast one
-    // would take the plain land there for worked land)
+    // (stage 3: inside the rectangle the grid of the whole ball is drawn by the variant of the edge of the worked land
+    // alone, which asks every pixel for its chunk — the fast one would take the plain land there for worked land, the
+    // plain one the worked land for plain; the strip at the rim and the world are drawn as at stage 2)
     if (STAGE >= 3 && clip) { this.globes[0].visible = false; if (this.globes[3]) this.globes[3].visible = false; }
     // the thin shell of air at the limb
     const air = new Mesh(new SphereGeometry(R + 75, 128, 64), new ShaderMaterial({
