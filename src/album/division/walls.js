@@ -1,15 +1,16 @@
-// Borders nobody can cross (the lead's brief of the second step, 14.11.2026: «такая граница должна читаться как стена…
-// чтобы перевал читался как ворота в ней»). The roads say where: between two neighbouring land districts the roads
-// work out the cheapest way from town to town (roads/routes.js); where it costs far more than its length the mountain
-// is impassable there and the two get no leg at all. So the walls are the borders of neighbours with no leg between
-// them, read from album.roadNet every time the network is laid (the roads may move to the passes of history), never
-// kept. Where a pass leads over a range its two districts have a leg: the wall has a gap there, a gate. And a border a
-// road crosses as it is drawn is no wall either (album.roadNet.crossed): the road of a pass of history joins districts
-// that do not touch and goes over the borders of those between, and a leg may cut the corner of a third district.
-// Drawn in the division modes as a dark band with a brick-red core, over the border line it lies on.
+// Borders nobody can cross (the lead's brief of the second step, 14.11.2026). The roads say where: between two
+// neighbouring land districts the roads work out the cheapest way from town to town (roads/routes.js); where it costs
+// far more than its length the mountain is impassable there and the two get no leg at all. So these are the borders of
+// neighbours with no leg between them, read from album.roadNet every time the network is laid (the roads may move to
+// the passes of history), never kept. A border a road crosses as it is drawn is not one of them either
+// (album.roadNet.crossed): the road of a pass of history joins districts that do not touch and goes over the borders
+// of those between, and a leg may cut the corner of a third district.
+// They are data only (album.division.impassable()): from v0.6.82 they were drawn in the division modes as walls, and the
+// owner took that back on 15.11.2026: «не надо визуализировать, мы это потом визуализируем уже в
+// строительстве дорог». Troops will cross mountains, only few of them; whether a land can be passed is worked out
+// later and is not this. The rule that some districts cannot be joined by a main road stays («это крутая будет механика»).
 import { LAND } from './build.js';
 import { KN as FN } from './km.js';
-import { makeRibbonsFor } from './lines.js';
 
 const key = (a, b) => (a < b ? a * 65536 + b : b * 65536 + a);
 
@@ -45,18 +46,8 @@ export function wallLines(geo, pairs) {
   return out;
 }
 
-// what a wall looks like: a dark band under a brick-red core, km on the ground and at least so many pixels
-export const WALL = { w: .09, px: 7, dark: 0x120c08, core: { w: .035, px: 2.6, colour: 0xc2321e } };
-
-// → { pairs, update(cam, dom, alpha), dispose() }
-export function createWalls(album, geo, pairs) {
-  const lines = wallLines(geo, pairs);
-  const dark = makeRibbonsFor(album, lines, WALL.w, WALL.dark, WALL.px, 6.4), core = makeRibbonsFor(album, lines, WALL.core.w, WALL.core.colour, WALL.core.px, 6.5);
-  return {
-    pairs, km: lines.reduce((s, l) => { for (let i = 1; i < l.length; i++) s += Math.hypot(l[i][0] - l[i - 1][0], l[i][1] - l[i - 1][1]); return s; }, 0),
-    update(cam, dom, alpha) {
-      for (const [m, a] of [[dark, alpha * .8], [core, alpha]]) { if (!m) continue; m.mesh.visible = a > .01; if (m.mesh.visible) { m.setPx(cam, dom); m.u.uAlpha.value = a; } }
-    },
-    dispose() { for (const m of [dark, core]) if (m) { album.scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); } },
-  };
+// the borders of the pairs for the network the roads laid → { pairs, km }
+export function wallsOf(div, net) {
+  const pairs = impassablePairs(div, div.centres, net.legs, net.crossed), lines = wallLines(div.geo, pairs);
+  return { pairs, km: lines.reduce((s, l) => { for (let i = 1; i < l.length; i++) s += Math.hypot(l[i][0] - l[i - 1][0], l[i][1] - l[i - 1][1]); return s; }, 0) };
 }

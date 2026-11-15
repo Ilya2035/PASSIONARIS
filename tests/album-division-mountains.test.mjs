@@ -60,8 +60,8 @@ test('division in the mountains: the walls — neighbours with no way between th
   assert.deepEqual(impassablePairs(div, centres, [{ a: 0, b: 1 }], new Set([1 * 65536 + 2])), [], 'a road goes over the border of 1 and 2: no wall');
   const geo = { lines: [{ pts: [[0, 0], [1, 0], [2, 0], [3, 0]], labs: [0 | 1 << 16, 2 | 1 << 16, 1 | 2 << 16] }] };
   assert.deepEqual(wallLines(geo, [[1, 2]]), [[[1, 0], [2, 0], [3, 0]]], 'the run of pieces between the two, either side');
-  const knob = DEFS.find(k => k.key === 'divWalls');
-  assert.equal(knob?.map, 'Непроходимые границы', 'a switch on the map panel');
+  // (the owner, 15.11.2026: not drawn — data only, the roads will show it one day)
+  assert.equal(DEFS.find(k => k.key === 'divWalls'), undefined, 'no knob: the walls are not drawn');
 });
 
 // ---- the album's real data

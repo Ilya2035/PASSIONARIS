@@ -11,7 +11,7 @@ import { createPanel } from './panel.js';
 import { createLabels } from './labels.js';
 import { createLines } from './lines.js';
 import { createPlaces } from './places.js';
-import { impassablePairs, createWalls } from './walls.js';
+import { wallsOf } from './walls.js';
 import { nameDistricts } from './names.js';
 import { districtByLines } from './border.js';
 import { pickGround } from '../pick.js';
@@ -221,9 +221,9 @@ export async function startDivision(album, U) {
     capitalOf: (level, id) => { const sts = cur.div.centres?.seats; if (!sts) return null; const d = level === 'land' ? sts.land.get(id) : sts[level]?.[id]; return d === undefined ? null : { district: d, index: cur.div.centres.site[d] }; },
     seatOf,
     // ---- the borders nobody can cross (walls.js): the pairs of neighbouring land districts with no way between them,
-    // as the roads found them (album.roadNet), and their km; [] before the roads are laid
-    impassable: () => walls?.pairs || [],
-    get wallKm() { return walls?.km || 0; },
+    // as the roads found them (album.roadNet), and their km; [] before the roads are laid. Data only: not drawn
+    impassable: () => { syncWalls(); return walls?.pairs || []; },
+    get wallKm() { syncWalls(); return walls?.km || 0; },
     onChange: fn => listeners.push(fn),
     get data() { return cur.div; },
     lands,
@@ -247,14 +247,13 @@ export async function startDivision(album, U) {
     for (let l = 0; l < 3; l++) { alpha[l * 2] = base[l] * fade[l] * far; alpha[l * 2 + 1] = base[l] * fade[l] * far * .6; }
     alpha[6] = mode && p.get('divState') ? far : 0;
     lines.update(cam, dom, alpha, p.get('look'));
-    // the walls: laid again whenever the roads are (they may move to other passes), shown in the division modes while
-    // the knob is on, seen from a little higher than the borders of the districts
-    const net = album.roadNet;
-    if (net && (wallsFor?.net !== net || wallsFor?.div !== cur.div)) {
-      walls?.dispose(); walls = createWalls(album, cur.div.geo, impassablePairs(cur.div, cur.div.centres, net.legs, net.crossed)); wallsFor = { net, div: cur.div };
-      console.log(`[album] walls: ${walls.pairs.length} pairs of districts nobody can pass between, ${walls.km.toFixed(0)} km`);
-    }
-    walls?.update(cam, dom, mode && p.get('divWalls') ? far * ss(5, 14, s.district / pxKm) : 0);
+  }
+  // the borders nobody can cross: worked out again whenever the roads are laid (they may move to other passes) or the
+  // land is divided anew, and only when asked for
+  function syncWalls() {
+    const net = album.roadNet; if (!net || (wallsFor?.net === net && wallsFor?.div === cur.div)) return;
+    walls = wallsOf(cur.div, net); wallsFor = { net, div: cur.div };
+    console.log(`[album] borders nobody can cross: ${walls.pairs.length} pairs of districts, ${walls.km.toFixed(0)} km`);
   }
 
   return { id: 'division', update(dt, t, cam) {
