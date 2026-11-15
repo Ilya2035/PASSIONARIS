@@ -13,6 +13,7 @@
 // The chunks themselves are never seen on the map (the owner: «чанки не видим сами по себе… только в dev-режиме»):
 // the knob «Чанки 1 км²» draws their outlines and what each is like, for checking.
 import { Vector2, Vector3 } from 'three';
+import { BBOX, KM_PER_DEG, COS_REF } from '../geo.js';
 import { KKM as FKM, KN as FN, KNY as FNY, KM_GLSL } from '../division/km.js';
 // the last texel of the lattice of chunks; written as one number while the lattice is a square (the shader the same,
 // letter for letter, as before the lattice could be a rectangle: the GPU compiler is touchy)
@@ -300,7 +301,12 @@ void aspDivision(Px p, inout vec3 col, float landA) {
   if (inR < .002) return;
   vec3 cl = landA > .02 ? divLook(col, p.pk, p.px, false) : col;
   vec3 cw = landA < .98 ? divLook(col, p.pk, p.px, true) : col;
-  col = mix(col, mix(cw, cl, landA), inR);
+  // the districts end at the edge of the polygon: beyond it lies the land and the sea of the world, and the ground
+  // calls this over a band beyond the edge (inRegion() fades there), over which the division smeared its edge. The
+  // edge is told by the flat km of the point: any use of p.ll here, regionEdge() or another, made the whole ground
+  // shader 15–30 % slower on the integrated GPU, the division off or on.
+  vec2 eK = min(p.pk - vec2(${(BBOX.lon0 * KM_PER_DEG * COS_REF).toFixed(3)}, ${(BBOX.lat0 * KM_PER_DEG).toFixed(3)}), vec2(${(BBOX.lon1 * KM_PER_DEG * COS_REF).toFixed(3)}, ${(BBOX.lat1 * KM_PER_DEG).toFixed(3)}) - p.pk);
+  col = mix(col, mix(cw, cl, landA), inR * step(0., min(eK.x, eK.y)));
 }`;
 
 const ZARAGOZA = [41.65, -0.89];                    // the town of the album data (vectors.places)

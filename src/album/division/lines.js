@@ -69,7 +69,8 @@ const STYLE = {
   4: { w: .06, px: 3, ink: 0x24160e, light: 0xfff6e0 }, 5: { w: .04, px: 2, ink: 0x22406a, light: 0xdce8f8 },
   6: { w: .07, px: 3.4, ink: 0x7a1410, light: 0xc0201a },
 };
-const inside = ([lon, lat]) => lat > BBOX.lat0 - .1 && lat < BBOX.lat1 + .1 && lon > BBOX.lon0 - .1 && lon < BBOX.lon1 + .1;
+// (strictly the polygon: beyond it the raster holds only a sea that is not there, and the land of the world is not divided)
+const inside = ([lon, lat]) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
 
 // a line of flat km → pieces of [lon, lat] for a ribbon: a point every 400 m (a line along a crest stands on every rise
 // of it and is not buried between two far corners), cut where it leaves the album's region
