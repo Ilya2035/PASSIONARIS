@@ -97,7 +97,7 @@ export function chunksIn(sum, lat, lon, hLat, hLon, rect, nx = SNX, ny = SNY, km
 // than the strip along its rim, ONE of three by what lies under the block: chunks everywhere — the fast variant;
 // none — the plain land; some — the edge of the worked land. A block on the rim is cut along it, as the levels of
 // stage 2 are: its part inside goes to one of the three, the strip to the full variant, what lies beyond to the world.
-// (Until v0.6.166 the full variant drew every block that touched the edge of the worked land or the rim, whole: from
+// (Until v0.6.168 the full variant drew every block that touched the edge of the worked land or the rim, whole: from
 // 1700 km that was 94 blocks of the 297 in sight, most of them open sea a hundred kilometres off the coast.)
 export function blockZones(lat, lon, hLat, hLon, chunks) {
   if (!touches(lat, lon, hLat, hLon, REGION_FADE + ZEPS)) return [false, false, true, false, false];
