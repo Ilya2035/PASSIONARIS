@@ -186,18 +186,22 @@ export default {
       WX.uStorm.value.set(storm ? 1 : 0, rainT, album.shot ? STORM_STILL : STORM_FLASH, 0);
       // above the line of snowfall it snows (the line follows the snow line of the ground: the look, «Снеговая линия»)
       // (on the album's own land; off it the line goes by the warmth of the month)
-      if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); WX.uSnowC.value.set(...snowClimNumbers(T.uSnow.value, T.uExag.value), 0); } else WX.uSnowF.value.w = 0;
+      if (rain) { needFog(album.data.base.at, album.shot); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); WX.uSnowC.value.set(...snowClimNumbers(T.uSnow.value, T.uExag.value), 0); } else WX.uSnowF.value.w = 0;
       // fog: what the hour has left of it (thickest at dawn, gone by noon)
       // (and what the height of the camera leaves of it: fog is weather seen from near, from a height there is none)
       const rise = sunTimes(yday, s.lat)?.rise ?? 6, low = natural && nearLand(s) ? fogByHeight(s.h) : 0, fog = p.get('fog') ? p.get('fogAmount') * fogByHour(hour, rise) * low : 0;
       // (clouds in the mountains: with the fog the deep valleys fill with cloud; with the clouds on, high crests wear caps)
+      // (The fog, the caps and the snow in the air need the floor of the land. It is built in the idle moments between
+      // the frames — sky/weather.js, needFog — so they come a moment after their switch: the finishing pass draws no fog
+      // until the pictures are there, and the falling snow counts the land as the sea till then. A still capture
+      // builds it at once.)
       const caps = p.get('clouds') && low > 0 ? p.get('cloudCover') : 0;
       if (fog > .02 || caps > 0) {
-        const f = fogNumbers(fog > .02 ? fog : 0), k = T.uExag.value / 1000; needFog(album.data.base.at);
+        const f = fogNumbers(fog > .02 ? fog : 0), k = T.uExag.value / 1000; needFog(album.data.base.at, album.shot);
         WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); WX.uLow.value.set(fog > .02 ? HILL_FILL * Math.min(1, fog / .7) : 0, caps > 0 ? 1 : 0, capBank(caps), fog > .02 ? 1 : 0);
       } else WX.uFog.value.x = 0;
       if (cover > 0 || fog > .02) needClouds();
-      layer.weather = { cover, rain: rain ? force : 0, storm, fog, caps, whirls, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
+      layer.weather = { cover, rain: rain ? force : 0, storm, fog, caps, floor: !!WX.tFog.value, whirls, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
       // the plume: it grows with the time of the map (a still capture shows it full grown), its billows travel down it
       if (wanted && !plume) begin(c.t);
       if (plume && natural) {

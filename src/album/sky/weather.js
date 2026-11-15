@@ -325,52 +325,88 @@ export const fogNumbers = amount => ({ thick: amount * (110 + 190 * amount), ban
 // costs: 0.3–0.4 s and 1.4 MB of pictures for the rectangle of stage 2, 1.1 s and 6 MB for that of stage 3 — once,
 // when the fog, the caps or the rain are first switched on. A frame reads the same points whatever the size; no
 // difference could be told from the spread of the measure — docs/album/sky.md, «Большой полигон (этап 3)».)
-export function fogFloor(at, cell = 4, sub = 4, box = BBOX) {
+//
+// The work is cut into small parts — a row of the grid, a line of a pass — so that it can be done a little at a time
+// (needFog below). fogFloorJob() is the work: step(ms) does parts of it for about ms milliseconds, one part at
+// least, and tells whether the floor is whole; then it is in .result. pack: the result also holds the two pictures
+// as half floats, ready for the graphics card (hf: floor, weight, sea, mean of every cell; pk: the crests).
+export function fogFloorJob(at, cell = 4, sub = 4, box = BBOX, pack = false) {
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const la of [box.lat0, (box.lat0 + box.lat1) / 2, box.lat1]) for (const lo of [box.lon0, (box.lon0 + box.lon1) / 2, box.lon1]) {
     const [x, z] = planeOf(la, lo); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
   }
   const w = Math.ceil((x1 - x0) / cell), h = Math.ceil((z1 - z0) / cell), n = w * h;
-  let low = new Float32Array(n), mean = new Float32Array(n), sea = new Float32Array(n);
+  let low = new Float32Array(n), mean = new Float32Array(n), sea = new Float32Array(n), open = null, weight = null, round = null, hf = null, pk = null;
   // (and, on a grid twice as fine, the highest ground of every cell: the crests, for the caps of cloud they wear)
   const pw = w * 2, ph = h * 2, peak = new Float32Array(pw * ph), half = sub / 2;
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    let lo = Infinity, m = 0, s = 0;
-    for (let b = 0; b < sub; b++) for (let a = 0; a < sub; a++) {
-      const ll = llOfPlane(x0 + (i + (a + .5) / sub) * cell, z0 + (j + (b + .5) / sub) * cell), g = at(ll.lat, ll.lon), g0 = Math.max(g, 0);
-      if (g0 < lo) lo = g0; m += g0; if (g <= 0) s++;
-      const pi = (j * 2 + (b >= half ? 1 : 0)) * pw + i * 2 + (a >= half ? 1 : 0); if (g0 > peak[pi]) peak[pi] = g0;
-    }
-    low[j * w + i] = lo; mean[j * w + i] = m / (sub * sub); sea[j * w + i] = s / (sub * sub);
-  }
-  // one pass along the rows and one along the columns: the lowest, or the mean, of the cells within r of each
-  const pass = (src, r, min) => {
-    const tmp = new Float32Array(n), out = new Float32Array(n);
-    for (const [a, b, len, lines, stride, step] of [[src, tmp, w, h, w, 1], [tmp, out, h, w, 1, w]]) {
-      for (let l = 0; l < lines; l++) for (let k = 0; k < len; k++) {
-        let acc = min ? Infinity : 0, c = 0;
-        for (let d = -r; d <= r; d++) { const kk = k + d; if (kk < 0 || kk >= len) continue; const v = a[l * stride + kk * step]; if (min) { if (v < acc) acc = v; } else { acc += v; c++; } }
-        b[l * stride + k * step] = min ? acc : acc / c;
+  // a piece of the work in `count` parts: a call does its parts while there is time, and tells when the last is done
+  const tasks = [], parts = (count, fn) => { let i = 0; tasks.push(until => { do fn(i++); while (i < count && performance.now() < until); return i >= count; }); };
+  // the heights, a row of the grid at a time
+  parts(h, j => {
+    for (let i = 0; i < w; i++) {
+      let lo = Infinity, m = 0, s = 0;
+      for (let b = 0; b < sub; b++) for (let a = 0; a < sub; a++) {
+        const ll = llOfPlane(x0 + (i + (a + .5) / sub) * cell, z0 + (j + (b + .5) / sub) * cell), g = at(ll.lat, ll.lon), g0 = Math.max(g, 0);
+        if (g0 < lo) lo = g0; m += g0; if (g <= 0) s++;
+        const pi = (j * 2 + (b >= half ? 1 : 0)) * pw + i * 2 + (a >= half ? 1 : 0); if (g0 > peak[pi]) peak[pi] = g0;
       }
+      low[j * w + i] = lo; mean[j * w + i] = m / (sub * sub); sea[j * w + i] = s / (sub * sub);
     }
-    return out;
+  });
+  // one pass along the rows and one along the columns: the lowest, or the mean, of the cells within r of each
+  // (line: one row or one column of it; get: the picture it reads, asked when its turn comes; put: where it goes)
+  const line = (a, b, len, stride, step, r, min, l) => {
+    for (let k = 0; k < len; k++) {
+      let acc = min ? Infinity : 0, c = 0;
+      for (let d = -r; d <= r; d++) { const kk = k + d; if (kk < 0 || kk >= len) continue; const v = a[l * stride + kk * step]; if (min) { if (v < acc) acc = v; } else { acc += v; c++; } }
+      b[l * stride + k * step] = min ? acc : acc / c;
+    }
+  };
+  const pass = (get, put, r, min) => {
+    let src, tmp, out;
+    parts(h, l => { if (!l) { src = get(); tmp = new Float32Array(n); out = new Float32Array(n); } line(src, tmp, w, w, 1, r, min, l); });
+    parts(w, l => { line(tmp, out, h, 1, w, r, min, l); if (l === w - 1) put(out); });
   };
   // (the lowest ground within 24 km: over a wide basin the top of the fog is then nearly level, and the land rising
   // away from the river comes out of it along its own contour — which is what gives fog its shape from above)
   const r8 = Math.max(1, Math.round(8 / cell)), r12 = Math.max(1, Math.round(12 / cell)), r24 = Math.max(1, Math.round(24 / cell));
-  const open = pass(sea, Math.max(1, Math.round(40 / cell)), false);          // how much of the 40 km around is sea
-  low = pass(pass(pass(low, r24, true), r12, false), r12, false); mean = pass(mean, Math.round(16 / cell) || 1, false); sea = pass(sea, r8, false);
-  const weight = new Float32Array(n);
-  for (let i = 0; i < n; i++) weight[i] = mix(1 + .25 * Math.max(0, Math.min(1, (mean[i] - low[i] - 60) / 340)), .9 * Math.min(1, (1 - open[i]) * 2.2), sea[i]);
+  pass(() => sea, v => { open = v; }, Math.max(1, Math.round(40 / cell)), false);          // how much of the 40 km around is sea
+  pass(() => low, v => { low = v; }, r24, true); pass(() => low, v => { low = v; }, r12, false); pass(() => low, v => { low = v; }, r12, false);
+  pass(() => mean, v => { mean = v; }, Math.round(16 / cell) || 1, false); pass(() => sea, v => { sea = v; }, r8, false);
+  parts(h, j => {
+    if (!j) weight = new Float32Array(n);
+    for (let i = j * w; i < (j + 1) * w; i++) weight[i] = mix(1 + .25 * Math.max(0, Math.min(1, (mean[i] - low[i] - 60) / 340)), .9 * Math.min(1, (1 - open[i]) * 2.2), sea[i]);
+  });
   // (the crests a little rounded — the mean of a cell and its neighbours: a cap of cloud is not cut in facets)
-  const round = new Float32Array(pw * ph);
-  for (let j = 0; j < ph; j++) for (let i = 0; i < pw; i++) {
-    let s = 0, c = 0;
-    for (let b = Math.max(0, j - 1); b <= Math.min(ph - 1, j + 1); b++) for (let a = Math.max(0, i - 1); a <= Math.min(pw - 1, i + 1); a++) { s += peak[b * pw + a]; c++; }
-    round[j * pw + i] = s / c;
+  parts(ph, j => {
+    if (!j) round = new Float32Array(pw * ph);
+    for (let i = 0; i < pw; i++) {
+      let s = 0, c = 0;
+      for (let b = Math.max(0, j - 1); b <= Math.min(ph - 1, j + 1); b++) for (let a = Math.max(0, i - 1); a <= Math.min(pw - 1, i + 1); a++) { s += peak[b * pw + a]; c++; }
+      round[j * pw + i] = s / c;
+    }
+  });
+  if (pack) {
+    parts(h, j => {
+      if (!j) hf = new Uint16Array(n * 4);
+      for (let i = j * w; i < (j + 1) * w; i++) { hf[i * 4] = DataUtils.toHalfFloat(low[i]); hf[i * 4 + 1] = DataUtils.toHalfFloat(weight[i]); hf[i * 4 + 2] = DataUtils.toHalfFloat(sea[i]); hf[i * 4 + 3] = DataUtils.toHalfFloat(mean[i]); }
+    });
+    parts(ph, j => { if (!j) pk = new Uint16Array(pw * ph); for (let i = j * pw; i < (j + 1) * pw; i++) pk[i] = DataUtils.toHalfFloat(round[i]); });
   }
-  return { w, h, cell, x0, z0, floor: low, weight, sea, mean, peak: round, pw, ph };
+  let turn = 0, result = null;
+  return {
+    get result() { return result; }, count: h * (pack ? 3 : 2) + (h + w) * 6 + ph * (pack ? 2 : 1),   // (count: how many parts the work has)
+    step(ms = Infinity) {
+      const until = performance.now() + ms;
+      while (turn < tasks.length) { if (!tasks[turn](until)) return false; turn++; if (performance.now() >= until) break; }
+      if (turn < tasks.length) return false;
+      result ||= { w, h, cell, x0, z0, floor: low, weight, sea, mean, peak: round, pw, ph, hf, pk };
+      return true;
+    },
+  };
 }
+// the whole floor at once
+export function fogFloor(at, cell = 4, sub = 4, box = BBOX) { const job = fogFloorJob(at, cell, sub, box); job.step(); return job.result; }
 // the floor and the willingness at a place, as the shader reads them (for the tests)
 export function fogFloorAt(ff, lat, lon) {
   const [x, z] = planeOf(lat, lon), i = Math.max(0, Math.min(ff.w - 1, Math.floor((x - ff.x0) / ff.cell))), j = Math.max(0, Math.min(ff.h - 1, Math.floor((z - ff.z0) / ff.cell)));
@@ -452,17 +488,38 @@ export const climateNow = (lat, lon) => (clim.pic ? climateAt(clim.pic, lat, lon
 // the file of the open climate (gunzipped ArrayBuffer; normals.json): the mean temperature of every month in tenths
 // of a degree, the precipitation of every month in mm, and the height the temperature is given at, m
 export const climateOf = buf => ({ tavg: new Int16Array(buf, 0, 12 * 360 * 720), prec: new Uint16Array(buf, 6220800, 12 * 360 * 720), elev: new Int16Array(buf, 12441600, 360 * 720) });
-export function needFog(at) {
-  if (WX.tFog.value) return;
-  const ff = fogFloor(at), hf = new Uint16Array(ff.w * ff.h * 4);
-  for (let i = 0; i < ff.w * ff.h; i++) { hf[i * 4] = DataUtils.toHalfFloat(ff.floor[i]); hf[i * 4 + 1] = DataUtils.toHalfFloat(ff.weight[i]); hf[i * 4 + 2] = DataUtils.toHalfFloat(ff.sea[i]); hf[i * 4 + 3] = DataUtils.toHalfFloat(ff.mean[i]); }
-  const t = new DataTexture(hf, ff.w, ff.h, RGBAFormat, HalfFloatType);
+// The floor is built when the fog, the caps or the rain first ask for it. Done at once it stopped the picture for as
+// long as it took — a third of a second over the rectangle of stage 2, more than a second over that of stage 3 (the
+// leading session, 15.11.2026). So it is done in the idle moments between the frames, a few parts at a time, and what
+// needs it comes a moment after its switch. now: at once, whatever it takes — a still capture shows its first frame.
+// Tells whether the pictures are there.
+// An idle moment says how long it lasts, and a go fills it. Where the page has no idle moments at all — its frames
+// follow one another without a gap — a go comes all the same after FOG_WAIT ms and lasts FOG_SLICE ms: a fifth of the
+// time at the worst, and no frame longer by more than a go.
+export const FOG_SLICE = 4, FOG_WAIT = 20;
+const floorWork = { job: null, waits: false };
+const whenIdle = go => (globalThis.requestIdleCallback ? globalThis.requestIdleCallback(go, { timeout: FOG_WAIT }) : setTimeout(go, 0));
+function fogPictures(ff) {
+  const t = new DataTexture(ff.hf, ff.w, ff.h, RGBAFormat, HalfFloatType);
   t.internalFormat = 'RGBA16F'; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.magFilter = t.minFilter = LinearFilter; t.needsUpdate = true;
   WX.tFog.value = t; WX.uFogRect.value.set(ff.x0, ff.z0, 1 / (ff.w * ff.cell), 1 / (ff.h * ff.cell));
-  const pk = new Uint16Array(ff.pw * ff.ph); for (let i = 0; i < pk.length; i++) pk[i] = DataUtils.toHalfFloat(ff.peak[i]);
-  const tp = new DataTexture(pk, ff.pw, ff.ph, RedFormat, HalfFloatType);
+  const tp = new DataTexture(ff.pk, ff.pw, ff.ph, RedFormat, HalfFloatType);
   tp.internalFormat = 'R16F'; tp.wrapS = tp.wrapT = ClampToEdgeWrapping; tp.magFilter = tp.minFilter = LinearFilter; tp.needsUpdate = true;
-  WX.tPeak.value = tp;
+  WX.tPeak.value = tp; floorWork.job = null;
+}
+export function needFog(at, now = false) {
+  if (WX.tFog.value) return true;
+  const job = floorWork.job || (floorWork.job = fogFloorJob(at, 4, 4, BBOX, true));
+  if (now) { job.step(); fogPictures(job.result); return true; }
+  // (a go that came only because it had waited too long has no idle time left: it says 0)
+  const go = idle => {
+    floorWork.waits = false;
+    if (WX.tFog.value) return;
+    if (job.step(idle?.timeRemaining ? Math.max(FOG_SLICE, idle.timeRemaining() - 1) : FOG_SLICE)) fogPictures(job.result);
+    else { floorWork.waits = true; whenIdle(go); }
+  };
+  if (!floorWork.waits) { floorWork.waits = true; whenIdle(go); }
+  return false;
 }
 
 // ---- the two texts of the shaders

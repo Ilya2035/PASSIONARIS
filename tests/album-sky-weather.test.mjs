@@ -8,9 +8,10 @@ import { MAP_NEAR, CLOUD_KM, GROW_KM, CELL_KM, GROW, GROW_LOD, GROW_DEV, FIELD_D
   COVER_REST, WILL_REST, skyShare, coverOfShare, rainWill, coverAt, rainMaskAt, climatePicture, climateAt, climUV, CLIM_W, CLIM_H, climateOf,
   WORLD, WORLD_LON, worldNeeded, TRADES, POLAR, BELTS, windOf, windTurn, windNorm, WIND_SPAN, WIND_LIKE, baseAt, WHIRLS, WHIRL_MORE, WHIRL_EYE, whirlsAt, whirlWarp, whirlShare,
   LAPSE, SNOW_T, SNOW_LOW, SNOW_HIGH, snowByWarmth, snowClimNumbers, freshSnowLine,
-  STORM_KM, STORM_EVERY, STORM_FLASH, STORM_STILL, flashAt, fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
+  STORM_KM, STORM_EVERY, STORM_FLASH, STORM_STILL, flashAt, fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorJob, fogFloorAt, needFog, FOG_SLICE, FOG_WAIT, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
   HILL_FILL, HILL_FROM, CAP_CREST, CAP_HIGH, CAP_UNDER, CAP_OVER, capBank, capAt } from '../src/album/sky/weather.js';
 import { readFileSync } from 'node:fs';
+import { DataUtils } from 'three';
 import { cloudShader, LUMPS, BANK_STEP, SHELL_REACH, cloudShow, rainCloudShow } from '../src/album/layers/clouds.js';
 import { LIGHT } from '../src/album/light.js';
 import { postShader, POST_CLOUDS, POST_RAIN, POST_FOG, POST_WIDE, POST_STORM } from '../src/album/post.js';
@@ -408,6 +409,18 @@ test('weather: fog fills the land from the floor of the valley and the sea', () 
     const [x, z] = planeOf(la, lo); assert.ok(x >= whole.x0 - 1e-6 && x <= whole.x0 + whole.w * whole.cell + 1e-6 && z >= whole.z0 - 1e-6 && z <= whole.z0 + whole.h * whole.cell + 1e-6, `${la}, ${lo}`);
   }
   assert.ok(whole.w * whole.cell >= ff.w * ff.cell - 32 && whole.h * whole.cell >= ff.h * ff.cell - 32, 'never smaller than over Iberia');
+  // The floor can be built a part at a time (needFog does so between the frames, so that the picture does not stop):
+  // a go with no time to spare does one part, and the floor comes out the same to the last bit
+  const job = fogFloorJob(land, 8, 2, IBERIA, true); let goes = 1; assert.equal(job.result, null);
+  while (!job.step(0)) { goes++; assert.equal(job.result, null); }
+  assert.equal(goes, job.count); assert.equal(job.count, ff.h * 3 + (ff.h + ff.w) * 6 + ff.ph * 2); assert.equal(job.step(0), true, 'and stays whole');
+  for (const k of ['floor', 'weight', 'sea', 'mean', 'peak']) assert.deepEqual(job.result[k], ff[k], k);
+  assert.deepEqual([job.result.w, job.result.h, job.result.x0, job.result.z0, job.result.cell], [ff.w, ff.h, ff.x0, ff.z0, ff.cell]);
+  // with the two pictures packed for the graphics card: floor, weight, sea and mean of every cell; the crests
+  const { hf, pk } = job.result; assert.equal(hf.length, ff.w * ff.h * 4); assert.equal(pk.length, ff.pw * ff.ph);
+  for (const i of [0, 777, ff.w * ff.h - 1]) assert.deepEqual([...hf.slice(i * 4, i * 4 + 4)], [ff.floor[i], ff.weight[i], ff.sea[i], ff.mean[i]].map(v => DataUtils.toHalfFloat(v)), `cell ${i}`);
+  for (const i of [0, 4321, ff.pw * ff.ph - 1]) assert.equal(pk[i], DataUtils.toHalfFloat(ff.peak[i]));
+  assert.equal(ff.hf, null, 'not packed unless asked');
   // in the valley the floor is the bottom of the valley; a few km up its side it is still nearly the bottom — so the
   // side rises out of the fog; far away on the plain it is the plain itself
   assert.ok(at(41, -3).floor < 260, `${at(41, -3).floor}`); assert.ok(at(41.1, -3).floor < 300 && land(41.1, -3) - at(41.1, -3).floor > 200);
@@ -469,4 +482,29 @@ test('weather: nothing of it in the shaders of the land, and nothing at all whil
   assert.ok(/wxFogTop\(P/.test(fog) && !/wxLines|albumCloudShade\(wpos\)/.test(fog));
   // the picture of the clouds, once asked for: repeating, one byte a point
   needClouds(); const t = WX.tCloud.value; assert.ok(t && t.image.width === CLOUD_N && t.image.data.length === CLOUD_N * CLOUD_N); needClouds(); assert.equal(WX.tCloud.value, t, 'built once');
+});
+
+test('weather: the floor of the fog is built between the frames, and at once for a still capture', async () => {
+  const land = (lat, lon) => (lon < -8 ? -100 : Math.min(500, 200 + Math.abs(lat - 41) * 111 * 30));
+  // asked for, it is not there yet: the picture must not stop while it is built
+  assert.equal(WX.tFog.value, null); assert.equal(needFog(land), false); assert.equal(WX.tFog.value, null); assert.equal(WX.tPeak.value, null);
+  // it comes by itself a little later, whether it is asked for again or not
+  const t0 = Date.now(); while (!WX.tFog.value) { assert.ok(Date.now() - t0 < 120000, 'the floor never came'); await new Promise(r => setTimeout(r, 10)); }
+  assert.equal(needFog(land), true);
+  // the two pictures over the rectangle of the album's heights, cells of 4 km, the crests twice as fine
+  const a = WX.tFog.value.image, p = WX.tPeak.value.image, rect = WX.uFogRect.value, c0 = planeOf(BBOX.lat0, BBOX.lon0), c1 = planeOf(BBOX.lat1, BBOX.lon1);
+  assert.deepEqual([p.width, p.height, a.data.length, p.data.length], [a.width * 2, a.height * 2, a.width * a.height * 4, p.width * p.height]);
+  near(rect.z, 1 / (a.width * 4), 1e-12); near(rect.w, 1 / (a.height * 4), 1e-12);
+  for (const [x, z] of [c0, c1]) assert.ok(x >= rect.x - 1e-6 && x <= rect.x + a.width * 4 + 1e-6 && z >= rect.y - 1e-6 && z <= rect.y + a.height * 4 + 1e-6);
+  // (the sea in the west of the made-up land: its floor is the sea itself; the plain is 500 m)
+  const cellOf = (la, lo) => { const [x, z] = planeOf(la, lo); return (Math.floor((z - rect.y) / 4) * a.width + Math.floor((x - rect.x) / 4)) * 4; };
+  assert.equal(a.data[cellOf(40, -9.5)], DataUtils.toHalfFloat(0)); near(DataUtils.fromHalfFloat(a.data[cellOf(38, -3)]), 500, 5);
+  // a still capture cannot wait: there the same pictures are made at once
+  WX.tFog.value = null; WX.tPeak.value = null;
+  assert.equal(needFog(land, true), true); assert.deepEqual(WX.tFog.value.image.data, a.data); assert.deepEqual(WX.tPeak.value.image.data, p.data);
+  assert.ok(FOG_SLICE >= 2 && FOG_SLICE <= 8 && FOG_WAIT >= 2 * FOG_SLICE && FOG_WAIT <= 50, 'a go is a small part of a frame, and the wait for one is short');
+  // (asked for at once while it is being built in parts: it is finished on the spot, and what was waiting does nothing)
+  WX.tFog.value = null; WX.tPeak.value = null;
+  assert.equal(needFog(land), false); assert.equal(needFog(land, true), true); const kept = WX.tFog.value;
+  await new Promise(r => setTimeout(r, 30)); assert.equal(WX.tFog.value, kept); assert.deepEqual(kept.image.data, a.data);
 });
