@@ -11,11 +11,11 @@
 import { WebGLRenderTarget, DepthTexture, UnsignedIntType, LinearFilter, NearestFilter, ShaderMaterial, Mesh, PlaneGeometry, OrthographicCamera, Scene, Vector2, Vector3, Matrix4 } from 'three';
 import { COMMON } from './glsl.js';
 import { LIGHT, lightUniforms } from './light.js';
-import { WEATHER, WX, HILL_FROM } from './sky/weather.js';
+import { WEATHER, WX, WORLD, HILL_FROM } from './sky/weather.js';
 import { GLOBE, GLOBE_GLSL } from './sky/globe.js';
 import { PLUME, PLUME_GLSL, KINDS } from './sky/plume.js';
 
-const CLOUDS = 1, RAIN = 2, FOG = 4, BALL = 8, ASH = 16;
+const CLOUDS = 1, RAIN = 2, FOG = 4, BALL = 8, ASH = 16, WIDE = 32, STORM = 64;   // (WIDE: the whole text of the weather, for a view beyond the album — sky/weather.js, WORLD)
 const v3 = a => `vec3(${a.map(x => x.toFixed(3)).join(', ')})`;
 // (this pass is drawn with its own flat camera: the eye of the map comes as uEye, under the name LIGHT knows)
 const HEAD = `#define cameraPosition uEye\n${COMMON}\n${LIGHT}\n${WEATHER}`;
@@ -61,13 +61,14 @@ const RAY = /* glsl */`
 // dark — forest, a slope in shade — becomes blue-grey, so the relief and the forests still read through the snow.
 // (This snow is weather, laid here by the height of the pixel. The lasting snow is the ground shader's own.)
 const WET = /* glsl */`
+          float wIn = 0.;                                   // (is the land behind the pixel the album's own: for the line of snowfall)
           if (uRain.x > 0. && ground) {
             // (the place on the map of the weather, its climate and the threshold of its clouds are found once; the
             // trail behind the cloud is asked a little way downwind with the same)
             vec4 mw = wxMapOf(wpos); mw.xy += WX_WIND * RAIN_LAG; vec2 q0 = mw.xy, cw = wxClim(mw);
             float thw = wxThr(cw.x), pol = wxPolar(mw.w), gw = wxGrow(q0, pol), now = wxRainCloud(q0, thw, gw, pol) * wxRainMask(q0, cw.y);
             float was = wxRainCloud(q0 + WX_WIND * 40., thw, gw, pol + 2.) * wxRainMask(q0 + WX_WIND * 40., cw.y), wk = min(uRain.x * 1.6, 1.), wet = max(now, .7 * was) * wk;
-            float alt = length(wpos + vec3(0., RKM, 0.)) - RKM, over = alt - wxSnowLine(mw.w);
+            wIn = wxInside(wpos); float alt = length(wpos + vec3(0., RKM, 0.)) - RKM, over = uSnowF.w > 0. ? alt - wxSnowLine(mw, wIn) : -9.;
             if (uSnowF.w > 0. && over > -uSnowF.z * 2.) {
               // The edge of the fresh snow is crisp and ragged, with patches before it: not a contour drawn with a
               // ruler and not a soft band either (a soft band lies on the slopes like cotton wool). The raggedness
@@ -176,9 +177,10 @@ const RAINY = /* glsl */`
                 // clouds. A short way through the layer — a steep look from near the ground — is walked in three
                 // steps, and which cells rain is asked at its two ends only: that picture is too large to change on 40 km.
                 bool brief = t1 - t0 < 40.; int steps = brief ? 3 : 6; float rain = 0., sf = 0., ra = 0., rb = 0., tn = t1;
-                vec4 ma = wxFall(E + rdW * t0), mb = wxFall(E + rdW * t1);
+                // (each end is asked whole before the other: wxMap leaves the wind and the whirl of the place it was last asked)
+                vec4 ma = wxFall(E + rdW * t0); vec2 ca = wxClim(ma); float ta = wxThr(ca.x), pol = wxPolar(ma.w), ga = wxGrow(ma.xy, pol);
+                vec4 mb = wxFall(E + rdW * t1); vec2 cb = wxClim(mb); float tb = wxThr(cb.x), gb = wxGrow(mb.xy, pol);
                 if (abs(mb.x - ma.x) > MAP_ROUND * .5) { float turn = sign(mb.x - ma.x); mb.x -= turn * MAP_ROUND; mb.z -= turn; }   // (across the line where the map closes)
-                vec2 ca = wxClim(ma), cb = wxClim(mb); float ta = wxThr(ca.x), tb = wxThr(cb.x), pol = wxPolar(ma.w), ga = wxGrow(ma.xy, pol), gb = wxGrow(mb.xy, pol);
                 if (brief) { ra = wxRainMask(ma.xy, ca.y); rb = wxRainMask(mb.xy, cb.y); }
                 for (int i = 0; i < steps; i++) {
                   float u = (float(i) + .5) / float(steps); vec2 qi = mix(ma.xy, mb.xy, u);
@@ -189,8 +191,9 @@ const RAINY = /* glsl */`
                 // how much of it is snow: in the air by the height of the land under it; near the ground by the very
                 // slope behind the pixel, so that snow falls exactly where the ground turns white
                 if (uSnowF.w > 0. && rain > 0.) {
-                  if (!ground || uRain.w < 1.) sf = .5 * (wxSnowAir(uEye + rdW * mix(t0, t1, .3)) + wxSnowAir(uEye + rdW * mix(t0, t1, .75)));
-                  if (ground) sf = mix(sf, wxSnowy(dot(normalize(wpos + vec3(0., RKM, 0.)), WX_AXIS), length(wpos + vec3(0., RKM, 0.)) - RKM), uRain.w);
+                  if (!ground) wIn = wxInside(uEye + rdW * mix(t0, t1, .5));
+                  if (!ground || uRain.w < 1.) sf = .5 * (wxSnowAir(uEye + rdW * mix(t0, t1, .3), mix(ma, mb, .3), wIn) + wxSnowAir(uEye + rdW * mix(t0, t1, .75), mix(ma, mb, .75), wIn));
+                  if (ground) sf = mix(sf, wxSnowy(wxSnowLine(mb, wIn), length(wpos + vec3(0., RKM, 0.)) - RKM), uRain.w);
                 }
                 float veil = 1. - exp(-rain * (t1 - t0) / 6. * uRain.x * (.075 + .04 * sf));
                 if (veil > .004) {
@@ -241,7 +244,7 @@ const PLUMED = /* glsl */`
               c = mix(c, albumFinish(${v3(KINDS.dust.colour)} * (albumSunCol() * .9 + albumSkyCol() * .35 + albumMoonCol() * .4)), (1. - exp(-over.x * way * .02)) * .8);
             }
           }`;
-const frag = f => /* glsl */`uniform vec3 uEye;
+const frag = f => /* glsl */`${f & WIDE ? '#define WX_WORLD\n' : ''}${f & STORM ? '#define WX_STORM\n' : ''}uniform vec3 uEye;
         ${f ? HEAD : ''}${f & BALL ? GLOBE_GLSL : ''}${f & ASH ? PLUME_GLSL : ''}${f & RAIN ? RAIN_FN : ''}
         uniform sampler2D tCol, tDepth; uniform vec2 uPx; uniform float uNear, uFar, uProj, uRad, uAO, uSharp, uVig; uniform mat4 uInvProj, uCamWorld; varying vec2 vUv;
         uniform float uRpp;                           // radians in one pixel (a little more on a large picture)
@@ -278,7 +281,7 @@ const frag = f => /* glsl */`uniform vec3 uEye;
         }`;
 
 // (for the tests: the text of the pass for a set of weather)
-export const postShader = frag, POST_CLOUDS = CLOUDS, POST_RAIN = RAIN, POST_FOG = FOG, POST_BALL = BALL, POST_PLUME = ASH;
+export const postShader = frag, POST_CLOUDS = CLOUDS, POST_RAIN = RAIN, POST_FOG = FOG, POST_BALL = BALL, POST_PLUME = ASH, POST_WIDE = WIDE, POST_STORM = STORM;
 
 export class Post {
   // T: the uniforms of the ground (album.terrain.u), for the light the weather is counted with
@@ -304,7 +307,7 @@ export class Post {
     const ball = GLOBE.uGlobe.value.x > 0 ? BALL : 0;
     if (!WX.tCloud.value) return ball;
     const clouds = this.T.uCloud?.value.x > 0;
-    return ball | (PLUME.uPl.value.x > 0 ? ASH : 0) | (clouds ? CLOUDS : 0) | (clouds && WX.uRain.value.x > 0 ? RAIN : 0) | (WX.uFog.value.x > 0 && WX.tFog.value ? FOG : 0);
+    return ball | (clouds && WORLD.on ? WIDE : 0) | (PLUME.uPl.value.x > 0 ? ASH : 0) | (clouds ? CLOUDS : 0) | (clouds && WX.uRain.value.x > 0 ? RAIN : 0) | (clouds && WX.uRain.value.x > 0 && WX.uStorm.value.x > 0 ? STORM : 0) | (WX.uFog.value.x > 0 && WX.tFog.value ? FOG : 0);
   }
   // fewer samples when the machine is struggling (the album has already halved its picture scale)
   setSamples(n) { if (this.rt.samples !== n) { this.rt.samples = n; this.rt.dispose(); } }

@@ -62,6 +62,67 @@ export const WIND = [.924, -.383], GROW_WIND = [-.42, .31], CELL_WIND = [.62, -.
 export const cloudOffset = drift => [-drift * WIND[0] - 37, -drift * WIND[1] + 11];
 export const growOffset = drift => [-drift * GROW_WIND[0] + 2051, -drift * GROW_WIND[1] + 977];
 export const cellOffset = drift => [-drift * CELL_WIND[0], -drift * CELL_WIND[1]];
+
+// ---- the wind of a place
+// The whole field is carried by the wind of the album's own latitudes: the westerlies, which blow toward the east
+// and a little toward the pole. Elsewhere the wind is another. windOf(s) — s the sine of the latitude — says how the
+// wind of a latitude differs from that one, for one km of the wind's way: [east, south], km of the map. Nothing
+// between 35° and 60° north (the album); in the tropics the trades blow the other way, toward the west and the
+// equator; beyond 70° the polar easterlies; south of the equator the same, mirrored.
+export const TRADES = -.7, POLAR = -.5, BELTS = [.42, .57, .87, .94];        // (the sines of 25°, 35°, 60° and 70°)
+export function windOf(s) {
+  const a = Math.abs(s), e = mix(mix(TRADES, 1, ss(BELTS[0], BELTS[1], a)), POLAR, ss(BELTS[2], BELTS[3], a));
+  return [(e - 1) * WIND[0], (e * Math.max(-1, Math.min(1, s * 6)) - 1) * WIND[1]];
+}
+// Clouds cannot simply be carried at another speed at every latitude: in a day the picture would be sheared out of
+// all shape. So where the wind differs, the picture is read twice; each read is carried by the wind of the place for
+// WIND_SPAN km of the way and then set back, while the other one shows. The clouds there go with their own wind and
+// are made anew as they go. windTurn(way): where the two reads stand in their turn (−.5 … .5) and their weights.
+// WIND_LIKE: two reads of the picture this many km apart are alike by 1/e (so that their mix keeps the deviation
+// of one read, whether they are the same clouds or different ones).
+export const WIND_SPAN = 400, WIND_LIKE = 110;
+export function windTurn(way) { const a = ((way / WIND_SPAN) % 1 + 1) % 1, b = (a + .5) % 1, wa = 1 - Math.abs(2 * a - 1); return [a - .5, b - .5, wa, 1 - wa]; }
+// by how much the mix of the two reads is stretched back to the deviation of one (len: the length of windOf)
+export const windNorm = (len, wa, wb) => { const sep = len * WIND_SPAN * .5; return 1 / Math.sqrt(wa * wa + wb * wb + 2 * wa * wb * Math.exp(-sep * sep / (WIND_LIKE * WIND_LIKE))); };
+
+// ---- the great whirls
+// The clouds of the Earth are not scattered evenly: they are drawn into great whirls. The storms of the middle
+// latitudes, a thousand km and more across, travel east with the westerlies; the cyclones of the tropics, smaller and
+// tighter, with a clear eye, travel west with the trades. A whirl twists the map of the weather about its middle —
+// the nearer to the middle, the more — so the clouds there are wound into a spiral; and it has more cloud and more
+// rain than the sky around it. Where the climate is dry a whirl fades away.
+// Each: lat, lon — where it is when the way of the wind is 0; sway — how many degrees of latitude it wanders; r — its
+// radius, km of the ground; turn — how far its middle is turned, radians (north of the equator against the clock,
+// south of it with the clock); speed — km it travels for one km of the wind's way (east positive); eye — a clear eye.
+export const WHIRLS = [
+  { lat: 52, lon: -150, sway: 7, r: 1300, turn: 2.6, speed: .45 }, { lat: 50, lon: -75, sway: 8, r: 1200, turn: 2.4, speed: .45 }, { lat: 55, lon: 85, sway: 6, r: 1100, turn: 2.2, speed: .45 },
+  { lat: -52, lon: -110, sway: 6, r: 1300, turn: 2.6, speed: .45 }, { lat: -54, lon: 10, sway: 6, r: 1250, turn: 2.5, speed: .45 }, { lat: -50, lon: 135, sway: 7, r: 1200, turn: 2.4, speed: .45 },
+  { lat: 17, lon: -52, sway: 4, r: 520, turn: 5, speed: -.3, eye: true }, { lat: -15, lon: 78, sway: 4, r: 480, turn: 5, speed: -.3, eye: true },
+];
+// how much the threshold of the clouds is lowered at the middle of a whirl, and from which turn a whirl has an eye
+export const WHIRL_MORE = .1, WHIRL_EYE = 4;
+// where the whirls are after `way` km of the wind's way: the place, the place on the map, the radius in km of the map
+// (the map is stretched toward the poles), the turn with its sign
+export function whirlsAt(way) {
+  return WHIRLS.map((w, i) => {
+    const lat = w.lat + w.sway * Math.sin(way / 2300 + i * 1.9), lon = wrapLon(w.lon + way * w.speed / (KM_PER_DEG * Math.cos(lat * D))), [x, y] = mapOf(lat, lon);
+    return { lat, lon, x, y, r: w.r * COS_REF / Math.cos(lat * D), km: w.r, turn: w.turn * Math.sign(lat), k: 1 };
+  });
+}
+// A place of the map as the whirls twist it (wxWhirl in the shaders): [x, y, more, turned] — more: how much thicker
+// the cloud is there (taken from the threshold; less than nothing in an eye), turned: by what angle the map is turned.
+// whirls: from whirlsAt; k of each — how much of it there is (1, or less where the climate is dry).
+export function whirlWarp(x, y, whirls) {
+  let more = 0, turned = 0;
+  for (const w of whirls) {
+    let dx = x - w.x; const dy = y - w.y; dx -= MAP_ROUND * Math.round(dx / MAP_ROUND);
+    const r2 = (dx * dx + dy * dy) / (w.r * w.r); if (r2 >= 1) continue;
+    const f = (1 - r2) * (1 - r2), turn = w.turn * w.k, a = turn * f, c = Math.cos(a), s = Math.sin(a);
+    x = w.x + dx * c - dy * s; y = w.y + dx * s + dy * c; turned += a;
+    more += f * Math.min(Math.abs(turn) * .4, 1) - (Math.abs(turn) > WHIRL_EYE ? 3 * (1 - ss(.002, .01, r2)) : 0);
+  }
+  return [x, y, more, turned];
+}
 // its three sizes of cloud: how many cells of noise in one side of the picture, and their weight
 const OCTAVES = [[26, .46], [70, .32], [174, .22]];
 function mulberry(seed) { return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -108,8 +169,15 @@ export function softNoise(noise) {
 // the field at a place of the map, around .5, as the shaders read it (wxCloudN): the clouds and what makes them grow
 // and melt; for the tests and for choosing the pages
 export function cloudAt(noise, x, y, drift = 0) {
-  const o = cloudOffset(drift), g = growOffset(drift);
-  return fieldAt(noise, (x + o[0]) / CLOUD_KM, (y + o[1]) / CLOUD_KM) + (fieldAt(softNoise(noise), (x + g[0]) / GROW_KM, (y + g[1]) / GROW_KM) - .5) * GROW;
+  const g = growOffset(drift);
+  return baseAt(noise, x, y, drift) + (fieldAt(softNoise(noise), (x + g[0]) / GROW_KM, (y + g[1]) / GROW_KM) - .5) * GROW;
+}
+// the clouds themselves at a place of the map (wxBase): one read where the wind is the album's, two in their turn elsewhere
+export function baseAt(noise, x, y, drift = 0) {
+  const o = cloudOffset(drift), w = windOf(Math.tanh((MAP_Y0 - y) / MAP_K)), u = (x + o[0]) / CLOUD_KM, v = (y + o[1]) / CLOUD_KM, len = Math.hypot(w[0], w[1]);
+  if (len < 1e-4) return fieldAt(noise, u, v);
+  const [ta, tb, wa, wb] = windTurn(drift), k = WIND_SPAN / CLOUD_KM;
+  return .5 + (fieldAt(noise, u - w[0] * k * ta, v - w[1] * k * ta) * wa + fieldAt(noise, u - w[0] * k * tb, v - w[1] * k * tb) * wb - .5) * windNorm(len, wa, wb);
 }
 // the cells of rain at a place of the map, 0..1 around .5 (wxRainMask reads the same)
 export const RAIN_SHIFT = [.16, .16];
@@ -145,21 +213,33 @@ export const rainWill = mm => 1 - Math.exp(-mm / 120);
 // the cover at a place: the knob moved by the climate there (clim: { cover, will } or nothing — the knob alone)
 export const coverAt = (knob, clim) => (clim ? Math.max(.02, Math.min(1, clim.cover + knob - COVER_REST)) : knob);
 export const rainMaskAt = (force, clim) => rainMask(force) + (clim ? (WILL_REST - clim.will) * WILL_GAIN : 0);
-// The picture of the climate for a day of the year: CLIM_W × CLIM_H, RGBA bytes — R the cover, G the rain will. Rows
-// go by the sine of the latitude (row 0 at the north pole), so the shaders find a place without an arcsine; columns
-// from 180° W. prec: the monthly precipitation of the open climate (Uint16, 12 × 360 × 720, row 0 at 90° N, column 0
-// at 180° W); between the middles of two months the two are mixed.
+// Above which height what falls is snow, by the warmth of the month (m over the sea): the air is LAPSE degrees colder
+// with every km of height, and snow falls where it is colder than SNOW_T. t: the mean temperature of the month at the
+// height `elev` m. In a hard frost the line lies under the sea — it snows everywhere; in the tropics it stands above
+// every mountain. Kept between SNOW_LOW and SNOW_HIGH (what the picture of the climate can hold).
+export const LAPSE = 6.5, SNOW_T = 1.5, SNOW_LOW = -1000, SNOW_HIGH = 6500;
+export const snowByWarmth = (t, elev = 0) => Math.max(SNOW_LOW, Math.min(SNOW_HIGH, (t + LAPSE * elev / 1000 - SNOW_T) / LAPSE * 1000));
+// The picture of the climate for a day of the year: CLIM_W × CLIM_H, RGBA bytes — R the cover, G the rain will, B the
+// line of snowfall by the warmth of the month (0 at SNOW_LOW .. 255 at SNOW_HIGH). Rows go by the sine of the
+// latitude (row 0 at the north pole), so the shaders find a place without an arcsine; columns from 180° W. prec: the
+// monthly precipitation of the open climate (Uint16, 12 × 360 × 720, row 0 at 90° N, column 0 at 180° W); between
+// the middles of two months the two are mixed. tavg (Int16, tenths of a degree, the same grid) and elev (Int16, m,
+// 360 × 720): the temperature and the height it is given at — without them the line of snowfall stands at its top.
 export const CLIM_W = 360, CLIM_H = 180;
-export function climatePicture(prec, yday = 172, W = 720, H = 360) {
+export function climatePicture(prec, yday = 172, W = 720, H = 360, tavg = null, elev = null) {
   const mf = ((yday - 15.2) / 30.4375 % 12 + 12) % 12, m0 = Math.floor(mf), m1 = (m0 + 1) % 12, k = mf - m0, out = new Uint8Array(CLIM_W * CLIM_H * 4);
   for (let j = 0; j < CLIM_H; j++) {
     const lat = Math.asin(1 - 2 * (j + .5) / CLIM_H) / D, y = Math.max(0, Math.min(H - 1, Math.floor((90 - lat) / 180 * H)));
     for (let i = 0; i < CLIM_W; i++) {
       // (the mean of the cells of the climate that fall into one point of the picture, along the parallel)
-      let a = 0, b = 0, n = 0;
-      for (let x = Math.floor(i * W / CLIM_W); x < Math.floor((i + 1) * W / CLIM_W); x++) { a += prec[m0 * W * H + y * W + x]; b += prec[m1 * W * H + y * W + x]; n++; }
+      let a = 0, b = 0, n = 0, line = 0;
+      for (let x = Math.floor(i * W / CLIM_W); x < Math.floor((i + 1) * W / CLIM_W); x++) {
+        a += prec[m0 * W * H + y * W + x]; b += prec[m1 * W * H + y * W + x]; n++;
+        if (tavg) line += snowByWarmth(mix(tavg[m0 * W * H + y * W + x], tavg[m1 * W * H + y * W + x], k) * .1, elev ? elev[y * W + x] : 0);
+      }
       const mm = mix(a, b, k) / n, o = (j * CLIM_W + i) * 4;
-      out[o] = Math.round(coverOfShare(skyShare(mm)) * 255); out[o + 1] = Math.round(rainWill(mm) * 255); out[o + 3] = 255;
+      out[o] = Math.round(coverOfShare(skyShare(mm)) * 255); out[o + 1] = Math.round(rainWill(mm) * 255);
+      out[o + 2] = tavg ? Math.round((line / n - SNOW_LOW) / (SNOW_HIGH - SNOW_LOW) * 255) : 255; out[o + 3] = 255;
     }
   }
   return out;
@@ -169,11 +249,12 @@ export const climUV = (lat, lon) => [(wrapLon(lon) + 180) / 360, .5 - .5 * Math.
 export function climateAt(pic, lat, lon) {
   const [u, v] = climUV(lat, lon), x = u * CLIM_W - .5, y = Math.max(0, Math.min(CLIM_H - 1, v * CLIM_H - .5)), i = Math.floor(x), j = Math.min(CLIM_H - 2, Math.floor(y)), fx = x - i, fy = y - j;
   const at = (a, b, c) => pic[(b * CLIM_W + ((a % CLIM_W) + CLIM_W) % CLIM_W) * 4 + c] / 255, rd = c => mix(mix(at(i, j, c), at(i + 1, j, c), fx), mix(at(i, j + 1, c), at(i + 1, j + 1, c), fx), fy);
-  return { cover: rd(0), will: rd(1) };
+  return { cover: rd(0), will: rd(1), snow: SNOW_LOW + rd(2) * (SNOW_HIGH - SNOW_LOW) };
 }
 // how hard it rains on the ground at a place, 0..1 (wxRainAt in the shaders); clim: the climate there, if it counts
-export function rainAt(noise, lat, lon, cover, force, drift = 0, clim) {
-  const p = mapOf(lat, lon), x = p[0] + WIND[0] * RAIN_LAG, y = p[1] + WIND[1] * RAIN_LAG, t = cloudThreshold(coverAt(cover, clim)) + RAIN_EDGE, m = rainMaskAt(force, clim);
+export function rainAt(noise, lat, lon, cover, force, drift = 0, clim, whirls = whirlsAt(drift)) {
+  const p = mapOf(lat, lon), [x, y, more] = whirlWarp(p[0] + WIND[0] * RAIN_LAG, p[1] + WIND[1] * RAIN_LAG, whirls);
+  const t = cloudThreshold(coverAt(cover, clim)) - WHIRL_MORE * more + RAIN_EDGE, m = rainMaskAt(force, clim) - WHIRL_MORE * more;
   return ss(t, t + .08, cloudAt(noise, x, y, drift)) * ss(m, m + .08, cellAt(noise, x, y, drift));
 }
 
@@ -204,6 +285,10 @@ export const snowShare = (lat, height, shift = 0) => ss(-SNOW_BAND, SNOW_BAND, h
 // the same line for the shaders: its height at the equator, how much it falls with every degree of latitude, and
 // the band — all in km of the world (heights there are stretched `exag` times)
 export const snowNumbers = (shift, exag) => [snowfallLine(0, shift) * exag / 1000, 55 * exag / 1000, SNOW_BAND * exag / 1000];
+// Off the album's own land the line goes by the warmth of the month (snowByWarmth, the picture of the climate). For
+// the shaders: by how much one whole of the blue of that picture lifts the line, and where the line is at none — km of
+// the world. (On the album's land the line stays the one above: it hangs on the snow the ground shader draws.)
+export const snowClimNumbers = (shift, exag) => [(SNOW_HIGH - SNOW_LOW) * exag / 1000, (SNOW_LOW + shift) * exag / 1000];
 
 // ---- the fog of the morning
 // How much of the fog is left at an hour of the day, 0..1: it gathers through the night, is thickest at dawn, thins
@@ -305,6 +390,12 @@ export const BANK_KM = 8192;
 // uFogRect: where tFog lies on the plane: (x0, z0, 1 / width, 1 / height), km.
 // uSnowF: the line of snowfall (snowNumbers): x its height at the equator, y its fall with every degree of latitude,
 //        z its band, all in km of the world; w 1 while precipitation can be snow.
+// uSnowC: the line of snowfall off the album's land (snowClimNumbers): x how much one whole of the blue of the
+//        picture of the climate lifts it, y where it is at none — km of the world.
+// uWind: the two reads of the clouds where the wind differs from the album's (windTurn): xy where they stand in their
+//        turn, zw their weights.
+// uWhirl, uWhirlN: the great whirls in view — of each (x, y) on the map, 1 / its radius (km of the map), its turn — and
+//        how many of them.
 // uLow:  the low clouds: x how much of the relief the cloud of a mountain valley fills (of the way from the floor of
 //        the land to its mean height), y 1 while high crests wear caps of cloud, z from which value of the field of
 //        the banks a crest has its cap, w 1 while there is fog itself. (uFog.x is 1 while there is fog or caps.)
@@ -313,7 +404,8 @@ export const BANK_KM = 8192;
 // tPeak: the highest ground of every 2 km, m: the crests (laid over the same rect as tFog).
 // tClim: the climate (climatePicture): until the open climate is read, one point that says «as the knobs say».
 export const WX = { tCloud: { value: null }, tFog: { value: null }, tPeak: { value: null }, tClim: { value: null }, uFogRect: { value: new Vector4(0, 0, 1, 1) }, uRain: { value: new Vector4(0, .2, 0, 1) },
-  uGrow: { value: new Vector4(2051, 977, 0, 0) }, uSunMap: { value: new Vector2(-.74, -.67) }, uStorm: { value: new Vector4(0, 0, STORM_FLASH, 0) }, uFog: { value: new Vector4(0, .3, .5, .05) }, uSnowF: { value: new Vector4(9, 0, .2, 0) }, uLow: { value: new Vector4(0, 0, .5, 0) } };
+  uGrow: { value: new Vector4(2051, 977, 0, 0) }, uSunMap: { value: new Vector2(-.74, -.67) }, uStorm: { value: new Vector4(0, 0, STORM_FLASH, 0) }, uFog: { value: new Vector4(0, .3, .5, .05) }, uSnowF: { value: new Vector4(9, 0, .2, 0) }, uSnowC: { value: new Vector4(12, -1.6, 0, 0) }, uLow: { value: new Vector4(0, 0, .5, 0) },
+  uWind: { value: new Vector4(0, .5, 1, 0) }, uWhirl: { value: WHIRLS.map(() => new Vector4(0, 0, 1, 0)) }, uWhirlN: { value: 0 } };
 const climTexture = (data, w, h) => {
   const t = new DataTexture(data, w, h, RGBAFormat, UnsignedByteType);
   t.wrapS = RepeatWrapping; t.wrapT = ClampToEdgeWrapping; t.magFilter = t.minFilter = LinearFilter; t.needsUpdate = true; return t;
@@ -324,23 +416,28 @@ export function needClouds() {
   const t = new DataTexture(cloudNoise(), CLOUD_N, CLOUD_N, RedFormat, UnsignedByteType);
   t.wrapS = t.wrapT = RepeatWrapping; t.magFilter = LinearFilter; t.minFilter = LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true;
   WX.tCloud.value = t;
-  if (!WX.tClim.value) WX.tClim.value = climTexture(new Uint8Array([Math.round(COVER_REST * 255), Math.round(WILL_REST * 255), 0, 255]), 1, 1);
+  if (!WX.tClim.value) WX.tClim.value = climTexture(new Uint8Array([Math.round(COVER_REST * 255), Math.round(WILL_REST * 255), 255, 255]), 1, 1);
 }
 // The climate for the clouds: the open climate of the world is read once (4 MB), and its picture made again when the
 // day of the year moves into another fortnight. Until it has come — and if it does not come — the weather goes by the
-// knobs alone. fetchPrec(): a promise of the monthly precipitation (Uint16Array, 12 × 360 × 720).
-const clim = { prec: null, asked: false, key: -1 };
-export function needClimate(yday, fetchPrec) {
-  if (!clim.asked) { clim.asked = true; fetchPrec().then(p => { clim.prec = p; clim.key = -1; }).catch(e => console.warn('[album] no climate for the clouds:', e.message || e)); }
+// knobs alone. fetchClimate(): a promise of { prec, tavg, elev } (climateOf).
+const clim = { data: null, asked: false, key: -1 };
+export function needClimate(yday, fetchClimate) {
+  if (!clim.asked) { clim.asked = true; fetchClimate().then(d => { clim.data = d; clim.key = -1; }).catch(e => console.warn('[album] no climate for the clouds:', e.message || e)); }
   const key = Math.floor(yday / 15);
-  if (!clim.prec || key === clim.key) return;
-  clim.key = key; const old = WX.tClim.value; WX.tClim.value = climTexture(climatePicture(clim.prec, key * 15 + 7), CLIM_W, CLIM_H); old?.dispose?.();
+  if (!clim.data || key === clim.key) return;
+  clim.key = key; const old = WX.tClim.value, d = clim.data;
+  WX.tClim.value = climTexture(climatePicture(d.prec, key * 15 + 7, 720, 360, d.tavg, d.elev), CLIM_W, CLIM_H); old?.dispose?.();
   clim.pic = WX.tClim.value.image.data;
 }
+// how much of a great whirl there is over a place by its climate: whole where the month is wet, none where it is dry
+// (clim: climateNow of its middle, or nothing — whole)
+export const whirlShare = clim => (clim ? ss(.2, .55, clim.will) : 1);
 // the climate at a place as the clouds have it now (nothing until the open climate has come)
 export const climateNow = (lat, lon) => (clim.pic ? climateAt(clim.pic, lat, lon) : null);
-// the monthly precipitation out of the file of the open climate (gunzipped ArrayBuffer; normals.json: prec at 6 220 800)
-export const precOf = buf => new Uint16Array(buf.slice(6220800, 12441600));
+// the file of the open climate (gunzipped ArrayBuffer; normals.json): the mean temperature of every month in tenths
+// of a degree, the precipitation of every month in mm, and the height the temperature is given at, m
+export const climateOf = buf => ({ tavg: new Int16Array(buf, 0, 12 * 360 * 720), prec: new Uint16Array(buf, 6220800, 12 * 360 * 720), elev: new Int16Array(buf, 12441600, 360 * 720) });
 export function needFog(at) {
   if (WX.tFog.value) return;
   const ff = fogFloor(at), hf = new Uint16Array(ff.w * ff.h * 4);
@@ -354,24 +451,72 @@ export function needFog(at) {
   WX.tPeak.value = tp;
 }
 
+// ---- the two texts of the shaders
+// The graphics card counts both sides of a small «if» and then picks one. So what only the wide world needs — the
+// winds of other latitudes, the great whirls, the arctangent for places far from the album's meridian — would be
+// paid for in every pixel over Spain too (measured 15.11.2026: +5 ms a frame with the clouds on). Hence two texts
+// of every shader of the weather: the plain one, and the whole one with #define WX_WORLD. The whole one is used
+// when the view reaches beyond the album's own belt of wind (35°…60° N), farther than WORLD_LON degrees from its
+// meridian, or into a whirl. Over the album the two give the same clouds to the last km, so the change is not seen.
+export const WORLD = { on: false }, WORLD_LON = 19;
+// does a view need the whole text: lat, lon — where the camera looks; reach — how far the land in view lies from
+// there, km; whirls — how many great whirls reach into the view
+export function worldNeeded(lat, lon, reach, whirls = 0) {
+  const dLat = reach / KM_PER_DEG, lo = Math.asin(BELTS[1]) / D + .2, hi = Math.asin(BELTS[2]) / D - .2;
+  return whirls > 0 || lat - dLat < lo || lat + dLat > hi || Math.abs(wrapLon(lon - CENTRE.lon)) + dLat / Math.max(.2, Math.cos(Math.min(89, Math.abs(lat) + dLat) * D)) > WORLD_LON;
+}
+
 // ---- the GLSL of the weather: pasted after COMMON and LIGHT (it uses RKM, uExag, uCloud, uSun, uSunW, albumDay)
 const v3 = a => `vec3(${a.map(x => x.toFixed(6)).join(', ')})`, f1 = x => x.toFixed(1), thrA = .5 + FIELD_DEV * 2.4, thrB = FIELD_DEV * 4;
 export const WEATHER = /* glsl */`
-uniform sampler2D tCloud, tFog, tPeak, tClim; uniform vec4 uRain, uGrow, uFog, uFogRect, uSnowF, uLow, uStorm; uniform vec2 uSunMap;
+uniform sampler2D tCloud, tFog, tPeak, tClim; uniform vec4 uRain, uGrow, uFog, uFogRect, uSnowF, uSnowC, uLow, uStorm, uWind, uWhirl[${WHIRLS.length}]; uniform vec2 uSunMap; uniform int uWhirlN;
 const vec2 WX_WIND = vec2(${WIND[0].toFixed(4)}, ${WIND[1].toFixed(4)});
 #define RAIN_LAG ${f1(RAIN_LAG)}
 #define MAP_ROUND ${MAP_ROUND.toFixed(3)}
 const vec3 WX_AXIS = ${v3(MAP_AXIS)}, WX_E0 = ${v3(MAP_E0)}, WX_E1 = ${v3(MAP_E1)};
+// What wxMap leaves behind about the place it was last asked: how the wind there differs from the album's (east and
+// south, km of the map for one km of the wind's way); how much thicker the cloud is there — the middle of a great
+// whirl (less than nothing in its eye); and by what angle the whirls have turned the map there.
+vec2 wxWind = vec2(0.); float wxMore = 0., wxTurn = 0.;
+#ifdef WX_WORLD
+// the wind of a latitude beside the wind of the album's (s: the sine of the latitude): windOf
+vec2 wxWindOf(float s) {
+  float a = abs(s), e = mix(mix(${TRADES.toFixed(2)}, 1., smoothstep(${BELTS[0]}, ${BELTS[1]}, a)), ${POLAR.toFixed(2)}, smoothstep(${BELTS[2]}, ${BELTS[3]}, a));
+  return vec2(e - 1., e * clamp(s * 6., -1., 1.) - 1.) * WX_WIND;
+}
+// a place of the map as the great whirls twist it: turned about the middle of a whirl, the more the nearer to it
+vec2 wxWhirl(vec2 q) {
+  wxMore = 0.; wxTurn = 0.;
+  for (int i = 0; i < uWhirlN; i++) {
+    vec4 w = uWhirl[i]; vec2 d = q - w.xy; d.x -= MAP_ROUND * floor(d.x / MAP_ROUND + .5);
+    float r2 = dot(d, d) * w.z * w.z; if (r2 >= 1.) continue;
+    float f = (1. - r2) * (1. - r2), a = w.w * f, c = cos(a), s = sin(a);
+    q = w.xy + vec2(d.x * c - d.y * s, d.x * s + d.y * c); wxTurn += a;
+    wxMore += f * min(abs(w.w) * .4, 1.) - (abs(w.w) > ${WHIRL_EYE.toFixed(1)} ? 3. * (1. - smoothstep(.002, .01, r2)) : 0.);
+  }
+  return q;
+}
+#endif
 // A place of the world (P: from the centre of the Earth) on the map of the weather. xy: km east and south on a
 // Mercator map of the whole Earth that fits the album at its middle; z: where the place is in the picture of the
-// climate, around the Earth (0..1 from 180° W); w: the sine of its latitude.
-vec4 wxMap(vec3 P) {
+// climate, around the Earth (0..1 from 180° W); w: the sine of its latitude. wxFlat: the place itself; wxMap: as the
+// great whirls twist it — what the clouds and the rain are asked by.
+vec4 wxFlat(vec3 P) {
   vec3 e = normalize(P); float s = clamp(dot(e, WX_AXIS), -.99996, .99996), x = dot(e, WX_E0), y = dot(e, WX_E1), t = y / max(x, 1e-6);
   // (within 20° of the meridian of the album — over the album itself and well around it — the arctangent is a short
   // series, good to a twentieth of a km of the map; an arctangent in every pixel is what the weather cost most)
-  float lon = x > 0. && abs(t) < ${MAP_NEAR.toFixed(2)} ? t * (1. - t * t * (.3333333 - t * t * (.2 - t * t * .1428571))) : atan(y, x);
+  // (the plain text is used only while the whole view lies within that)
+  float lon = t * (1. - t * t * (.3333333 - t * t * (.2 - t * t * .1428571)));
+#ifdef WX_WORLD
+  if (x <= 0. || abs(t) >= ${MAP_NEAR.toFixed(2)}) lon = atan(y, x);
+#endif
   return vec4(lon * ${MAP_K.toFixed(3)}, ${MAP_Y0.toFixed(3)} - atanh(s) * ${MAP_K.toFixed(3)}, lon * .15915494 + ${((CENTRE.lon + 180) / 360).toFixed(6)}, s);
 }
+#ifdef WX_WORLD
+vec4 wxMap(vec3 P) { vec4 m = wxFlat(P); wxWind = wxWindOf(m.w); if (uWhirlN > 0) m.xy = wxWhirl(m.xy); return m; }
+#else
+vec4 wxMap(vec3 P) { return wxFlat(P); }
+#endif
 vec4 wxMapOf(vec3 wpos) { return wxMap(wpos + vec3(0., RKM, 0.)); }
 // how many times smaller than on the map things are on the ground at a latitude (s: its sine), as a level of detail:
 // toward the poles the field is read softer, so that its clouds do not turn to grain there
@@ -385,11 +530,27 @@ vec2 wxPlane(vec3 wpos) { vec3 P = wpos + vec3(0., RKM, 0.); return P.xz / max(P
 // higher lod is a softer field
 // (its two parts apart, for those who ask the field at several places close together: what makes the clouds grow
 // and melt is far too large to differ between them, and is read once)
-float wxBase(vec2 q, float lod) { return textureLod(tCloud, (q + uCloud.yz) / ${CLOUD_KM.toFixed(3)}, lod).r; }
+// (The clouds themselves: one read where the wind is the album's — wxWind is nothing there. Elsewhere two reads in
+// their turn, each carried by the wind of the place and then set back while the other shows; their mix is stretched
+// back to the deviation of one read.)
+#ifdef WX_WORLD
+float wxWindNorm() { float sep = length(wxWind) * ${(WIND_SPAN * .5).toFixed(1)}; return inversesqrt(uWind.z * uWind.z + uWind.w * uWind.w + 2. * uWind.z * uWind.w * exp(-sep * sep / ${(WIND_LIKE * WIND_LIKE).toFixed(1)})); }
+#endif
+float wxBase(vec2 q, float lod) {
+  vec2 p = (q + uCloud.yz) / ${CLOUD_KM.toFixed(3)};
+#ifdef WX_WORLD
+  if (dot(wxWind, wxWind) >= 1e-8) {
+    vec2 d = wxWind * ${(WIND_SPAN / CLOUD_KM).toFixed(6)};
+    return .5 + (textureLod(tCloud, p - d * uWind.x, lod).r * uWind.z + textureLod(tCloud, p - d * uWind.y, lod).r * uWind.w - .5) * wxWindNorm();
+  }
+#endif
+  return textureLod(tCloud, p, lod).r;
+}
 float wxGrow(vec2 q, float lod) { return (textureLod(tCloud, (q + uGrow.xy) / ${GROW_KM.toFixed(3)}, lod + ${GROW_LOD.toFixed(1)}).r - .5) * ${GROW.toFixed(2)}; }
 float wxCloudN(vec2 q, float lod) { return wxBase(q, lod) + wxGrow(q, lod); }
 // from which value of the field there is cloud, for a cover of the place (c: wxClim().x); the knob moves it
-float wxThr(float c) { return ${thrA.toFixed(5)} - ${thrB.toFixed(5)} * clamp(c + uCloud.x - ${COVER_REST.toFixed(2)}, .02, 1.); }
+// (and a great whirl has more cloud at its middle: for the place wxMap was last asked)
+float wxThr(float c) { return ${thrA.toFixed(5)} - ${thrB.toFixed(5)} * clamp(c + uCloud.x - ${COVER_REST.toFixed(2)}, .02, 1.) - ${WHIRL_MORE.toFixed(2)} * wxMore; }
 // the clouds over a point of the world, 0 clear sky .. 1 thick cloud
 float albumCloudField(vec3 wpos) { vec4 m = wxMapOf(wpos); float thr = wxThr(wxClim(m).x); return smoothstep(thr - .05, thr + .14, wxCloudN(m.xy, wxPolar(m.w))); }
 // how much sunlight the clouds leave at a point of the ground: 1 open .. about .5 under a thick cloud
@@ -403,30 +564,39 @@ float albumCloudShade(vec3 wpos) {
 }
 // the cells of rain over a place of the map, around .5; and which clouds rain, 0..1, for a will of the place (wxClim().y)
 float wxCells(vec2 q) { return textureLod(tCloud, (q + uGrow.zw) / ${CELL_KM.toFixed(3)} + vec2(${RAIN_SHIFT[0]}, ${RAIN_SHIFT[1]}), 0.).r; }
-float wxRainMask(vec2 q, float will) { float t = uRain.y + (${WILL_REST.toFixed(2)} - will) * ${WILL_GAIN.toFixed(2)}; return smoothstep(t, t + .08, wxCells(q)); }
+float wxRainMask(vec2 q, float will) { float t = uRain.y + (${WILL_REST.toFixed(2)} - will) * ${WILL_GAIN.toFixed(2)} - ${WHIRL_MORE.toFixed(2)} * wxMore; return smoothstep(t, t + .08, wxCells(q)); }
 // is there cloud enough over the place for rain, 0..1 (thr: wxThr of the place); whether that cloud rains is wxRainMask
 // (g: wxGrow of the place, or of one near it)
 float wxRainCloud(vec2 q, float thr, float g, float lod) { float t = thr + ${RAIN_EDGE.toFixed(3)}; return smoothstep(t, t + .08, wxBase(q, lod) + g); }
 // rain over a place of the map, 0..1: under a cloud that rains, nearly to its edge
 float wxRainAt(vec4 m, float lod) { vec2 c = wxClim(m); float l = lod + wxPolar(m.w); return wxRainCloud(m.xy, wxThr(c.x), wxGrow(m.xy, l), l) * wxRainMask(m.xy, c.y); }
 // lightning over a place of the map, 0..1: the cells of the storm that flash now (hashCell: glsl.js)
+// (only in the text made for a thunderstorm — #define WX_STORM: without it there is no lightning to count)
+#ifndef WX_STORM
+float wxFlash(vec2 q) { return 0.; }
+#else
 float wxFlash(vec2 q) {
-  if (uStorm.x <= 0.) return 0.;
   vec2 g = (q + uCloud.yz) / ${STORM_KM.toFixed(1)}, id = floor(g); float h = hashCell(id), ph = uStorm.y / ${STORM_EVERY.toFixed(1)} + h * 61., k = fract(ph);
   if (k > uStorm.z || hashCell(id + floor(ph) * 3.7) < .5) return 0.;
   // (brightest at the middle of the cell, nothing at its edge: a flash is round)
   return (.5 + .5 * step(.5, fract(k / uStorm.z * 2.5 + h * 3.))) * (1. - smoothstep(.08, .48, length(fract(g) - .5)));
 }
-// the line of snowfall at a latitude (s: its sine), km of the world over the sea
-float wxSnowLine(float s) { return uSnowF.x - abs(degrees(asin(s))) * uSnowF.y; }
-// how much of what falls is snow, 0 rain .. 1 snow: at a height (km of the world over the sea) at that latitude
-float wxSnowy(float s, float alt) { return smoothstep(-uSnowF.z, uSnowF.z, alt - wxSnowLine(s)); }
+#endif
+// is a point of the world on the album's own land — where the picture of its floor lies: 0 off it .. 1 well inside
+float wxInside(vec3 wpos) { vec2 uv = (wxPlane(wpos) - uFogRect.xy) * uFogRect.zw, e = min(uv, 1. - uv); return wpos.y > -RKM ? smoothstep(0., .08, min(e.x, e.y)) : 0.; }
+// The line of snowfall at a place of the map (m: wxMap or wxFlat of it), km of the world over the sea. On the album's
+// own land it goes by the latitude — it hangs on the snow the ground shader draws; off it, by the warmth of the month.
+float wxSnowLine(vec4 m, float inside) {
+  return mix(textureLod(tClim, vec2(m.z, .5 - .5 * m.w), 0.).b * uSnowC.x + uSnowC.y, uSnowF.x - abs(degrees(asin(m.w))) * uSnowF.y, inside);
+}
+// how much of what falls is snow, 0 rain .. 1 snow: at a height with the line of snowfall given (both km of the world over the sea)
+float wxSnowy(float line, float alt) { return smoothstep(-uSnowF.z, uSnowF.z, alt - line); }
 // the same in the air over a point of the world: by the height of the land around it (the mean of 16 km) where the
-// album knows it, and by the sea elsewhere
-float wxSnowAir(vec3 wpos) {
-  vec2 uv = (wxPlane(wpos) - uFogRect.xy) * uFogRect.zw; vec3 P = wpos + vec3(0., RKM, 0.);
-  float land = uv == clamp(uv, 0., 1.) && P.y > 0. ? textureLod(tFog, uv, 0.).a * uExag * .001 : 0.;
-  return wxSnowy(dot(normalize(P), WX_AXIS), land);
+// album knows it, and by the sea elsewhere (m: the place of the point on the map — its zw; finding it costs an
+// arctangent, so the caller gives the one it has; inside: wxInside of the point, or of one near it)
+float wxSnowAir(vec3 wpos, vec4 m, float inside) {
+  float land = inside > 0. ? textureLod(tFog, (wxPlane(wpos) - uFogRect.xy) * uFogRect.zw, 0.).a * uExag * .001 * inside : 0.;
+  return wxSnowy(wxSnowLine(m, inside), land);
 }
 // the top of the fog over a point of the plane, km over the sea: the floor of the land there, and over it a layer
 // whose thickness goes by the place and by the banks the fog lies in (over the sea the banks are fewer: sea fog

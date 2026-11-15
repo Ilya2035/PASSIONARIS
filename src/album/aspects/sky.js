@@ -8,12 +8,12 @@
 // And what the weather (sky/weather.js) needs: how much of the sky the clouds cover, how hard it rains, how much fog
 // the hour has left.
 import { Vector3, Vector4, BackSide } from 'three';
-import { frame, BBOX } from '../geo.js';
+import { frame, BBOX, R, distKm } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, lightHour } from '../sky/astro.js';
 import { PLUME, KINDS, plumeReach, plumeFrame, nearestVolcano } from '../sky/plume.js';
 import { GLOBE, globeAmount, globeDim, frameSunUp, raiseSun } from '../sky/globe.js';
-import { WX, needClouds, needFog, needClimate, precOf, climateNow, cloudOffset, growOffset, cellOffset, rainCover, rainMask, fogByHour, fogByHeight, fogNumbers, snowNumbers, HILL_FILL, capBank, STORM_FLASH, STORM_STILL } from '../sky/weather.js';
+import { WX, WORLD, worldNeeded, needClouds, needFog, needClimate, climateOf, climateNow, windTurn, whirlsAt, whirlShare, snowClimNumbers, cloudOffset, growOffset, cellOffset, rainCover, rainMask, fogByHour, fogByHeight, fogNumbers, snowNumbers, HILL_FILL, capBank, STORM_FLASH, STORM_STILL } from '../sky/weather.js';
 
 const MAP_LIGHT = sunAt(0);
 
@@ -87,6 +87,9 @@ export default {
     { id: 'sky-eruption-space', group: 'Небо и свет', title: 'Извержение из космоса: Этна', note: 'Этна с 6000 км: шлейф пепла длиной больше тысячи километров виден из космоса.', p: { eruption: 1, light: 'day' }, cam: cam([38.5, 17], 6000, 0, 0) },
     { id: 'sky-dust', group: 'Небо и свет', title: 'Песчаная буря с высоты', note: 'Буря поднялась на юго-востоке Испании и идёт по ветру: широкий бледно-жёлтый шлейф пыли, земля под ним в мутной дымке. Буря поднимается там, куда смотрит камера, — в игре её место выбирает игрок. Переключатель «Песчаная буря» на панели карты.', p: { dustStorm: 1 }, cam: cam([38.3, -1.8], 500, 30, 0) },
     { id: 'sky-dust-near', group: 'Небо и свет', title: 'Песчаная буря вблизи', note: 'Та же буря с 30 км: земля тонет в жёлтой пыли, дальние холмы едва видны.', p: { dustStorm: 1 }, cam: cam([38.3, -1.8], 30, 70, 60) },
+    { id: 'sky-earth-whirls', group: 'Небо и свет', title: 'Вся Земля: большие вихри', note: 'Северная Атлантика с 20 000 км. Облака не рассыпаны ровно: их закручивают большие вихри — шторм умеренных широт посреди океана и, ближе к экватору, тропический циклон с ясным глазом. К северу от экватора вихри закручены против часовой стрелки. Вихри идут вместе с ветром: штормы на восток, тропические циклоны на запад.', p: { light: 'day', clouds: 1, yday: 250, cloudShift: 5008 }, cam: cam([35, -52], 20000, 0, 0) },
+    { id: 'sky-whirl', group: 'Небо и свет', title: 'Шторм умеренных широт', note: 'Тот же шторм с 5000 км: облака свиты в спираль шириной больше двух тысяч километров, в середине их больше, и там идёт дождь.', p: { light: 'day', rain: 1, yday: 250, cloudShift: 5008 }, cam: cam([43.6, -47], 5000, 0, 0) },
+    { id: 'sky-hurricane', group: 'Небо и свет', title: 'Тропический циклон', note: 'Сентябрь, Атлантика к северу от Пуэрто-Рико, вид с 1800 км: плотная спираль облаков в тысячу километров с ясным глазом посередине.', p: { light: 'day', rain: 1, yday: 250, cloudShift: 5008 }, cam: cam([20.4, -66.4], 1800, 0, 0) },
     { id: 'sky-earth-clouds', group: 'Небо и свет', title: 'Вся Земля: облака по климату', note: 'Шар с 20 000 км, облака включены. Сколько облаков над местом — по его климату в этом месяце: над Сахарой небо чистое, над северной Атлантикой и у экватора облачно. Месяц берётся из ручки «День года».', p: { light: 'day', clouds: 1 }, cam: cam([25, 5], 20000, 0, 0) },
     { id: 'sky-earth-rain', group: 'Небо и свет', title: 'Вся Земля: где идут дожди', note: 'То же с дождём: тёмные тучи стоят там, где в этом месяце дождливо, — у экватора и в умеренных широтах; над пустынями их нет.', p: { light: 'day', rain: 1 }, cam: cam([25, 5], 20000, 0, 0) },
   ],
@@ -114,7 +117,7 @@ export default {
     };
     const sync = () => { album.cam.edgePan = !!p.get('edgePan') && !album.shot; want(); };
     // the open climate of the world, for the clouds: read once, when the clouds are first switched on
-    const fetchPrec = () => fetch('assets/climate/normals-open.bin.gz').then(r => { if (!r.ok) throw new Error(`normals-open: ${r.status}`); return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }).then(precOf);
+    const fetchClimate = () => fetch('assets/climate/normals-open.bin.gz').then(r => { if (!r.ok) throw new Error(`normals-open: ${r.status}`); return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }).then(climateOf);
     // the fog and the caps of the crests lie on the album's own land: there is nothing of them to draw far from it
     const nearLand = c => c.lat > BBOX.lat0 - 6 && c.lat < BBOX.lat1 + 6 && c.lon > BBOX.lon0 - 8 && c.lon < BBOX.lon1 + 8;
     p.on(sync); sync();
@@ -151,12 +154,30 @@ export default {
       const way = drift + p.get('cloudShift'), off = cloudOffset(way), grow = growOffset(way), cell = cellOffset(way);
       cloud.set(cover, off[0], off[1], 4 + 3 * T.uExag.value); WX.uGrow.value.set(grow[0], grow[1], cell[0], cell[1]);
       // how much cloud a place has, and how willingly it rains there, goes by its climate
-      if (cover > 0) needClimate(yday, fetchPrec);
+      if (cover > 0) needClimate(yday, fetchClimate);
+      // where the wind is not the album's the clouds are read twice, in their turn (sky/weather.js, windTurn)
+      WX.uWind.value.set(...windTurn(way));
+      // the great whirls: those that reach into the view (the eye sees as far as its horizon), each as much as the
+      // climate of its place has of it
+      let whirls = 0;
+      if (cover > 0) {
+        const far = Math.acos(R / (R + Math.max(eye, 1))) * R + 400;
+        for (const w of whirlsAt(way)) {
+          const k = whirlShare(climateNow(w.lat, w.lon)); if (k < .02 || distKm(s, w) > far + w.km) continue;
+          WX.uWhirl.value[whirls++].set(w.x, w.y, 1 / w.r, w.turn * k);
+        }
+      }
+      WX.uWhirlN.value = whirls;
+      // which text of the shaders of the weather this view needs: the plain one over the album, the whole one beyond
+      // (how far the land in view lies from the place looked at: to the edge of the window, or to the horizon)
+      const look = (s.tilt + 30) * Math.PI / 180, reach = Math.min(Math.acos(R / (R + Math.max(eye, 1))) * R, look < 1.45 ? eye * Math.tan(look) : 1e9);
+      WORLD.on = cover > 0 && worldNeeded(s.lat, s.lon, reach, whirls);
       // the lines of falling rain show near the ground only: from a height rain is a grey curtain under its cloud
       WX.uRain.value.set(rain ? force : 0, rainMask(force), rainT, 1 - ss(60, 220, s.h));
       WX.uStorm.value.set(storm ? 1 : 0, rainT, album.shot ? STORM_STILL : STORM_FLASH, 0);
       // above the line of snowfall it snows (the line follows the snow line of the ground: the look, «Снеговая линия»)
-      if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); } else WX.uSnowF.value.w = 0;
+      // (on the album's own land; off it the line goes by the warmth of the month)
+      if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); WX.uSnowC.value.set(...snowClimNumbers(T.uSnow.value, T.uExag.value), 0, 0); } else WX.uSnowF.value.w = 0;
       // fog: what the hour has left of it (thickest at dawn, gone by noon)
       // (and what the height of the camera leaves of it: fog is weather seen from near, from a height there is none)
       const rise = sunTimes(yday, s.lat)?.rise ?? 6, low = natural && nearLand(s) ? fogByHeight(s.h) : 0, fog = p.get('fog') ? p.get('fogAmount') * fogByHour(hour, rise) * low : 0;
@@ -167,7 +188,7 @@ export default {
         WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); WX.uLow.value.set(fog > .02 ? HILL_FILL * Math.min(1, fog / .7) : 0, caps > 0 ? 1 : 0, capBank(caps), fog > .02 ? 1 : 0);
       } else WX.uFog.value.x = 0;
       if (cover > 0 || fog > .02) needClouds();
-      layer.weather = { cover, rain: rain ? force : 0, storm, fog, caps, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
+      layer.weather = { cover, rain: rain ? force : 0, storm, fog, caps, whirls, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
       // the plume: it grows with the time of the map (a still capture shows it full grown), its billows travel down it
       if (wanted && !plume) begin(c.t);
       if (plume && natural) {

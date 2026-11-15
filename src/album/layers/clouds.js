@@ -16,7 +16,7 @@
 import { Mesh, SphereGeometry, ShaderMaterial, DoubleSide, Vector2, Vector3 } from 'three';
 import { COMMON } from '../glsl.js';
 import { LIGHT, lightUniforms } from '../light.js';
-import { WEATHER, WX, CLOUD_KM, GROW_KM, GROW, GROW_LOD, CLOUD_N, MAP_ROUND } from '../sky/weather.js';
+import { WEATHER, WX, WORLD, CLOUD_KM, WIND_SPAN, CLOUD_N, MAP_ROUND } from '../sky/weather.js';
 import { GLOBE, GLOBE_GLSL } from '../sky/globe.js';
 import { R, COS_REF } from '../geo.js';
 
@@ -59,18 +59,37 @@ void main() {
   vec4 m = wxMap(C); vec2 q = m.xy, clim = wxClim(m);
   // km of the map in one pixel (the map is stretched toward the poles), and the levels of detail by it
   float polar = wxPolar(m.w), px = length(fwidth(C)) * exp2(polar) * ${COS_REF.toFixed(5)};
+  // (within a great whirl the map is wound up, and the lumps with it: there they are read softer, or they would be
+  // combed into hair)
   vec2 lod = log2(max(px / vec2(${(LUMP_KM[0] / 1024).toFixed(4)}, ${(LUMP_KM[1] / 1024).toFixed(4)}), 1.)) + polar, qb = (q + uCloud.yz) / ${CLOUD_KM.toFixed(3)};
-  // the field: the clouds themselves (read smoothly), what makes them grow and melt, and the lumps
-  float base = cloudTex(qb, polar), lumps = cloudLumps(q, lod), thr = wxThr(clim.x), n = base + wxGrow(q, polar) + lumps, dens = smoothstep(thr - .04, thr + .16, n);
+#ifdef WX_WORLD
+  lod += min(abs(wxTurn) * .7, 2.);
+#endif
+  // (which way the Sun is on the map: one direction for the frame, that of the place the camera looks at — where the
+  // Sun stands otherwise, the view is so wide that the lit sides of the clouds are smaller than a pixel. Within a
+  // great whirl the map is turned, and that way with it.)
+  vec2 s2 = uSunMap;
+#ifdef WX_WORLD
+  if (wxTurn != 0.) { float tc = cos(wxTurn), ts = sin(wxTurn); s2 = vec2(s2.x * tc - s2.y * ts, s2.x * ts + s2.y * tc); }
+#endif
+  // The field: the clouds themselves (read smoothly), what makes them grow and melt, and the lumps. The clouds
+  // themselves are asked once more, softly, BANK_STEP km toward the Sun: that gives the slope of the whole cloud.
+  // (Where the wind differs from the album's, both are two reads in their turn: sky/weather.js, wxBase.)
+  vec2 qs = s2 * ${(BANK_STEP / CLOUD_KM).toFixed(6)}; float base, toSun;
+#ifdef WX_WORLD
+  if (dot(wxWind, wxWind) >= 1e-8) {
+    vec2 dw = wxWind * ${(WIND_SPAN / CLOUD_KM).toFixed(6)}, qa = qb - dw * uWind.x, qc = qb - dw * uWind.y; float nrm = wxWindNorm();
+    base = .5 + (cloudTex(qa, polar) * uWind.z + cloudTex(qc, polar) * uWind.w - .5) * nrm;
+    toSun = .5 + (textureLod(tCloud, qa + qs, polar + 2.).r * uWind.z + textureLod(tCloud, qc + qs, polar + 2.).r * uWind.w - .5) * nrm - base;
+  } else
+#endif
+  { base = cloudTex(qb, polar); toSun = textureLod(tCloud, qb + qs, polar + 2.).r - base; }
+  float lumps = cloudLumps(q, lod), thr = wxThr(clim.x), n = base + wxGrow(q, polar) + lumps, dens = smoothstep(thr - .04, thr + .16, n);
   if (dens <= .003) discard;
   // The side toward the Sun is bright: there is less cloud between it and the Sun than on the far side. The step
   // toward the Sun is a few pixels (not less than 2.5 km, not more than 7): from near, every lump has its lit side.
-  // (which way the Sun is on the map: one direction for the frame, that of the place the camera looks at — where the
-  // Sun stands otherwise, the view is so wide that the lit sides of the clouds are smaller than a pixel)
-  vec2 s2 = uSunMap;
-  // (The clouds themselves are asked once more, softly, BANK_STEP km toward the Sun: that gives the slope of the
-  // whole cloud. The lumps are asked again at the step itself. What makes the clouds grow is the same at all three.)
-  float toSun = textureLod(tCloud, qb + s2 * ${(BANK_STEP / CLOUD_KM).toFixed(6)}, polar + 2.).r - base, off = clamp(px * 3., 2.5, 7.);
+  // (The lumps are asked again at the step itself. What makes the clouds grow is the same there.)
+  float off = clamp(px * 3., 2.5, 7.);
   float slope = lumps - cloudLumps(q + s2 * off, lod) - toSun * off * ${(1 / BANK_STEP).toFixed(5)}, lit = smoothstep(-.07, .09, slope);
   // And a whole cloud has a lit side and a far side: where more cloud stands toward the Sun, this place is in its
   // shade. That, more than the lumps, is what makes a bank of cloud a body and not a flat patch.
@@ -103,17 +122,21 @@ export const SHELL_REACH = 1.5;
 
 export default async function init(album) {
   const T = album.terrain.u, p = album.params;
-  const mesh = new Mesh(new SphereGeometry(1, 192, 96, 0, Math.PI * 2, 0, SHELL_REACH), new ShaderMaterial({
-    transparent: true, depthTest: false, depthWrite: false, side: DoubleSide, vertexShader: VERT, fragmentShader: FRAG,
-    uniforms: { ...lightUniforms(T), ...WX, ...GLOBE, uExag: T.uExag, uShow: { value: 0 }, uShowRain: { value: 0 }, uVig: { value: .35 }, uRes: { value: new Vector2(1, 1) } },
-  }));
+  // two texts of the shader with the same uniforms: the plain one for a view over the album, the whole one for the
+  // rest of the Earth (sky/weather.js, WORLD); the second is made when it is first needed
+  const uniforms = { ...lightUniforms(T), ...WX, ...GLOBE, uExag: T.uExag, uShow: { value: 0 }, uShowRain: { value: 0 }, uVig: { value: .35 }, uRes: { value: new Vector2(1, 1) } };
+  // (and one more pair for a thunderstorm: the lightning is counted only in those)
+  const material = key => new ShaderMaterial({ transparent: true, depthTest: false, depthWrite: false, side: DoubleSide, vertexShader: VERT, fragmentShader: FRAG, uniforms,
+    defines: { ...(key & 1 ? { WX_WORLD: 1 } : {}), ...(key & 2 ? { WX_STORM: 1 } : {}) } });
+  const mats = [material(0)], mesh = new Mesh(new SphereGeometry(1, 192, 96, 0, Math.PI * 2, 0, SHELL_REACH), mats[0]);
   mesh.position.set(0, -R, 0); mesh.frustumCulled = false; mesh.visible = false;
   (album.overlay || album.scene).add(mesh);
   const Y = new Vector3(0, 1, 0), up = new Vector3();
   return { id: 'clouds', mesh, update(dt, t, cam) {
     // None are drawn once the eye itself is down at the height of the clouds. (How much of the sky they cover — and
     // whether there are any — is set by the sky layer: uCloud.x.)
-    const on = T.uCloud.value.x > 0 && !!WX.tCloud.value, h = cam.s.h, top = T.uCloud.value.w, above = ss(top + 2, top + 14, cam.alt ?? h), u = mesh.material.uniforms;
+    const on = T.uCloud.value.x > 0 && !!WX.tCloud.value, h = cam.s.h, top = T.uCloud.value.w, above = ss(top + 2, top + 14, cam.alt ?? h), u = uniforms;
+    const key = (WORLD.on ? 1 : 0) | (WX.uStorm.value.x > 0 ? 2 : 0); mesh.material = mats[key] ||= material(key);
     const show = on ? cloudShow(h) * above : 0, showRain = on && WX.uRain.value.x > 0 ? rainCloudShow(h) * above : 0;
     mesh.visible = show + showRain > 0; u.uShow.value = show; u.uShowRain.value = showRain;
     if (mesh.visible) {
