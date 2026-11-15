@@ -322,8 +322,9 @@ export const fogNumbers = amount => ({ thick: amount * (110 + 190 * amount), ban
 // coast, falling to nothing 40 km out (sea fog lies in banks along the shore, not over the whole sea).
 // at(lat, lon) gives the height of the ground in m (under the sea negative). box: the rectangle the grid covers — that
 // of the detailed heights, not the worked land: the floor is made of heights alone. (Its size is what the build
-// costs: 0.25 s and 1.4 MB of pictures for the rectangle of stage 2, 1.05 s and 6 MB for that of stage 3 — once,
-// when the fog, the caps or the rain are first switched on. A frame costs the same: it reads the same points.)
+// costs: 0.3–0.4 s and 1.4 MB of pictures for the rectangle of stage 2, 1.1 s and 6 MB for that of stage 3 — once,
+// when the fog, the caps or the rain are first switched on. A frame reads the same points whatever the size; no
+// difference could be told from the spread of the measure — docs/album/sky.md, «Большой полигон (этап 3)».)
 export function fogFloor(at, cell = 4, sub = 4, box = BBOX) {
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const la of [box.lat0, (box.lat0 + box.lat1) / 2, box.lat1]) for (const lo of [box.lon0, (box.lon0 + box.lon1) / 2, box.lon1]) {
