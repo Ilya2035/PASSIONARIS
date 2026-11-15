@@ -25,7 +25,7 @@ test('the polygon: its heights are whole inside the border and give way to the w
   const glsl = read('../src/album/glsl.js');
   assert.ok(glsl.includes('float regionEdge(vec2 ll) { vec2 a = min(ll - vec2(${f(BBOX.lat0)}, ${f(BBOX.lon0)}), vec2(${f(BBOX.lat1)}, ${f(BBOX.lon1)}) - ll); return min(a.x, a.y); }'));
   assert.ok(glsl.includes('float inRegion(vec2 ll) { return smoothstep(${f(-REGION_FADE)}, 0., regionEdge(ll)); }'));
-  assert.ok(read('../src/album/terrain.js').includes('#define STATE(ll) smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))') && STATE_FADE[0] > 0 && STATE_FADE[1] > STATE_FADE[0], 'the state of the chunks gives way inside the border');
+  assert.ok(read('../src/album/terrain.js').includes('#define STATE(ll) ${STAGE >= 3 ? S3_STATE : `smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))`}') && STATE_FADE[0] > 0 && STATE_FADE[1] > STATE_FADE[0], 'the state of the chunks gives way inside the border');
 });
 
 test('world heights: read between four points, round the Earth and up to the poles', () => {
@@ -242,4 +242,33 @@ test('stage 3: the loader hands the mask of the worked land to the chunks; at st
   const data = read('../src/album/data.js');
   assert.ok(data.includes("import { loadWorked } from './worked.js';") && data.includes('let worked = null;') && data.includes('if (STAGE >= 3) { try { worked = (await loadWorked()).at; }'));
   assert.ok(data.includes('return { meta, base, world, worked, vectors,'), 'data.worked: (lat, lon) → 0, 1, 2 — or null');
+});
+
+test('stage 3: the plain land inside the rectangle of the heights — where no chunk lies, the natural state', async () => {
+  const { zonesOf3, chunkSums, allChunks, S3_CHUNK_HERE, S3_STATE, S3_CLIP_INNER } = await import('../src/album/terrain.js');
+  const { NONE, FKM } = await import('../src/album/chunks.js');
+  const { BBOX, KM_PER_DEG, COS_REF } = await import('../src/album/geo.js');
+  // the sums of the chunk raster: a raster 8 × 6 with a hole of two texels
+  const nx = 8, ny = 6, cell = new Uint16Array(nx * ny).fill(7); cell[2 * nx + 5] = NONE; cell[3 * nx + 5] = NONE;
+  const sum = chunkSums(cell, nx, ny), w = nx + 1;
+  assert.equal(sum[ny * w + nx], nx * ny - 2); assert.equal(sum[2 * w + 8], 16, 'two rows whole');
+  // a square: every texel under it and two around it must be a chunk
+  const km = FKM * 2, rect = { x0: 0, y0: 0 }, at = (tx, ty, half) => allChunks(sum, (ty + .5) * km / KM_PER_DEG, (tx + .5) * km / (KM_PER_DEG * COS_REF), half * km / KM_PER_DEG, half * km / (KM_PER_DEG * COS_REF), rect, nx, ny, km);
+  assert.equal(at(2, 2, .1), true, 'the hole is three texels away');
+  assert.equal(at(3, 2, .1), false, 'the hole is within two texels');
+  assert.equal(at(0, 2, .1), false, 'the edge of the raster is within two texels: beyond it there are no chunks');
+  // the variants of a square: the fast one only when it is all worked land deep inside the rectangle
+  const lat = (BBOX.lat0 + BBOX.lat1) / 2, lon = (BBOX.lon0 + BBOX.lon1) / 2;
+  assert.deepEqual(zonesOf3(lat, lon, .5, .5, true), [true, false, false]);
+  assert.deepEqual(zonesOf3(lat, lon, .5, .5, false), [false, true, false], 'plain land inside: the full variant, the whole square');
+  assert.deepEqual(zonesOf3(BBOX.lat1, lon, .5, .5, true), [false, true, true], 'on the rim of the rectangle: the full variant and the world');
+  assert.deepEqual(zonesOf3(BBOX.lat1 + 5, lon, .5, .5, false), [false, false, true]);
+  // the text stage 3 adds to the shaders
+  assert.ok(S3_CHUNK_HERE.includes('float chunkHere(vec2 pk)') && S3_CHUNK_HERE.includes(`vec4 w = step(id, vec4(${(NONE - .5).toFixed(1)}));`), 'a texel with NONE is no chunk');
+  assert.ok(S3_STATE.startsWith('min(smoothstep(') && S3_STATE.endsWith('chunkHere(pk))'), 'the state holds where a chunk lies and still gives way at the rim of the rectangle');
+  assert.equal(S3_CLIP_INNER, '1.');
+  const terrain = read('../src/album/terrain.js');
+  assert.ok(terrain.includes('#define STATE(ll) ${STAGE >= 3 ? S3_STATE : `smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))`}'), 'at stage 2 the text of the shader is what it was');
+  assert.ok(terrain.includes("${CHUNK_GLSL}${STAGE >= 3 ? S3_CHUNK_HERE : ''}") && terrain.includes('c5 = ${STAGE >= 3 ? S3_CLIP_INNER : `${(STATE_FADE[1] + ZEPS).toFixed(4)} - dm`}; }'));
+  assert.ok(terrain.includes('if (STAGE >= 3 && clip) this.globes[0].visible = false;'));
 });

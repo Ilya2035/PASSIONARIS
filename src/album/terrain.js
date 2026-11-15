@@ -12,8 +12,8 @@ import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Vector2, Vector3
   UnsignedByteType, FloatType, NoColorSpace, RepeatWrapping, ClampToEdgeWrapping, LinearMipmapLinearFilter, LinearFilter } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT } from './glsl.js';
 import { ASPECT_GLSL, ASPECT_UNIFORMS } from './aspects/index.js';
-import { R, KM_PER_DEG, COS_REF, wrapLon, LAT_MAX, BBOX } from './geo.js';
-import { FKM } from './chunks.js';
+import { R, KM_PER_DEG, COS_REF, wrapLon, LAT_MAX, BBOX, STAGE } from './geo.js';
+import { FKM, NONE, SNX, SNY } from './chunks.js';
 import { GROUND_TILES } from './data.js';
 import { CLIM_KM, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K } from './ground/climate.js';
 import { stepTable } from './ground/steps.js';
@@ -43,6 +43,46 @@ export const zonesOf = (lat, lon, hLat, hLon) => [
   touches(lat, lon, hLat, hLon, ZEPS - STATE_FADE[1]),
   touches(lat, lon, hLat, hLon, REGION_FADE + ZEPS) && !within(lat, lon, hLat, hLon, -STATE_FADE[1] - ZEPS),
   !within(lat, lon, hLat, hLon, REGION_FADE - ZEPS)];
+// The same at stage 3, where the rectangle of the heights holds land without chunks — the plain land of the world on
+// detailed heights: the south of England, Germany beyond the Rhine, Switzerland, Italy, the Sahara. A square is
+// drawn by ONE of the first two variants, whole: by the fast one (zone 1, which takes every pixel for worked land)
+// when all of it is worked land deep enough inside the rectangle, otherwise by the full one (zone 2), which asks
+// every pixel whether a chunk lies under it. worked: is every texel of the chunk raster under the square a chunk.
+export const zonesOf3 = (lat, lon, hLat, hLon, worked) => {
+  const fast = worked && within(lat, lon, hLat, hLon, -STATE_FADE[1] - ZEPS);
+  return [fast, !fast && touches(lat, lon, hLat, hLon, REGION_FADE + ZEPS), !within(lat, lon, hLat, hLon, REGION_FADE - ZEPS)];
+};
+// How many texels of the state raster of the chunks (2.5 km) hold a chunk, summed from the south-west corner: for
+// «is every texel under this square a chunk» in a few numbers. cell: ch.stateCell; → Int32Array (nx + 1) × (ny + 1).
+export function chunkSums(cell, nx = SNX, ny = SNY) {
+  const w = nx + 1, sum = new Int32Array(w * (ny + 1));
+  for (let y = 0; y < ny; y++) for (let x = 0, row = 0; x < nx; x++) { row += cell[y * nx + x] !== NONE ? 1 : 0; sum[(y + 1) * w + x + 1] = sum[y * w + x + 1] + row; }
+  return sum;
+}
+// is every texel under the square (centre and half-sides in degrees), and two texels around it, a chunk.
+// rect: the lattice of the chunks { x0, y0 } in flat km; km: the side of a texel
+export function allChunks(sum, lat, lon, hLat, hLon, rect, nx = SNX, ny = SNY, km = FKM * 2) {
+  const x0 = Math.floor(((lon - hLon) * KM_PER_DEG * COS_REF - rect.x0) / km) - 2, x1 = Math.floor(((lon + hLon) * KM_PER_DEG * COS_REF - rect.x0) / km) + 2;
+  const y0 = Math.floor(((lat - hLat) * KM_PER_DEG - rect.y0) / km) - 2, y1 = Math.floor(((lat + hLat) * KM_PER_DEG - rect.y0) / km) + 2;
+  if (x0 < 0 || y0 < 0 || x1 >= nx || y1 >= ny) return false;
+  const w = nx + 1, n = sum[(y1 + 1) * w + x1 + 1] - sum[y0 * w + x1 + 1] - sum[(y1 + 1) * w + x0] + sum[y0 * w + x0];
+  return n === (x1 - x0 + 1) * (y1 - y0 + 1);
+}
+// ---- what stage 3 adds to the text of the shaders (at stage 2 none of it is in them)
+// the full variant is not cut on its inner side: it draws whatever the fast one leaves, however deep inside
+export const S3_CLIP_INNER = '1.';
+// 1 where a chunk lies under the point, 0 where none does (chunks.js, NONE), joined smoothly between the texels of
+// the chunk raster — the edge of the worked land is a band of one texel, 1.25 km, along the outlines of the chunks
+export const S3_CHUNK_HERE = `
+float chunkHere(vec2 pk) {
+  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)} - .5, f = fract(t); ivec2 c = ivec2(floor(t));
+  vec4 id = vec4(chunkIdTexel(c), chunkIdTexel(c + ivec2(1, 0)), chunkIdTexel(c + ivec2(0, 1)), chunkIdTexel(c + ivec2(1, 1)));
+  vec4 w = step(id, vec4(${(NONE - .5).toFixed(1)}));
+  return mix(mix(w.x, w.y, f.x), mix(w.z, w.w, f.x), f.y);
+}`;
+// the state of the chunks holds where a chunk lies, and gives way to the natural state at the rim of the rectangle
+// as before
+export const S3_STATE = `min(smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll)), chunkHere(pk))`;
 // a texture of one point, for a map that is missing
 const flat = (format, data) => { const t = new DataTexture(data, 1, 1, format, data instanceof Float32Array ? FloatType : UnsignedByteType); t.colorSpace = NoColorSpace; t.needsUpdate = true; return t; };
 const f1 = n => Number(n).toFixed(1);
@@ -79,7 +119,7 @@ void main() {
   vec4 dz = vec4(ll - vec2(${f1(BBOX.lat0)}, ${f1(BBOX.lon0)}), vec2(${f1(BBOX.lat1)}, ${f1(BBOX.lon1)}) - ll), c4 = vec4(1.);   // degrees inside each side of the polygon
   float dm = min(min(dz.x, dz.y), min(dz.z, dz.w)), c5 = 1.;
   if (uZone == 1) c4 = dz - ${(STATE_FADE[1] - ZEPS).toFixed(4)};
-  else if (uZone == 2) { c4 = dz + ${(REGION_FADE + ZEPS).toFixed(4)}; c5 = ${(STATE_FADE[1] + ZEPS).toFixed(4)} - dm; }
+  else if (uZone == 2) { c4 = dz + ${(REGION_FADE + ZEPS).toFixed(4)}; c5 = ${STAGE >= 3 ? S3_CLIP_INNER : `${(STATE_FADE[1] + ZEPS).toFixed(4)} - dm`}; }
   else if (uZone == 3) c5 = ${(ZEPS - REGION_FADE).toFixed(4)} - dm;
   gl_ClipDistance[0] = c4.x; gl_ClipDistance[1] = c4.y; gl_ClipDistance[2] = c4.z; gl_ClipDistance[3] = c4.w; gl_ClipDistance[4] = c5;
 #endif
@@ -108,10 +148,10 @@ const FRAG_SRC = /* glsl */`
 #else
 #define ALBUM_WORLD 1
 #define REGION(ll) inRegion(ll)
-#define STATE(ll) smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))
+#define STATE(ll) ${STAGE >= 3 ? S3_STATE : `smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))`}
 #endif
 ${COMMON}
-${CHUNK_GLSL}
+${CHUNK_GLSL}${STAGE >= 3 ? S3_CHUNK_HERE : ''}
 ${LIGHT}
 uniform float uTime, uShade, uSnow, uForestK, uSeason;
 uniform int uGrid, uData;
@@ -698,6 +738,8 @@ export class Terrain {
     // every level (the others share its uniforms); this.zoned: all of them, [level][variant].
     const clip = clipOk(), ZONES = clip ? [1, 2, 3] : [0];
     this.clip = clip;
+    // stage 3: where the chunks lie (zonesOf3)
+    if (STAGE >= 3) { this.chunkSum = chunkSums(chunks.stateCell); this.chunkRect = { x0: cr.x, y0: cr.y }; }
     const grids = (g, own, order) => ZONES.map(z => {
       const mesh = new Mesh(g, new ShaderMaterial({
         uniforms: { ...this.u, ...own, uZone: { value: z } }, defines: clip ? { ZONE: z, CLIP_ZONES: 1 } : { ZONE: z }, extensions: { clipCullDistance: clip },
@@ -726,6 +768,9 @@ export class Terrain {
     ggeo.setAttribute('position', new BufferAttribute(new Float32Array(gn * 3), 3)); ggeo.setAttribute('grid', new BufferAttribute(ggrid, 2)); ggeo.setIndex(new BufferAttribute(gidx, 1));
     this.globes = grids(ggeo, { uCentre: { value: new Vector2(0, 0) }, uCell: { value: KM_PER_DEG }, uFine: { value: new Vector3() }, uLod: { value: Math.log2(KM_PER_DEG / .234) } }, -11);
     this.globe = this.globes[0];
+    // (stage 3: the grid of the whole ball is drawn inside the rectangle by the full variant alone — the fast one
+    // would take the plain land there for worked land)
+    if (STAGE >= 3 && clip) this.globes[0].visible = false;
     // the thin shell of air at the limb
     const air = new Mesh(new SphereGeometry(R + 75, 128, 64), new ShaderMaterial({
       side: BackSide, transparent: true, depthWrite: false, uniforms: { uSun: this.u.uSun },
@@ -760,7 +805,8 @@ export class Terrain {
       u.uFine.value.set(fine ? fine.lat : 0, fine ? fine.lon : 0, fine ? fine.half - c * 1.5 : 0);
       shown = shown && (!fine || fine.half < 2600) && Math.abs(lat) + half / KM_PER_DEG < POLE_LAT;
       // (a variant of the shader that has nothing to draw in this square is not drawn at all)
-      const zs = this.clip ? zonesOf(lat, lon, half / KM_PER_DEG, half / (KM_PER_DEG * COS_REF)) : [true];
+      const hLat = half / KM_PER_DEG, hLon = half / (KM_PER_DEG * COS_REF);
+      const zs = !this.clip ? [true] : STAGE >= 3 ? zonesOf3(lat, lon, hLat, hLon, allChunks(this.chunkSum, lat, lon, hLat, hLon, this.chunkRect)) : zonesOf(lat, lon, hLat, hLon);
       this.zoned[l].forEach((m, k) => { m.visible = shown && zs[k]; });
       fine = { lat, lon, half };
       if (shown) cover = fine;

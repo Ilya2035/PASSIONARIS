@@ -82,7 +82,7 @@ test('natural swamp: level ground at the sea and in the wet takes it; hills, the
   for (let k = 0; k < ch.count; k++) {
     assert.ok(nat[k] >= 0 && nat[k] <= .95);
     if (ch.kind[k] === 0) assert.equal(nat[k], 0, 'a chunk of water holds no swamp');
-    const c = ch.centre(k); if (c.lat > 44.9 || c.lat < 35.1) assert.equal(nat[k], 0, 'nothing outside the region of the album');
+    const c = ch.centre(k); if (c.lat > BBOX.lat1 + .1 || c.lat < BBOX.lat0 - .1) assert.equal(nat[k], 0, 'nothing outside the region of the album');
   }
 });
 

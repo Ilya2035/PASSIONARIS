@@ -108,15 +108,16 @@ test('ground climate: without the file the old formula answers, so nothing break
 });
 
 test('ground climate: the picture the shaders read — the country around, wet, warm, summer', () => {
-  const rect = { x0: CI0 * CHUNK_KM, y0: CJ0 * CHUNK_KM, side: CN * CHUNK_KM }, n = 32;
+  // (the lattice of the chunks as it is at this stage of the polygon: a square at stage 2, a rectangle at stage 3)
+  const rect = { x0: CI0 * CHUNK_KM, y0: CJ0 * CHUNK_KM, w: CNX * CHUNK_KM, h: CNY * CHUNK_KM }, n = 32, cw = CNX * CHUNK_KM / CLIM_KM, chh = CNY * CHUNK_KM / CLIM_KM;
   const flat = climateTexels(() => 800, rect, null, n);
   assert.equal(flat.length, n * n * 4);
   for (let o = 0; o < n * n; o += 37) assert.equal(flat[o * 4], Math.round(800 / 4096 * 255), 'a plateau of 800 m is 800 m around every place');
   const sea = climateTexels(() => -50, rect, null, n);
   assert.equal(sea[0], 0, 'no land around: 0');
-  const c = baked(), t = climateTexels(() => 100, rect, c, CLIM_N);
+  const c = baked(), t = climateTexels(() => 100, rect, c, cw, chh);
   // the texel of a place holds the bytes of the baked cell
-  const cell = (lat, lon) => { const x = Math.floor((lon * 111.195 * Math.cos(40 * Math.PI / 180) - c.x0) / c.km), y = Math.floor((lat * 111.195 - c.y0) / c.km); return (y * c.n + x) * 4; };
+  const cell = (lat, lon) => { const x = Math.floor((lon * 111.195 * Math.cos(40 * Math.PI / 180) - c.x0) / c.km), y = Math.floor((lat * 111.195 - c.y0) / c.km); return (y * c.w + x) * 4; };
   for (const [lat, lon] of [[40.42, -3.70], [42.88, -8.54], [36.84, -2.46]]) { const o = cell(lat, lon); assert.equal(t[o + 1], c.data[o], 'wet'); assert.equal(t[o + 2], c.data[o + 2], 'warm'); assert.equal(t[o + 3], c.data[o + 1], 'summer'); }
   assert.ok(t[cell(42.88, -8.54) + 1] > t[cell(40.42, -3.70) + 1] && t[cell(40.42, -3.70) + 1] > t[cell(36.84, -2.46) + 1]);
 });
