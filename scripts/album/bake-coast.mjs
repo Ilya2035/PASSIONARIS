@@ -9,7 +9,7 @@
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { OUT_DIR } from './osm-extract.mjs';
+import { OUT_DIR, extractsFault } from './osm-extract.mjs';
 import { workedNear } from './worked-near.mjs';
 import { COAST_N, COAST_NY, COAST_X0, COAST_Y0, COAST_KM } from '../../src/album/water/courses.js';
 import { KM_PER_DEG, COS_REF } from '../../src/album/geo.js';
@@ -19,6 +19,7 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 // PASSIONARIS_COAST_OUT: another file to write
 const worked = process.env.PASSIONARIS_WORKED === '0' ? null : workedNear(ROOT, 3);
 const OUT_FILE = process.env.PASSIONARIS_COAST_OUT || join(ROOT, 'public', 'assets', 'album', 'water', 'coast.bin.gz');
+{ const fault = extractsFault(); if (fault) { console.error(fault); process.exit(1); } }
 const KX = KM_PER_DEG * COS_REF / 1e6, KY = KM_PER_DEG / 1e6, N = COAST_N, NY = COAST_NY, C = COAST_KM / N;   // N cells across, NY from south to north
 const len = new Float32Array(N * NY); let count = 0, km = 0;
 for (const f of readdirSync(OUT_DIR).filter(f => f.endsWith('.beaches.json.gz'))) for (const b of JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, f))))) {

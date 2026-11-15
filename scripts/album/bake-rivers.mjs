@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { OUT_DIR } from './osm-extract.mjs';
+import { OUT_DIR, extractsFault } from './osm-extract.mjs';
 import { workedNear } from './worked-near.mjs';
 import { encodeCourses, BBOX_M } from '../../src/album/water/courses.js';
 import { KM_PER_DEG, COS_REF } from '../../src/album/geo.js';
@@ -38,6 +38,7 @@ const RU = { Ebro: 'Эбро', Tajo: 'Тахо', Tejo: 'Тежу', Duero: 'Ду�
   Ain: 'Эн', Drôme: 'Дром', Ardèche: 'Ардеш', Var: 'Вар', Meurthe: 'Мёрт', Escaut: 'Шельда', Corrèze: 'Коррез', Vézère: 'Везер', Isle: 'Иль', Truyère: 'Трюйер', Gard: 'Гар', Arve: 'Арв' };
 const bare = n => n.replace(/^(r[íi]o|riu|rivi[èe]re|fleuve|oued|wadi|la|le|el|l')\s+/i, '').replace(/^(d[e']|du|des|de la)\s*/i, '').trim();
 const KX = KM_PER_DEG * COS_REF / 1e6, KY = KM_PER_DEG / 1e6;      // microdegrees → flat km
+{ const fault = extractsFault(); if (fault) { console.error(fault); process.exit(1); } }   // files cut for the region of another stage have half of the rivers
 const rd = (name, what) => JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, `${name}.${what}.json.gz`))));
 const names = readdirSync(OUT_DIR).filter(f => f.endsWith('.rivers.json.gz')).map(f => f.slice(0, -'.rivers.json.gz'.length));
 const key = (lon, lat) => lat * 33554432 + lon + 12e6;

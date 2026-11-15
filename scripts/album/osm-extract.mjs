@@ -7,7 +7,10 @@
 // Each extract → data/album/osm/extract/<name>.<what>.json.gz (gitignored). Coordinates are whole microdegrees,
 // [lon, lat, lon, lat, …]. The PBF format is read by hand: no dependencies.
 //   node scripts/album/osm-extract.mjs [name …]
-import { openSync, readSync, closeSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+// The folder remembers which region its files were cut for (region.json: the box and the extracts done for it). When
+// the region grows — stage 3 — the files of the old box are made anew, not taken for done: they have no north of
+// France in them. The bakes that read the folder ask extractsFault() first and refuse files of another region.
+import { openSync, readSync, closeSync, writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateSync, gzipSync } from 'node:zlib';
 import { PBF_DIR, EXTRACTS, pbfFile } from './fetch-osm.mjs';
@@ -16,6 +19,18 @@ import { BBOX } from '../../src/album/geo.js';
 // (PASSIONARIS_OSM_EXTRACT: another folder for what is kept — a worktree that reads the raw files of the main folder writes its own)
 export const OUT_DIR = process.env.PASSIONARIS_OSM_EXTRACT || join(PBF_DIR, '..', 'extract');
 const BOX = { lat0: BBOX.lat0 - .3, lat1: BBOX.lat1 + .3, lon0: BBOX.lon0 - .4, lon1: BBOX.lon1 + .4 };       // the album's region with a margin, degrees
+const REGION_FILE = join(OUT_DIR, 'region.json'), sameBox = b => !!b && ['lat0', 'lat1', 'lon0', 'lon1'].every(k => Math.abs(b[k] - BOX[k]) < 1e-9);
+const readStamp = () => { try { const s = JSON.parse(readFileSync(REGION_FILE, 'utf8')); return s && Array.isArray(s.done) ? s : null; } catch { return null; } };
+// '' when every file of the folder was cut for the region as it is now, else what is wrong and what to run
+export function extractsFault() {
+  const have = existsSync(OUT_DIR) ? readdirSync(OUT_DIR).filter(f => f.endsWith('.rivers.json.gz')).map(f => f.slice(0, -'.rivers.json.gz'.length)) : [], st = readStamp();
+  const again = ': run node scripts/album/osm-extract.mjs (it makes them anew)';
+  if (!have.length) return `no extracts in ${OUT_DIR}: run node scripts/album/osm-extract.mjs`;
+  if (!st) return `the extracts in ${OUT_DIR} do not say which region they were cut for (they were made before region.json)` + again;
+  if (!sameBox(st.box)) return `the extracts in ${OUT_DIR} were cut for another region (${JSON.stringify(st.box)}, now ${JSON.stringify(BOX)})` + again;
+  const stale = have.filter(n => !st.done.includes(n));
+  return stale.length ? `${stale.length} extracts in ${OUT_DIR} were cut for another region (${stale.slice(0, 6).join(', ')}${stale.length > 6 ? ', …' : ''})` + again : '';
+}
 const PLACE = new Set(['city', 'town', 'village', 'hamlet']);
 const WANT = ['waterway', 'natural', 'water', 'name', 'name:ru', 'name:es', 'intermittent', 'place', 'population', 'boundary', 'admin_level', 'type', 'tunnel'];
 
@@ -155,11 +170,17 @@ function extract(name, file) {
 }
 
 if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('scripts/album/osm-extract.mjs')) {
-  const only = process.argv.slice(2);
+  const only = process.argv.slice(2), t0 = Date.now();
+  // what the folder holds for this very region; files of another box (or of none: made before the stamp) are not done
+  let stamp = readStamp(); if (!stamp || !sameBox(stamp.box)) { if (existsSync(join(OUT_DIR, 'spain.rivers.json.gz')) || stamp) console.log(`the extracts in ${OUT_DIR} were cut for another region: made anew`); stamp = { box: BOX, done: [] }; }
+  let made = 0;
   for (const e of EXTRACTS) {
     const name = e.split('/').pop(), f = pbfFile(e);
-    if (only.length ? !only.includes(name) : existsSync(join(OUT_DIR, `${name}.rivers.json.gz`))) continue;
+    if (only.length ? !only.includes(name) : stamp.done.includes(name) && existsSync(join(OUT_DIR, `${name}.rivers.json.gz`))) continue;
     if (!existsSync(f)) { console.log(`no file for ${name}: run scripts/album/fetch-osm.mjs`); continue; }
-    extract(name, f);
+    extract(name, f); made++;
+    if (!stamp.done.includes(name)) stamp.done.push(name);
+    writeFileSync(REGION_FILE, JSON.stringify(stamp));              // after every extract: a run that was cut off goes on from here
   }
+  console.log(`${made} extracts made in ${((Date.now() - t0) / 1000).toFixed(0)} s, ${stamp.done.length} of ${EXTRACTS.length} in ${OUT_DIR}`);
 }

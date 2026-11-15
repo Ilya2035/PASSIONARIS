@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Chunks, CHANNELS, CHUNK_KM, CI0, llOf } from '../src/album/chunks.js';
+import { Chunks, CHANNELS, CHUNK_KM, CI0, CNX, CNY, llOf } from '../src/album/chunks.js';
 import water, { WATER_CORE, SHEET_FRAG, sheetPull, SHEET_PULL, WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../src/album/aspects/water.js';
 import { makeFreeze, winterPhase, SHOWS, SPAN, SEA_CHANNEL } from '../src/album/layers/freeze.js';
 import { ringDistance, lakeGrid } from '../src/album/layers/lakes.js';
@@ -104,7 +104,7 @@ test('water: in time the ice spreads chunk by chunk from the shore, then melts b
   for (let i = 0; i < 400; i++) m.step(.2, { cold: 0 });
   assert.equal(ch.get('ice', near), 0); assert.equal(ch.get('ice', far), 0); assert.equal(m.melt[near], 0); assert.ok(m.state.retreat < .01, 'the retreat is over');
   for (let k = 0; k < ch.count; k += 37) assert.equal(ch.get('flood', k), 0, 'the water never writes the flood of a chunk');
-  assert.ok(ch.count >= 16384 && m.ice.length === ch.count, 'every chunk has its ice, the islands and lagoons added after the lattice too');
+  assert.ok(ch.count >= CNX * CNY && m.ice.length === ch.count, 'every chunk has its ice, the islands and lagoons added after the lattice too');
 });
 
 test('water: snow lies only on ice that can bear it; a thaw wets the ice and takes the snow', () => {
@@ -211,7 +211,7 @@ test('water: the baked rivers of the region — thousands of kilometres of real 
   assert.ok(c.rivers.length > 800, c.rivers.length + ' rivers');
   const widest = name => Math.max(0, ...c.rivers.filter(r => r.name === name || r.ru === name).map(r => Math.max(...r.w)));
   for (const name of ['Эбро', 'Гвадалквивир', 'Гаронна', 'Тахо']) assert.ok(widest(name) > .1, name + ' is a great river: ' + widest(name));
-  for (const r of c.rivers) { assert.ok(r.n >= 3); for (let i = 0; i < r.n; i++) assert.ok(r.ll[i * 2] > -10.01 && r.ll[i * 2] < 4.51 && r.ll[i * 2 + 1] > 35.19 && r.ll[i * 2 + 1] < 44.81 && r.w[i] >= .0015); }
+  for (const r of c.rivers) { assert.ok(r.n >= 3); for (let i = 0; i < r.n; i++) assert.ok(r.ll[i * 2] > BBOX.lon0 - .01 && r.ll[i * 2] < BBOX.lon1 + .01 && r.ll[i * 2 + 1] > BBOX.lat0 - .01 && r.ll[i * 2 + 1] < BBOX.lat1 + .01 && r.w[i] >= .0015); }
   const main = mainRivers(c);
   assert.ok(main.length > 200 && main.some(l => l.rank <= 5) && main.every(l => l.pts.length > 2));
 });
