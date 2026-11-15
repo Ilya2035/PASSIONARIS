@@ -6,6 +6,15 @@
 // a pixel or three, and the brooks, far thinner than a pixel, are left out. A river freezes with its chunk, a little
 // later than still water. Where the height data says sea, it ends. A river that is dry for a part of the year
 // (a rambla) is a bed of pale gravel with a thread of water.
+// Near the ground a river is not a drawn line (the owner, 15.11.2026: «Реки выглядят плохо… как будто это просто
+// прочертили их. Всё же реки формируют рельеф»; «у них должна быть 3D-текстура, они должны иметь маленькую анимацию,
+// течение»):
+//   • every river, a small one too, lies in a BED: banks stand on both sides of the water, a couple of pixels of them
+//     at least (BED), cut into the land — the bank that faces the sun is light, the other lies in its own shade, and
+//     a dark line of wet earth runs along the foot of each;
+//   • the water RUNS: streaks of lighter and darker water drawn out along the river slide downstream, quicker in the
+//     deep thread; where the sun stands over the water they glint (FLOW). A frozen river stands still.
+// From the middle heights up (riverFar: lean) a river is the thin line it was.
 import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Color, DoubleSide, CustomBlending, SrcAlphaFactor, OneMinusSrcAlphaFactor } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT } from '../glsl.js';
 import { SHEET_VERT, SHEET_FRAG, sheetUniforms, sheetPull } from '../aspects/water.js';
@@ -36,6 +45,11 @@ export const SHOW = [.035, .1];        // a river is left out when its water is 
 export const GEN = { w: [.7, 3.5], t: [[.03, .1], [.16, .5]], range: 12 };
 export const FAR_PX = 1.6, FAR_SHOW = 2, FAR_TINT = .7;
 export const MID = { lean: [.02, .045], back: [.2, .32], least: [.42, 1.3], clear: .85, tint: .85, tintAt: [.02, .05] };
+// near the ground: the least room for the two banks of a river, pixels; from how many pixels of sheet the banks are drawn (… wholly)
+export const BED = { banks: 4.4, from: [3.2, 5.5] };
+// the current: km a second the streaks slide (a little quicker than life, so that it can be seen from a few km up);
+// how strong the streaks and the glints are; they are drawn while a pixel is under FLOW.near km (… wholly)
+export const FLOW = { speed: .0045, streak: .3, glint: .55, near: [.06, .03] };
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // how a river is drawn when a pixel is px km: its least width in pixels, the widths it shows from, how far its line
 // has slid toward the two smoother shapes
@@ -135,6 +149,7 @@ const VERT = /* glsl */`${COMMON}
     float water = max(real, uPx * uMinPx * mix(mix(.42, 1., size), mix(${MID.least[0].toFixed(2)}, ${MID.least[1].toFixed(2)}, s2), uLean));
     float show = smoothstep(uShow.x, uShow.y, real / max(uPx, 1e-5));               // brooks far thinner than a pixel are left out
     float full = water * 1.5 + min(water * .8, .03);                                // the banks stand beside the water
+    full = max(full, water + ${BED.banks.toFixed(1)} * uPx * (1. - uLean));                               // … a couple of pixels of them at least near the ground: a small river has a bed too
     float bed = mix(full, mix(water, full, smoothstep(5., 13., full / max(uPx, 1e-5))), uLean);   // … but a thin river seen from the middle heights is its water alone
     vec2 slide = mix(aGen.xy * uGen.x, aGen.zw, uGen.y) * ${GEN.range.toFixed(1)}, way = mix(mix(aMisc.xy, aGenDir.xy, uGen.x), aGenDir.zw, uGen.y);   // from high up the line is smoother
     vec2 at = aLL + vec2(slide.y / KM, slide.x / (KM * cos(radians(aLL.x))));
@@ -147,11 +162,11 @@ const FRAG = /* glsl */`${COMMON}
   ${CHUNK_GLSL}
   ${LIGHT}
   ${SHEET_FRAG}
-  uniform vec3 uFlat, uTint; uniform float uPass; varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;   // uPass: 0 the banks · 1 the water
+  uniform vec3 uFlat, uTint; uniform float uPass, uLean; varying float vSide; varying vec2 vEnd, vAcross; varying vec4 vRiv; varying float vWater;   // uPass: 0 the banks · 1 the water
   void main() {
     vec2 pk = sheetPk(); float px = sheetPx(pk);
     float bed = vRiv.x, s = vSide, wpx = bed / max(px, 1e-6), dry = step(.5, vEnd.y);
-    float far = smoothstep(5., 13., wpx);                                           // 0 a thin line of water · 1 banks, bars and depth
+    float far = max(smoothstep(5., 13., wpx), (1. - uLean) * smoothstep(${BED.from[0].toFixed(1)}, ${BED.from[1].toFixed(1)}, wpx));   // 0 a thin line of water · 1 banks, bars and depth (near the ground: from a few pixels of sheet)
     float bend = clamp(vRiv.w * bed * 1.6, -1., 1.) * far;                           // + the river turns left: its inner bank is on the left
     float inner = clamp(bend * s * 1.6, 0., 1.);                                     // 1 on the inside of a bend, where the bar lies
     float we = mix(1., vWater * mix(1., .34, dry), far);                             // where the water ends, in halves of the bed
@@ -180,6 +195,7 @@ const FRAG = /* glsl */`${COMMON}
       vec3 bar = mix(wet * 1.25, mix(vec3(.72, .67, .52), vec3(.80, .76, .64), dry), smoothstep(0., .3, up)) * grain;
       float slope = mix(1.7, .35, max(inner, dry)) * (1. - smoothstep(.6, 1., up));
       col = sheetGround(mix(steep, bar, max(inner, dry * .8)), vec3(-vAcross * slope, 1.));
+      col *= 1. - .3 * (1. - smoothstep(0., .22, up)) * (1. - max(inner, dry));        // the wet foot of a steep bank: a dark line along the water
     } else {
       Wtr w = sheetWater(2, pk, px);
       float deep = (2.4 + 5. * smoothstep(.012, .26, bed * vWater)) * mix(1., .25, dry), t = x + bend * .55;   // the deep thread hugs the outer bank
@@ -190,6 +206,14 @@ const FRAG = /* glsl */`${COMMON}
       col = mix(col, mix(vec3(.05, .125, .19), vec3(.05, .15, .36), uTint.z) * (.2 + .8 * albumDay()), mix(uTint.x, uTint.y, uTint.z) * (1. - far) * (1. - w.cB.r));
       float foot = far * (1. - dry) * (1. - inner) * smoothstep(.35, 0., edge) * clamp(dot(vAcross, uSun.xy) * 1.5, 0., 1.) * .5;   // a steep bank shades the water at its foot
       col *= 1. - foot;
+      // the current: streaks drawn out along the river slide downstream, quicker in the deep thread; the sun glints on them
+      float flow = (1. - smoothstep(${FLOW.near[1].toFixed(3)}, ${FLOW.near[0].toFixed(3)}, px)) * (1. - dry) * (1. - smoothstep(.05, .4, w.cB.r));
+      if (flow > .003) {
+        float run = vRiv.y - uTime * ${FLOW.speed.toFixed(4)} * (1.25 - .55 * min(abs(t), 1.)), wl = max(bed * vWater * 1.6, px * 6.);
+        float a1 = wNoise(vec2(run / wl, x * 1.7 + vRiv.z)), a2 = wNoise(vec2(run / (wl * .36) + 3.1, x * 3.9 + vRiv.z * 1.7));
+        col *= 1. + ((a1 - .5) * ${FLOW.streak.toFixed(2)} + (a2 - .5) * ${(FLOW.streak * .6).toFixed(2)}) * flow;
+        col += w.sunCol * pow(max(a1 * .6 + a2 * .7 - .55, 0.), 3.) * ${FLOW.glint.toFixed(2)} * flow * max(uSun.z, 0.) * smoothstep(0., .3, edge);
+      }
     }
     sheetOut(col, alpha, 1.);
   }`;
@@ -237,7 +261,7 @@ export default async function init(album) {
   const banksMat = material(0), waterMat = material(1);
   // after the ground and the lakes, before trees and houses: first the banks of every river, then the water of every river
   const add = (geo, mat, order) => { const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = order; album.scene.add(mesh); return mesh; };
-  const meshes = sets.map((set, i) => { const b = build(set); return { mesh: add(b.geo, waterMat, -5), banks: i ? null : add(b.geo, banksMat, -6), points: b.points }; });
+  const meshes = sets.map(set => { const b = build(set); return { mesh: add(b.geo, waterMat, -5), banks: add(b.geo, banksMat, -6), points: b.points }; });   // (a brook has banks too, since a small river has a bed)
   const p = album.params; let on = true;
   const sync = () => { on = !!p.get('riversOn') && p.get('rivers') > 0; u.uK.value = p.get('rivers'); u.uFlat.value.set(FLAT[p.get('look')] || FLAT.atlas); };
   p.on(sync); sync();
@@ -248,6 +272,6 @@ export default async function init(album) {
       u.uPull.value = sheetPull(album, cam);
       u.uMinPx.value = far.minPx; u.uShow.value[0] = far.show[0]; u.uShow.value[1] = far.show[1]; u.uGen.value[0] = far.gen[0]; u.uGen.value[1] = far.gen[1]; u.uLean.value = far.lean; u.uTint.value[0] = far.tint[0]; u.uTint.value[1] = far.tint[1]; u.uTint.value[2] = far.tint[2];
       meshes[0].mesh.visible = on; meshes[1].mesh.visible = on && BROOK * u.uK.value / px > far.show[0];
-      meshes[0].banks.visible = on && u.uPx.value < .12;            // banks are drawn only while a great river is a few pixels wide
+      for (const m of meshes) m.banks.visible = m.mesh.visible && u.uPx.value < .12;   // banks are drawn only while a great river is a few pixels wide
     } };
 }
