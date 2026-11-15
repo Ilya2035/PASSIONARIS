@@ -63,6 +63,16 @@ export function relight(zPlace, zFrame, amount, night = .5) {
   return a.map((v, i) => mix(1, Math.min(v / b[i], RELIGHT_MOST), amount));
 }
 
+// The same for land the ground shader has already lit by the Sun of its own place: the land beyond the album's
+// polygon (terrain.js — there the slopes and the shadows of the relief go by uSunW, and the night side has no
+// sunlight). Only the colours of the light there are still the frame's: sunA — the colour of the frame's sunlight,
+// skyB — of its sky (lightNumbers A and B). The share is what the light of the place is of what the ground drew.
+export function relightOwn(zPlace, sunA, skyB, amount, night = .5) {
+  // (what the ground drew on level land there: sunlight by the sine of the Sun's height — none under the horizon — and the light of the sky)
+  const a = levelLight(zPlace, night), g = Math.max(zPlace, 0) * 1.25;
+  return a.map((v, i) => mix(1, Math.min(v / (sunA[i] * g + skyB[i]), RELIGHT_MOST), amount));
+}
+
 // uGlobe: x how much of the dimming is laid (globeDim: 0 near the ground .. 1 from a height), y how light the night
 //         sky is (levelLight's night).
 export const GLOBE = { uGlobe: { value: new Vector4(0, .5, 0, 0) } };
@@ -80,6 +90,12 @@ vec3 globeLight(float z) {
 vec3 globeRelight(vec3 up) {
   if (uGlobe.x <= 0.) return vec3(1.);
   return mix(vec3(1.), min(globeLight(dot(up, uSunW)) / globeLight(uSun.z), ${RELIGHT_MOST.toFixed(1)}), uGlobe.x);
+}
+// the same for land the ground shader has lit by the Sun of its own place — beyond the album's polygon (relightOwn)
+vec3 globeRelightOwn(vec3 up) {
+  if (uGlobe.x <= 0.) return vec3(1.);
+  float z = dot(up, uSunW), g = max(z, 0.) * 1.25;
+  return mix(vec3(1.), min(globeLight(z) / (albumSunCol() * g + albumSkyCol()), ${RELIGHT_MOST.toFixed(1)}), uGlobe.x);
 }
 // A finished colour (what albumFinish gave: tone curve, then gamma) with its light multiplied by k: the finish is
 // undone, the light dimmed, the colour finished again. Dimming the screen colour itself would leave the night far

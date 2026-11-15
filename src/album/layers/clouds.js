@@ -27,10 +27,14 @@ void main() { vW = (modelMatrix * vec4(position, 1.)).xyz; gl_Position = project
 // The lumps of a cloud top are the picture of the clouds itself, read much smaller, twice: lumps of 24, 9 and 3.6 km,
 // then of 6, 2 and 1 km. A read of the picture is several times cheaper than noise counted in the pixel, and it has
 // no square grain. Each is read at a level of detail by the size of the pixel: lumps smaller than a pixel fade by
-// themselves. [how many times the read repeats around the Earth — a whole number, so that the map of the weather
-// closes without a seam — and the weight of the read]
-export const LUMPS = [[49, .34], [204, .16]];
-const LUMP_KM = LUMPS.map(l => MAP_ROUND / l[0]);
+// themselves.
+// Each read is turned, so that nothing lines up: read straight, the lumps stood in rows along the parallels, and a
+// solid cloud showed a grid of dimples (seen 15.11.2026 on «Дождь с игровой высоты»). A read is [a, b, weight]: the
+// place on the map, in turns around the Earth, goes into the picture as (a x + b y, −b x + a y). With a and b whole
+// numbers the read still repeats around the Earth exactly, so the map of the weather closes without a seam; it
+// repeats hypot(a, b) times a turn, at an angle of atan(b / a).
+export const LUMPS = [[40, 28, .34], [120, -165, .16]];
+const LUMP_KM = LUMPS.map(l => MAP_ROUND / Math.hypot(l[0], l[1]));
 // how far toward the Sun the neighbour stands that a whole cloud is shaded by, km: its side away from the Sun is darker
 export const BANK_STEP = 26;
 const FRAG = /* glsl */`
@@ -46,8 +50,9 @@ varying vec3 vW;
 float cloudTex(vec2 uv, float lod) { uv = uv * ${CLOUD_N.toFixed(1)} + .5; vec2 i = floor(uv), f = uv - i; return textureLod(tCloud, (i + f * f * (3. - 2. * f) - .5) / ${CLOUD_N.toFixed(1)}, lod).r; }
 // the lumps of the clouds over a place of the map; lod: for the larger and the smaller ones, by the size of the pixel
 float cloudLumps(vec2 q, vec2 lod) {
-  vec2 p = q + uCloud.yz;
-  return (cloudTex(p / ${LUMP_KM[0].toFixed(3)} + .23, lod.x) - .5) * ${LUMPS[0][1]} + (cloudTex(p / ${LUMP_KM[1].toFixed(3)} + .61, lod.y) - .5) * ${LUMPS[1][1]};
+  vec2 p = (q + uCloud.yz) / ${MAP_ROUND.toFixed(3)};
+  return (cloudTex(vec2(${LUMPS[0][0].toFixed(1)} * p.x + ${LUMPS[0][1].toFixed(1)} * p.y, ${(-LUMPS[0][1]).toFixed(1)} * p.x + ${LUMPS[0][0].toFixed(1)} * p.y) + .23, lod.x) - .5) * ${LUMPS[0][2]}
+    + (cloudTex(vec2(${LUMPS[1][0].toFixed(1)} * p.x + ${LUMPS[1][1].toFixed(1)} * p.y, ${(-LUMPS[1][1]).toFixed(1)} * p.x + ${LUMPS[1][0].toFixed(1)} * p.y) + .61, lod.y) - .5) * ${LUMPS[1][2]};
 }
 void main() {
   if (uCloud.x <= 0. || uShow + uShowRain <= 0.) discard;

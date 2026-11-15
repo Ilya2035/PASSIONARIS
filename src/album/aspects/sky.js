@@ -10,6 +10,7 @@
 import { Vector3, Vector4, BackSide } from 'three';
 import { frame, BBOX, R, distKm } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
+import { snowlineOf, WARM_WORLD } from '../ground/climate.js';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, lightHour } from '../sky/astro.js';
 import { PLUME, KINDS, plumeReach, plumeFrame, nearestVolcano } from '../sky/plume.js';
 import { GLOBE, globeAmount, globeDim, frameSunUp, raiseSun } from '../sky/globe.js';
@@ -118,6 +119,12 @@ export default {
     const sync = () => { album.cam.edgePan = !!p.get('edgePan') && !album.shot; want(); };
     // the open climate of the world, for the clouds: read once, when the clouds are first switched on
     const fetchClimate = () => fetch('assets/climate/normals-open.bin.gz').then(r => { if (!r.ok) throw new Error(`normals-open: ${r.status}`); return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }).then(climateOf);
+    // the line of lasting snow of the world at a place, m — the rule of the land of the whole Earth (ground/climate.js)
+    // by the warmth it keeps for every place; nothing where the album has no climate of the world
+    const wc = album.data.world?.clim?.image, lastingSnow = wc?.data ? (lat, lon) => {
+      const i = Math.min(wc.width - 1, Math.max(0, Math.floor((lon / 360 + .5) * wc.width))), j = Math.min(wc.height - 1, Math.max(0, Math.floor((.5 - lat / 180) * wc.height)));
+      return snowlineOf(WARM_WORLD[0] + (WARM_WORLD[1] - WARM_WORLD[0]) * wc.data[(j * wc.width + i) * 4 + 2] / 255, lat);
+    } : null;
     // the fog and the caps of the crests lie on the album's own land: there is nothing of them to draw far from it
     const nearLand = c => c.lat > BBOX.lat0 - 6 && c.lat < BBOX.lat1 + 6 && c.lon > BBOX.lon0 - 8 && c.lon < BBOX.lon1 + 8;
     p.on(sync); sync();
@@ -154,7 +161,7 @@ export default {
       const way = drift + p.get('cloudShift'), off = cloudOffset(way), grow = growOffset(way), cell = cellOffset(way);
       cloud.set(cover, off[0], off[1], 4 + 3 * T.uExag.value); WX.uGrow.value.set(grow[0], grow[1], cell[0], cell[1]);
       // how much cloud a place has, and how willingly it rains there, goes by its climate
-      if (cover > 0) needClimate(yday, fetchClimate);
+      if (cover > 0) needClimate(yday, fetchClimate, lastingSnow);
       // where the wind is not the album's the clouds are read twice, in their turn (sky/weather.js, windTurn)
       WX.uWind.value.set(...windTurn(way));
       // the great whirls: those that reach into the view (the eye sees as far as its horizon), each as much as the
@@ -177,7 +184,7 @@ export default {
       WX.uStorm.value.set(storm ? 1 : 0, rainT, album.shot ? STORM_STILL : STORM_FLASH, 0);
       // above the line of snowfall it snows (the line follows the snow line of the ground: the look, «Снеговая линия»)
       // (on the album's own land; off it the line goes by the warmth of the month)
-      if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); WX.uSnowC.value.set(...snowClimNumbers(T.uSnow.value, T.uExag.value), 0, 0); } else WX.uSnowF.value.w = 0;
+      if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); WX.uSnowC.value.set(...snowClimNumbers(T.uSnow.value, T.uExag.value), 0); } else WX.uSnowF.value.w = 0;
       // fog: what the hour has left of it (thickest at dawn, gone by noon)
       // (and what the height of the camera leaves of it: fog is weather seen from near, from a height there is none)
       const rise = sunTimes(yday, s.lat)?.rise ?? 6, low = natural && nearLand(s) ? fogByHeight(s.h) : 0, fog = p.get('fog') ? p.get('fogAmount') * fogByHour(hour, rise) * low : 0;

@@ -220,13 +220,14 @@ export const rainMaskAt = (force, clim) => rainMask(force) + (clim ? (WILL_REST 
 export const LAPSE = 6.5, SNOW_T = 1.5, SNOW_LOW = -1000, SNOW_HIGH = 6500;
 export const snowByWarmth = (t, elev = 0) => Math.max(SNOW_LOW, Math.min(SNOW_HIGH, (t + LAPSE * elev / 1000 - SNOW_T) / LAPSE * 1000));
 // The picture of the climate for a day of the year: CLIM_W × CLIM_H, RGBA bytes — R the cover, G the rain will, B the
-// line of snowfall by the warmth of the month (0 at SNOW_LOW .. 255 at SNOW_HIGH). Rows go by the sine of the
+// line of snowfall by the warmth of the month, A the line of lasting snow of the place (both 0 at SNOW_LOW .. 255 at
+// SNOW_HIGH; lasting(lat, lon): that line in m, from the land of the world — without it the line stands at its top). Rows go by the sine of the
 // latitude (row 0 at the north pole), so the shaders find a place without an arcsine; columns from 180° W. prec: the
 // monthly precipitation of the open climate (Uint16, 12 × 360 × 720, row 0 at 90° N, column 0 at 180° W); between
 // the middles of two months the two are mixed. tavg (Int16, tenths of a degree, the same grid) and elev (Int16, m,
 // 360 × 720): the temperature and the height it is given at — without them the line of snowfall stands at its top.
 export const CLIM_W = 360, CLIM_H = 180;
-export function climatePicture(prec, yday = 172, W = 720, H = 360, tavg = null, elev = null) {
+export function climatePicture(prec, yday = 172, W = 720, H = 360, tavg = null, elev = null, lasting = null) {
   const mf = ((yday - 15.2) / 30.4375 % 12 + 12) % 12, m0 = Math.floor(mf), m1 = (m0 + 1) % 12, k = mf - m0, out = new Uint8Array(CLIM_W * CLIM_H * 4);
   for (let j = 0; j < CLIM_H; j++) {
     const lat = Math.asin(1 - 2 * (j + .5) / CLIM_H) / D, y = Math.max(0, Math.min(H - 1, Math.floor((90 - lat) / 180 * H)));
@@ -239,7 +240,9 @@ export function climatePicture(prec, yday = 172, W = 720, H = 360, tavg = null, 
       }
       const mm = mix(a, b, k) / n, o = (j * CLIM_W + i) * 4;
       out[o] = Math.round(coverOfShare(skyShare(mm)) * 255); out[o + 1] = Math.round(rainWill(mm) * 255);
-      out[o + 2] = tavg ? Math.round((line / n - SNOW_LOW) / (SNOW_HIGH - SNOW_LOW) * 255) : 255; out[o + 3] = 255;
+      out[o + 2] = tavg ? Math.round((line / n - SNOW_LOW) / (SNOW_HIGH - SNOW_LOW) * 255) : 255;
+      const last = lasting ? lasting(lat, -180 + (i + .5) * 360 / CLIM_W) : null;
+      out[o + 3] = last == null ? 255 : Math.max(0, Math.min(255, Math.round((last - SNOW_LOW) / (SNOW_HIGH - SNOW_LOW) * 255)));
     }
   }
   return out;
@@ -249,7 +252,7 @@ export const climUV = (lat, lon) => [(wrapLon(lon) + 180) / 360, .5 - .5 * Math.
 export function climateAt(pic, lat, lon) {
   const [u, v] = climUV(lat, lon), x = u * CLIM_W - .5, y = Math.max(0, Math.min(CLIM_H - 1, v * CLIM_H - .5)), i = Math.floor(x), j = Math.min(CLIM_H - 2, Math.floor(y)), fx = x - i, fy = y - j;
   const at = (a, b, c) => pic[(b * CLIM_W + ((a % CLIM_W) + CLIM_W) % CLIM_W) * 4 + c] / 255, rd = c => mix(mix(at(i, j, c), at(i + 1, j, c), fx), mix(at(i, j + 1, c), at(i + 1, j + 1, c), fx), fy);
-  return { cover: rd(0), will: rd(1), snow: SNOW_LOW + rd(2) * (SNOW_HIGH - SNOW_LOW) };
+  return { cover: rd(0), will: rd(1), snow: SNOW_LOW + rd(2) * (SNOW_HIGH - SNOW_LOW), lasting: SNOW_LOW + rd(3) * (SNOW_HIGH - SNOW_LOW) };
 }
 // how hard it rains on the ground at a place, 0..1 (wxRainAt in the shaders); clim: the climate there, if it counts
 export function rainAt(noise, lat, lon, cover, force, drift = 0, clim, whirls = whirlsAt(drift)) {
@@ -288,7 +291,12 @@ export const snowNumbers = (shift, exag) => [snowfallLine(0, shift) * exag / 100
 // Off the album's own land the line goes by the warmth of the month (snowByWarmth, the picture of the climate). For
 // the shaders: by how much one whole of the blue of that picture lifts the line, and where the line is at none — km of
 // the world. (On the album's land the line stays the one above: it hangs on the snow the ground shader draws.)
-export const snowClimNumbers = (shift, exag) => [(SNOW_HIGH - SNOW_LOW) * exag / 1000, (SNOW_LOW + shift) * exag / 1000];
+export const snowClimNumbers = (shift, exag) => [(SNOW_HIGH - SNOW_LOW) * exag / 1000, (SNOW_LOW + shift) * exag / 1000, SNOW_DROP * exag / 1000];
+// The line of fresh snow at a place, m (wxSnowLine in the shaders). It lies SNOW_DROP below the lasting snow of the
+// place — on the album's land the line by the latitude above, beyond it the lasting snow of the world (`lasting`, m:
+// the ground's rule by the warmth of the place, ground/climate.js) — and never above the line of the month's warmth
+// (`month`, m: snowByWarmth): in a cold month it snows far below the snow that lasts the summer.
+export const freshSnowLine = (lat, inside, lasting, month, shift = 0) => Math.min(mix(lasting + shift, snowLine(lat, shift), inside) - SNOW_DROP, month + shift);
 
 // ---- the fog of the morning
 // How much of the fog is left at an hour of the day, 0..1: it gathers through the night, is thickest at dawn, thins
@@ -390,8 +398,8 @@ export const BANK_KM = 8192;
 // uFogRect: where tFog lies on the plane: (x0, z0, 1 / width, 1 / height), km.
 // uSnowF: the line of snowfall (snowNumbers): x its height at the equator, y its fall with every degree of latitude,
 //        z its band, all in km of the world; w 1 while precipitation can be snow.
-// uSnowC: the line of snowfall off the album's land (snowClimNumbers): x how much one whole of the blue of the
-//        picture of the climate lifts it, y where it is at none — km of the world.
+// uSnowC: the lines of snow in the picture of the climate (snowClimNumbers): x how much one whole of a colour lifts a
+//        line, y where the line is at none, z how far under the lasting snow fresh snow lies — km of the world.
 // uWind: the two reads of the clouds where the wind differs from the album's (windTurn): xy where they stand in their
 //        turn, zw their weights.
 // uWhirl, uWhirlN: the great whirls in view — of each (x, y) on the map, 1 / its radius (km of the map), its turn — and
@@ -421,13 +429,14 @@ export function needClouds() {
 // The climate for the clouds: the open climate of the world is read once (4 MB), and its picture made again when the
 // day of the year moves into another fortnight. Until it has come — and if it does not come — the weather goes by the
 // knobs alone. fetchClimate(): a promise of { prec, tavg, elev } (climateOf).
+// lasting(lat, lon): the line of lasting snow of the world there, m (or nothing) — from the land of the whole Earth.
 const clim = { data: null, asked: false, key: -1 };
-export function needClimate(yday, fetchClimate) {
+export function needClimate(yday, fetchClimate, lasting = null) {
   if (!clim.asked) { clim.asked = true; fetchClimate().then(d => { clim.data = d; clim.key = -1; }).catch(e => console.warn('[album] no climate for the clouds:', e.message || e)); }
   const key = Math.floor(yday / 15);
   if (!clim.data || key === clim.key) return;
   clim.key = key; const old = WX.tClim.value, d = clim.data;
-  WX.tClim.value = climTexture(climatePicture(d.prec, key * 15 + 7, 720, 360, d.tavg, d.elev), CLIM_W, CLIM_H); old?.dispose?.();
+  WX.tClim.value = climTexture(climatePicture(d.prec, key * 15 + 7, 720, 360, d.tavg, d.elev, lasting), CLIM_W, CLIM_H); old?.dispose?.();
   clim.pic = WX.tClim.value.image.data;
 }
 // how much of a great whirl there is over a place by its climate: whole where the month is wet, none where it is dry
@@ -582,12 +591,15 @@ float wxFlash(vec2 q) {
   return (.5 + .5 * step(.5, fract(k / uStorm.z * 2.5 + h * 3.))) * (1. - smoothstep(.08, .48, length(fract(g) - .5)));
 }
 #endif
-// is a point of the world on the album's own land — where the picture of its floor lies: 0 off it .. 1 well inside
-float wxInside(vec3 wpos) { vec2 uv = (wxPlane(wpos) - uFogRect.xy) * uFogRect.zw, e = min(uv, 1. - uv); return wpos.y > -RKM ? smoothstep(0., .08, min(e.x, e.y)) : 0.; }
-// The line of snowfall at a place of the map (m: wxMap or wxFlat of it), km of the world over the sea. On the album's
-// own land it goes by the latitude — it hangs on the snow the ground shader draws; off it, by the warmth of the month.
+// is a place of the map (m: wxMap or wxFlat of it) in the album's polygon: 1 inside, 0 beyond its rim — the rule of
+// the ground shader (inRegion, glsl.js)
+float wxInside(vec4 m) { return inRegion(vec2(degrees(asin(m.w)), m.z * 360. - 180.)); }
+// The line of fresh snow at a place of the map, km of the world over the sea (freshSnowLine). It hangs on the lasting
+// snow the ground shader draws — in the polygon the line by the latitude, beyond it the lasting snow of the world —
+// and is never above the line of the month's warmth.
 float wxSnowLine(vec4 m, float inside) {
-  return mix(textureLod(tClim, vec2(m.z, .5 - .5 * m.w), 0.).b * uSnowC.x + uSnowC.y, uSnowF.x - abs(degrees(asin(m.w))) * uSnowF.y, inside);
+  vec4 c = textureLod(tClim, vec2(m.z, .5 - .5 * m.w), 0.);
+  return min(mix(c.a * uSnowC.x + uSnowC.y - uSnowC.z, uSnowF.x - abs(degrees(asin(m.w))) * uSnowF.y, inside), c.b * uSnowC.x + uSnowC.y);
 }
 // how much of what falls is snow, 0 rain .. 1 snow: at a height with the line of snowfall given (both km of the world over the sea)
 float wxSnowy(float line, float alt) { return smoothstep(-uSnowF.z, uSnowF.z, alt - line); }
@@ -595,7 +607,7 @@ float wxSnowy(float line, float alt) { return smoothstep(-uSnowF.z, uSnowF.z, al
 // album knows it, and by the sea elsewhere (m: the place of the point on the map — its zw; finding it costs an
 // arctangent, so the caller gives the one it has; inside: wxInside of the point, or of one near it)
 float wxSnowAir(vec3 wpos, vec4 m, float inside) {
-  float land = inside > 0. ? textureLod(tFog, (wxPlane(wpos) - uFogRect.xy) * uFogRect.zw, 0.).a * uExag * .001 * inside : 0.;
+  float land = inside > 0. ? textureLod(tFog, clamp((wxPlane(wpos) - uFogRect.xy) * uFogRect.zw, 0., 1.), 0.).a * uExag * .001 * inside : 0.;
   return wxSnowy(wxSnowLine(m, inside), land);
 }
 // the top of the fog over a point of the plane, km over the sea: the floor of the land there, and over it a layer

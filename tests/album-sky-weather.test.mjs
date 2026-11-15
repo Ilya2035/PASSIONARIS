@@ -7,7 +7,7 @@ import { MAP_NEAR, CLOUD_KM, GROW_KM, CELL_KM, GROW, GROW_LOD, GROW_DEV, FIELD_D
   cloudNoise, cloudAt, cellAt, cloudOffset, growOffset, cellOffset, cloudThreshold, rainCover, rainMask, rainAt,
   COVER_REST, WILL_REST, skyShare, coverOfShare, rainWill, coverAt, rainMaskAt, climatePicture, climateAt, climUV, CLIM_W, CLIM_H, climateOf,
   WORLD, WORLD_LON, worldNeeded, TRADES, POLAR, BELTS, windOf, windTurn, windNorm, WIND_SPAN, WIND_LIKE, baseAt, WHIRLS, WHIRL_MORE, WHIRL_EYE, whirlsAt, whirlWarp, whirlShare,
-  LAPSE, SNOW_T, SNOW_LOW, SNOW_HIGH, snowByWarmth, snowClimNumbers,
+  LAPSE, SNOW_T, SNOW_LOW, SNOW_HIGH, snowByWarmth, snowClimNumbers, freshSnowLine,
   STORM_KM, STORM_EVERY, STORM_FLASH, STORM_STILL, flashAt, fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
   HILL_FILL, HILL_FROM, CAP_CREST, CAP_HIGH, CAP_UNDER, CAP_OVER, capBank, capAt } from '../src/album/sky/weather.js';
 import { readFileSync } from 'node:fs';
@@ -41,7 +41,9 @@ test('weather: the map of the whole Earth the clouds and the rain are laid out o
   // it closes on itself around the Earth: the two sides of the line opposite the album lie MAP_ROUND apart
   near(mapOf(40, CENTRE.lon + 179.999)[0] - mapOf(40, CENTRE.lon - 179.999)[0], MAP_ROUND, 1);
   // every read of the picture repeats a whole number of times around it, so nothing shows along that line
-  assert.deepEqual(ROUND, [4, 3, 2]); for (const k of [CLOUD_KM, GROW_KM, CELL_KM, ...LUMPS.map(l => MAP_ROUND / l[0])]) near(MAP_ROUND / k, Math.round(MAP_ROUND / k), 1e-9);
+  assert.deepEqual(ROUND, [4, 3, 2]); for (const k of [CLOUD_KM, GROW_KM, CELL_KM]) near(MAP_ROUND / k, Math.round(MAP_ROUND / k), 1e-9);
+  // (the lumps are read turned, by whole numbers: one turn around the Earth moves the read by a whole number of pictures)
+  for (const l of LUMPS) assert.ok(Number.isInteger(l[0]) && Number.isInteger(l[1]) && l[1] !== 0, `${l}`);
   for (const [x, y] of [[1234, -456], [-9000, 3000]]) { near(cloudAt(NOISE, x, y, 700), cloudAt(NOISE, x + MAP_ROUND, y, 700), 1e-9); near(cellAt(NOISE, x, y, 700), cellAt(NOISE, x - MAP_ROUND, y, 700), 1e-9); }
   // the three directions the shaders find a place by: the axis of the Earth and two places on the equator
   const dir = (la, lo) => { const v = toWorld(la, lo, 0); return [v.x / R, (v.y + R) / R, v.z / R]; }, dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -193,9 +195,18 @@ test('weather: above the line of snowfall it snows, below it rains', () => {
   const jan = climateAt(climatePicture(pr, 15.2, W, H, ta, el), 60, 30), south = climateAt(climatePicture(pr, 15.2, W, H, ta, el), 20, 30), jul = climateAt(climatePicture(pr, 197.8, W, H, ta, el), 60, 30);
   near(jan.snow, snowByWarmth(-20, 500), 40); near(south.snow, snowByWarmth(20), 40); near(jul.snow, snowByWarmth(20, 500), 40); assert.ok(jan.snow < 0 && south.snow > 2500);
   near(climateAt(climatePicture(pr, 15.2), 60, 30).snow, SNOW_HIGH, 1e-6, 'no temperature: no snow');
-  for (const exag of [1, 1.6]) for (const shift of [0, -500]) { const [per, at0] = snowClimNumbers(shift, exag); for (const b of [0, .3, 1]) near((b * per + at0) / exag * 1000, SNOW_LOW + b * (SNOW_HIGH - SNOW_LOW) + shift, 1e-6); }
-  // the shaders: on the album's land the line of the ground, off it the line of the climate, one passing into the other
-  assert.ok(WEATHER.includes('float wxInside(vec3 wpos)') && WEATHER.includes('textureLod(tClim, vec2(m.z, .5 - .5 * m.w), 0.).b * uSnowC.x + uSnowC.y'));
+  for (const exag of [1, 1.6]) for (const shift of [0, -500]) { const [per, at0, drop] = snowClimNumbers(shift, exag); near(drop, SNOW_DROP * exag / 1000, 1e-12); for (const b of [0, .3, 1]) near((b * per + at0) / exag * 1000, SNOW_LOW + b * (SNOW_HIGH - SNOW_LOW) + shift, 1e-6); }
+  // The line of fresh snow hangs on the lasting snow the ground draws: SNOW_DROP under it — in the polygon the line by
+  // the latitude, beyond it the lasting snow of the world — and is never above the line of the month's warmth
+  near(freshSnowLine(42.63, 1, 9999, 5000), snowfallLine(42.63), 1e-9, 'the Pyrenees in June: as it was'); near(freshSnowLine(46, 0, 2450, 5000), 2450 - SNOW_DROP, 1e-9, 'the Alps in summer');
+  near(freshSnowLine(46, 0, 2450, 300), 300, 1e-9, 'the Alps in January: down to the valleys'); near(freshSnowLine(42.63, 1, 9999, 900), 900, 1e-9, 'and the Pyrenees in a cold month');
+  near(freshSnowLine(46, .5, 2450, 5000), (2450 + snowLine(46)) / 2 - SNOW_DROP, 1e-9, 'at the rim of the polygon one passes into the other'); near(freshSnowLine(46, 0, 2450, 5000, -400), 2450 - 400 - SNOW_DROP, 1e-9);
+  // the picture of the climate carries the lasting snow of the world too (given by the land of the whole Earth)
+  const last = (lat, lon) => (lat > 40 ? 2400 : 5200), withLast = climatePicture(pr, 197.8, W, H, ta, el, last);
+  near(climateAt(withLast, 60, 30).lasting, 2400, 40); near(climateAt(withLast, 10, 30).lasting, 5200, 40); near(climateAt(climatePicture(pr, 197.8, W, H, ta, el), 60, 30).lasting, SNOW_HIGH, 1e-6, 'none given: at the top');
+  // the shaders: the same rule, and «in the polygon» is the rule of the ground shader
+  assert.ok(WEATHER.includes('float wxInside(vec4 m) { return inRegion(vec2(degrees(asin(m.w)), m.z * 360. - 180.)); }'));
+  assert.ok(WEATHER.includes('return min(mix(c.a * uSnowC.x + uSnowC.y - uSnowC.z, uSnowF.x - abs(degrees(asin(m.w))) * uSnowF.y, inside), c.b * uSnowC.x + uSnowC.y);'));
   // the pages of snowfall: it rains over the place with the clouds moved as the page moves them, and the mountains there are above the line
   const force = def('rainForce').value, cover = rainCover(force);
   for (const id of ['sky-snow', 'sky-snow-near']) {
@@ -221,7 +232,11 @@ test('weather: a storm cloud from a height, a grey sky from below', () => {
   for (let h = 20; h < 2000; h *= 1.2) assert.ok(rainCloudShow(h * 1.2) >= rainCloudShow(h) - 1e-9 && cloudShow(h * 1.2) >= cloudShow(h), `height ${h}`);
   // its lumps are the picture of the clouds read small — no noise counted in the pixel; they do not drown the field itself
   assert.ok(!/vnoise|fbm|worley/.test(cloudShader.replace(/float vnoise[\s\S]*?\n}/, '').split('uniform float uShow')[1]), 'no noise in the shell');
-  assert.ok(LUMPS.length === 2 && LUMPS[0][0] < LUMPS[1][0] && MAP_ROUND / LUMPS[0][0] < CLOUD_KM / 8 && MAP_ROUND / LUMPS[1][0] > 100 && LUMPS[0][1] + LUMPS[1][1] < .6);
+  const lumpKm = LUMPS.map(l => MAP_ROUND / Math.hypot(l[0], l[1])), lumpAt = LUMPS.map(l => Math.atan2(l[1], l[0]) * 180 / Math.PI);
+  assert.ok(LUMPS.length === 2 && lumpKm[0] > lumpKm[1] && lumpKm[0] < CLOUD_KM / 8 && lumpKm[1] > 100 && LUMPS[0][2] + LUMPS[1][2] < .6);
+  // each is turned, and not by the same angle: read straight, the lumps stood in rows and a solid cloud showed a grid
+  assert.ok(Math.abs(lumpAt[0]) > 20 && Math.abs(lumpAt[0]) < 70 && Math.abs(lumpAt[1]) > 20 && Math.abs(lumpAt[1]) < 70 && Math.abs(lumpAt[0] - lumpAt[1]) > 40, `${lumpAt}`);
+  assert.match(cloudShader, /cloudTex\(vec2\(40\.0 \* p\.x \+ 28\.0 \* p\.y, -28\.0 \* p\.x \+ 40\.0 \* p\.y\) \+ \.23, lod\.x\)/);
   // a whole cloud has a lit side and a far side: the field asked a little way toward the Sun; a cloud that rains is dark
   assert.ok(BANK_STEP > 10 && BANK_STEP < 60); assert.match(cloudShader, /float bank = smoothstep\(-\.008, \.06, toSun\)/); assert.match(cloudShader, /\(\.02 \+ \.13 \* smoothstep\(-\.075, \.05, slope\)\)/);
   assert.match(cloudShader, /float cloudTex\(vec2 uv, float lod\)/);
@@ -423,7 +438,7 @@ test('weather: nothing of it in the shaders of the land, and nothing at all whil
   for (const k of ['tCloud', 'tFog', 'tPeak', 'tClim', 'uRain', 'uGrow', 'uSunMap', 'uStorm', 'uFog', 'uFogRect', 'uSnowF', 'uSnowC', 'uWind', 'uWhirl', 'uWhirlN', 'uLow']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
   // the GLSL of the weather: what post.js and layers/clouds.js call
   for (const sig of ['vec4 wxMap(vec3 P)', 'vec4 wxMapOf(vec3 wpos)', 'float wxPolar(float s)', 'vec2 wxClim(vec4 m)', 'vec2 wxPlane(vec3 wpos)', 'float wxCloudN(vec2 q, float lod)', 'float wxThr(float c)', 'float albumCloudField(vec3 wpos)', 'float albumCloudShade(vec3 wpos)',
-    'float wxCells(vec2 q)', 'float wxRainMask(vec2 q, float will)', 'float wxBase(vec2 q, float lod)', 'float wxGrow(vec2 q, float lod)', 'float wxRainCloud(vec2 q, float thr, float g, float lod)', 'float wxRainAt(vec4 m, float lod)', 'float wxFogTop(vec2 q)', 'vec2 wxCap(vec2 q)', 'float wxFlash(vec2 q)', 'float wxSnowLine(vec4 m, float inside)', 'float wxSnowy(float line, float alt)', 'float wxInside(vec3 wpos)', 'vec4 wxFlat(vec3 P)', 'vec2 wxWindOf(float s)', 'vec2 wxWhirl(vec2 q)', 'float wxWindNorm()',
+    'float wxCells(vec2 q)', 'float wxRainMask(vec2 q, float will)', 'float wxBase(vec2 q, float lod)', 'float wxGrow(vec2 q, float lod)', 'float wxRainCloud(vec2 q, float thr, float g, float lod)', 'float wxRainAt(vec4 m, float lod)', 'float wxFogTop(vec2 q)', 'vec2 wxCap(vec2 q)', 'float wxFlash(vec2 q)', 'float wxSnowLine(vec4 m, float inside)', 'float wxSnowy(float line, float alt)', 'float wxInside(vec4 m)', 'vec4 wxFlat(vec3 P)', 'vec2 wxWindOf(float s)', 'vec2 wxWhirl(vec2 q)', 'float wxWindNorm()',
     'float wxSnowAir(vec3 wpos, vec4 m, float inside)']) assert.ok(WEATHER.includes(sig), sig);
   assert.ok(!/vnoise|fbm|worley/.test(WEATHER), 'the weather reads its two pictures and counts no noise');
   for (const k of Object.keys(WX)) assert.match(WEATHER, new RegExp(`\\b${k}\\b`), k);

@@ -68,7 +68,7 @@ const WET = /* glsl */`
             vec4 mw = wxMapOf(wpos); mw.xy += WX_WIND * RAIN_LAG; vec2 q0 = mw.xy, cw = wxClim(mw);
             float thw = wxThr(cw.x), pol = wxPolar(mw.w), gw = wxGrow(q0, pol), now = wxRainCloud(q0, thw, gw, pol) * wxRainMask(q0, cw.y);
             float was = wxRainCloud(q0 + WX_WIND * 40., thw, gw, pol + 2.) * wxRainMask(q0 + WX_WIND * 40., cw.y), wk = min(uRain.x * 1.6, 1.), wet = max(now, .7 * was) * wk;
-            wIn = wxInside(wpos); float alt = length(wpos + vec3(0., RKM, 0.)) - RKM, over = uSnowF.w > 0. ? alt - wxSnowLine(mw, wIn) : -9.;
+            wIn = wxInside(mw); float alt = length(wpos + vec3(0., RKM, 0.)) - RKM, over = uSnowF.w > 0. ? alt - wxSnowLine(mw, wIn) : -9.;
             if (uSnowF.w > 0. && over > -uSnowF.z * 2.) {
               // The edge of the fresh snow is crisp and ragged, with patches before it: not a contour drawn with a
               // ruler and not a soft band either (a soft band lies on the slopes like cotton wool). The raggedness
@@ -191,7 +191,7 @@ const RAINY = /* glsl */`
                 // how much of it is snow: in the air by the height of the land under it; near the ground by the very
                 // slope behind the pixel, so that snow falls exactly where the ground turns white
                 if (uSnowF.w > 0. && rain > 0.) {
-                  if (!ground) wIn = wxInside(uEye + rdW * mix(t0, t1, .5));
+                  if (!ground) wIn = wxInside(mix(ma, mb, .5));
                   if (!ground || uRain.w < 1.) sf = .5 * (wxSnowAir(uEye + rdW * mix(t0, t1, .3), mix(ma, mb, .3), wIn) + wxSnowAir(uEye + rdW * mix(t0, t1, .75), mix(ma, mb, .75), wIn));
                   if (ground) sf = mix(sf, wxSnowy(wxSnowLine(mb, wIn), length(wpos + vec3(0., RKM, 0.)) - RKM), uRain.w);
                 }
@@ -226,9 +226,15 @@ const RAINY = /* glsl */`
             }
           }`;
 // Day and night on the ball (sky/globe.js): from a height the frame is drawn with the highest Sun in view, and here
-// every pixel of the land is dimmed to the light of its own place.
+// every pixel of the land is dimmed to the light of its own place. Over the album's polygon the ground was lit by
+// the frame's Sun; beyond it the ground shader has already taken the Sun of the place (terrain.js), and only the
+// colours of the light are brought to the place's own. (inRegion: glsl.js — 1 in the polygon, 0 beyond its rim.)
 const RELIT = /* glsl */`
-          if (ground) c = globeDimmed(c, globeRelight(normalize(wpos + vec3(0., RKM, 0.))));`;
+          if (ground) {
+            vec3 up = normalize(wpos + vec3(0., RKM, 0.));
+            float rg = inRegion(vec2(degrees(asin(clamp(dot(up, WX_AXIS), -1., 1.))), LON0 + degrees(atan(dot(up, WX_E1), dot(up, WX_E0)))));
+            c = globeDimmed(c, mix(globeRelightOwn(up), globeRelight(up), rg));
+          }`;
 // The plume of an eruption or of a sand storm (sky/plume.js) on the land: its shadow; what has fallen out of it —
 // grey ash, thickest near the volcano, or pale dust — through which the relief still reads; and, for dust, the haze of
 // the storm itself: the dust hangs from its top down to the ground, and a look gathers it along its way through it.
