@@ -1,0 +1,122 @@
+{
+  "about": "Исторические земли и провинции Франции, которых нет в нынешнем полигоне альбома (к северу от 44,8° с. ш. и к востоку от 4,5° в. д.): заготовка к третьему этапу третьей волны, когда полигон расширится на всю Францию. Вид — как в lands.json: lands — исторические земли (группы провинций), provinces — провинции, политические и исторические, каждая тянется к одному или нескольким нынешним департаментам. iso — коды департаментов ISO 3166-2; когда admin.json получит единицы Natural Earth admin-1 для севера Франции, по ним пишется admin (коды FRA-…), поле iso уходит. at — опорные точки [широта, долгота]: середина провинции, к ней ставится подпись (точная граница — по рельефу, docs/album/division.md). town — главный город провинции, для справки: город-столицу деление выбирает само, самый большой город провинции. Регион у всех — «Западная Европа» (westeurope). Списки составлены вручную по истории дореволюционных провинций и «pays»; спорные места — в notes.",
+  "region": "westeurope",
+  "lands": [
+    { "id": "normandy", "name": "Нормандия", "region": "westeurope" },
+    { "id": "brittany", "name": "Бретань", "region": "westeurope" },
+    { "id": "picardy", "name": "Пикардия, Артуа и Фландрия", "region": "westeurope" },
+    { "id": "iledefrance", "name": "Иль-де-Франс", "region": "westeurope" },
+    { "id": "loire", "name": "Орлеане и долина Луары", "region": "westeurope" },
+    { "id": "champagne", "name": "Шампань", "region": "westeurope" },
+    { "id": "lorraine", "name": "Лотарингия и Эльзас", "region": "westeurope" },
+    { "id": "burgundy", "name": "Бургундия и Франш-Конте", "region": "westeurope" },
+    { "id": "berry", "name": "Берри, Бурбонне и Ниверне", "region": "westeurope" },
+    { "id": "poitou", "name": "Пуату и Шаранта", "region": "westeurope" },
+    { "id": "limousin", "name": "Лимузен и Овернь", "region": "westeurope" },
+    { "id": "lyonnais", "name": "Лионне и Дофине", "region": "westeurope" },
+    { "id": "savoy", "name": "Савойя", "region": "westeurope" },
+    { "id": "provence", "name": "Прованс и Ницца", "region": "westeurope" },
+    { "id": "corsica", "name": "Корсика", "region": "westeurope" }
+  ],
+  "provinces": [
+    { "id": "caux", "name": "Руан и Ко", "region": "westeurope", "land": "normandy", "iso": ["FR-76"], "town": "Руан", "at": [[49.65, 1.0]] },
+    { "id": "evrecin", "name": "Эврёсен и Нормандский Вексен", "region": "westeurope", "land": "normandy", "iso": ["FR-27"], "town": "Эврё", "at": [[49.1, 1.0]] },
+    { "id": "bessin", "name": "Бессен и Ож", "region": "westeurope", "land": "normandy", "iso": ["FR-14"], "town": "Кан", "at": [[49.1, -0.35]] },
+    { "id": "cotentin", "name": "Котантен и Авраншен", "region": "westeurope", "land": "normandy", "iso": ["FR-50"], "town": "Кутанс", "at": [[49.1, -1.3]] },
+    { "id": "alencon", "name": "Алансонне и Перш", "region": "westeurope", "land": "normandy", "iso": ["FR-61"], "town": "Алансон", "at": [[48.6, 0.1]] },
+
+    { "id": "cornouaille", "name": "Леон и Корнуай", "region": "westeurope", "land": "brittany", "iso": ["FR-29"], "town": "Кемпер", "at": [[48.25, -4.1]] },
+    { "id": "tregor", "name": "Трегор и Пентьевр", "region": "westeurope", "land": "brittany", "iso": ["FR-22"], "town": "Сен-Бриё", "at": [[48.4, -2.8]] },
+    { "id": "vannetais", "name": "Ваннете", "region": "westeurope", "land": "brittany", "iso": ["FR-56"], "town": "Ванн", "at": [[47.85, -2.85]] },
+    { "id": "rennais", "name": "Ренне и Сен-Мало", "region": "westeurope", "land": "brittany", "iso": ["FR-35"], "town": "Ренн", "at": [[48.15, -1.65]] },
+    { "id": "nantais", "name": "Нанте", "region": "westeurope", "land": "brittany", "iso": ["FR-44"], "town": "Нант", "at": [[47.35, -1.75]] },
+
+    { "id": "flandre", "name": "Французская Фландрия и Эно", "region": "westeurope", "land": "picardy", "iso": ["FR-59"], "town": "Лилль", "at": [[50.45, 3.25]] },
+    { "id": "artois", "name": "Артуа и Булонне", "region": "westeurope", "land": "picardy", "iso": ["FR-62"], "town": "Аррас", "at": [[50.5, 2.3]] },
+    { "id": "amienois", "name": "Амьенуа и Понтьё", "region": "westeurope", "land": "picardy", "iso": ["FR-80"], "town": "Амьен", "at": [[49.95, 2.3]] },
+    { "id": "beauvaisis", "name": "Бовези и Валуа", "region": "westeurope", "land": "picardy", "iso": ["FR-60"], "town": "Бове", "at": [[49.4, 2.4]] },
+    { "id": "vermandois", "name": "Вермандуа и Суасонне", "region": "westeurope", "land": "picardy", "iso": ["FR-02"], "town": "Лан", "at": [[49.55, 3.55]] },
+
+    { "id": "paris", "name": "Париж и Франс", "region": "westeurope", "land": "iledefrance", "iso": ["FR-75", "FR-92", "FR-93", "FR-94", "FR-95"], "town": "Париж", "at": [[48.86, 2.35], [49.07, 2.1]] },
+    { "id": "hurepoix", "name": "Юрепуа и Мантуа", "region": "westeurope", "land": "iledefrance", "iso": ["FR-78", "FR-91"], "town": "Версаль", "at": [[48.8, 1.85], [48.5, 2.25]] },
+    { "id": "brie", "name": "Бри", "region": "westeurope", "land": "iledefrance", "iso": ["FR-77"], "town": "Мо", "at": [[48.6, 2.95]] },
+
+    { "id": "orleanais", "name": "Орлеане", "region": "westeurope", "land": "loire", "iso": ["FR-45"], "town": "Орлеан", "at": [[47.9, 2.25]] },
+    { "id": "chartrain", "name": "Шартрен и Бос", "region": "westeurope", "land": "loire", "iso": ["FR-28"], "town": "Шартр", "at": [[48.35, 1.35]] },
+    { "id": "blesois", "name": "Блезуа и Вандомуа", "region": "westeurope", "land": "loire", "iso": ["FR-41"], "town": "Блуа", "at": [[47.6, 1.4]] },
+    { "id": "touraine", "name": "Турень", "region": "westeurope", "land": "loire", "iso": ["FR-37"], "town": "Тур", "at": [[47.25, 0.7]] },
+    { "id": "anjou", "name": "Анжу", "region": "westeurope", "land": "loire", "iso": ["FR-49"], "town": "Анже", "at": [[47.4, -0.55]] },
+    { "id": "maine", "name": "Мэн", "region": "westeurope", "land": "loire", "iso": ["FR-72"], "town": "Ле-Ман", "at": [[47.95, 0.2]] },
+    { "id": "lavallois", "name": "Нижний Мэн", "region": "westeurope", "land": "loire", "iso": ["FR-53"], "town": "Лаваль", "at": [[48.15, -0.65]] },
+
+    { "id": "reims", "name": "Ремуа и Шалон", "region": "westeurope", "land": "champagne", "iso": ["FR-51"], "town": "Реймс", "at": [[48.95, 4.25]] },
+    { "id": "troyes", "name": "Труа", "region": "westeurope", "land": "champagne", "iso": ["FR-10"], "town": "Труа", "at": [[48.3, 4.15]] },
+    { "id": "bassigny", "name": "Бассиньи", "region": "westeurope", "land": "champagne", "iso": ["FR-52"], "town": "Лангр", "at": [[48.1, 5.2]] },
+    { "id": "rethelois", "name": "Арденны и Ретелуа", "region": "westeurope", "land": "champagne", "iso": ["FR-08"], "town": "Шарлевиль", "at": [[49.6, 4.65]] },
+
+    { "id": "nancy", "name": "Нанси и Туль", "region": "westeurope", "land": "lorraine", "iso": ["FR-54"], "town": "Нанси", "at": [[48.75, 6.15]] },
+    { "id": "messin", "name": "Мессен и Немецкая Лотарингия", "region": "westeurope", "land": "lorraine", "iso": ["FR-57"], "town": "Мец", "at": [[49.05, 6.65]] },
+    { "id": "barrois", "name": "Барруа и Верден", "region": "westeurope", "land": "lorraine", "iso": ["FR-55"], "town": "Бар-ле-Дюк", "at": [[49.0, 5.4]] },
+    { "id": "vosges", "name": "Вогезы", "region": "westeurope", "land": "lorraine", "iso": ["FR-88"], "town": "Эпиналь", "at": [[48.2, 6.4]] },
+    { "id": "basalsace", "name": "Нижний Эльзас", "region": "westeurope", "land": "lorraine", "iso": ["FR-67"], "town": "Страсбург", "at": [[48.65, 7.55]] },
+    { "id": "hautalsace", "name": "Верхний Эльзас и Бельфор", "region": "westeurope", "land": "lorraine", "iso": ["FR-68", "FR-90"], "town": "Кольмар", "at": [[47.85, 7.25], [47.63, 6.9]] },
+
+    { "id": "dijonnais", "name": "Дижонне и Осуа", "region": "westeurope", "land": "burgundy", "iso": ["FR-21"], "town": "Дижон", "at": [[47.4, 4.75]] },
+    { "id": "maconnais", "name": "Шалонне, Маконне и Шароле", "region": "westeurope", "land": "burgundy", "iso": ["FR-71"], "town": "Шалон-сюр-Сон", "at": [[46.65, 4.55]] },
+    { "id": "auxerrois", "name": "Осеруа и Сенонне", "region": "westeurope", "land": "burgundy", "iso": ["FR-89"], "town": "Осер", "at": [[47.85, 3.6]] },
+    { "id": "bresse", "name": "Бресс и Бюже", "region": "westeurope", "land": "burgundy", "iso": ["FR-01"], "town": "Бург-ан-Брес", "at": [[46.1, 5.35]] },
+    { "id": "besancon", "name": "Безансонне и Монбельяр", "region": "westeurope", "land": "burgundy", "iso": ["FR-25"], "town": "Безансон", "at": [[47.15, 6.35]] },
+    { "id": "aval", "name": "Аваль и Юра", "region": "westeurope", "land": "burgundy", "iso": ["FR-39"], "town": "Доль", "at": [[46.75, 5.7]] },
+    { "id": "amont", "name": "Амон", "region": "westeurope", "land": "burgundy", "iso": ["FR-70"], "town": "Везуль", "at": [[47.65, 6.1]] },
+
+    { "id": "berry", "name": "Берри", "region": "westeurope", "land": "berry", "iso": ["FR-18"], "town": "Бурж", "at": [[47.05, 2.5]] },
+    { "id": "basberry", "name": "Нижний Берри", "region": "westeurope", "land": "berry", "iso": ["FR-36"], "town": "Шатору", "at": [[46.75, 1.55]] },
+    { "id": "bourbonnais", "name": "Бурбонне", "region": "westeurope", "land": "berry", "iso": ["FR-03"], "town": "Мулен", "at": [[46.4, 3.2]] },
+    { "id": "nivernais", "name": "Ниверне", "region": "westeurope", "land": "berry", "iso": ["FR-58"], "town": "Невер", "at": [[47.1, 3.5]] },
+
+    { "id": "poitou", "name": "Верхнее Пуату", "region": "westeurope", "land": "poitou", "iso": ["FR-86"], "town": "Пуатье", "at": [[46.55, 0.45]] },
+    { "id": "niortais", "name": "Ниорте и Гатин", "region": "westeurope", "land": "poitou", "iso": ["FR-79"], "town": "Ниор", "at": [[46.55, -0.3]] },
+    { "id": "baspoitou", "name": "Нижнее Пуату", "region": "westeurope", "land": "poitou", "iso": ["FR-85"], "town": "Фонтене-ле-Конт", "at": [[46.65, -1.3]] },
+    { "id": "aunis", "name": "Онис и Сентонж", "region": "westeurope", "land": "poitou", "iso": ["FR-17"], "town": "Ла-Рошель", "at": [[45.75, -0.75]] },
+    { "id": "angoumois", "name": "Ангумуа", "region": "westeurope", "land": "poitou", "iso": ["FR-16"], "town": "Ангулем", "at": [[45.7, 0.2]] },
+
+    { "id": "limousin", "name": "Лимузен", "region": "westeurope", "land": "limousin", "iso": ["FR-87"], "town": "Лимож", "at": [[45.9, 1.25]] },
+    { "id": "baslimousin", "name": "Нижний Лимузен", "region": "westeurope", "land": "limousin", "iso": ["FR-19"], "admin": ["FRA-5280"], "town": "Тюль", "at": [[45.35, 1.9]] },
+    { "id": "marche", "name": "Марш", "region": "westeurope", "land": "limousin", "iso": ["FR-23"], "town": "Гере", "at": [[46.1, 2.0]] },
+    { "id": "limagne", "name": "Нижняя Овернь", "region": "westeurope", "land": "limousin", "iso": ["FR-63"], "town": "Клермон", "at": [[45.7, 3.15]] },
+
+    { "id": "lyonnais", "name": "Лионне и Божоле", "region": "westeurope", "land": "lyonnais", "iso": ["FR-69"], "town": "Лион", "at": [[45.85, 4.6]] },
+    { "id": "forez", "name": "Форе", "region": "westeurope", "land": "lyonnais", "iso": ["FR-42"], "town": "Монбризон", "at": [[45.75, 4.2]] },
+    { "id": "dauphine", "name": "Гренобле и Вьеннуа", "region": "westeurope", "land": "lyonnais", "iso": ["FR-38"], "town": "Гренобль", "at": [[45.25, 5.6]] },
+    { "id": "valentinois", "name": "Валентинуа и Диуа", "region": "westeurope", "land": "lyonnais", "iso": ["FR-26"], "admin": ["FRA-5288"], "town": "Валанс", "at": [[44.7, 5.15]] },
+    { "id": "gapencais", "name": "Гапансе и Бриансонне", "region": "westeurope", "land": "lyonnais", "iso": ["FR-05"], "town": "Гап", "at": [[44.65, 6.3]] },
+
+    { "id": "savoie", "name": "Савойя, Морьен и Тарантез", "region": "westeurope", "land": "savoy", "iso": ["FR-73"], "town": "Шамбери", "at": [[45.5, 6.4]] },
+    { "id": "genevois", "name": "Женевуа, Шабле и Фосиньи", "region": "westeurope", "land": "savoy", "iso": ["FR-74"], "town": "Анси", "at": [[46.05, 6.4]] },
+
+    { "id": "marseille", "name": "Марсель, Экс и Арль", "region": "westeurope", "land": "provence", "iso": ["FR-13"], "admin": ["FRA-5274"], "town": "Экс", "at": [[43.5, 5.3], [43.68, 4.63]] },
+    { "id": "comtat", "name": "Конта-Венессен и Авиньон", "region": "westeurope", "land": "provence", "iso": ["FR-84"], "admin": ["FRA-5352"], "town": "Авиньон", "at": [[44.0, 5.15]] },
+    { "id": "toulon", "name": "Тулон и Фрежюс", "region": "westeurope", "land": "provence", "iso": ["FR-83"], "town": "Тулон", "at": [[43.45, 6.2]] },
+    { "id": "hauteprovence", "name": "Верхний Прованс", "region": "westeurope", "land": "provence", "iso": ["FR-04"], "town": "Динь", "at": [[44.1, 6.2]] },
+    { "id": "nice", "name": "Ницца и Грас", "region": "westeurope", "land": "provence", "iso": ["FR-06"], "town": "Ницца", "at": [[43.95, 7.1]] },
+
+    { "id": "cismonte", "name": "Корсика по эту сторону гор", "region": "westeurope", "land": "corsica", "iso": ["FR-2B"], "town": "Бастия", "at": [[42.4, 9.2]] },
+    { "id": "pumonti", "name": "Корсика по ту сторону гор", "region": "westeurope", "land": "corsica", "iso": ["FR-2A"], "town": "Аяччо", "at": [[41.85, 8.95]] }
+  ],
+  "changes": [
+    "nimes («Ним»): убрать из admin FRA-5274 (Буш-дю-Рон). Сейчас в полигон попадает только край этого департамента у Камарга, и он отдан Ниму; когда полигон дойдёт до Марселя, департамент — провинция «Марсель, Экс и Арль» (Прованс).",
+    "Три департамента уже есть в admin.json, но ни одна провинция к ним не тянется: Коррез (FRA-5280), Дром (FRA-5288), Воклюз (FRA-5352). В этом списке у них свои провинции — «Нижний Лимузен», «Валентинуа и Диуа», «Конта-Венессен и Авиньон» — с кодами admin уже сейчас.",
+    "Провинции юга, которые выходят за 44,8° с. ш. (Бордле, Перигор, Керси, Руэрг, Верхняя Овернь, Жеводан и Виваре), растут сами: они тянутся к целым департаментам.",
+    "regions[westeurope].about: «в альбом попадает их юг…» — переписать, когда в полигоне будет вся Франция."
+  ],
+  "notes": [
+    "Корсика оставлена в «Западной Европе». По правилу владельца для регионов («группы островов») она может стать отдельным регионом вместе с Сардинией — решает владелец.",
+    "Альпы (Савойя, Дофине, Верхний Прованс) — по тому же правилу («горные системы») могут стать своим регионом. Пока это земли «Савойя», «Лионне и Дофине», «Прованс и Ницца» в «Западной Европе».",
+    "Овернь: Верхняя Овернь (Канталь с Веле, провинция auvergne) сейчас в земле «Лангедок и Руссильон», Нижняя Овернь — в новой земле «Лимузен и Овернь». Можно перенести auvergne в «Лимузен и Овернь»; Веле (Верхняя Луара) исторически — Лангедок.",
+    "«Париж и Франс» — малая провинция (около 2 000 км², 4–5 районов): Париж с ближними департаментами и Французским Вексеном. Если владелец захочет Париж отдельно, 95 (Валь-д’Уаз) отходит к «Юрепуа и Мантуа».",
+    "Шартрен и Бос (Эр и Луар) исторически входил в губернаторство Орлеане, а не в Иль-де-Франс.",
+    "Эн (Бресс, Бюже, Домб, Жекс) с 1601 года — часть губернаторства Бургундии; поэтому в земле «Бургундия и Франш-Конте», а не «Лионне и Дофине».",
+    "Савойя и Ницца вошли во Францию в 1860 году; в альбоме важна культурная география, не дата.",
+    "Соседи, если полигон захватит их края: Бельгия (Фландрия, Эно, Намюр, Льеж, Люксембург), Люксембург, Германия (Саар, Пфальц, Баден), Швейцария (Женева, Во, Вале, Невшатель, Юра, Базель), Италия (Аоста, Пьемонт, Лигурия). Их провинции — когда будет известен полигон."
+  ]
+}
