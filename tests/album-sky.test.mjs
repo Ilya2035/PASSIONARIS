@@ -214,10 +214,7 @@ test('sky: day and night on the ball — the frame is drawn by day, every place 
   for (const t of ['smoothstep(-.08, .12, z)', 'smoothstep(.05, .45, z)', 'mix(1.25, 1.22, high)', 'mix(.62, 1.15, high)', 'mix(.30, 1.02, high)', 'vec3(.26, .33, .52) * uGlobe.y', 'vec3(.46, .58, .78)', 'vec3(1.10, .64, .34) * glow', 'dot(up, uSunW)', 'globeLight(uSun.z)']) assert.ok(GLOBE_GLSL.includes(t), t);
   // it is laid over the finished picture: by the finishing pass (only while it is on), the sky and the shell of the clouds
   assert.ok(!postShader(0).includes('globeRelight') && !postShader(POST_CLOUDS).includes('globeRelight'));
-  for (const f of [POST_BALL, POST_BALL | POST_CLOUDS]) {
-    assert.match(postShader(f), /vec3 kIn = globeRelight\(up\), k = mix\(globeRelightOwn\(up\), kIn, rg\);/);
-    assert.match(postShader(f), /c = globeDimmed\(c, k, albumHorizon\(rdW\) \* \(albumHaze\(wpos\) \* uExposure\) \* \(kIn - k\)\);/);
-  }
+  for (const f of [POST_BALL, POST_BALL | POST_CLOUDS]) assert.match(postShader(f), /if \(ground\) c = globeDimmed\(c, globeRelight\(normalize\(wpos \+ vec3\(0\., RKM, 0\.\)\)\)\);/);
   // … and the air over that land was drawn with the frame's light, like everything in the polygon: its part of a
   // pixel takes the share of the frame's light on both sides of the rim. Level land under a share of air comes to
   // one and the same light, whichever Sun the ground shader lit it with

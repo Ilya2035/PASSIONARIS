@@ -201,7 +201,7 @@ test('world: three variants of the ground shader, and the polygon keeps the one 
   assert.ok(terrain.includes('#if ZONE == 1\n#define ALBUM_WORLD 0\n#define REGION(ll) 1.\n#define STATE(ll) 1.\n#elif ZONE == 3\n#define ALBUM_WORLD 2\n#define REGION(ll) 0.\n#define STATE(ll) 0.\n#else\n#define ALBUM_WORLD 1\n#define REGION(ll) inRegion(ll)'));
   const main = terrain.slice(terrain.lastIndexOf('void main() {'), terrain.indexOf('// The numbers written as the edges of smoothstep()')).replace(/\/\/[^\n]*/g, '');
   assert.ok(!main.includes('inRegion(') && !main.includes('regionEdge('), 'the shader asks REGION() and STATE() only: inside the polygon and beyond it they are numbers, and the rules of the other side fall out when it is compiled');
-  assert.equal(main.split('REGION(ll)').length - 1, 4, 'at the top, at the snow, at the lakes and at the light of the place: never carried through the aspects');
+  assert.equal(main.split('REGION(ll)').length - 1, 3, 'at the top, at the snow and at the lakes: never carried through the aspects');
   assert.ok(terrain.includes('cw.r = max(worldLod(ll, ${(WORLD_LOD0 + 2).toFixed(2)}), 0.) / 4096.; clim = mix(cw, clim, rg);'), 'the country round a place beyond the polygon: the world map smoothed over 20 km');
   assert.ok(main.includes('if (rsW < 1.) p.cB = mix(vec4(0., 0., 0., .30 + .13 * smoothstep(200., 3000., -h0)), p.cB, rsW);'), 'the sea beyond the chunks is not becalmed');
   // inside the polygon heightLod() is the polygon's own, beyond it the world's alone
@@ -212,7 +212,8 @@ test('world: three variants of the ground shader, and the polygon keeps the one 
     const before = main.slice(0, k), open = before.lastIndexOf('#if ZONE != 3'), alt = before.lastIndexOf('#if ZONE == 3'), close = before.lastIndexOf('#endif');
     assert.ok(Math.max(open, alt) > close, call + ' is left out of the variant of the world');
   }
-  assert.ok(forest.includes('#if ZONE != 3\n  if (fStand.x > .003) fFarm = setFarm(p.pk);'), 'nobody ploughs beyond the polygon');
+  const farmAt = forest.indexOf('  if (fStand.x > .003) fFarm = setFarm(p.pk) * clamp('), zoneAt = forest.lastIndexOf('#if ZONE != 3\n', farmAt);
+  assert.ok(farmAt > 0 && zoneAt > 0 && !forest.slice(zoneAt, farmAt).includes('#endif') && !forest.slice(zoneAt, farmAt).replace(/\/\/[^\n]*\n/g, '').trim().replace('#if ZONE != 3', ''), 'nobody ploughs beyond the polygon');
   // the grids are cut between the variants, with a small overlap, and a variant with nothing to draw is not drawn
   assert.ok(terrain.includes('gl_ClipDistance[0] = c4.x; gl_ClipDistance[1] = c4.y; gl_ClipDistance[2] = c4.z; gl_ClipDistance[3] = c4.w; gl_ClipDistance[4] = c5;'));
   assert.ok(terrain.includes("defines: clip ? { ZONE: z, CLIP_ZONES: 1 } : { ZONE: z }, extensions: { clipCullDistance: clip },") && terrain.includes('const clip = clipOk(), ZONES = clip ? [1, 2, 3] : [0];'), 'where the video card cannot cut, one variant draws the whole Earth');

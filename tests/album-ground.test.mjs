@@ -230,12 +230,9 @@ test('shadows cast by the relief fade with the height of the camera', () => {
   // one Sun for the frame: the sky dims every place in the finishing pass (sky/globe.js)
   const main = terrain.slice(terrain.lastIndexOf('void main() {')).replace(/\/\/[^\n]*/g, '');
   assert.ok(main.includes('vec2 sd = normalize(uSun.xy + 1e-4); float tanEl = uSun.z / max(1e-3, length(uSun.xy));') && main.includes('float nl = max(dot(n, uSun), 0.), day = albumDay();'), 'slopes and shadows go by the Sun of the frame, in the polygon and beyond it');
-  // beyond the polygon the finished light is brought to the light of the place: what post.js (globeRelightOwn) expects
-  assert.ok(!main.includes('uSunW'), 'the ground does not count the Sun of the place itself');
-  assert.ok(main.includes('float rgL = REGION(ll); if (rgL < 1. && uGlobe.x > 0.) { vec3 upL = normalize(vPos + vec3(0., RKM, 0.)), asPolygon = globeRelight(upL); col *= asPolygon / mix(globeRelightOwn(upL), asPolygon, rgL); }'), 'beyond the polygon: the sky\'s measure for the polygon over its measure for that land — the finishing pass leaves the first alone');
-  assert.ok(terrain.includes('#if ZONE != 1\n${GLOBE_GLSL}') && terrain.includes('...chunks.uniforms, ...ASPECT_UNIFORMS, ...GLOBE,'), 'the functions and the measure of the sky itself, not copies of them');
-  assert.ok(main.indexOf('if (rgL < 1. && uGlobe.x > 0.) {') < main.indexOf('col = albumAir(col, vPos);') && main.indexOf('col = albumAir(col, vPos);') < main.indexOf('gl_FragColor = vec4(albumFinish(col), 1.);'), 'the land is multiplied before the air is laid: the air is the frame\'s, and the pass gives it the measure of the polygon itself');
-  const globe = fs.readFileSync(new URL('../src/album/sky/globe.js', import.meta.url), 'utf8'), post = fs.readFileSync(new URL('../src/album/post.js', import.meta.url), 'utf8');
-  assert.ok(globe.includes('vec3 globeRelight(vec3 up) {') && globe.includes('vec3 globeRelightOwn(vec3 up) {'), 'the two measures of the sky the ground uses');
-  assert.ok(post.includes('vec3 kIn = globeRelight(up), k = mix(globeRelightOwn(up), kIn, rg);') && post.includes('c = globeDimmed(c, k, albumHorizon(rdW) * (albumHaze(wpos) * uExposure) * (kIn - k));') && post.includes('inRegion('), 'the finishing pass lays the very mix the ground divides the land by, and gives the air the measure of the polygon (if post.js does otherwise, the hand-over of the ground shader must follow)');
+  // the light of the place is the sky's work alone: one measure for the whole Earth in its finishing pass
+  assert.ok(!terrain.includes('uSunW') && !terrain.includes('globeRelight') && !terrain.includes('GLOBE'), 'the ground does not count the Sun of a place, and takes nothing of the day and night of the ball');
+  assert.ok(main.includes('col = albumAir(col, vPos);\n  gl_FragColor = vec4(albumFinish(col), 1.);'));
+  const post = fs.readFileSync(new URL('../src/album/post.js', import.meta.url), 'utf8');
+  assert.ok(post.includes('if (ground) c = globeDimmed(c, globeRelight(normalize(wpos + vec3(0., RKM, 0.))));') && !post.includes('globeRelightOwn'), 'the finishing pass of the sky dims the polygon and the land beyond it alike (if it takes them apart again, the ground must hand the land over accordingly — v0.6.124)');
 });

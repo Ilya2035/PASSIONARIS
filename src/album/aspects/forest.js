@@ -267,7 +267,11 @@ float forestCover(Px p) {
   fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade, albumSoft(p.px));
   fFarm = 0.;
 #if ZONE != 3
-  if (fStand.x > .003) fFarm = setFarm(p.pk);                        // (beyond the polygon nobody ploughs: terrain.js, ZONE)
+  // (A clearing keeps to the gentle ground, as the fields do: whole up to a slope of .10, none from .26 — the same
+  // numbers as the fields of the settlements, SET_SLOPE. Taken from the share of fields alone, the clearing of a
+  // village was a round patch that climbed the steep side of its valley — the owner: «маленькие кружочки… больше
+  // по местности», 15.11.2026. Written with clamp: one more smoothstep here is one more row of the table of steps.)
+  if (fStand.x > .003) fFarm = setFarm(p.pk) * clamp((.26 - p.slope) * 6.25, 0., 1.);                        // (beyond the polygon nobody ploughs: terrain.js, ZONE)
 #endif
   return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);
 }
@@ -308,7 +312,7 @@ void aspForest(Px p, inout Land L) {
     vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) * .7, .34) * (.08 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
     if (edgy > 0. && dot(vs, vs) > px * px * .25) {
 #if ZONE != 3
-      float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
+      float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) * clamp((.26 - p.slope) * 6.25, 0., 1.) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
 #else
       float top = forestNear(pk + vs, 0., px, have, p.cC.rg, p.wet) * part;
 #endif

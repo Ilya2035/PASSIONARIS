@@ -18,7 +18,6 @@ import { GROUND_TILES } from './data.js';
 import { CLIM_N, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K } from './ground/climate.js';
 import { stepTable } from './ground/steps.js';
 import { REGION_FADE, STATE_FADE, WORLD_LOD0 } from './ground/world.js';
-import { GLOBE, GLOBE_GLSL } from './sky/globe.js';
 
 const M = 160, LEVELS = 9;
 const POLE_LAT = 88;   // a level of the grid is drawn only if it ends short of this latitude
@@ -116,9 +115,6 @@ ${CHUNK_GLSL}
 ${LIGHT}
 uniform float uTime, uShade, uSnow, uForestK, uSeason;
 uniform int uGrid, uData;
-#if ZONE != 1
-${GLOBE_GLSL}   // the day and night of the ball: uGlobe, globeRelight(), globeRelightOwn() — for the last line of main()
-#endif
 // The grain of the ground: squares of real ground about 10 km across, seen from a satellite, with their broad tones
 // taken out (scripts/album/bake-ground-tiles.mjs). They are layers of one texture: a pixel shader may read only 16
 // textures, and the aspects need some of them. The names are layer numbers for texDetail():
@@ -374,12 +370,11 @@ void main() {
 
   // sun: shadows cast by the relief, and how open the sky is above the point
   float lod0 = log2(max(px, .234) / .234);
-  // (The Sun is one for the whole frame, in the polygon and beyond it: uSun, as east, north, up. From a height the
-  // sky draws the frame with the highest Sun in view and then dims every place to its own light in the finishing
-  // pass — sky/globe.js. In v0.6.114 the land beyond the polygon turned its slopes and cast its shadows by the Sun
-  // of the place itself; its sea hardly darkened by night, slopes of the night side caught sunlight, and by evening
-  // and by night the polygon stood out as a dark rectangle. What the finishing pass expects beyond the polygon is
-  // settled at the end of main().)
+  // (The Sun is one for the whole frame and the whole Earth, in the polygon and beyond it: uSun, as east, north,
+  // up. From a height the sky draws the frame by day and then brings every place to its own light in the finishing
+  // pass, by one measure — post.js, sky/globe.js. The ground and the water never count the Sun of a place
+  // themselves. In v0.6.114 the land beyond the polygon did: its sea hardly darkened by night, slopes of the night
+  // side caught sunlight, and by evening and by night the polygon stood out as a dark rectangle.)
   vec2 sd = normalize(uSun.xy + 1e-4); float tanEl = uSun.z / max(1e-3, length(uSun.xy));
   // Shadows cast by the relief are for the near and middle heights: there a shadow lies in its valley and shows
   // the shape of the mountain. From afar the same shadows are dark blots inside a range that no shape explains (the
@@ -647,24 +642,6 @@ void main() {
   }
 
 #endif
-#if ZONE != 1
-  // ---- beyond the polygon the ground hands the land over so that the sky treats it as it treats the polygon. The
-  // land is drawn with the one Sun of the frame everywhere. The finishing pass of the sky (post.js) then brings
-  // every place to its own light. The polygon it multiplies by «light of the place / light of the frame»
-  // (globeRelight). Beyond the polygon it takes the land to be lit by the Sun of its own place (as the ground did in
-  // v0.6.114) and multiplies it by another measure, «light of the place / what level land draws under that Sun»
-  // (globeRelightOwn); the air over the land it takes to be lit by the frame, and gives it the first measure. So
-  // the land — the colour before the air — goes out times the first measure over the second: over the very mix of
-  // the two that the pass lays in the band of the border. What the pass leaves is the first measure alone, for land
-  // and air, on both sides. Both measures are the sky's own functions (sky/globe.js), not copies: counted here by a
-  // formula of its own, the two sides parted by a sixth in the evening. Near the ground, where the pass leaves the
-  // frame alone (uGlobe.x = 0), nothing is done.
-  // (Lit by the Sun of the place, as in v0.6.114, the sea of the world hardly darkened by night and slopes of the
-  // night side caught sunlight: by evening and by night the polygon stood out as a rectangle.)
-  // (the weight of the polygon and the upward direction are counted again here: carried through the aspects they
-  // would be two more numbers held all the way — docs/album/ground.md, «Скорость»)
-  float rgL = REGION(ll); if (rgL < 1. && uGlobe.x > 0.) { vec3 upL = normalize(vPos + vec3(0., RKM, 0.)), asPolygon = globeRelight(upL); col *= asPolygon / mix(globeRelightOwn(upL), asPolygon, rgL); }
-#endif
   // ---- air between the eye and the ground, then the finish shared by everything
   col = albumAir(col, vPos);
   gl_FragColor = vec4(albumFinish(col), 1.);
@@ -713,7 +690,7 @@ export class Terrain {
       // the whole Earth beyond the polygon (ground/world.js); without the files: deep sea and a mild climate
       tWorld: { value: data.world?.tex || flat(RedFormat, new Float32Array([-3200])) }, tWorldClim: { value: data.world?.clim || flat(RGBAFormat, new Uint8Array([128, 128, 128, 255])) },
       uStep: { value: GROUND_STEPS.table },
-      ...chunks.uniforms, ...ASPECT_UNIFORMS, ...GLOBE,
+      ...chunks.uniforms, ...ASPECT_UNIFORMS,
     };
     // A grid is drawn by the three variants of the shader (ZONE), each cut to its own part of the Earth — or by the
     // one variant that draws everything, where the video card cannot cut. this.levels: the first of them for
