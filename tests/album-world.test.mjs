@@ -10,7 +10,8 @@ import { WORLD_W, WORLD_H, WARM, WARM_WORLD, ICE_STEP, LAPSE, TREE_WARM, TREE_DR
 import { WMAP_W, WMAP_H, WMAP_KM, WORLD_LOD0, REGION_FADE, STATE_FADE, regionEdge, regionWeight, decodeWorldHeights, worldAt, joinHeights, raiseIce, capSouth, CAP_LAT } from '../src/album/ground/world.js';
 
 const FILE = new URL('../public/assets/album/ground/world.bin.gz', import.meta.url), MAP = new URL('../public/assets/map/height.delta.bin.gz', import.meta.url);
-const read = f => fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+// (a checkout on Windows may give the files its own line ends)
+const read = f => fs.readFileSync(new URL(f, import.meta.url), 'utf8').split('\r\n').join('\n');
 
 test('the polygon: its heights are whole inside the border and give way to the world over a fifth of a degree outside', () => {
   const mid = [(BBOX.lat0 + BBOX.lat1) / 2, (BBOX.lon0 + BBOX.lon1) / 2];
