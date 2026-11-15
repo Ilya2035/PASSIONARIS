@@ -225,15 +225,18 @@ const RAINY = /* glsl */`
               }
             }
           }`;
-// Day and night on the ball (sky/globe.js): from a height the frame is drawn with the highest Sun in view, and here
-// every pixel of the land is dimmed to the light of its own place. Over the album's polygon the ground was lit by
-// the frame's Sun; beyond it the ground shader has already taken the Sun of the place (terrain.js), and only the
-// colours of the light are brought to the place's own. (inRegion: glsl.js — 1 in the polygon, 0 beyond its rim.)
+// Day and night on the ball (sky/globe.js): from a height the frame is drawn by day, and here every pixel of the
+// land is dimmed to the light of its own place. Over the album's polygon the ground was lit by the frame's Sun;
+// beyond it the ground shader has already taken the Sun of the place (terrain.js), and only the colours of the light
+// are brought to the place's own. The air between the eye and the land is lit by the frame's Sun everywhere: its
+// part of the pixel always takes the share of the frame's light (airShare). (inRegion: glsl.js — 1 in the polygon,
+// 0 beyond its rim.)
 const RELIT = /* glsl */`
           if (ground) {
             vec3 up = normalize(wpos + vec3(0., RKM, 0.));
             float rg = inRegion(vec2(degrees(asin(clamp(dot(up, WX_AXIS), -1., 1.))), LON0 + degrees(atan(dot(up, WX_E1), dot(up, WX_E0)))));
-            c = globeDimmed(c, mix(globeRelightOwn(up), globeRelight(up), rg));
+            vec3 kIn = globeRelight(up), k = mix(globeRelightOwn(up), kIn, rg);
+            c = globeDimmed(c, k, albumHorizon(rdW) * (albumHaze(wpos) * uExposure) * (kIn - k));
           }`;
 // The plume of an eruption or of a sand storm (sky/plume.js) on the land: its shadow; what has fallen out of it —
 // grey ash, thickest near the volcano, or pale dust — through which the relief still reads; and, for dust, the haze of
