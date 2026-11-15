@@ -26,7 +26,10 @@ for (const f of readdirSync(OUT_DIR).filter(f => f.endsWith('.places.json.gz')))
 }
 sites.sort((a, b) => b[2] - a[2] || a[0] - b[0] || a[1] - b[1]);
 const units = JSON.parse(readFileSync(join(ROOT, 'public', 'assets', 'album', 'division', 'admin.json'), 'utf8')).units;
-const [named, stats] = russifySites(sites, units); sites.length = 0; sites.push(...named);
+// (a place the data gives no name — at stage 3 there are five, in Morocco and in the Sahara — is left out: a
+// settlement nobody named cannot be told on the map, and the list is of names)
+const [named, stats] = russifySites(sites, units), nameless = named.filter(s => !s[4]).length; sites.length = 0; sites.push(...named.filter(s => s[4]));
+if (nameless) console.log(`left out: ${nameless} places without a name`);
 console.log(`names: ${stats.kept} Russian in the data, transcribed ${Object.entries(stats.byLang).map(([l, n]) => `${l} ${n}`).join(', ')}`);
 const gz = gzipSync(Buffer.from(JSON.stringify({ v: 2, source: '© OpenStreetMap contributors, ODbL 1.0', sites })), { level: 9 });
 mkdirSync(join(ROOT, 'public', 'assets', 'album', 'town'), { recursive: true });

@@ -281,10 +281,24 @@ test('villages of the album: about nine to a district, on level ground by the wa
     if (w) byWater++;
   }
   assert.equal(cls[5], 0); assert.equal(cls[0], 0); assert.ok(cls[1] > cls[2] && cls[2] > cls[3] * 5 && cls[4] < cls[1] * .02, 'made places by the class of their ground: ' + cls);
-  assert.ok(byWater / kinds[2] > .3, `${Math.round(byWater / kinds[2] * 100)} % of the made places stand by a river or the shore`);
+  // The made places seek the water — against the land they stand in, not against a number of Spain. Of the ground a
+  // place may be made on, 18 % lies by a river or the shore in Iberia and 11 % in the Maghreb, where rivers are few;
+  // the made places stand by water 1.6 to 1.9 times as often as that in every land of stage 3 (34 % in Iberia, 21 % in
+  // the Maghreb, 31 % in France, 33 % in the Low Countries and on the Rhine).
+  { let ground = 0, groundW = 0;
+    for (let c = 0; c < KN * KNY; c++) {
+      const d = div.cells[c]; if (d < 0 || div.kinds[d] !== LAND || facts.cls[c] < 1 || facts.cls[c] > 4 || div.raster.hgt[c] > TOO_HIGH) continue;
+      const i = c % KN, j = (c - i) / KN; let w = false; ground++;
+      for (let dj = -1; dj <= 1 && !w; dj++) for (let di = -1; di <= 1; di++) { const u = i + di, v = j + dj; if (u < 0 || v < 0 || u >= KN || v >= KNY) { w = true; break; } const t = v * KN + u, e = div.cells[t]; if (e < 0 || div.kinds[e] !== LAND || div.raster.riv[t] > 0) { w = true; break; } }
+      if (w) groundW++;
+    }
+    const share = byWater / kinds[2], chance = groundW / ground;
+    assert.ok(share > 1.4 * chance && share > .15, `${Math.round(share * 100)} % of the made places stand by a river or the shore, ${Math.round(chance * 100)} % of the ground they may stand on lies there`); }
   // the model: the towns as before, and the villages between them
   const base = centrePlaces(data.vectors.places, div, sites), vill = villagePlaces(list, sites, { base: own.length }), places = [...base, ...vill];
-  const alone = growTowns(ch, base, 1, at), model = growTowns(ch, places, 1, at), founded = model.towns.filter(t => !t.town);
+  // (as the album founds them: only where the square kilometre belongs to a district — at stage 3 the worked land has an edge)
+  const where = { where: (x, y) => { const c = squareOf(x, y); return c >= 0 && div.cells[c] >= 0; } };
+  const alone = growTowns(ch, base, 1, at, undefined, where), model = growTowns(ch, places, 1, at, undefined, where), founded = model.towns.filter(t => !t.town);
   assert.equal(model.towns.length - founded.length, alone.towns.length, 'the towns are the same with the villages and without them');
   assert.ok(founded.length > vill.length * .95, `${founded.length} of ${vill.length} villages founded`); assert.ok(founded.every(t => t.cls === 0 && t.R <= VILLAGE_RMAX), 'a place between the centres is a village: under a thousand people');
   const inFine = model.towns.filter(t => t.village);
@@ -299,7 +313,7 @@ test('villages of the album: about nine to a district, on level ground by the wa
   assert.equal(world.settlements.length, model.towns.length); assert.equal(new Set(world.settlements.map(s => s.district * 256 + s.site)).size, world.settlements.length);
   assert.ok(world.settlements.every(s => s.site >= 0 && s.site <= MAX_IN_DISTRICT && div.kinds[s.district] === LAND));
   const back = unpackLand(packLand(world)); assert.equal(back.settlements.length, world.settlements.length);
-  assert.ok(world.settlements.length * 8 < 200000, `${world.settlements.length * 8} bytes for the settlements of the album`);
+  // (how many bytes that is, is asked by the land there is — two lines below — not by a number of the present polygon)
   // the same settlements over the land of the whole world: within the bound the owner set for them
   let landKm2 = 0; for (let d = 0; d < div.count; d++) if (div.kinds[d] === LAND) landKm2 += kmData(div).box.num[d];
   assert.ok(world.settlements.length * 8 / landKm2 * 149e6 < 40e6, `${(world.settlements.length * 8 / landKm2 * 149).toFixed(1)} MB for the settlements of a world settled as thickly as this land`);

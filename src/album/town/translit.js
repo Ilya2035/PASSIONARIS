@@ -15,6 +15,7 @@
 // or the etymology of a word: the result is a readable Russian name, not always the one an atlas would print.
 // Plain JavaScript, no imports.
 
+import { STAGE } from '../geo.js';
 const S = '(?<![^])', E = '(?![^])';                                // the start and the end of a word
 // a word through a list of rules: [pattern at this place, what to write]; a letter no rule knows goes through PLAIN
 const PLAIN = { a: 'а', b: 'б', c: 'к', d: 'д', e: 'е', f: 'ф', g: 'г', h: '', i: 'и', j: 'х', k: 'к', l: 'л', m: 'м', n: 'н', o: 'о', p: 'п', q: 'к', r: 'р', s: 'с', t: 'т', u: 'у', v: 'в', w: 'в', x: 'кс', y: 'и', z: 'з',
@@ -114,7 +115,19 @@ const FR = compile([
   [`${S}[eéèê]`, 'э'], ['(?<=ou)[eéè]', 'э'], ['[uûü]', 'ю'],
 ]);
 const FR_SMALL = { de: 'де', du: 'дю', des: 'де', le: 'ле', la: 'ла', les: 'ле', sur: 'сюр', sous: 'су', en: 'ан', et: 'э', lès: 'ле', lez: 'ле', aux: 'о', au: 'о', à: 'а' };
-const frWord = w => run(frEnd(w), FR).replace(/ьа/g, 'ья').replace(/ьу/g, 'ью').replace(/айа/g, 'айя');
+// (Two faults of these rules are mended from stage 3 only — geo.js STAGE: on stage 2 the names of the present polygon
+// stay as they were baked. A nasal before p or b is written with «м»: Шампань, Коломб, Тампль — not Шанпань. A name
+// that begins with a mute h and an e begins with «Э»: Эрик, Эрбиньяк — not Ерик.)
+const frWord = w => {
+  let r = run(frEnd(w), FR).replace(/ьа/g, 'ья').replace(/ьу/g, 'ью').replace(/айа/g, 'айя');
+  if (STAGE >= 3) {
+    // (only where the word itself has an m there: the «н» of Montpellier is the n of «mont», and stays)
+    const src = [...w.matchAll(/[mn](?=[pb])/g)].map(m => m[0]), n = (r.match(/н(?=[пб])/g) || []).length; let k = 0;
+    if (src.length === n) r = r.replace(/н(?=[пб])/g, () => (src[k++] === 'm' ? 'м' : 'н'));
+    if (/^h[eéèêë]/.test(w) && r[0] === 'е') r = 'э' + r.slice(1);
+  }
+  return r;
+};
 
 // ---- the Latin spelling of the names of the Maghreb
 const AV = 'aeiouyàâéèêîïôû';
@@ -131,6 +144,7 @@ const arWord = w => run(w.replace(new RegExp(`(?<=[^${AV}])e$`, 'u'), ''), AR);
 // ---- German (the left bank of the Rhine, Luxembourg, the east of Belgium)
 const DV = 'aeiouyäöü', DC = `[^${DV}]`;
 const DE = compile([
+  [`${S}oe`, 'э'], ['oe', 'ё'], ['uy', 'ю'],                          // on the Lower Rhine oe and uy are ö and ü: Voerde → Фёрде, Vluyn → Флюн
   ['tzsch|tsch|zsch', 'ч'], ['sch', 'ш'], ['chs', 'кс'], ['ch', 'х'], [`(?<=[${DV}])ck(?=[${DV}])`, 'кк'], ['ck', 'к'], ['ph', 'ф'], ['qu', 'кв'], ['th', 'т'], ['tz', 'ц'],
   // the second half of a name that begins with st, sp: Neustadt → Нойштадт, Oberstein → Оберштайн
   ['stra(?:ss|ß)e', 'штрассе'], ['stadt', 'штадт'], ['stein', 'штайн'], ['stedt', 'штедт'], ['stätt', 'штетт'], ['stett', 'штетт'], ['stuhl', 'штуль'], ['strom', 'штром'], ['spitz', 'шпиц'],
@@ -148,6 +162,7 @@ const DE_SMALL = { am: 'ам', an: 'ан', der: 'дер', die: 'ди', dem: 'д�
 
 // ---- Dutch (the Netherlands, Flanders)
 const NL = compile([
+  ['rh', 'р'], [`auw${E}`, 'ау'], [`ouw${E}`, 'ау'], [`${S}eij`, 'эй'], ['eij', 'ей'], [`${S}u[iy]`, 'эй'],   // Rhoon → Рон, Delfgauw → Делфгау, Eijsden → Эйсден, Uitgeest → Эйтгест
   [`sch${E}`, 'с'], ['sch', 'сх'], ['sj', 'ш'], ['tj', 'ч'], ['ch', 'х'], ['ck', 'к'], ['ph', 'ф'], ['th', 'т'], ['qu', 'кв'],
   [`burgh?${E}`, 'бург'],                                            // Middelburg → Мидделбург, as the maps write it
   ['aai', 'ай'], ['ooi', 'ой'], ['oei', 'уй'], ['eeuw', 'еув'], ['ieuw', 'иув'], ['eeu', 'еу'], ['ieu', 'иу'],
@@ -223,6 +238,7 @@ const AR_LETTERS = { 'ا': 'а', 'أ': 'а', 'إ': 'и', 'آ': 'а', 'ب': 'б',
   'غ': 'г', 'ف': 'ф', 'ق': 'к', 'ك': 'к', 'ل': 'л', 'م': 'м', 'ن': 'н', 'ه': 'х', 'ة': 'а', 'و': 'у', 'ي': 'и', 'ى': 'а', 'ء': '', 'ئ': 'и', 'ؤ': 'у' };
 
 const LOOKALIKE = { A: 'А', a: 'а', B: 'В', C: 'С', c: 'с', E: 'Е', e: 'е', H: 'Н', K: 'К', M: 'М', O: 'О', o: 'о', P: 'Р', p: 'р', T: 'Т', X: 'Х', x: 'х', y: 'у' };
+const UNLOOK = Object.fromEntries(Object.entries(LOOKALIKE).map(([latin, cyr]) => [cyr, latin]));   // the Cyrillic look-alike → the Latin letter
 const bare = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const cap = s => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export const hasLatin = s => /[A-Za-zÀ-ɏ]/.test(s);
@@ -271,13 +287,20 @@ export function placeRussian(name, lang = 'es') {
 }
 export function toRussian(name, lang = 'es') {
   const raw = String(name || '').replace(/[‎‏]/g, '').trim();
+  // (a Latin name with a stray Cyrillic look-alike typed into it — «Chаmpillon» of Champagne with the Russian «а»:
+  // back to Latin letters, and on by the rules of its language)
+  if (hasCyrillic(raw) && hasLatin(raw)) {
+    const lat = (raw.match(/[A-Za-zÀ-ɏ]/g) || []).length, cyr = (raw.match(/[А-Яа-яЁё]/g) || []).length, back = raw.replace(/[А-Яа-яЁё]/g, c => UNLOOK[c] ?? c);
+    if (lat > cyr && !hasCyrillic(back)) return toRussian(back, lang);
+  }
   // (a Russian name of the data with a stray Latin letter in it: «A Корунья»)
   if (hasCyrillic(raw)) return hasLatin(raw) ? raw.replace(/[A-Za-z]/g, c => LOOKALIKE[c] ?? c).replace(/^А[- ]Корунья$/, 'Ла-Корунья') : raw;
   if (!raw) return raw;
   if (ARABIC[raw]) return ARABIC[raw];
   const clean = cleanName(raw);
   if (!hasLatin(clean)) return cap([...clean].map(c => (c === ' ' ? '-' : AR_LETTERS[c] ?? '')).join('').replace(/-+/g, '-').replace(/^-|-$/g, ''));
-  const known = EXONYMS[bare(clean)]; if (known) return known;
+  // (English writes its saints short — «St John», «St. Brelade»: the list knows them in full)
+  const key = bare(clean), known = EXONYMS[key] || (lang === 'en' && EXONYMS[key.replace(/^st\.? /, 'saint ')]); if (known) return known;
   const L = LANGS[guessLang(lang, clean)] || LANGS.es, id = guessLang(lang, clean);
   // the words: «d'», «l'» stay with the word they belong to
   const words = clean.toLowerCase().replace(/[’`´]/g, "'").split(/[\s\-–]+/).filter(Boolean), out = [];
@@ -311,6 +334,8 @@ export const langOfUnit = id => { const [c, n] = String(id || '').split('-'); re
 // The language of a name of unit `id` at (lon, lat). Belgium has three: Dutch north of the language border (about
 // 50.74° N), French south of it and in Brussels, German in the east by the border (Eupen, Sankt Vith).
 export function langAt(id, lon, lat, name = '') {
+  // (the Channel Islands stand with France in the division — the owner: «их к Франции принеси» — and their names are English)
+  if (Number.isFinite(lat) && lat > 49.1 && lat < 49.78 && lon > -2.75 && lon < -1.98) return 'en';
   const lang = langOfUnit(id);
   if (lang !== 'be' || !Number.isFinite(lat)) return guessLang(lang, name);
   if (lon > 5.95 && lat < 50.72 && lat > 50.1) return 'de';

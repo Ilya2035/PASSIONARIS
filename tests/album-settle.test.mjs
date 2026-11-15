@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { farmGround } from '../src/album/town/farmland.js';
+import { STAGE } from '../src/album/geo.js';
 import { Chunks, kmOf, llOf, NONE } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
@@ -759,6 +760,20 @@ test('settle names: every name of a settlement is Russian — transcribed by rul
   assert.equal(T.toRussian('Cologne', 'fr'), 'Колонь', 'the village of Gascony keeps its own name'); assert.equal(T.toRussian('Florence', 'fr'), 'Флоранс');
   for (const k of ['cologne', 'nice', 'tours', 'florence', 'munich', 'reading', 'stoke', 'como']) assert.ok(!(k in T.EXONYMS) && k in T.PLACE_NAMES, k);
   assert.match(readFileSync(new URL('../scripts/album/russify-names.mjs', import.meta.url), 'utf8'), /names\[key\] = placeRussian\(key, langAt\(unitAt\(pl\.lon, pl\.lat\), pl\.lon, pl\.lat, key\)\);/);
+  // a Latin name with a Cyrillic look-alike typed into it (the data of Champagne: «Chаmpillon» with the Russian «а») goes by the rules of its language
+  assert.equal(T.toRussian('Chаmpillon', 'fr'), T.toRussian('Champillon', 'fr')); assert.ok(!T.hasLatin(T.toRussian('Chаmpillon', 'fr')));
+  // two faults of the French rules are mended from stage 3 (on stage 2 the names of the present polygon stay as baked):
+  // a nasal before p, b is «м»; a mute h and e at the head of a name is «Э»
+  assert.deepEqual(['Champagne', 'Colombes', 'Temple', 'Héric', 'Herbignac'].map(n => T.toRussian(n, 'fr')), STAGE >= 3 ? ['Шампань', 'Коломб', 'Тампль', 'Эрик', 'Эрбиньяк'] : ['Шанпань', 'Колонб', 'Танпль', 'Ерик', 'Ербиньяк']);
+  assert.equal(T.toRussian('Montpellier', 'fr'), 'Монпелье', 'the «н» of Montpellier is the n of «mont», on either stage');
+  for (const [name, ru] of Object.entries({ Rhoon: 'Рон', Delfgauw: 'Делфгау', Eijsden: 'Эйсден', Uitgeest: 'Эйтгест' })) assert.equal(T.toRussian(name, 'nl'), ru, name);
+  for (const [name, ru] of Object.entries({ Voerde: 'Фёрде', 'Neukirchen-Vluyn': 'Нойкирхен-Флюн' })) assert.equal(T.toRussian(name, 'de'), ru, name);
+  assert.equal(T.toRussian('A Корунья', 'gl'), 'Ла-Корунья', 'a Russian name with a stray Latin letter stays Russian');
+  // the Channel Islands stand with France in the division, and their names are English, saints written short
+  assert.equal(T.langAt('FRA-5298', -2.11, 49.19, 'St Helier'), 'en'); assert.equal(T.langAt('FRA-5298', -2.54, 49.46, 'St Peter Port'), 'en'); assert.equal(T.langAt('FRA-5298', -1.62, 49.63, 'Cherbourg'), 'fr', 'the Cotentin is France');
+  for (const [name, ru] of Object.entries({ 'St John': 'Сент-Джон', 'St. Brelade': 'Сент-Брелад', 'St Saviour': 'Сент-Сейвьер', 'St Clement': 'Сент-Клемент', 'St Lawrence': 'Сент-Лоренс', 'St Peter Port': 'Сент-Питер-Порт' })) assert.equal(T.toRussian(name, 'en'), ru, name);
+  // a place without a name is left out when the list is baked
+  assert.match(readFileSync(new URL('../scripts/album/bake-sites.mjs', import.meta.url), 'utf8'), /sites\.push\(\.\.\.named\.filter\(s => s\[4\]\)\);/);
   const unitAt = T.unitFinder({ 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } });
   assert.equal(unitAt(1, 1), 'ESP-1'); assert.equal(unitAt(-2, 1), 'PRT-2'); assert.equal(unitAt(-.8, 1), 'PRT-2', 'a place on the shore takes the nearest unit');
   // records: the Russian name, and the name of the data as the sixth number
