@@ -1,6 +1,6 @@
 // Shared GLSL of the album: geometry of the sphere patch, height sampling, noise.
 import { R, CENTRE, KM_PER_DEG, COS_REF, BBOX } from './geo.js';
-import { FN, FKM } from './chunks.js';
+import { FNX, FNY, FKM } from './chunks.js';
 import { WARM, LAPSE, TREE_WARM, TREE_SOFT, TREE_SOFT_K, TREE_DRY, WET_RISE, WET_RISE_MIN, WET_RISE_MAX } from './ground/climate.js';
 import { REGION_FADE, WORLD_LOD0 } from './ground/world.js';
 
@@ -154,7 +154,7 @@ vec4 chunkC(vec2 pk) { return texture(tChunkC, chunkUV(pk)); }   // built, field
 // smoothed inside the fine raster: the nine texels around the point each weigh in with a smooth bell (a quadratic
 // B-spline) and the chunk that weighs most wins, so borders run as clean curves, not as steps of the raster.
 // One km of distance from a border is 1.6 of y.
-float chunkIdTexel(ivec2 i) { vec2 v = texelFetch(tChunkId, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).rg; return floor(v.r * 255. + .5) + floor(v.g * 255. + .5) * 256.; }
+float chunkIdTexel(ivec2 i) { vec2 v = texelFetch(tChunkId, clamp(i, ivec2(0), ivec2(${FNX - 1}, ${FNY - 1})), 0).rg; return floor(v.r * 255. + .5) + floor(v.g * 255. + .5) * 256.; }
 vec2 chunkCell(vec2 pk) {
   vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t); ivec2 c = ivec2(floor(t));
   float wx[3] = float[3](.5 * (1. - f.x) * (1. - f.x), .75 - (f.x - .5) * (f.x - .5), .5 * f.x * f.x);

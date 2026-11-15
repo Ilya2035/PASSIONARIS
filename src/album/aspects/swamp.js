@@ -4,7 +4,8 @@
 // The state comes from the chunks: p.cA.a = share of the chunk's land under swamp, p.cB = (ice, snow, flood, spare).
 // Which swamp grows at a place is not stored: it follows from the height, the wetness and the sea (swampKind).
 
-import { FKM, FN, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+import { FKM, FNX, FNY, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+import { BBOX } from '../geo.js';
 import { wetAt as climateWet } from '../ground/climate.js';
 
 // ---- rules on the CPU: the same numbers as in the GLSL below, for the natural state, the map of swamps, the tests
@@ -56,20 +57,20 @@ const inside = (poly, lat, lon) => {
 export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
   const n = ch.count, cell = ch.cell, out = new Float32Array(n), isLand = k => ch.kind[k] === 1;
   // heights on the fine raster the outlines live on (1.25 km), land chunks only
-  const hgt = new Float32Array(FN * FN).fill(-1);
-  for (let ty = 0, t = 0; ty < FN; ty++) {
+  const hgt = new Float32Array(FNX * FNY).fill(-1);
+  for (let ty = 0, t = 0; ty < FNY; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KMD;
-    for (let tx = 0; tx < FN; tx++, t++) if (isLand(cell[t])) hgt[t] = heightAt(lat, (X0 + (tx + .5) * FKM) / (KMD * COS));
+    for (let tx = 0; tx < FNX; tx++, t++) if (isLand(cell[t])) hgt[t] = heightAt(lat, (X0 + (tx + .5) * FKM) / (KMD * COS));
   }
   // how much of the chunk is flat ground (water stands on it) and gentle ground (a blanket of peat holds on it):
   // the share of neighbouring points inside the chunk that differ by less than 9 m, and by less than 55 m
   const tex = new Uint32Array(n), pairs = new Uint32Array(n), fl = new Uint32Array(n), ge = new Uint32Array(n);
-  for (let ty = 0, t = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++, t++) {
+  for (let ty = 0, t = 0; ty < FNY; ty++) for (let tx = 0; tx < FNX; tx++, t++) {
     const k = cell[t], h = hgt[t]; tex[k]++;
     if (h <= 0) continue;
     for (let d = 0; d < 2; d++) {
-      if (d ? ty >= FN - 1 : tx >= FN - 1) continue;
-      const m = t + (d ? FN : 1); if (cell[m] !== k) continue;
+      if (d ? ty >= FNY - 1 : tx >= FNX - 1) continue;
+      const m = t + (d ? FNX : 1); if (cell[m] !== k) continue;
       const g = hgt[m]; if (g <= 0) continue;
       const dh = Math.abs(g - h); pairs[k]++;
       if (dh < 1e-6 && h > 8) continue;              // a dead-level surface inland is a reservoir in the height data, not land
@@ -103,13 +104,13 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
   // ground holds half of it; what it does not hold lies on the level chunks beside it, so the area is kept.
   const PEAK = .85, TKM2 = FKM * FKM;
   const fit = k => { const c = ch.centre(k); return .5 + .5 * Math.max(ss(.3, .8, flat(k)), ss(11.5, 9, tempAt(c.lat, ch.height[k])) * ss(.4, .8, gentle(k))); };
-  const clampT = v => Math.max(0, Math.min(FN - 1, Math.floor(v)));
+  const clampX = v => Math.max(0, Math.min(FNX - 1, Math.floor(v))), clampY = v => Math.max(0, Math.min(FNY - 1, Math.floor(v)));
   for (const w of wetlands) {
     const acc = new Map(), R = w.poly ? 0 : Math.sqrt(w.km2 / (Math.PI * PEAK)), wx = w.lon * KMD * COS, wy = w.lat * KMD;
     const xs = w.poly ? w.poly.map(q => q[1] * KMD * COS) : [wx - R * 1.3, wx + R * 1.3], ys = w.poly ? w.poly.map(q => q[0] * KMD) : [wy - R * 1.3, wy + R * 1.3];
-    const tx0 = clampT((Math.min(...xs) - X0) / FKM), tx1 = clampT((Math.max(...xs) - X0) / FKM), ty0 = clampT((Math.min(...ys) - Y0) / FKM), ty1 = clampT((Math.max(...ys) - Y0) / FKM);
+    const tx0 = clampX((Math.min(...xs) - X0) / FKM), tx1 = clampX((Math.max(...xs) - X0) / FKM), ty0 = clampY((Math.min(...ys) - Y0) / FKM), ty1 = clampY((Math.max(...ys) - Y0) / FKM);
     for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-      const k = cell[ty * FN + tx]; if (!isLand(k)) continue;
+      const k = cell[ty * FNX + tx]; if (!isLand(k)) continue;
       const x = X0 + (tx + .5) * FKM, y = Y0 + (ty + .5) * FKM;
       const v = w.poly ? (inside(w.poly, y / KMD, x / (KMD * COS)) ? 1 : 0) : 1 - ss(.7 * R, 1.3 * R, Math.hypot(x - wx, y - wy));
       if (v > 0) acc.set(k, (acc.get(k) || 0) + v);
@@ -131,7 +132,7 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
     for (const [k, v] of share) if (v >= .04) out[k] = Math.min(.95, Math.max(out[k], v));
   }
   // nothing outside the region of the album: the land shader ends there
-  for (let k = 0; k < n; k++) { if (!out[k]) continue; const c = ch.centre(k); if (c.lat < 35.15 || c.lat > 44.85 || c.lon < -10.05 || c.lon > 4.55) out[k] = 0; }
+  for (let k = 0; k < n; k++) { if (!out[k]) continue; const c = ch.centre(k); if (c.lat < BBOX.lat0 - .05 || c.lat > BBOX.lat1 + .05 || c.lon < BBOX.lon0 - .05 || c.lon > BBOX.lon1 + .05) out[k] = 0; }
   return out;
 }
 
