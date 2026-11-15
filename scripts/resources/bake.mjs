@@ -9,15 +9,26 @@
 // Output: public/assets/resources/<grid>.json (meta, deposits, zones) + <grid>.bin.gz (amounts and depths).
 import fs from 'node:fs';
 import path from 'node:path';
-import { RESOURCES, RES_INDEX, ALBUM_GRID, chunkI, chunkJ, chunkLat, chunkLon, strHash } from './lib.mjs';
+import { execFileSync } from 'node:child_process';
+import { RESOURCES, RES_INDEX, ALBUM_GRIDS, chunkI, chunkJ, chunkLat, chunkLon, strHash } from './lib.mjs';
 import { csvObjects, gzip, gunzip } from './lib-node.mjs';
 import { BONUS, SIZE, REF100, DENSITY, CLASSES, KNOWN } from './reference.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const P = (...a) => path.join(ROOT, ...a);
-const RAW = P('data', 'raw', 'resources');
-const OUT = P('public', 'assets', 'resources');
-const TARGETS = process.argv.slice(2).length ? process.argv.slice(2) : ['album', 'world'];
+// (the raw downloads are outside git and may lie only in the main checkout when this is a worktree)
+const MAIN = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).split('\n')[0].slice(9).trim();
+const RAW0 = [P('data', 'raw'), path.join(MAIN, 'data', 'raw')].find(d => fs.existsSync(path.join(d, 'resources'))) || P('data', 'raw');
+const RAW = path.join(RAW0, 'resources');
+let OUT = P('public', 'assets', 'resources');
+// --data <folder>: the album data to bake the album's table from instead of public/album-data/ (the data of the next
+//   stage of the polygon); the lattice of the table follows "stage" of its meta.json (lib.mjs ALBUM_GRIDS).
+// --out <folder>: where to write instead of public/assets/resources/ (a trial bake).
+const ARGS = process.argv.slice(2), optOf = n => { const i = ARGS.indexOf(n); return i >= 0 ? ARGS[i + 1] : null; };
+const ALBUM_DATA = optOf('--data') ? path.resolve(optOf('--data')) : P('public', 'album-data');
+if (optOf('--out')) OUT = path.resolve(optOf('--out'));
+const named = ARGS.filter((a, i) => !a.startsWith('--') && !['--data', '--out'].includes(ARGS[i - 1]));
+const TARGETS = named.length ? named : ['album', 'world'];
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -115,7 +126,7 @@ const byRock = (mix, table, other = 0) => {
 
 // --- Natural Earth 10m rivers (public domain): polylines with a size class
 function loadRivers() {
-  const f = must(P('data', 'raw', 'ne_10m_rivers_lake_centerlines.geojson'), 'npm run data:download');
+  const f = must(path.join(RAW0, 'ne_10m_rivers_lake_centerlines.geojson'), 'npm run data:download');
   const j = JSON.parse(fs.readFileSync(f, 'utf8'));
   const out = [];
   for (const ft of j.features) {
@@ -176,11 +187,11 @@ function loadWorldMap() {
 }
 
 function albumGrid() {
-  const meta = JSON.parse(fs.readFileSync(must(P('public', 'album-data', 'meta.json'),
+  const meta = JSON.parse(fs.readFileSync(must(path.join(ALBUM_DATA, 'meta.json'),
     'run scripts/album/fetch-data.mjs'), 'utf8'));
   const b = meta.bbox;
-  const g = ALBUM_GRID;
-  const hb = meta.base, hbuf = readGz(P('public', 'album-data', hb.file));
+  const g = ALBUM_GRIDS[(meta.stage || 2) >= 3 ? 3 : 2];
+  const hb = meta.base, hbuf = readGz(path.join(ALBUM_DATA, hb.file));
   const hpx = new Uint16Array(hbuf.buffer, hbuf.byteOffset, hb.w * hb.h);
   const n = 256 * 2 ** hb.z;
   const world = loadWorldMap();
@@ -192,7 +203,7 @@ function albumGrid() {
     if (x < 0 || y < 0 || x > hb.w - 1 || y > hb.h - 1) return world.height(lat, lon);
     return hpx[Math.round(y) * hb.w + Math.round(x)] / 4 - 8192;
   };
-  const vec = JSON.parse(fs.readFileSync(P('public', 'album-data', 'vectors.json'), 'utf8'));
+  const vec = JSON.parse(fs.readFileSync(path.join(ALBUM_DATA, 'vectors.json'), 'utf8'));
   const lakes = (vec.lakes ?? []).map(l => l.ring);
   const lake = (lat, lon) => lakes.some(r => inRing(r, lon, lat)) || (!(lon >= b.lon0 && lon <= b.lon1 && lat >= b.lat0 && lat <= b.lat1) && world.lake(lat, lon));
   // The album's own CPU height: bilinear, clamped at the edge — data.base.at in src/album/data.js, line for line

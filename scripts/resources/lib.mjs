@@ -1,6 +1,7 @@
 // Passionaris — natural resources: shared, browser-safe code (no Node imports).
 // Used by the bake (scripts/resources/bake.mjs), the tests and the album's «Ресурсы» mode.
 // The resource list and every rule are described in docs/RESOURCES.md.
+import { STAGE } from '../../src/album/geo.js';      // which polygon the album stands at: the lattice of its squares
 
 // ------------------------------------------------------------------ resources
 // The owner's list of base raw materials (docs/RESOURCES.md, «Список сырья»), 52 kinds, no alloys or refined products.
@@ -91,9 +92,16 @@ export const chunkOf = (lat, lon) => ({ i: chunkI(lon), j: chunkJ(lat) });
 // centre (or any point with fx, fy ∈ [0, 1) inside) of chunk (i, j)
 export const chunkLon = (i, fx = 0.5) => (i + fx) * CHUNK_KM / (KM_PER_DEG * COS_REF);
 export const chunkLat = (j, fy = 0.5) => (j + fy) * CHUNK_KM / KM_PER_DEG;
-// The album's chunk grid — the same as CN, CI0, CJ0 in src/album/chunks.js (docs/ALBUM-CHUNKS.md):
-// 128 × 128 chunks from chunk (−88, 388); chunk number k = (j − 388) · 128 + (i + 88).
-export const ALBUM_GRID = { kind: 'chunks', i0: -88, j0: 388, W: 128, H: 128, chunkKm: CHUNK_KM };
+// The album's grid of 10 km squares — the lattice of src/album/chunks.js (CNX × CNY squares from (CI0, CJ0);
+// docs/ALBUM-CHUNKS.md), by the stage of the polygon (src/album/geo.js STAGE): 128 × 128 from (−88, 388) at stage 2,
+// 192 × 280 from (−88, 324) at stage 3. A square of the table is s = (j − j0) · W + (i − i0), row 0 the southmost.
+// (A square is not a chunk: the chunks have natural outlines and, at stage 3, exist only on the worked land —
+// spreadToChunks() below lays the table over them.)
+export const ALBUM_GRIDS = {
+  2: { kind: 'chunks', i0: -88, j0: 388, W: 128, H: 128, chunkKm: CHUNK_KM },
+  3: { kind: 'chunks', i0: -88, j0: 324, W: 192, H: 280, chunkKm: CHUNK_KM },
+};
+export const ALBUM_GRID = ALBUM_GRIDS[STAGE >= 3 ? 3 : 2];
 // the grid that covers a lon/lat box
 export function gridForBox(b) {
   const i0 = chunkI(b.lon0), i1 = chunkI(b.lon1), j0 = chunkJ(b.lat0), j1 = chunkJ(b.lat1);
@@ -232,6 +240,7 @@ export function spreadToChunks(table, meta, g) {
   for (const d of meta.deposits) { const k = table.index[d.res] * N + d.cell; area[k] = Math.max(0, area[k] - d.amount); }
   const rows = g.FNY ?? g.FN, nL = new Uint16Array(N), nW = new Uint16Array(N), sq = new Int32Array(g.FN * rows);
   for (let ty = 0, t = 0; ty < rows; ty++) for (let tx = 0; tx < g.FN; tx++, t++) {
+    if (!(g.cell[t] < n)) { sq[t] = -1; continue; }   // no chunk here (chunks.js NONE: the world beyond the worked land)
     const s = Math.floor(ty / g.sub) * SW + Math.floor(tx / g.sub);
     sq[t] = s;
     if (g.kind[g.cell[t]]) nL[s]++; else nW[s]++;
@@ -239,13 +248,15 @@ export function spreadToChunks(table, meta, g) {
   const fish = table.index.fish;
   const amount = new Float32Array(R * n), depth = new Uint8Array(R * n).fill(255);
   for (let t = 0; t < sq.length; t++) {
-    const s = sq[t], k = g.cell[t], land = !!g.kind[k];
+    const s = sq[t]; if (s < 0) continue;
+    const k = g.cell[t], land = !!g.kind[k];
     for (let r = 0; r < R; r++) {
       const v = area[r * N + s];
       if (!v) continue;
       const water = r === fish ? nW[s] > 0 : nL[s] === 0;   // which texels of the square take it
       if (land === water) continue;
-      amount[r * n + k] += v / (water ? nW[s] : nL[s]);
+      // (a square only partly on the worked land gives its chunks that part of what it holds, not all of it)
+      amount[r * n + k] += v * ((nL[s] + nW[s]) / (g.sub * g.sub)) / (water ? nW[s] : nL[s]);
       depth[r * n + k] = 0;
     }
   }
@@ -278,6 +289,7 @@ export function zonesToChunks(zones, meta, g) {
       const x0 = (s % SW) * g.sub, y0 = Math.floor(s / SW) * g.sub;
       for (let y = y0; y < y0 + g.sub; y++) for (let x = x0; x < x0 + g.sub; x++) {
         const k = g.cell[y * g.FN + x];
+        if (!(k < g.count)) continue;         // no chunk here
         if (!sea && !g.kind[k]) continue;
         if ((w.get(k) ?? 0) < z.weights[q]) w.set(k, z.weights[q]);
       }

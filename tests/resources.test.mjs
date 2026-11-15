@@ -10,7 +10,7 @@ import {
   hash32, strHash, scatterZone, withZones, sumCells, spreadToChunks, zonesToChunks, index100, fmtAmount, SPREAD, poolStocks,
 } from '../scripts/resources/lib.mjs';
 import { BONUS, SIZE, KNOWN } from '../scripts/resources/reference.mjs';
-import { CN, CI0, CJ0, CHUNK_KM, kmOf, Chunks, FN, FKM } from '../src/album/chunks.js';
+import { CNX, CNY, CI0, CJ0, CHUNK_KM, kmOf, Chunks, FNX, FNY, FKM } from '../src/album/chunks.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 
 const DIR = new URL('../public/assets/resources/', import.meta.url);
@@ -76,14 +76,14 @@ test('chunk grid: the formula of the brief, and chunk centres map back to their 
     assert.deepEqual(chunkOf(chunkLat(j), chunkLon(i)), { i, j });
     assert.ok(Math.abs(chunkLat(j, 0) - chunkLat(j, 1) + 10 / 111.195) < 1e-9, 'a chunk is 10 km tall');
   }
-  assert.deepEqual([ALBUM_GRID.i0, ALBUM_GRID.j0, ALBUM_GRID.W, ALBUM_GRID.H, ALBUM_GRID.chunkKm], [CI0, CJ0, CN, CN, CHUNK_KM]);
-  assert.deepEqual([meta.grid.i0, meta.grid.j0, meta.grid.W, meta.grid.H], [CI0, CJ0, CN, CN]);
+  assert.deepEqual([ALBUM_GRID.i0, ALBUM_GRID.j0, ALBUM_GRID.W, ALBUM_GRID.H, ALBUM_GRID.chunkKm], [CI0, CJ0, CNX, CNY, CHUNK_KM]);
+  assert.deepEqual([meta.grid.i0, meta.grid.j0, meta.grid.W, meta.grid.H], [CI0, CJ0, CNX, CNY]);
   for (const [lat, lon] of [[40.4, -3.7], [43.3, -2.9]]) {
     const [x, y] = kmOf(lat, lon), { i, j } = chunkOf(lat, lon);
     assert.deepEqual([Math.floor(x / CHUNK_KM), Math.floor(y / CHUNK_KM)], [i, j]);
   }
   const g = gridForBox(ALBUM_BOX);
-  assert.ok(g.i0 >= CI0 && g.j0 >= CJ0 && g.i0 + g.W <= CI0 + CN && g.j0 + g.H <= CJ0 + CN);
+  assert.ok(g.i0 >= CI0 && g.j0 >= CJ0 && g.i0 + g.W <= CI0 + CNX && g.j0 + g.H <= CJ0 + CNY);
 });
 
 test('album table: format 2 — whole numbers in metric units, a scale step and a 0–100 reference per resource', () => {
@@ -281,7 +281,7 @@ test('natural chunks: squares spread over the chunks of their texels — fish to
 
 test('natural chunks of the album: totals kept, wood on land, fish in water, known places in their chunks', { skip: !albumData && 'public/album-data/ is not there' }, () => {
   const ch = new Chunks(albumData.base.at, albumData.vectors.rivers);
-  const g = { count: ch.count, kind: ch.kind, cell: ch.cell, FN, sub: CHUNK_KM / FKM, links: ch.links, at: (lat, lon) => ch.at(lat, lon) };
+  const g = { count: ch.count, kind: ch.kind, cell: ch.cell, FN: FNX, FNY, sub: CHUNK_KM / FKM, links: ch.links, at: (lat, lon) => ch.at(lat, lon) };
   const out = spreadToChunks(table, meta, g), n = ch.count;
   const total = (arr, N, res, filter = () => true) => { let s = 0; for (let k = 0; k < N; k++) if (filter(k)) s += arr[RES_INDEX[res] * N + k]; return s; };
   for (const res of ['fish', 'wood', 'stone', 'clay', 'copper', 'silver']) {
