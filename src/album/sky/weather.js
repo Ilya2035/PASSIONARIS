@@ -13,9 +13,10 @@
 // How much cloud a place has, and how willingly its clouds rain, goes by its climate: the precipitation of the month
 // (the open climate of the world, public/assets/climate/normals-open.bin.gz), in a small picture tClim.
 //
-// The fog, the cloud of the mountain valleys and the caps of the crests belong to the album's own piece of land (the
-// polygon): they lie on a plane that touches the globe at its middle (planeOf), over a picture of the floor of the
-// land (tFog) and of its crests (tPeak).
+// The fog, the cloud of the mountain valleys and the caps of the crests belong to the land the album has detailed
+// heights of — the rectangle BBOX of geo.js (at stage 2 the worked polygon itself; at stage 3 wider than the worked
+// land: the simple land inside the rectangle has its fog too). They lie on a plane that touches the globe at the
+// middle of the album (planeOf), over a picture of the floor of the land (tFog) and of its crests (tPeak).
 // All pictures are built on the first frame that needs them; while the weather is off they do not exist.
 import { DataTexture, RedFormat, RGBAFormat, UnsignedByteType, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, ClampToEdgeWrapping, DataUtils, Vector2, Vector4 } from 'three';
 import { R, BBOX, CENTRE, KM_PER_DEG, COS_REF, toWorld, fromWorld, wrapLon } from '../geo.js';
@@ -319,7 +320,10 @@ export const fogNumbers = amount => ({ thick: amount * (110 + 190 * amount), ban
 // The floor of the land for the fog, on a grid over the map: for every cell the lowest ground around it (smoothed),
 // m over the sea, and how willingly fog gathers there: 1 on the land .. 1.25 in a deep valley; over the sea .9 at the
 // coast, falling to nothing 40 km out (sea fog lies in banks along the shore, not over the whole sea).
-// at(lat, lon) gives the height of the ground in m (under the sea negative).
+// at(lat, lon) gives the height of the ground in m (under the sea negative). box: the rectangle the grid covers — that
+// of the detailed heights, not the worked land: the floor is made of heights alone. (Its size is what the build
+// costs: 0.25 s and 1.4 MB of pictures for the rectangle of stage 2, 1.05 s and 6 MB for that of stage 3 — once,
+// when the fog, the caps or the rain are first switched on. A frame costs the same: it reads the same points.)
 export function fogFloor(at, cell = 4, sub = 4, box = BBOX) {
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const la of [box.lat0, (box.lat0 + box.lat1) / 2, box.lat1]) for (const lo of [box.lon0, (box.lon0 + box.lon1) / 2, box.lon1]) {
@@ -466,7 +470,9 @@ export function needFog(at) {
 // paid for in every pixel over Spain too (measured 15.11.2026: +5 ms a frame with the clouds on). Hence two texts
 // of every shader of the weather: the plain one, and the whole one with #define WX_WORLD. The whole one is used
 // when the view reaches beyond the album's own belt of wind (35°…60° N), farther than WORLD_LON degrees from its
-// meridian, or into a whirl. Over the album the two give the same clouds to the last km, so the change is not seen.
+// meridian, or into a whirl. Inside those bounds the two give the same clouds to the last km, so the change is not
+// seen. (The belt is the wind's, not the polygon's: at stage 3 the worked land reaches south of 35° N — the Maghreb —
+// and a view over it takes the whole text, as every view that reaches there always did.)
 export const WORLD = { on: false }, WORLD_LON = 19;
 // does a view need the whole text: lat, lon — where the camera looks; reach — how far the land in view lies from
 // there, km; whirls — how many great whirls reach into the view
@@ -591,11 +597,11 @@ float wxFlash(vec2 q) {
   return (.5 + .5 * step(.5, fract(k / uStorm.z * 2.5 + h * 3.))) * (1. - smoothstep(.08, .48, length(fract(g) - .5)));
 }
 #endif
-// is a place of the map (m: wxMap or wxFlat of it) in the album's polygon: 1 inside, 0 beyond its rim — the rule of
-// the ground shader (inRegion, glsl.js)
+// is a place of the map (m: wxMap or wxFlat of it) in the rectangle of the album's detailed heights (BBOX): 1 inside,
+// 0 beyond its rim — the rule of the ground shader (inRegion, glsl.js)
 float wxInside(vec4 m) { return inRegion(vec2(degrees(asin(m.w)), m.z * 360. - 180.)); }
 // The line of fresh snow at a place of the map, km of the world over the sea (freshSnowLine). It hangs on the lasting
-// snow the ground shader draws — in the polygon the line by the latitude, beyond it the lasting snow of the world —
+// snow the ground shader draws — in that rectangle the line by the latitude, beyond it the lasting snow of the world —
 // and is never above the line of the month's warmth.
 float wxSnowLine(vec4 m, float inside) {
   vec4 c = textureLod(tClim, vec2(m.z, .5 - .5 * m.w), 0.);

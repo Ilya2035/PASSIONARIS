@@ -125,7 +125,9 @@ export default {
       const i = Math.min(wc.width - 1, Math.max(0, Math.floor((lon / 360 + .5) * wc.width))), j = Math.min(wc.height - 1, Math.max(0, Math.floor((.5 - lat / 180) * wc.height)));
       return snowlineOf(WARM_WORLD[0] + (WARM_WORLD[1] - WARM_WORLD[0]) * wc.data[(j * wc.width + i) * 4 + 2] / 255, lat);
     } : null;
-    // the fog and the caps of the crests lie on the album's own land: there is nothing of them to draw far from it
+    // the fog and the caps of the crests lie where the album has detailed heights — the rectangle BBOX, over which the
+    // floor of the land is built (fogFloor); at stage 3 that is wider than the worked land, and the fog lies on the
+    // simple land inside it too. Far from the rectangle there is nothing of them to draw
     const nearLand = c => c.lat > BBOX.lat0 - 6 && c.lat < BBOX.lat1 + 6 && c.lon > BBOX.lon0 - 8 && c.lon < BBOX.lon1 + 8;
     p.on(sync); sync();
     const layer = { id: 'sky', dome, hour: 0, update(dt, _t, c) {

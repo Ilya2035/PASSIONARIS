@@ -27,6 +27,8 @@ async function start() {
   step('сцена');
   step('чанки'); const tChunks = performance.now();
   // the lakes of the water aspect are cut out of the land as chunks of their own (the shoals in the list are not lakes)
+  // (data.worked: the mask of the worked land from the loader — at stage 3 chunks are made only under it; at stage 2
+  // there is none, and every square of the lattice has its chunks)
   const lakes = await fetch('assets/album/water/lakes.json').then(r => r.json()).then(j => (j.lakes || []).filter(l => !l.shoal && l.ring)).catch(() => []);
   const chunks = album.chunks = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked); album.chunkMs = Math.round(performance.now() - tChunks);
   const terrain = album.terrain = new Terrain(data, scene, chunks);

@@ -22,6 +22,9 @@ import { DEFS } from '../src/album/params.js';
 
 const near = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg || ''} ${a} is not within ${eps} of ${b}`);
 const NOISE = cloudNoise(), page = id => sky.pages.find(p => p.id === id), def = k => DEFS.find(d => d.key === k);
+// The land the weather was made on: the rectangle of Iberia, which is BBOX at stage 2. What a test counts over a piece
+// of land it counts over this one, so that its numbers are the same at every stage (geo.js, STAGE).
+const IBERIA = { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
 
 test('weather: the plane it is laid out on', () => {
   const o = planeOf(CENTRE.lat, CENTRE.lon); near(o[0], 0, 1e-6); near(o[1], 0, 1e-6);
@@ -148,7 +151,7 @@ test('weather: it rains under some of the clouds, nearly to their edge', () => {
   assert.ok(rainMask(1) < rainMask(.3), 'harder rain: more of the clouds rain');
   const force = def('rainForce').value, cover = rainCover(force), thr = cloudThreshold(cover);
   let n = 0, wet = 0, wetHard = 0, wetWeak = 0;
-  for (let la = BBOX.lat0 + .2; la < BBOX.lat1; la += .15) for (let lo = BBOX.lon0 + .2; lo < BBOX.lon1; lo += .15) {
+  for (let la = IBERIA.lat0 + .2; la < IBERIA.lat1; la += .15) for (let lo = IBERIA.lon0 + .2; lo < IBERIA.lon1; lo += .15) {
     const r = rainAt(NOISE, la, lo, cover, force); n++;
     if (r > .5) wet++; if (rainAt(NOISE, la, lo, rainCover(1), 1) > .5) wetHard++; if (rainAt(NOISE, la, lo, rainCover(.3), .3) > .5) wetWeak++;
     // no rain out of a clear sky: where it rains, the cloud stands over the place the rain fell from
@@ -254,7 +257,12 @@ test('weather: the wind of a place — westerlies over the album, trades in the 
   const s = lat => Math.sin(lat * Math.PI / 180), w = lat => windOf(s(lat));
   // over the album and all the way to 60° N the wind is the wind the field is carried by: nothing to add
   for (const lat of [35.2, 40, 44.8, 50, 59]) { near(w(lat)[0], 0, 1e-9, `${lat}`); near(w(lat)[1], 0, 1e-9, `${lat}`); }
-  assert.ok(BELTS[1] <= s(BBOX.lat0), 'the whole album lies in the westerlies');
+  // Iberia lies in the westerlies whole. The belt is the wind's and not the polygon's: where the rectangle of the
+  // album reaches south of it (stage 3, the Maghreb) the wind is another, and a view there takes the whole text
+  assert.ok(BELTS[1] <= s(IBERIA.lat0), 'the whole of Iberia lies in the westerlies');
+  assert.ok(BBOX.lat0 <= IBERIA.lat0 && BBOX.lat1 >= IBERIA.lat1 && BBOX.lon0 <= IBERIA.lon0 && BBOX.lon1 >= IBERIA.lon1, 'the album holds Iberia at every stage');
+  assert.equal(worldNeeded(BBOX.lat0 + .1, CENTRE.lon, 0), BBOX.lat0 < IBERIA.lat0, 'the whole text at the south rim of the album: only where it reaches south of Iberia');
+  assert.equal(worldNeeded(Math.min(BBOX.lat1, 59) - .5, CENTRE.lon, 0), false, 'and not at its north rim');
   // the trades blow the other way: toward the west, and toward the equator on either side of it
   const tn = w(12), ts = w(-12); near(WIND[0] + tn[0], TRADES * WIND[0], 1e-9); assert.ok(WIND[0] + tn[0] < -.5, 'west'); assert.ok(WIND[1] + tn[1] > .2, 'north of the equator: southward'); assert.ok(WIND[1] + ts[1] < -.2, 'south of it: northward');
   // the westerlies of the south blow east and toward their own pole; beyond 70° the polar easterlies
@@ -391,8 +399,15 @@ test('weather: the fog is of the morning', () => {
 test('weather: fog fills the land from the floor of the valley and the sea', () => {
   // a made-up land: a plain at 500 m, a valley along the 41st parallel cut down to 200 m, the sea west of 8° W
   const land = (lat, lon) => (lon < -8 ? -100 : Math.min(500, 200 + Math.abs(lat - 41) * 111 * 30));
-  const ff = fogFloor(land, 8, 2), at = (la, lo) => fogFloorAt(ff, la, lo);
+  const ff = fogFloor(land, 8, 2, IBERIA), at = (la, lo) => fogFloorAt(ff, la, lo);
   assert.ok(ff.w * ff.cell > 1150 && ff.h * ff.cell > 1000 && ff.floor.length === ff.w * ff.h && ff.weight.length === ff.w * ff.h);
+  // left to itself the floor covers the rectangle of the album's detailed heights (BBOX), whatever the stage: every
+  // corner and every middle of a side lies on its grid
+  const whole = fogFloor(land, 32, 1);
+  for (const la of [BBOX.lat0, (BBOX.lat0 + BBOX.lat1) / 2, BBOX.lat1]) for (const lo of [BBOX.lon0, (BBOX.lon0 + BBOX.lon1) / 2, BBOX.lon1]) {
+    const [x, z] = planeOf(la, lo); assert.ok(x >= whole.x0 - 1e-6 && x <= whole.x0 + whole.w * whole.cell + 1e-6 && z >= whole.z0 - 1e-6 && z <= whole.z0 + whole.h * whole.cell + 1e-6, `${la}, ${lo}`);
+  }
+  assert.ok(whole.w * whole.cell >= ff.w * ff.cell - 32 && whole.h * whole.cell >= ff.h * ff.cell - 32, 'never smaller than over Iberia');
   // in the valley the floor is the bottom of the valley; a few km up its side it is still nearly the bottom — so the
   // side rises out of the fog; far away on the plain it is the plain itself
   assert.ok(at(41, -3).floor < 260, `${at(41, -3).floor}`); assert.ok(at(41.1, -3).floor < 300 && land(41.1, -3) - at(41.1, -3).floor > 200);
@@ -408,7 +423,7 @@ test('weather: fog fills the land from the floor of the valley and the sea', () 
 test('weather: clouds in the mountains — a sea of cloud in the valleys, caps on the crests', () => {
   // a made-up land: a plain at 400 m and a range along 42.5° N whose crest stands at 3000 m, 20 km from its foot
   const land = (lat, lon) => 400 + 2600 * Math.max(0, 1 - Math.abs(lat - 42.5) * 111.2 / 20);
-  const ff = fogFloor(land, 8, 2), at = (la, lo) => fogFloorAt(ff, la, lo);
+  const ff = fogFloor(land, 8, 2, IBERIA), at = (la, lo) => fogFloorAt(ff, la, lo);
   assert.equal(ff.pw, ff.w * 2); assert.equal(ff.ph, ff.h * 2); assert.equal(ff.peak.length, ff.pw * ff.ph);
   // the crests are kept on a grid twice as fine, as the highest ground of a cell, only a little rounded
   const crest = at(42.5, 0), foot = at(42.0, 0), plain = at(40, 0);

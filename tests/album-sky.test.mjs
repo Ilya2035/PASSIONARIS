@@ -10,7 +10,7 @@ import { postShader, POST_BALL, POST_CLOUDS } from '../src/album/post.js';
 import { cloudShader } from '../src/album/layers/clouds.js';
 import { LIGHT, lightUniforms, lightNumbers, lightFrame, FRAME, sunAt, HAZE_KM } from '../src/album/light.js';
 import { AlbumCamera, edgePush, keyPush, panStep, zoomAbout, tiltCap, nearLon, H_MIN, H_MAX, H_TILT, PAN_H, TILT_MAX, EDGE_PX, PAN_RATE } from '../src/album/camera.js';
-import { KM_PER_DEG, BBOX, R, LAT_MAX, fromWorld, distKm } from '../src/album/geo.js';
+import { KM_PER_DEG, R, LAT_MAX, fromWorld, distKm } from '../src/album/geo.js';
 import sky from '../src/album/aspects/sky.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
