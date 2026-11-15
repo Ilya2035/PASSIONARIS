@@ -68,6 +68,39 @@ export function allChunks(sum, lat, lon, hLat, hLon, rect, nx = SNX, ny = SNY, k
   const w = nx + 1, n = sum[(y1 + 1) * w + x1 + 1] - sum[y0 * w + x1 + 1] - sum[(y1 + 1) * w + x0] + sum[y0 * w + x0];
   return n === (x1 - x0 + 1) * (y1 - y0 + 1);
 }
+// ---- stage 3: a level of the grid is cut into BLOCKS × BLOCKS blocks, each drawn by the variant that suits it.
+// (Whole levels by one variant — the first step — left every level that touches the edge of the worked land to the
+// full variant, and from 150 km up most levels touch it: measured in one window, the frame was a fifth to a third
+// longer there — 226 ms against 177 over the Rhine from 150 km, 139 against 115 over Iberia from 1700 km. Near the
+// ground it is the same either way.)
+export const BLOCKS = 8;
+// the triangles of a grid of m × m cells, block after block: block b = bj · blocks + bi is the m / blocks cells a side
+// from cell (bi, bj) · m / blocks, and its triangles are the indices [b · per, (b + 1) · per), per = (m / blocks)² · 6
+export function blockIndex(m, blocks) {
+  const n = m + 1, q = m / blocks, idx = new Uint32Array(m * m * 6);
+  let k = 0;
+  for (let bj = 0; bj < blocks; bj++) for (let bi = 0; bi < blocks; bi++)
+    for (let j = bj * q; j < (bj + 1) * q; j++) for (let i = bi * q; i < (bi + 1) * q; i++) { const a = j * n + i; idx[k++] = a; idx[k++] = a + 1; idx[k++] = a + n; idx[k++] = a + 1; idx[k++] = a + n + 1; idx[k++] = a + n; }
+  return idx;
+}
+// what lies under a square (centre and half-sides in degrees) and two texels around it: 'all' — every texel of the
+// chunk raster is a chunk, 'none' — not one is, 'some'. Beyond the raster there are no chunks.
+export function chunksIn(sum, lat, lon, hLat, hLon, rect, nx = SNX, ny = SNY, km = FKM * 2) {
+  const x0 = Math.floor(((lon - hLon) * KM_PER_DEG * COS_REF - rect.x0) / km) - 2, x1 = Math.floor(((lon + hLon) * KM_PER_DEG * COS_REF - rect.x0) / km) + 2;
+  const y0 = Math.floor(((lat - hLat) * KM_PER_DEG - rect.y0) / km) - 2, y1 = Math.floor(((lat + hLat) * KM_PER_DEG - rect.y0) / km) + 2;
+  const a0 = Math.max(0, x0), a1 = Math.min(nx - 1, x1), b0 = Math.max(0, y0), b1 = Math.min(ny - 1, y1);
+  if (a0 > a1 || b0 > b1) return 'none';
+  const w = nx + 1, n = sum[(b1 + 1) * w + a1 + 1] - sum[b0 * w + a1 + 1] - sum[(b1 + 1) * w + a0] + sum[b0 * w + a0];
+  return n === 0 ? 'none' : n === (x1 - x0 + 1) * (y1 - y0 + 1) ? 'all' : 'some';
+}
+// which variants draw a block: [zone 1, zone 2, zone 3, zone 4]. One of them where the block lies whole in its part
+// of the Earth; on the rim of the rectangle of the heights — the full variant and the world, cut along the rim.
+export function blockZones(lat, lon, hLat, hLon, chunks) {
+  if (!touches(lat, lon, hLat, hLon, REGION_FADE + ZEPS)) return [false, false, true, false];
+  if (chunks === 'all' && within(lat, lon, hLat, hLon, -STATE_FADE[1] - ZEPS)) return [true, false, false, false];
+  if (chunks === 'none' && within(lat, lon, hLat, hLon, -ZEPS)) return [false, false, false, true];
+  return [false, true, !within(lat, lon, hLat, hLon, REGION_FADE - ZEPS), false];
+}
 // ---- what stage 3 adds to the text of the shaders (at stage 2 none of it is in them)
 // the full variant is not cut on its inner side: it draws whatever the fast one leaves, however deep inside
 export const S3_CLIP_INNER = '1.';
@@ -135,6 +168,9 @@ const FRAG_SRC = /* glsl */`
 //      state, and ${REGION_FADE}° beyond it, where its heights and climate give way to those of the world. All of the shader.
 //   3  the world beyond. Nothing of the polygon is in it: no chunks, no swamp, fields, houses or borders, no heights
 //      of its own.
+//   4  (stage 3) the plain land of the world on the detailed heights of the rectangle — the south of England, Italy,
+//      the Sahara: the heights and the climate of the polygon, and no chunks under it. The shader of zone 1 without
+//      the state of the chunks and the parts that live on it: the natural state everywhere.
 //   0  the whole Earth by one variant (all of the shader), where the video card cannot cut the grids.
 // REGION(ll): 1 inside the polygon .. 0 beyond it; STATE(ll): 1 the state of the chunks .. 0 the natural state.
 #if ZONE == 1
@@ -145,10 +181,17 @@ const FRAG_SRC = /* glsl */`
 #define ALBUM_WORLD 2
 #define REGION(ll) 0.
 #define STATE(ll) 0.
+#elif ZONE == 4
+#define ALBUM_WORLD 0
+#define REGION(ll) 1.
+#define STATE(ll) 0.
 #else
 #define ALBUM_WORLD 1
 #define REGION(ll) inRegion(ll)
 #define STATE(ll) ${STAGE >= 3 ? S3_STATE : `smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))`}
+#endif
+#if ZONE == 3 || ZONE == 4
+#define NO_CHUNKS                                                  // (no chunk lies under this variant: nothing reads their state)
 #endif
 ${COMMON}
 ${CHUNK_GLSL}${STAGE >= 3 ? S3_CHUNK_HERE : ''}
@@ -440,7 +483,7 @@ void main() {
   Px p;
   p.ll = ll; p.pk = pk; p.pdx = pdx; p.pdy = pdy; p.px = px; p.h = h0; p.hl = hl; p.slope = slope; p.n = n;
   p.wet = .5; p.n1 = .5; p.n2 = .5; p.n3 = .5; p.V = V; p.sd = sd; p.day = day; p.sh = sh; p.ao = ao; p.sunCol = sunCol; p.skyCol = skyCol;
-#if ZONE == 3
+#ifdef NO_CHUNKS
   p.cA = vec4(1., 0., 1., 0.); p.cB = vec4(0.); p.cC = vec4(0.);     // (no chunks: the natural state, filled in below)
 #else
   vec2 cuv = chunkUV(pk);
@@ -536,13 +579,13 @@ void main() {
     vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;
     if (fract((ga + gb) * .5) > .25) { gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }
     ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope)));
-#if ZONE != 3
+#ifndef NO_CHUNKS
     ground = aspShore(p, ground, L.cover);                           // beaches and rocks at the waterline (the water work)
 #endif
     L.col = ground;
 
     // the aspects paint over the bare ground in this order: wet ground, what people did, the forest
-#if ZONE != 3
+#ifndef NO_CHUNKS
     aspSwamp(p, L);
     aspSettle(p, L);
 #endif
@@ -642,7 +685,7 @@ void main() {
   }
 
   // ---- map modes drawn on the ground
-#if ZONE != 3
+#ifndef NO_CHUNKS
   aspDivision(p, col, landA);
 #endif
   if (uData > 0 && landA > .5) {
@@ -651,7 +694,7 @@ void main() {
     ramp *= .92 + .08 * step(.5, fract(v * 12.));
     col = ramp * (.62 + .45 * nl * sh);
   }
-#if ZONE != 3
+#ifndef NO_CHUNKS
   // the chunks themselves: a number of theirs as colour (chunks.show), their outlines, the one under the cursor
   if (uGrid > 0 || uChunkShow > 0. || uChunkHoverId >= 0.) {
     vec2 cc = chunkCell(pk); float edge = cc.y * ${(FKM / 2).toFixed(4)};          // km from the border of the chunk
@@ -712,8 +755,10 @@ export class Terrain {
     const n = M + 1, grid = new Float32Array(n * n * 2), pos = new Float32Array(n * n * 3), idx = new Uint32Array(M * M * 6);
     for (let j = 0, k = 0; j < n; j++) for (let i = 0; i < n; i++, k++) { grid[k * 2] = i - M / 2; grid[k * 2 + 1] = j - M / 2; }
     for (let j = 0, k = 0; j < M; j++) for (let i = 0; i < M; i++) { const a = j * n + i; idx[k++] = a; idx[k++] = a + 1; idx[k++] = a + n; idx[k++] = a + 1; idx[k++] = a + n + 1; idx[k++] = a + n; }
+    // stage 3, where the video card can cut the grids: the levels are drawn block by block (BLOCKS, blockZones)
+    const blocky = this.blocky = STAGE >= 3 && clipOk(); this.blocks = BLOCKS;
     const geo = new BufferGeometry();
-    geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setAttribute('grid', new BufferAttribute(grid, 2)); geo.setIndex(new BufferAttribute(idx, 1));
+    geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setAttribute('grid', new BufferAttribute(grid, 2)); geo.setIndex(new BufferAttribute(blocky ? blockIndex(M, BLOCKS) : idx, 1));
     // the climate of the ground as one picture over the square of the chunks (ground/climate.js)
     const cr = chunks.uniforms.uChunkRect.value, climW = Math.round(1 / cr.z / CLIM_KM), climH = Math.round(1 / cr.w / CLIM_KM);   // (the lattice of the chunks in cells of 5 km: 256 × 256 at stage 2, 384 × 560 at stage 3)
     const clim = new DataTexture(climateTexels(data.base.at, { x0: cr.x, y0: cr.y, w: 1 / cr.z, h: 1 / cr.w }, data.climate, climW, climH), climW, climH, RGBAFormat, UnsignedByteType);
@@ -736,15 +781,25 @@ export class Terrain {
     // A grid is drawn by the three variants of the shader (ZONE), each cut to its own part of the Earth — or by the
     // one variant that draws everything, where the video card cannot cut. this.levels: the first of them for
     // every level (the others share its uniforms); this.zoned: all of them, [level][variant].
-    const clip = clipOk(), ZONES = clip ? [1, 2, 3] : [0];
+    const clip = clipOk(), ZONES = clip ? (blocky ? [1, 2, 3, 4] : [1, 2, 3]) : [0];
     this.clip = clip;
     // stage 3: where the chunks lie (zonesOf3)
     if (STAGE >= 3) { this.chunkSum = chunkSums(chunks.stateCell); this.chunkRect = { x0: cr.x, y0: cr.y }; }
-    const grids = (g, own, order) => ZONES.map(z => {
-      const mesh = new Mesh(g, new ShaderMaterial({
+    // cut: the grid is drawn block by block — every variant gets a geometry of its own over the same points (its
+    // groups are its blocks: update()) and its material in a list, which is how three.js draws groups. The list
+    // answers .uniforms as the material does, for whoever reads the uniforms of a level (layers/ribbon.js).
+    const grids = (g, own, order, cut = false) => ZONES.map(z => {
+      const mat = new ShaderMaterial({
         uniforms: { ...this.u, ...own, uZone: { value: z } }, defines: clip ? { ZONE: z, CLIP_ZONES: 1 } : { ZONE: z }, extensions: { clipCullDistance: clip },
         vertexShader: VERT, fragmentShader: FRAG,                   // no polygonOffset: see the step in the vertex shader
-      }));
+      });
+      let mesh;
+      if (cut) {
+        const own2 = new BufferGeometry(), list = [mat];
+        own2.setAttribute('position', g.getAttribute('position')); own2.setAttribute('grid', g.getAttribute('grid')); own2.setIndex(g.index);
+        list.uniforms = mat.uniforms;
+        mesh = new Mesh(own2, list);
+      } else mesh = new Mesh(g, mat);
       mesh.frustumCulled = false; mesh.renderOrder = order;
       if (clip) { mesh.onBeforeRender = clipOn; mesh.onAfterRender = clipOff; }
       scene.add(mesh);
@@ -752,7 +807,7 @@ export class Terrain {
     });
     this.levels = []; this.zoned = [];
     for (let l = 0; l < LEVELS; l++) {
-      const set = grids(geo, { uCentre: { value: new Vector2() }, uCell: { value: 1 }, uFine: { value: new Vector3() }, uLod: { value: 0 } }, l - 20);
+      const set = grids(geo, { uCentre: { value: new Vector2() }, uCell: { value: 1 }, uFine: { value: new Vector3() }, uLod: { value: 0 } }, l - 20, blocky);
       this.zoned.push(set); this.levels.push(set[0]);
     }
     // ---- the rest of the Earth. The levels are squares of a flat grid of latitude and longitude around the camera:
@@ -770,7 +825,7 @@ export class Terrain {
     this.globe = this.globes[0];
     // (stage 3: the grid of the whole ball is drawn inside the rectangle by the full variant alone — the fast one
     // would take the plain land there for worked land)
-    if (STAGE >= 3 && clip) this.globes[0].visible = false;
+    if (STAGE >= 3 && clip) { this.globes[0].visible = false; if (this.globes[3]) this.globes[3].visible = false; }
     // the thin shell of air at the limb
     const air = new Mesh(new SphereGeometry(R + 75, 128, 64), new ShaderMaterial({
       side: BackSide, transparent: true, depthWrite: false, uniforms: { uSun: this.u.uSun },
@@ -789,6 +844,19 @@ export class Terrain {
     if (!d) { this.u.uDetOn.value = 0; return; }
     this.u.uDet.value = d.tex; this.u.uDetRect.value.set(...d.rect); this.u.uDetOn.value = 1 + (this.fine || 0);
   }
+  // Stage 3: the blocks of level l (centre lat, lon; a cell of c km) are handed to the variants — every block to the
+  // one that suits what lies under it, a block on the rim of the rectangle of the heights to two. Blocks that follow
+  // one another in the index go as one group, so a level is a handful of draws.
+  cut(l, lat, lon, c, shown) {
+    const set = this.zoned[l], runs = set.map(() => []), q = M / BLOCKS, per = q * q * 6, hLat = q * c / 2 / KM_PER_DEG, hLon = q * c / 2 / (KM_PER_DEG * COS_REF);
+    if (shown) for (let bj = 0, b = 0; bj < BLOCKS; bj++) for (let bi = 0; bi < BLOCKS; bi++, b++) {
+      const blat = lat + ((bj + .5) * q - M / 2) * c / KM_PER_DEG, blon = lon + ((bi + .5) * q - M / 2) * c / (KM_PER_DEG * COS_REF);
+      const zs = blockZones(blat, blon, hLat, hLon, chunksIn(this.chunkSum, blat, blon, hLat, hLon, this.chunkRect));
+      for (let k = 0; k < set.length; k++) if (zs[k]) { const r = runs[k], last = r[r.length - 1]; if (last && last[0] + last[1] === b * per) last[1] += per; else r.push([b * per, per]); }
+    }
+    set.forEach((m, k) => { const g = m.geometry; g.clearGroups(); for (const [start, count] of runs[k]) g.addGroup(start, count, 0); m.visible = runs[k].length > 0; });
+    this.draws = (l ? this.draws || 0 : 0) + runs.reduce((n, r) => n + r.length, 0);   // (how many draws the levels took this frame: for the measurements)
+  }
   // re-centres the levels on the camera target; cell sizes are powers of two, so the grid never swims.
   // The camera may stand over any place of the Earth (s.lon may run past 180°: it is brought back here). A level
   // that would reach a pole is not drawn — past it the flat grid of latitude and longitude folds over itself — and
@@ -806,8 +874,11 @@ export class Terrain {
       shown = shown && (!fine || fine.half < 2600) && Math.abs(lat) + half / KM_PER_DEG < POLE_LAT;
       // (a variant of the shader that has nothing to draw in this square is not drawn at all)
       const hLat = half / KM_PER_DEG, hLon = half / (KM_PER_DEG * COS_REF);
-      const zs = !this.clip ? [true] : STAGE >= 3 ? zonesOf3(lat, lon, hLat, hLon, allChunks(this.chunkSum, lat, lon, hLat, hLon, this.chunkRect)) : zonesOf(lat, lon, hLat, hLon);
-      this.zoned[l].forEach((m, k) => { m.visible = shown && zs[k]; });
+      if (this.blocky) this.cut(l, lat, lon, c, shown);
+      else {
+        const zs = !this.clip ? [true] : STAGE >= 3 ? zonesOf3(lat, lon, hLat, hLon, allChunks(this.chunkSum, lat, lon, hLat, hLon, this.chunkRect)) : zonesOf(lat, lon, hLat, hLon);
+        this.zoned[l].forEach((m, k) => { m.visible = shown && zs[k]; });
+      }
       fine = { lat, lon, half };
       if (shown) cover = fine;
     }

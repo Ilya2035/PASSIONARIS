@@ -198,7 +198,7 @@ test('world file: the two bakes share one rule', () => {
 test('world: three variants of the ground shader, and the polygon keeps the one it had', async () => {
   const terrain = read('../src/album/terrain.js'), glsl = read('../src/album/glsl.js'), forest = read('../src/album/aspects/forest.js');
   // what each variant knows of the polygon
-  assert.ok(terrain.includes('#if ZONE == 1\n#define ALBUM_WORLD 0\n#define REGION(ll) 1.\n#define STATE(ll) 1.\n#elif ZONE == 3\n#define ALBUM_WORLD 2\n#define REGION(ll) 0.\n#define STATE(ll) 0.\n#else\n#define ALBUM_WORLD 1\n#define REGION(ll) inRegion(ll)'));
+  assert.ok(terrain.includes('#if ZONE == 1\n#define ALBUM_WORLD 0\n#define REGION(ll) 1.\n#define STATE(ll) 1.\n#elif ZONE == 3\n#define ALBUM_WORLD 2\n#define REGION(ll) 0.\n#define STATE(ll) 0.\n#elif ZONE == 4\n#define ALBUM_WORLD 0\n#define REGION(ll) 1.\n#define STATE(ll) 0.\n#else\n#define ALBUM_WORLD 1\n#define REGION(ll) inRegion(ll)'));
   const main = terrain.slice(terrain.lastIndexOf('void main() {'), terrain.indexOf('// The numbers written as the edges of smoothstep()')).replace(/\/\/[^\n]*/g, '');
   assert.ok(!main.includes('inRegion(') && !main.includes('regionEdge('), 'the shader asks REGION() and STATE() only: inside the polygon and beyond it they are numbers, and the rules of the other side fall out when it is compiled');
   assert.equal(main.split('REGION(ll)').length - 1, 3, 'at the top, at the snow and at the lakes: never carried through the aspects');
@@ -209,14 +209,14 @@ test('world: three variants of the ground shader, and the polygon keeps the one 
   // beyond the polygon nothing of it is read or called
   for (const call of ['aspShore(p, ground, L.cover);', 'aspSwamp(p, L);', 'aspSettle(p, L);', 'aspDivision(p, col, landA);', 'vec2 cuv = chunkUV(pk);', 'float bC = textureLod(uBase, bu, lb).r', 'if (uGrid > 0 || uChunkShow > 0. || uChunkHoverId >= 0.) {', 'if (uFireOn > .5) {']) {
     const k = main.indexOf(call); assert.ok(k > 0, call);
-    const before = main.slice(0, k), open = before.lastIndexOf('#if ZONE != 3'), alt = before.lastIndexOf('#if ZONE == 3'), close = before.lastIndexOf('#endif');
+    const before = main.slice(0, k), open = Math.max(before.lastIndexOf('#if ZONE != 3'), before.lastIndexOf('#ifndef NO_CHUNKS')), alt = Math.max(before.lastIndexOf('#if ZONE == 3'), before.lastIndexOf('#ifdef NO_CHUNKS')), close = before.lastIndexOf('#endif');
     assert.ok(Math.max(open, alt) > close, call + ' is left out of the variant of the world');
   }
-  const farmAt = forest.indexOf('  if (fStand.x > .003) fFarm = setFarm(p.pk) * clamp('), zoneAt = forest.lastIndexOf('#if ZONE != 3\n', farmAt);
-  assert.ok(farmAt > 0 && zoneAt > 0 && !forest.slice(zoneAt, farmAt).includes('#endif') && !forest.slice(zoneAt, farmAt).replace(/\/\/[^\n]*\n/g, '').trim().replace('#if ZONE != 3', ''), 'nobody ploughs beyond the polygon');
+  const farmAt = forest.indexOf('  if (fStand.x > .003) fFarm = setFarm(p.pk) * clamp('), zoneAt = forest.lastIndexOf('#ifndef NO_CHUNKS\n', farmAt);
+  assert.ok(farmAt > 0 && zoneAt > 0 && !forest.slice(zoneAt, farmAt).includes('#endif') && !forest.slice(zoneAt, farmAt).replace(/\/\/[^\n]*\n/g, '').trim().replace('#ifndef NO_CHUNKS', ''), 'nobody ploughs where no chunk lies');
   // the grids are cut between the variants, with a small overlap, and a variant with nothing to draw is not drawn
   assert.ok(terrain.includes('gl_ClipDistance[0] = c4.x; gl_ClipDistance[1] = c4.y; gl_ClipDistance[2] = c4.z; gl_ClipDistance[3] = c4.w; gl_ClipDistance[4] = c5;'));
-  assert.ok(terrain.includes("defines: clip ? { ZONE: z, CLIP_ZONES: 1 } : { ZONE: z }, extensions: { clipCullDistance: clip },") && terrain.includes('const clip = clipOk(), ZONES = clip ? [1, 2, 3] : [0];'), 'where the video card cannot cut, one variant draws the whole Earth');
+  assert.ok(terrain.includes("defines: clip ? { ZONE: z, CLIP_ZONES: 1 } : { ZONE: z }, extensions: { clipCullDistance: clip },") && terrain.includes('const clip = clipOk(), ZONES = clip ? (blocky ? [1, 2, 3, 4] : [1, 2, 3]) : [0];'), 'where the video card cannot cut, one variant draws the whole Earth');
   const { zonesOf } = await import('../src/album/terrain.js').catch(() => ({}));
   if (zonesOf) {
     const mid = [(BBOX.lat0 + BBOX.lat1) / 2, (BBOX.lon0 + BBOX.lon1) / 2];
@@ -270,5 +270,41 @@ test('stage 3: the plain land inside the rectangle of the heights — where no c
   const terrain = read('../src/album/terrain.js');
   assert.ok(terrain.includes('#define STATE(ll) ${STAGE >= 3 ? S3_STATE : `smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll))`}'), 'at stage 2 the text of the shader is what it was');
   assert.ok(terrain.includes("${CHUNK_GLSL}${STAGE >= 3 ? S3_CHUNK_HERE : ''}") && terrain.includes('c5 = ${STAGE >= 3 ? S3_CLIP_INNER : `${(STATE_FADE[1] + ZEPS).toFixed(4)} - dm`}; }'));
-  assert.ok(terrain.includes('if (STAGE >= 3 && clip) this.globes[0].visible = false;'));
+  assert.ok(terrain.includes('if (STAGE >= 3 && clip) { this.globes[0].visible = false; if (this.globes[3]) this.globes[3].visible = false; }'), 'the grid of the whole ball: the full variant and the world only');
+});
+
+test('stage 3: a level of the grid is cut into blocks, and a fourth variant draws the plain land on detailed heights', async () => {
+  const { BLOCKS, blockIndex, chunksIn, chunkSums, blockZones } = await import('../src/album/terrain.js');
+  const { NONE, FKM } = await import('../src/album/chunks.js');
+  const { BBOX, KM_PER_DEG, COS_REF } = await import('../src/album/geo.js');
+  // the index of a grid by blocks: every triangle once, and the triangles of a block lie together
+  const m = 8, blocks = 2, n = m + 1, idx = blockIndex(m, blocks), per = (m / blocks) ** 2 * 6;
+  assert.equal(idx.length, m * m * 6);
+  const cellOf = k => { const a = idx[k - k % 6]; return [a % n, (a / n) | 0]; };
+  for (let b = 0; b < blocks * blocks; b++) for (let k = b * per; k < (b + 1) * per; k += 6) { const [i, j] = cellOf(k); assert.equal(((j / (m / blocks)) | 0) * blocks + ((i / (m / blocks)) | 0), b, 'the cell lies in its block'); }
+  assert.equal(new Set(Array.from({ length: m * m }, (_, c) => idx[c * 6])).size, m * m, 'every cell once');
+  assert.equal(160 % BLOCKS, 0, 'the grid of a level divides into the blocks');
+  // what lies under a square
+  const nx = 12, ny = 10, cell = new Uint16Array(nx * ny).fill(NONE); for (let y = 0; y < ny; y++) for (let x = 0; x < 6; x++) cell[y * nx + x] = 5;   // chunks in the west half
+  const sum = chunkSums(cell, nx, ny), km = FKM * 2, rect = { x0: 0, y0: 0 }, at = (tx, ty) => chunksIn(sum, (ty + .5) * km / KM_PER_DEG, (tx + .5) * km / (KM_PER_DEG * COS_REF), .1 * km / KM_PER_DEG, .1 * km / (KM_PER_DEG * COS_REF), rect, nx, ny, km);
+  assert.equal(at(2, 4), 'all'); assert.equal(at(9, 4), 'none'); assert.equal(at(5, 4), 'some'); assert.equal(at(7, 4), 'some', 'two texels from a chunk'); assert.equal(at(8, 4), 'none');
+  assert.equal(at(0, 4), 'some', 'the edge of the raster: beyond it no chunks'); assert.equal(at(40, 4), 'none');
+  // the variants of a block
+  const lat = (BBOX.lat0 + BBOX.lat1) / 2, lon = (BBOX.lon0 + BBOX.lon1) / 2;
+  assert.deepEqual(blockZones(lat, lon, .2, .2, 'all'), [true, false, false, false], 'worked land: the fast variant');
+  assert.deepEqual(blockZones(lat, lon, .2, .2, 'none'), [false, false, false, true], 'plain land on the detailed heights: the fourth');
+  assert.deepEqual(blockZones(lat, lon, .2, .2, 'some'), [false, true, false, false], 'the edge of the worked land: the full one');
+  assert.deepEqual(blockZones(BBOX.lat1 - .2, lon, .1, .1, 'all'), [false, true, false, false], 'in the rim of the rectangle the state gives way: the full one');
+  assert.deepEqual(blockZones(BBOX.lat1 - .2, lon, .1, .1, 'none'), [false, false, false, true]);
+  assert.deepEqual(blockZones(BBOX.lat1, lon, .5, .5, 'none'), [false, true, true, false], 'across the rim: the full one and the world, cut along it');
+  assert.deepEqual(blockZones(BBOX.lat1 + 3, lon, .5, .5, 'none'), [false, false, true, false]);
+  // the shader: the fourth variant reads no chunks, and the parts that live on them are not in it
+  const terrain = read('../src/album/terrain.js'), forest = read('../src/album/aspects/forest.js');
+  assert.ok(terrain.includes('#if ZONE == 3 || ZONE == 4\n#define NO_CHUNKS'));
+  for (const g of ['#ifdef NO_CHUNKS\n  p.cA = vec4(1., 0., 1., 0.); p.cB = vec4(0.); p.cC = vec4(0.);', '#ifndef NO_CHUNKS\n    ground = aspShore(', '#ifndef NO_CHUNKS\n    aspSwamp(p, L);', '#ifndef NO_CHUNKS\n  aspDivision(', '#ifndef NO_CHUNKS\n  // the chunks themselves:']) assert.ok(terrain.includes(g), g);
+  assert.ok(terrain.includes('#if ZONE != 3\n    float lb = 1.6 + max(log2(px / .234), 0.)'), 'the relief of the polygon is read by the fourth variant too');
+  assert.equal(forest.split('#ifndef NO_CHUNKS\n').length - 1, 2); assert.ok(!forest.includes('#if ZONE != 3'));
+  // the class: at stage 3 four variants, each with its own groups; the list of a level answers .uniforms
+  assert.ok(terrain.includes('ZONES = clip ? (blocky ? [1, 2, 3, 4] : [1, 2, 3]) : [0];') && terrain.includes('const blocky = this.blocky = STAGE >= 3 && clipOk();'));
+  assert.ok(terrain.includes('list.uniforms = mat.uniforms;') && terrain.includes('if (this.blocky) this.cut(l, lat, lon, c, shown);'));
 });

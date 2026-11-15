@@ -266,7 +266,7 @@ float forestCover(Px p) {
   if (have < .999 && have > .001 && fFade > 0.) fOwn = albumOrderOwn(p.pk, p.px);
   fStand = albumStand(fFc, uForestK, fPat, albumOrder(fPat, fOwn), have, fFade, albumSoft(p.px));
   fFarm = 0.;
-#if ZONE != 3
+#ifndef NO_CHUNKS
   // (A clearing keeps to the gentle ground, as the fields do: whole up to a slope of .10, none from .26 — the same
   // numbers as the fields of the settlements, SET_SLOPE. Taken from the share of fields alone, the clearing of a
   // village was a round patch that climbed the steep side of its valley — the owner: «маленькие кружочки… больше
@@ -311,7 +311,7 @@ void aspForest(Px p, inout Land L) {
     // of the shading — the same line pushed the whole ground shader off its edge of speed: 165 → 238 ms a frame.)
     vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) * .7, .34) * (.08 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
     if (edgy > 0. && dot(vs, vs) > px * px * .25) {
-#if ZONE != 3
+#ifndef NO_CHUNKS
       float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) * clamp((.26 - p.slope) * 6.25, 0., 1.) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
 #else
       float top = forestNear(pk + vs, 0., px, have, p.cC.rg, p.wet) * part;
