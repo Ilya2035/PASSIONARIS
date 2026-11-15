@@ -93,7 +93,25 @@ export function farmAt(x, y, bytes = farmBytes) {
 }
 // uSettle: x cell of the lattice, km · y how present the blocks are (1 near .. 0 the ground alone paints the roofs) ·
 // z height of the houses, × · w 1 settlements shown, 0 hidden
-export const settleUniforms = { tSettle: { value: settleTex }, uSettle: { value: new Vector4(CELL, 1, 1.25, 0) } };
+// ---- «Is the thing still there» under a tilted camera (aspects/settle.js). The ground shader knows the size of a
+// pixel on the ground with its length along the line of sight; looking along the ground that length is ten to thirty
+// times the width, and the rules that fade a thing out «from afar» took the fields, the clearing and the ground of a
+// village away as the camera tilted. Those rules are asked by the width instead: acrossOf(tilt) is the share of the
+// size of a pixel that is its width (1 straight down), at the point the camera looks at.
+// SEEN: the size of a pixel, km, between which the fields of a land ploughed only here and there go; VILLAGE: the
+// same for the ground of a village, in its radii; MARK_PX: a town is never drawn smaller than this many pixels across.
+export const SEEN = [.075, .045], VILLAGE = [.6, 1.6], MARK_PX = 2.2;
+export const acrossOf = tiltDeg => { const z = Math.max(.02, Math.cos(tiltDeg * Math.PI / 180)); return Math.SQRT2 * z / Math.sqrt(1 + z * z); };
+// uSetA: the two rules as (edge, 1 / (other edge − edge)) pairs for setStep() · uSetB.x: MARK_PX, uSetB.y: the share itself
+export const settleUniforms = { tSettle: { value: settleTex }, uSettle: { value: new Vector4(CELL, 1, 1.25, 0) }, uSetA: { value: new Vector4() }, uSetB: { value: new Vector4() } };
+// the tilt of the camera, degrees from straight down, written into the rules; → the share
+export function setTilt(tiltDeg = 0, u = settleUniforms) {
+  const k = acrossOf(tiltDeg);
+  u.uSetA.value.set(SEEN[0] / k, k / (SEEN[1] - SEEN[0]), VILLAGE[0] / k, k / (VILLAGE[1] - VILLAGE[0]));
+  u.uSetB.value.set(MARK_PX * k, k, 0, 0);
+  return k;
+}
+setTilt(0);
 
 // towns: what the model of growth founded, [{ x, y, R, sx, sy, home, byte }] (grow.js); may be empty.
 // more: where the shifts of the patches are written (the block of the texture; a block of its own for any other `out`).

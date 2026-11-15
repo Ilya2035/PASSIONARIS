@@ -735,3 +735,38 @@ test('settle hospice: at a great pass a hall, a chapel and a tower stand in a ro
   // the mark of a pass stands on the road as it is drawn, like its hospice
   assert.match(readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8'), /const on = towns\?\.passPoint\?\.\(q\) \|\| q;/); assert.match(src, /planHospice\(q, q\.dir, S, \{ at, atl: q\.atl \}\)/);
 });
+
+test('settle under a tilted camera: the fields, the clearing and the ground of a village are asked by the width of a pixel — and the shader works out nothing more for it', async () => {
+  const { readFileSync } = await import('node:fs'); const { Vector4 } = await import('three');
+  const { acrossOf, setTilt, SEEN, VILLAGE, MARK_PX } = await import('../src/album/town/state.js');
+  // straight down the width of a pixel is its size; looking along the ground it is a small share of it
+  assert.ok(Math.abs(acrossOf(0) - 1) < 1e-9);
+  assert.ok(acrossOf(60) > .6 && acrossOf(60) < .66); assert.ok(acrossOf(85) > .11 && acrossOf(85) < .13); assert.ok(acrossOf(90) > 0);
+  for (let t = 0; t < 88; t += 4) assert.ok(acrossOf(t + 4) < acrossOf(t));
+  // the edges of the rules with the tilt in them: the step the shader takes is the old step, taken at the width of the pixel
+  const u = { uSetA: { value: new Vector4() }, uSetB: { value: new Vector4() } };
+  const step = (e, k, x) => { const t = Math.max(0, Math.min(1, (x - e) * k)); return t * t * (3 - 2 * t); }, smooth = (a, b, x) => step(a, 1 / (b - a), x);
+  for (const tilt of [0, 40, 75, 85]) {
+    const k = setTilt(tilt, u), A = u.uSetA.value;
+    for (const px of [.01, .05, .06, .1, .4]) {
+      assert.ok(Math.abs(step(A.x, A.y, px) - smooth(SEEN[0], SEEN[1], px * k)) < 1e-6);
+      assert.ok(Math.abs(step(A.z, A.w, px / .05) - smooth(VILLAGE[0], VILLAGE[1], px * k / .05)) < 1e-6);
+    }
+    assert.ok(Math.abs(u.uSetB.value.x - MARK_PX * k) < 1e-9);
+  }
+  // from 20 km, looking along the ground (85°), a pixel at the point looked at is 13 m wide and some 150 m long
+  const px85 = .0127 * Math.hypot(1, 1 / Math.cos(85 * Math.PI / 180)); setTilt(85, u);
+  assert.ok(smooth(SEEN[0], SEEN[1], px85) < .01, 'by the size of the pixel the fields were gone');
+  assert.ok(step(u.uSetA.value.x, u.uSetA.value.y, px85) > .99, 'by its width they stand');
+  // straight down nothing has changed: the edges are the ones the rules always had
+  setTilt(0, u); assert.ok(Math.abs(u.uSetA.value.x - .075) < 1e-9 && Math.abs(u.uSetA.value.z - .6) < 1e-9 && Math.abs(u.uSetB.value.x - 2.2) < 1e-9);
+  assert.ok(settleUniforms.uSetA && settleUniforms.uSetB && Math.abs(settleUniforms.uSetA.value.x - .075) < 1e-6, 'the uniforms of the ground start as for a camera looking straight down');
+  // the shader: the rule is one function and the forest asks the same one, so a clearing and its fields go together
+  const g = settle.glsl, forest = (await import('../src/album/aspects/forest.js')).default.glsl;
+  assert.match(g, /float setSeen\(float px, float ploughed\) \{ return ploughed >= \.12 \? 1\. : mix\(setStep\(uSetA\.xy, px\), 1\., smoothstep\(\.03, \.12, ploughed\)\); \}/);
+  assert.match(g, /float seen = setSeen\(px, p\.cC\.g\);/); assert.match(forest, /float seen = setSeen\(px, people\.y\);/);
+  assert.match(g, /if \(small\) tm \*= 1\. - setStep\(uSetA\.zw, px \/ max\(r, \.02\)\);/); assert.match(g, /max\(0\., uSetB\.x \* px - r\)/);
+  // …and nothing of the way to the eye is worked out in it: that tipped the ground shader into its slow mode
+  assert.ok(!/p\.V\b|cameraPosition|vPos/.test(g.replace(/\/\/[^\n]*/g, '')), 'the way to the eye is not asked in the shader of the settlements');
+  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /setTilt\(cam\.s\.tilt\);/);
+});

@@ -30,6 +30,7 @@ import { settleUniforms } from '../town/state.js';
 
 const GLSL = /* glsl */`
 uniform sampler2D tSettle; uniform vec4 uSettle;   // cell of the lattice km · blocks standing 0..1 · height of houses × · settlements shown 0 / 1
+uniform vec4 uSetA, uSetB;                         // the rules that ask «is the thing still there», with the tilt of the camera in them (town/state.js, setTilt)
 ${RULES_GLSL}
 ${PALETTE_GLSL}
 // The roof over point q of the bent lattice of a patch: how much of the pixel it covers. cls = class of the cell,
@@ -130,6 +131,21 @@ void setSquares(int code, ivec2 c0, bool fine, vec2 pk, inout float own, inout f
     if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), fine, pk, own, riv, best, bc, sh);
   }
 }
+// IS THE THING STILL THERE — asked by the width of a pixel across the line of sight, not by p.px. p.px is the size of
+// the pixel on the ground with its length along the line of sight: looking along the ground from 20 km a pixel is
+// 13 m wide and 150–400 m long, and p.px says «the camera is far». Whether the fine pattern of a thing can be told
+// is still asked by p.px; whether the thing is there at all — by p.px times the share the tilt of the camera leaves
+// of it (straight down the two are the same number). The owner, 15.11.2026: «навожусь на селение, 20 километров,
+// потом поворачиваюсь, к земле я смотрю, и пропадает, зарастает текстура»: the fields of a village, its clearing in
+// the forest and its own ground went as the camera tilted.
+// The tilt comes ready in the edges of the rules (uSetA, uSetB: town/state.js, setTilt), one number for the whole
+// picture, so the shader works out nothing more than it did. (Worked out here for every pixel from the way to the
+// eye, two more numbers held at this spot tipped the whole ground shader into its slow mode: land-20 316 → 471 ms.)
+float setStep(vec2 ek, float x) { float t = clamp((x - ek.x) * ek.y, 0., 1.); return t * t * (3. - 2. * t); }
+// Is land that is ploughed only here and there shown as fields at this pixel (ploughed: the share of the natural cell
+// under fields): only while a furlong is wider than a pixel or so; a land ploughed in earnest keeps its fields at any
+// height. The forest asks the very same (forestKeep), so a clearing and its fields come and go together.
+float setSeen(float px, float ploughed) { return ploughed >= .12 ? 1. : mix(setStep(uSetA.xy, px), 1., smoothstep(.03, .12, ploughed)); }
 // How much of the land at a point is under fields, 0..1: the state of the chunk of 1 km² the point lies in (the first
 // rows of the texture, a texel a chunk: town/state.js). The chunk of a point is the one whose seed is nearest, as in
 // the division (division/km.js); the step from a chunk to the next is softened, so the edge of the fields runs along
@@ -195,9 +211,10 @@ void aspSettle(Px p, inout Land L) {
   // (a village by its people — under a thousand, whichever grid it lies in: the hamlet at the centre of a district as
   // much as a village between the centres)
   bool small = village || r < SET_TOWN_R;
-  float tm = 0., mt = m + (small ? 0. : max(0., 2.2 * px - r));
+  // (both by the width of a pixel across the line of sight: tilting the camera takes no village away)
+  float tm = 0., mt = m + (small ? 0. : max(0., uSetB.x * px - r));
   if (mt > -.03) tm = smoothstep(-.03, .015, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
-  if (small) tm *= 1. - smoothstep(.6, 1.6, px / max(r, .02));
+  if (small) tm *= 1. - setStep(uSetA.zw, px / max(r, .02));
   float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
   if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
 
@@ -205,7 +222,7 @@ void aspSettle(Px p, inout Land L) {
   // ploughed only here and there (the share of the natural cell, p.cC.g), the fields are a picture only while their
   // furlongs can be told: from higher up they would be pale specks, one by every village. So they come in as the
   // camera comes down; a land that is ploughed in earnest keeps its fields at any height.
-  float seen = p.cC.g >= .12 ? 1. : mix(smoothstep(.075, .045, px), 1., smoothstep(.03, .12, p.cC.g));
+  float seen = setSeen(px, p.cC.g);
   if (tilled && seen > .003 && tm < .997 && p.slope < .6 && p.hl < 1700.) {
     // how much of the land here is ploughed: the share of the chunk, more beside the houses, a little more or less
     // from place to place. Fields keep together: a chunk ploughed for the most part is ploughed whole, one ploughed

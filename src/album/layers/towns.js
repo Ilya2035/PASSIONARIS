@@ -19,7 +19,7 @@ import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
 import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict, passRank, CULTURES } from '../town/rules.js';
-import { settleTex, settleUniforms, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
+import { settleTex, settleUniforms, setTilt, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { loadPlaceNames, namePlaces } from '../town/sites.js';
@@ -481,6 +481,7 @@ export default async function init(album) {
     townOfChunk: c => { const n = own.owner.get(c); return n === undefined ? null : rowOf(model.towns[n]); },
     chunksOfTown: index => { const n = model.towns.findIndex(t => t.index === index), out = []; if (n >= 0) for (const [c, o] of own.owner) if (o === n) out.push(c); return out; },
     update(dt, t, cam) {
+      setTilt(cam.s.tilt);                                           // a tilted camera takes no field and no village away (town/state.js)
       // the land has been divided (or divided anew): a settlement stands at the centre of every district
       const dv = album.division, vk = p.get('villages') ?? 1;
       if (dv && (dv.version !== divSeen || vk !== villSeen)) {
