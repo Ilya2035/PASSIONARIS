@@ -10,6 +10,7 @@
 //     river itself, moved aside by half the water and a few metres. Road and river run side by side, bend for bend.
 //   • The road keeps to the bank it was on. A short stretch on the other bank, between two on this one, comes over
 //     to this bank: a road does not cross and cross back.
+//   • Where the road comes to the bank and where it leaves it, the corner is rounded: a road does not turn square.
 //   • Where the valley is wide and level, nothing is moved: the road is on its floor already.
 // Plain JavaScript without the GPU: the same roads and rivers always give the same banks. Everything is in flat km.
 import { kmOf } from '../chunks.js';
@@ -23,6 +24,7 @@ export const BANK = {
   least: .3,                         // a stretch is laid along the bank where that pull is at least this
   step: .07,                         // km between the corners of a road on a bank
   weave: 1.2,                        // km: a shorter stretch on the other bank comes over to this one
+  ease: 3,                           // corners of the road on each side of the place where it comes to the bank (or leaves it) that are eased
   minW: .004,                        // km: water narrower than this is not followed
 };
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -113,6 +115,11 @@ export function hugBanks(lines, courses, heightAt, B = BANK) {
       }
       for (let k = 1; k < kept.length; k++) stats.km += Math.hypot(kept[k][0] - kept[k - 1][0], kept[k][1] - kept[k - 1][1]);
       P.splice(a, b - a + 1, ...kept); stats.stretches++;
+      // the two joints: the corners around each are drawn toward the middle of their neighbours, twice (the ends of the road stay)
+      for (const j of [a + kept.length - 1, a]) for (let it = 0; it < 2; it++) {
+        const lo = Math.max(1, j - B.ease), hi = Math.min(P.length - 2, j + B.ease), was = []; for (let k = lo - 1; k <= hi + 1; k++) was.push(P[k]);
+        for (let k = lo; k <= hi; k++) { const p = was[k - lo], q = was[k - lo + 1], r = was[k - lo + 2], g = 1 - Math.abs(k - j) / (B.ease + 1), pt = [q[0] + ((p[0] + r[0]) / 2 - q[0]) * g * .5, q[1] + ((p[1] + r[1]) / 2 - q[1]) * g * .5]; if (q.bank) pt.bank = q.bank; P[k] = pt; }
+      }
     }
   });
   stats.km = Math.round(stats.km);

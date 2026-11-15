@@ -104,10 +104,10 @@ export function makeWorks(album, list, { wide = 2 } = {}) {
         // the water as it is drawn (the same sums as the sheet of the river): the works reach from bank to bank of that
         float real = aD.z * uRiver.z, s2 = clamp(real / .16, 0., 1.);
         float water = max(real, uRiver.x * mix(mix(.42, 1., sqrt(s2)), mix(uRiverLeast.x, uRiverLeast.y, s2), uRiver.y));
-        float half = water * .5 * aD.w + ${WORKS.abut.toFixed(3)} + uPx * .5;
+        float reach = water * .5 * aD.w + ${WORKS.abut.toFixed(3)} + uPx * .5;
         float roadReal = aR.x * uK, road = max(roadReal, aR.y * uPx), grow = clamp(road / max(roadReal, 1e-6), 1., 6.), zk = pow(grow, .6);   // drawn wider than life from high up, and a little taller
-        vec2 al = aD.xy, ac = vec2(-aD.y, aD.x), p = al * (aP.x * half + aQ.x * grow) + ac * (aP.y * road * uWide * .5 + aQ.y * grow);
-        float cl = cos(radians(aC.x)); vec2 ll = aC + vec2(p.y / KM, p.x / (KM * cl)), e = al * half;
+        vec2 al = aD.xy, ac = vec2(-aD.y, aD.x), p = al * (aP.x * reach + aQ.x * grow) + ac * (aP.y * road * uWide * .5 + aQ.y * grow);
+        float cl = cos(radians(aC.x)); vec2 ll = aC + vec2(p.y / KM, p.x / (KM * cl)), e = al * reach;
         float hw = max(heightLod(aC, 0.), 0.);                                              // the water: the ground at the middle of the river
         float hb = min(max(heightLod(aC + vec2(e.y / KM, e.x / (KM * cl)), 0.), 0.), max(heightLod(aC - vec2(e.y / KM, e.x / (KM * cl)), 0.), 0.));
         float deck = max(hw + aR.z * zk, hb + .8);                                          // level, and never lower than the lower bank

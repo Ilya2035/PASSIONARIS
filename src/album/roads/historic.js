@@ -49,6 +49,8 @@ export const HISTORIC = [
   { name: 'Памплона — Ирун', way: [[42.82, -1.64], [43.043, -1.618, 'Белате'], [43.34, -1.79]] },
   // Roads laid AFTER the towns of the provinces are joined (`after`): they add their way over a range to the main
   // roads and take nothing from the network of the plains, which the owner has approved as it is.
+  // Soria and Logroño are joined over the Sierra de Cebollera by the pass of Piqueras: without it the two towns, 79 km apart, were 167 km apart by main roads
+  { name: 'Сория — Логроньо', after: true, way: [[41.76, -2.47], [42.059, -2.535, 'Пикерас'], [42.47, -2.45]] },
   { name: 'Мадрид — Бургос', after: true, way: [[40.42, -3.70], [41.135, -3.580, 'Сомосьерра'], [41.67, -3.69], [42.34, -3.70]] },
   { name: 'Мадрид — Вильякастин', after: true, way: [[40.42, -3.70], [40.708, -4.142, 'Гвадаррама'], [40.78, -4.41]] },
   { name: 'Толедо — Байлен', after: true, way: [[39.86, -4.02], [39.00, -3.37], [38.76, -3.39], [38.385, -3.505, 'Деспеньяперрос'], [38.09, -3.78]] },

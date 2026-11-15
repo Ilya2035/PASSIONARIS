@@ -20,6 +20,7 @@ import { FINE, FW, cellXY, cellChunk, cellGround, fineRivers, climbs, finePoints
 import { riverCrossings, squareBridges, crossingType, fordable, fordSites, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
+import { worksGeometry, WORKS } from '../src/album/roads/works.js';
 import { GROUND_LIGHT } from '../src/album/layers/ribbon.js';
 import { LIGHT } from '../src/album/light.js';
 import { PAGES } from '../src/album/pages.js';
@@ -438,4 +439,26 @@ test('roads: a walker sees the canyon between two chunks; the way of a place to 
     assert.equal(lv[at(38, 5)], 0, 'water'); assert.equal(levelOf(1), 3); assert.equal(levelOf(INFRA.main + .01), 2); assert.equal(levelOf(INFRA.track + .01), 0);
     assert.ok(chunkEase(hgt, land, n, at(18, 5), .1) < 1.02 && chunkEase(hgt, land, n, at(18, 35), .1) > INFRA.track);
     const roads = new Uint8Array(n * n); roads[at(18, 35)] = 3; assert.equal(infraLevels(hgt, land, n, .1, roads)[at(18, 35)], 3, 'a chunk is never below the road that crosses it'); }
+});
+
+test('roads: the works at a river — a bridge of stone, of timber, a footbridge, a ferry: one mesh, every corner told where it stands', () => {
+  const at = (kind, width, road = .011) => ({ lat: 41.65, lon: -.86, dx: .8, dy: .6, width, sin: 1, kind, road, minPx: 2.1 });
+  const count = list => worksGeometry(list).attributes.aP.count;
+  const geo = worksGeometry([at('stone', .08), at('timber', .04, .008), at('foot', .02, .005), at('ferry', .2, .008)]), A = geo.attributes, n = A.aP.count;
+  for (const [name, size] of [['aC', 2], ['aD', 4], ['aP', 4], ['aQ', 2], ['aR', 3], ['aN', 3], ['aCol', 3], ['position', 3]]) { assert.equal(A[name].count, n, name); assert.equal(A[name].itemSize, size, name); }
+  const idx = geo.index.array; assert.ok(n > 300 && idx.length % 6 === 0 && Math.max(...idx) < n && Math.min(...idx) >= 0);
+  for (let v = 0; v < n; v++) {
+    const from = A.aP.getW(v), s = A.aP.getX(v), t = A.aP.getY(v), nl = Math.hypot(A.aN.getX(v), A.aN.getY(v), A.aN.getZ(v));
+    assert.ok(from === 0 || from === 1 || from === 2, 'a corner stands on the deck, on the water or on the ground');
+    assert.ok(Math.abs(s) <= 1 + 1e-6 && Math.abs(t) <= 1 + 1e-6 && nl > .9 && nl < 1.1 && Math.abs(A.aQ.getX(v)) < .03 && Math.abs(A.aQ.getY(v)) < .03, 'within its span and its deck, a few metres beyond at most');
+    assert.ok(Math.abs(A.aD.getX(v) - .8) < 1e-6 && Math.abs(A.aD.getW(v) - 1) < 1e-6 && A.aCol.getX(v) > 0 && A.aCol.getX(v) <= 1);
+  }
+  // a wider river — more piers under the stone, more posts under the timber; a ferry has no deck: nothing of it stands on one
+  assert.ok(count([at('stone', .12)]) > count([at('stone', .03)]) && count([at('timber', .08, .008)]) > count([at('timber', .02, .008)]));
+  { const f = worksGeometry([at('ferry', .2, .008)]).attributes; let deck = 0, ground = 0, water = 0; for (let v = 0; v < f.aP.count; v++) { const w = f.aP.getW(v); if (w === 0) deck++; else if (w === 1) water++; else ground++; }
+    assert.ok(deck === 0 && ground > 20 && water > 20, 'a hut on the ground, stages and a boat on the water'); }
+  // the deck of a stone bridge stands higher than that of timber, a footbridge lowest; a stone deck rises to its middle
+  assert.ok(WORKS.stone.H > WORKS.timber.H && WORKS.timber.H > WORKS.foot.H && WORKS.stone.camber > 0 && WORKS.timber.camber === 0 && WORKS.abut === BRIDGE.abut);
+  { const st = worksGeometry([at('stone', .08)]).attributes; let top = -1e9; for (let v = 0; v < st.aP.count; v++) if (st.aP.getW(v) === 0 && st.aN.getZ(v) > .9 && Math.abs(st.aP.getX(v)) < .01) top = Math.max(top, st.aP.getZ(v)); assert.ok(top >= WORKS.stone.camber, 'the middle of the deck: ' + top); }
+  assert.equal(worksGeometry([]).attributes.aP.count, 0);
 });

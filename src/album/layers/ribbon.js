@@ -177,7 +177,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float dz = dot(slope, vAcross) * sg * vRoad * 1000. + (h0 - heightLod(vLL, 2.5)) * .5 - mix(uRaise, max(uRaise, 1.1), bog);
         float cut = step(0., dz);                                                                                  // 1 a cutting: the bank rises from the road · 0 it is built up and falls away
         float bw = min(max(abs(dz) * .0026, 1.5 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel and a half
-        float off = abs(vX) - vRoad, bank = vol * clamp(off / pk + .5, 0., 1.) * clamp((bw - off) / pk + .5, 0., 1.) * step(1e-6, bw);
+        float off = abs(vX) - vRoad, bank = vol * min(1., uNear * 3.) * clamp(off / pk + .5, 0., 1.) * clamp((bw - off) / pk + .5, 0., 1.) * step(1e-6, bw);   // (the banks go with the cleared strip: beyond the room the ribbon keeps beside the road there is nothing to draw them on)
         vec3 nBed = normalize(vec3(-grade * uExag * uShade, 1.)), nBank = normalize(vec3(-(grade + vAcross * sg * mix(-.65, .84, cut)) * uExag * uShade, 1.));
         // the colours: the bed (over a bog — logs laid across, a dark gap between them when they can be seen); a cut bank is bare earth, a built one earth under grass; by a bog — the dark water of the ditch
         float per = max(.003, px * 4.), gap = bog * .24 * smoothstep(.2, .35, abs(fract(vDist / per) - .5));    // (a log is wider than life from higher up: never under a couple of pixels)
