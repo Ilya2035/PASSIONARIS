@@ -2,7 +2,7 @@
 // contract of the aspects.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Chunks, buildCells, CHANNELS, CHUNK_KM, CN, CNX, CNY, CI0, CJ0, FN, FNX, FNY, SNX, SNY, FKM, kmOf, llOf } from '../src/album/chunks.js';
+import { Chunks, buildCells, CHANNELS, CHUNK_KM, CN, CNX, CNY, CI0, CJ0, FN, FNX, FNY, SNX, SNY, FKM, NONE, kmOf, llOf } from '../src/album/chunks.js';
 import { ASPECTS, ASPECT_GLSL } from '../src/album/aspects/index.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
@@ -41,6 +41,25 @@ test('chunks: the lattice has a width and a height; the old names of the side ar
   assert.equal(flat.k(CI0 + CNX - 1, CJ0 + CNY - 1), CNX * CNY - 1); assert.equal(flat.k(CI0 + CNX, CJ0), -1); assert.equal(flat.k(CI0, CJ0 + CNY), -1);
   assert.deepEqual(flat.ij(CNX + 3), { i: CI0 + 3, j: CJ0 + 1 });
   assert.ok(CNX * CNY < 0xFFFE, 'the number of a chunk fits its two bytes');
+});
+
+test('chunks: under a mask of the worked land only its texels get chunks; the rest hold NONE', () => {
+  // worked: everything west of 0° — land west of 2.75° W, its sea up to 0°; east of 0° is the world
+  const w = new Chunks((lat, lon) => (lon < -2.75 ? 300 : -100), [], [], (lat, lon) => (lon >= 0 ? 0 : lon < -2.75 ? 1 : 2));
+  let none = 0; for (const v of w.cell) { if (v === NONE) none++; else assert.ok(v < w.count, 'a chunk that exists'); }
+  assert.ok(none > FNX * FNY * .2 && none < FNX * FNY * .45, `texels of the world: ${none / (FNX * FNY)}`);
+  assert.equal(w.whole, false); assert.equal(flat.whole, true); assert.ok(!flat.cell.includes(NONE));
+  assert.equal(w.at(40, 2), -1, 'the world has no chunk'); assert.equal(w.kind[w.at(40, -5)], 1); assert.equal(w.kind[w.at(40, -1)], 0);
+  assert.ok(w.count < CNX * CNY, 'a square with no worked ground has no seed and no number');
+  for (let k = 0; k < w.count; k++) { assert.ok(w.area[k] > 0, 'every chunk has ground'); for (const l of w.links[k]) assert.ok(l.k < w.count && l.k !== k); }
+  // squares and chunks: a square of the world has no chunk; a seeded chunk knows its square
+  const world = kmOf(40, 2), wi = Math.floor(world[0] / CHUNK_KM), wj = Math.floor(world[1] / CHUNK_KM);
+  assert.equal(w.k(wi, wj), -1); assert.deepEqual(w.ij(w.k(CI0, CJ0)), { i: CI0, j: CJ0 });
+  // the rasters the shaders read: nothing far in the world, and no fading of the state at the edge of the worked land
+  w.fill('ice', () => 1); w.flush();
+  const st = (lat, lon) => { const [x, y] = kmOf(lat, lon); return w.raster.B[(Math.floor((y - CJ0 * CHUNK_KM) / 2.5) * SNX + Math.floor((x - CI0 * CHUNK_KM) / 2.5)) * 4]; };
+  assert.equal(st(40, 3), 0, 'far in the world'); assert.equal(st(40, -1), 255, 'inside'); assert.equal(st(40, -.02), 255, 'at the very edge, inside');
+  assert.equal(st(40, .03), 255, 'one texel out: painted with the state of the chunk beside it');
 });
 
 test('chunks: points map to chunks and back; the mapped square covers the whole region of the album', () => {

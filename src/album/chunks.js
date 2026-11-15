@@ -13,8 +13,10 @@ import { DataTexture, RGBAFormat, RGFormat, UnsignedByteType, LinearFilter, Near
 import { KM_PER_DEG, COS_REF, BBOX } from './geo.js';
 
 // Chunks grow from seeds, one seed in every square of a lattice of 10 km, CNX squares wide and CNY high (now
-// 128 × 128; the lattice of stage 3 is a rectangle, 192 × 280: docs/BACKLOG.md). The number of a chunk is the number
-// of its seed's square: k = (j − CJ0) · CNX + (i − CI0); chunks added later (islands, lagoons) follow after.
+// 128 × 128; the lattice of stage 3 is a rectangle, 192 × 280: docs/BACKLOG.md). Chunks are numbered in the order of
+// their seeds' squares, row by row from the south-west; chunks added later (islands, lagoons) follow after. While
+// every square has a seed — no mask of the worked land — the number is that of the square,
+// k = (j − CJ0) · CNX + (i − CI0); under a mask the squares with no worked ground have no seed and no number.
 export const CHUNK_KM = 10, CNX = 128, CNY = 128, CI0 = -88, CJ0 = 388;
 // the fine raster the outlines live on: FNX × FNY texels of 1.25 km (now 1024 × 1024)
 export const FKM = 1.25, FNX = CNX * CHUNK_KM / FKM, FNY = CNY * CHUNK_KM / FKM;
@@ -22,7 +24,10 @@ export const FKM = 1.25, FNX = CNX * CHUNK_KM / FKM, FNY = CNY * CHUNK_KM / FKM;
 // row): whoever still reads them takes a rectangle for a square — move to CNX × CNY and FNX × FNY.
 export const CN = CNX, FN = FNX;
 export const SNX = FNX / 2, SNY = FNY / 2;              // the state rasters the shaders read: texels of 2.5 km (now 512 × 512)
-const X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM, Q = CHUNK_KM / FKM, NONE = 0xFFFF;
+const X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM, Q = CHUNK_KM / FKM;
+// In the raster of the chunks (ch.cell, the texture tChunkId): no chunk here. The texel lies outside the worked land
+// (worked.js) and is the world: whoever reads ch.cell must be ready for it; ch.at() gives −1 there.
+export const NONE = 0xFFFF;
 
 // Every number a chunk carries for the picture: name → [texture, byte, Russian label]. Values are 0..1.
 // The textures are read by the ground shader, the trees, the houses — by everything, the same way.
@@ -77,13 +82,18 @@ function line(x0, y0, x1, y1, mark) {
 // A lake is cut out of the land along its own outline and is always a chunk of its own, however small.
 //   heightAt(lat, lon) → metres (missing = all land); rivers: [{ pts: [[lon, lat], …], rank }];
 //   lakes: [{ ring: [[lon, lat], …] }]
-export function buildCells(heightAt, rivers = [], lakes = []) {
+//   worked(lat, lon) → 0 the world · 1 worked land · 2 its water (worked.js). With it only the texels of the worked
+//   land and of its water get chunks, the rest hold NONE, and the heights are asked for over the whole lattice.
+//   Without it — as before stage 3: every texel gets a chunk and everything beyond the polygon is sea.
+export function buildCells(heightAt, rivers = [], lakes = [], worked = null) {
   const n = FNX * FNY, land = new Uint8Array(n), hgt = new Float32Array(n), riv = new Uint8Array(n), pace = new Float32Array(n), lakeAt = new Uint16Array(n);
+  const none = new Uint8Array(n);        // 1: no chunk here (the world)
   for (let ty = 0, t = 0; ty < FNY; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG, inLat = lat > BBOX.lat0 && lat < BBOX.lat1;
     for (let tx = 0; tx < FNX; tx++, t++) {
       const lon = (X0 + (tx + .5) * FKM) / (KM_PER_DEG * COS_REF);
-      const h = !heightAt ? 100 : (inLat && lon > BBOX.lon0 && lon < BBOX.lon1 ? heightAt(lat, lon) : -3200);
+      if (worked && !worked(lat, lon)) none[t] = 1;
+      const h = !heightAt ? 100 : (worked || (inLat && lon > BBOX.lon0 && lon < BBOX.lon1) ? heightAt(lat, lon) : -3200);
       hgt[t] = h; land[t] = h > 0 ? 1 : 0;
       pace[t] = .82 + .5 * vnoise(tx / 7.1, ty / 7.1, 5);            // an even pace with slow swells: neat rounded cells, none alike
     }
@@ -95,7 +105,7 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, sx = 0, sy = 0, any = false;
     for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); sx += p[0]; sy += p[1]; }
     const inside = (x, y) => { let c = false; for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) { const p = pts[a], q = pts[b]; if ((p[1] > y) !== (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) c = !c; } return c; };
-    const put = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FNX && ty < FNY) { land[ty * FNX + tx] = 0; lakeAt[ty * FNX + tx] = i + 1; any = true; } };
+    const put = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FNX && ty < FNY && !none[ty * FNX + tx]) { land[ty * FNX + tx] = 0; lakeAt[ty * FNX + tx] = i + 1; any = true; } };
     for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++) for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) if (inside(tx + .5, ty + .5)) put(tx, ty);
     if (!any) put(Math.floor(sx / pts.length), Math.floor(sy / pts.length));
   });
@@ -118,22 +128,24 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     }
   }
   // seeds: land where the square is at least three tenths land, otherwise water; off the rivers where possible
-  const cell = new Uint16Array(n).fill(NONE), dist = new Int32Array(n).fill(1 << 30), kind = [], seed = new Uint8Array(n), seedAt = new Int32Array(CNX * CNY);
+  const cell = new Uint16Array(n).fill(NONE), dist = new Int32Array(n).fill(1 << 30), kind = [], seed = new Uint8Array(n);
+  const seedAt = [], squareOf = [], square = new Int32Array(CNX * CNY).fill(-1);   // the texel and the square of a seeded chunk; the chunk of a square, −1 for none
   const MAXC = 8192, buckets = new Array(MAXC), put = (t, c) => { const b = c < MAXC ? c : MAXC - 1; (buckets[b] || (buckets[b] = [])).push(t); };
   for (let yj = 0; yj < CNY; yj++) for (let xi = 0; xi < CNX; xi++) {
-    let nl = 0, low = 1e9;
-    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FNX + xi * Q + a; nl += land[t]; if (land[t] && lie[t] < low) low = lie[t]; }
-    const isLand = nl >= Q * Q * .3 ? 1 : 0;
+    let nl = 0, nt = 0, low = 1e9;
+    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FNX + xi * Q + a; if (none[t]) continue; nt++; nl += land[t]; if (land[t] && lie[t] < low) low = lie[t]; }
+    if (!nt) continue;                    // a square with no worked ground: no seed and no chunk
+    const isLand = nl >= nt * .3 ? 1 : 0;
     const cx = (xi + .5) * Q + ((yj & 1) ? 2 : -2) + (hash2(xi, yj, 11) - .5) * 4.4, cy = (yj + .5) * Q + (hash2(xi, yj, 23) - .5) * 4.4;
     // On land the seed goes down into the low ground of its square: the valley floor, the plain.
     let best = -1, bd = 1e9;
     for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) {
-      const t = (yj * Q + b) * FNX + xi * Q + a; if (land[t] !== isLand || lakeAt[t]) continue;
+      const t = (yj * Q + b) * FNX + xi * Q + a; if (none[t] || land[t] !== isLand || lakeAt[t]) continue;
       const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0) + (isLand ? Math.min(90, (lie[t] - low) * .09) : 0);
       if (d < bd) { bd = d; best = t; }
     }
-    if (best < 0) for (let b = 0; b < Q && best < 0; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FNX + xi * Q + a; if (land[t] === isLand) { best = t; break; } }   // a square that is all lake
-    kind.push(isLand); cell[best] = yj * CNX + xi; seedAt[yj * CNX + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(lie[best])) : 0; put(best, dist[best]);
+    if (best < 0) for (let b = 0; b < Q && best < 0; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FNX + xi * Q + a; if (!none[t] && land[t] === isLand) { best = t; break; } }   // a square that is all lake
+    const id = kind.length; kind.push(isLand); cell[best] = id; seedAt.push(best); squareOf.push(yj * CNX + xi); square[yj * CNX + xi] = id; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(lie[best])) : 0; put(best, dist[best]);
   }
   // The flood. Every land seed is a spring: its water rises and spreads, level by level, and takes the ground it
   // reaches first. Water from the valley floor climbs both slopes and meets the water of the next valley on the crest,
@@ -149,11 +161,11 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
       const tx = t % FNX, ty = (t / FNX) | 0, id = cell[t], lt = land[t], rt = riv[t], lvl = dist[t];
       for (let d = 0; d < 16; d++) {
         const dx = DX[d], dy = DY[d], x = tx + dx, y = ty + dy; if (x < 0 || y < 0 || x >= FNX || y >= FNY) continue;
-        const m = y * FNX + x; if (land[m] !== lt || lakeAt[m] !== lakeAt[t]) continue;
+        const m = y * FNX + x; if (none[m] || land[m] !== lt || lakeAt[m] !== lakeAt[t]) continue;
         let way = (d < 4 ? FKM : d < 8 ? FKM * 1.414 : FKM * 2.236) * LAM * pace[m], top = lt ? lie[m] : 0, tolls = riv[m] !== rt ? 1 : 0;
         if (d >= 8) {                     // a knight's move passes over two texels: it may not jump the coast, a crest or a river
           const a = t + (dx === 2 || dx === -2 ? dx / 2 : dy / 2 * FNX), b = a + (dx === 2 || dx === -2 ? dy * FNX : dx);
-          if (land[a] !== lt || land[b] !== lt || lakeAt[a] !== lakeAt[t] || lakeAt[b] !== lakeAt[t]) continue;
+          if (none[a] || none[b] || land[a] !== lt || land[b] !== lt || lakeAt[a] !== lakeAt[t] || lakeAt[b] !== lakeAt[t]) continue;
           if (lt) { top = Math.max(top, lie[a], lie[b]); if (!tolls && (riv[a] !== rt || riv[b] !== rt)) tolls = 2; }
         }
         if (lt && tolls) way += tolls * (Math.max(riv[m], rt, 1) === 2 ? 80 : 50);  // a river is paid for on entering and on leaving
@@ -167,14 +179,14 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
   // enough, otherwise part of the chunk it lies in
   const stack = [], lakeChunk = new Map();
   for (let s = 0; s < n; s++) {
-    if (cell[s] !== NONE) continue;
+    if (cell[s] !== NONE || none[s]) continue;
     const lt = land[s], comp = [s]; let host = NONE; cell[s] = NONE - 1; stack.push(s);
     while (stack.length) {
       const t = stack.pop(), tx = t % FNX, ty = (t / FNX) | 0;
       for (let d = 0; d < 4; d++) {
         const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FNX || y >= FNY) continue;
         const m = y * FNX + x;
-        if (cell[m] === NONE && land[m] === lt && lakeAt[m] === lakeAt[s]) { cell[m] = NONE - 1; comp.push(m); stack.push(m); } else if (cell[m] < NONE - 1 && host === NONE) host = cell[m];
+        if (cell[m] === NONE && !none[m] && land[m] === lt && lakeAt[m] === lakeAt[s]) { cell[m] = NONE - 1; comp.push(m); stack.push(m); } else if (cell[m] < NONE - 1 && host === NONE) host = cell[m];
       }
     }
     let id = host;
@@ -192,12 +204,12 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     const prev = cell.slice(), ids = new Uint16Array(49), ws = new Float32Array(49);
     for (let ty = 3; ty < FNY - 3; ty++) for (let tx = 3; tx < FNX - 3; tx++) {
       const t = ty * FNX + tx, id = prev[t];
-      if (seed[t] || lakeAt[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FNX] || riv[t + FNX]) continue;
+      if (none[t] || seed[t] || lakeAt[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FNX] || riv[t + FNX]) continue;
       if (prev[t - 3] === id && prev[t + 3] === id && prev[t - 3 * FNX] === id && prev[t + 3 * FNX] === id
         && prev[t - 2 * FNX - 2] === id && prev[t + 2 * FNX + 2] === id && prev[t - 2 * FNX + 2] === id && prev[t + 2 * FNX - 2] === id) continue;   // deep inside its chunk
       let nIds = 0;
       for (let b = 0; b < BELL.length; b += 2) {
-        const m = t + BELL[b], v = prev[m]; if (land[m] !== land[t] || lakeAt[m] || kind[v] !== kind[id]) continue;
+        const m = t + BELL[b], v = prev[m]; if (none[m] || land[m] !== land[t] || lakeAt[m] || kind[v] !== kind[id]) continue;
         let j = 0; while (j < nIds && ids[j] !== v) j++;
         if (j === nIds) { ids[nIds] = v; ws[nIds++] = 0; }
         ws[j] += BELL[b + 1];
@@ -210,15 +222,15 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
   // A chunk its neighbours squeezed down to a scrap (under 25 km²) takes ground back from the large neighbours of its
   // own kind, ring by ring, until it is about 30 km². An island keeps its chunk however small.
   const size = new Uint32Array(kind.length), own = new Map();
-  for (let t = 0; t < n; t++) size[cell[t]]++;
+  for (let t = 0; t < n; t++) if (cell[t] !== NONE) size[cell[t]]++;
   // a seed the rounding left alone inside a neighbour's ground, while its own chunk lives on beside it, joins the neighbour
-  for (let k = 0; k < CNX * CNY; k++) {
+  for (let k = 0; k < seedAt.length; k++) {
     const t = seedAt[k], tx = t % FNX, ty = (t / FNX) | 0; if (cell[t] !== k || size[k] < 2 || tx < 1 || ty < 1 || tx >= FNX - 1 || ty >= FNY - 1) continue;
     let alone = true, to = -1;
     for (let d = 0; d < 4; d++) { const v = cell[t + DY[d] * FNX + DX[d]]; if (v === k) alone = false; else if (kind[v] === kind[k]) to = v; }
     if (alone && to >= 0) { cell[t] = to; seed[t] = 0; size[k]--; size[to]++; }
   }
-  for (let t = 0; t < n; t++) { const k = cell[t]; if (size[k] < 16) { let l = own.get(k); if (!l) own.set(k, l = []); l.push(t); } }
+  for (let t = 0; t < n; t++) { const k = cell[t]; if (k !== NONE && size[k] < 16) { let l = own.get(k); if (!l) own.set(k, l = []); l.push(t); } }
   for (const [k, list] of own) {
     for (let q = 0; q < list.length && size[k] < 20; q++) {
       const t = list[q], tx = t % FNX, ty = (t / FNX) | 0;
@@ -230,14 +242,18 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     }
   }
   const lakeOf = new Int16Array(kind.length).fill(-1);
-  for (let t = 0; t < n; t++) if (lakeAt[t]) lakeOf[cell[t]] = lakeAt[t] - 1;
-  return { cell, count: kind.length, kind: Uint8Array.from(kind), land, hgt, riv, seedAt, lakeOf };
+  for (let t = 0; t < n; t++) if (lakeAt[t] && cell[t] !== NONE) lakeOf[cell[t]] = lakeAt[t] - 1;
+  return { cell, count: kind.length, kind: Uint8Array.from(kind), land, hgt, riv, seedAt: Int32Array.from(seedAt), square, squareOf: Int32Array.from(squareOf), none, lakeOf };
 }
 
 export class Chunks {
-  constructor(heightAt, rivers, lakes = []) {
-    const g = buildCells(heightAt, rivers, lakes), n = g.count, cell = g.cell;
+  // worked: the mask of the worked land as buildCells() takes it, or nothing — then every texel has a chunk
+  constructor(heightAt, rivers, lakes = [], worked = null) {
+    const g = buildCells(heightAt, rivers, lakes, worked), n = g.count, cell = g.cell;
     this.n = CNX; this.nx = CNX; this.ny = CNY; this.count = n; this.cell = cell;
+    this.whole = !worked;                // every texel has a chunk (no mask of the worked land)
+    this.square = g.square;              // the chunk seeded in a lattice square (j − CJ0) · CNX + (i − CI0), −1 for none
+    this.squareOf = g.squareOf;          // the square of a seeded chunk (the chunks added after the seeds have none)
     this.kind = g.kind;                  // 1 a chunk of land, 0 a chunk of water (sea or lake)
     this.lake = g.lakeOf;                // for a lake chunk the number of its lake in this.lakes, otherwise −1
     this.lakes = lakes;
@@ -246,11 +262,12 @@ export class Chunks {
     this.height = new Float32Array(n);   // mean height of its land, metres
     const sx = new Float64Array(n), sy = new Float64Array(n), cnt = new Uint32Array(n), links = new Map();
     for (let ty = 0, t = 0; ty < FNY; ty++) for (let tx = 0; tx < FNX; tx++, t++) {
-      const k = cell[t]; cnt[k]++; sx[k] += tx + .5; sy[k] += ty + .5;
+      const k = cell[t]; if (k === NONE) continue;
+      cnt[k]++; sx[k] += tx + .5; sy[k] += ty + .5;
       if (g.land[t]) { this.land[k]++; this.height[k] += g.hgt[t]; }
       for (let d = 0; d < 2; d++) {       // borders: the texel to the east and the one to the north
         if (d ? ty >= FNY - 1 : tx >= FNX - 1) continue;
-        const m = cell[t + (d ? FNX : 1)]; if (m === k) continue;
+        const m = cell[t + (d ? FNX : 1)]; if (m === k || m === NONE) continue;
         const key = k < m ? k * 65536 + m : m * 65536 + k, l = links.get(key);
         const river = Math.max(g.riv[t], g.riv[t + (d ? FNX : 1)]);
         if (l) { l.km += FKM; if (river) l.river = Math.max(l.river, river); l.wet += river ? FKM : 0; } else links.set(key, { a: Math.min(k, m), b: Math.max(k, m), km: FKM, river, wet: river ? FKM : 0 });
@@ -278,6 +295,22 @@ export class Chunks {
     this.resetters = [];
     this.stateCell = new Uint16Array(SNX * SNY);
     for (let y = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) this.stateCell[y * SNX + x] = cell[(y * 2 + 1) * FNX + x * 2 + 1];
+    // At the edge of the worked land a shader reads the state between a texel with a chunk and one without. So that the
+    // state does not fade towards the edge, the texels without a chunk within three steps of one are painted with
+    // that chunk's state (stateFill); farther out the rasters hold nothing.
+    this.stateFill = this.stateCell;
+    if (this.stateCell.includes(NONE)) {
+      let cur = this.stateCell;
+      for (let round = 0; round < 3; round++) {
+        const next = cur.slice();
+        for (let y = 0, q = 0; y < SNY; y++) for (let x = 0; x < SNX; x++, q++) {
+          if (cur[q] !== NONE) continue;
+          next[q] = x > 0 && cur[q - 1] !== NONE ? cur[q - 1] : x < SNX - 1 && cur[q + 1] !== NONE ? cur[q + 1] : y > 0 && cur[q - SNX] !== NONE ? cur[q - SNX] : y < SNY - 1 && cur[q + SNX] !== NONE ? cur[q + SNX] : NONE;
+        }
+        cur = next;
+      }
+      this.stateFill = cur;
+    }
     this.raster = { A: new Uint8Array(SNX * SNY * 4), B: new Uint8Array(SNX * SNY * 4), C: new Uint8Array(SNX * SNY * 4) };
     this.scratch = [new Uint8Array(SNX * SNY * 4), new Uint8Array(SNX * SNY * 4)];
     this.palW = Math.ceil(Math.sqrt(n)); this.pal = new Uint8Array(this.palW * this.palW * 4);
@@ -293,9 +326,11 @@ export class Chunks {
     for (const [name, v] of Object.entries(DEFAULTS)) for (let k = 0; k < n; k++) this.setNatural(name, k, v);
   }
   // ---- where things are
-  at(lat, lon) {                          // the chunk a point lies in, −1 outside the mapped square
+  at(lat, lon) {                          // the chunk a point lies in; −1 outside the lattice and where there is no chunk (the world)
     const [x, y] = kmOf(lat, lon), tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM);
-    return tx >= 0 && ty >= 0 && tx < FNX && ty < FNY ? this.cell[ty * FNX + tx] : -1;
+    if (!(tx >= 0 && ty >= 0 && tx < FNX && ty < FNY)) return -1;
+    const k = this.cell[ty * FNX + tx];
+    return k === NONE ? -1 : k;
   }
   centre(k) { const x = this.cx[k], y = this.cy[k]; return { ...llOf(x, y), x, y }; }   // the middle of the chunk (its centre of mass)
   neighbours(k) { return this.links[k].map(l => l.k); }
@@ -307,8 +342,8 @@ export class Chunks {
   }
   // Older code numbered chunks by lattice square. A chunk still carries the number of the square its seed stands in,
   // so these keep working, but a chunk is no longer that square: new code should use at(), centre(), links.
-  k(i, j) { const x = i - CI0, y = j - CJ0; return x >= 0 && y >= 0 && x < CNX && y < CNY ? y * CNX + x : -1; }
-  ij(k) { return k < CNX * CNY ? { i: (k % CNX) + CI0, j: ((k / CNX) | 0) + CJ0 } : { i: Math.floor(this.cx[k] / CHUNK_KM), j: Math.floor(this.cy[k] / CHUNK_KM) }; }
+  k(i, j) { const x = i - CI0, y = j - CJ0; return x >= 0 && y >= 0 && x < CNX && y < CNY ? this.square[y * CNX + x] : -1; }
+  ij(k) { const q = k < this.squareOf.length ? this.squareOf[k] : -1; return q >= 0 ? { i: (q % CNX) + CI0, j: ((q / CNX) | 0) + CJ0 } : { i: Math.floor(this.cx[k] / CHUNK_KM), j: Math.floor(this.cy[k] / CHUNK_KM) }; }
   // ---- state read by the shaders
   get(name, k) { const c = CHANNELS[name]; return this.bytes[c[0]][k * 4 + c[1]] / 255; }
   set(name, k, v) {
@@ -343,8 +378,8 @@ export class Chunks {
   flush() {
     for (const t of 'ABC') {
       if (!this.dirty[t]) continue;
-      const src = new Uint32Array(this.bytes[t].buffer), [a, b] = this.scratch, a32 = new Uint32Array(a.buffer), sc = this.stateCell, out = this.raster[t];
-      for (let s = 0; s < a32.length; s++) a32[s] = src[sc[s]];
+      const src = new Uint32Array(this.bytes[t].buffer), [a, b] = this.scratch, a32 = new Uint32Array(a.buffer), sc = this.stateFill, out = this.raster[t];
+      for (let s = 0; s < a32.length; s++) a32[s] = sc[s] === NONE ? 0 : src[sc[s]];
       // soften the step between two chunks: one pass along the rows, one along the columns
       const row = SNX * 4;
       for (let y = 0, o = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) for (let c = 0; c < 4; c++, o++) b[o] = (a[x > 0 ? o - 4 : o] + 2 * a[o] + a[x < SNX - 1 ? o + 4 : o] + 2) >> 2;
