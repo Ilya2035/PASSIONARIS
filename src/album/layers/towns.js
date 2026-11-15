@@ -76,7 +76,7 @@ const FRAG = /* glsl */`${COMMON}
     float house = floor(vL.x * 7. + vM.y * 3.3), hr = hash21(vec2(house * .37 + 1.3, vM.w * 9.1 + vM.y * .71));
     // (in the Maghreb a block is mostly of one tone — white, cream or clay — and its houses differ a little)
     bool mag = vL.z > 1.5 && mat < 3;
-    vec3 c = settleMat(mat, vL.z, mat == 5 ? fract(vM.y * .31 + vM.w) : mag ? fract(vM.w + vM.y * .11 + hr * .16) : fract(vM.w * 5.3 + vM.y * .37 + hr * .45));
+    vec3 c = settleOf(mat, vL.z, mat == 5 ? fract(vM.y * .31 + vM.w) : mag ? fract(vM.w + vM.y * .11 + hr * .16) : fract(vM.w * 5.3 + vM.y * .37 + hr * .45));
     if (mat == 0 || mat == 2 || mat == 11 || mag) c *= .94 + .12 * hr;
     vec3 lin;
     if (uStyle == 6) lin = mix(vec3(.07, .09, .13), vec3(.85, .68, .38), pow(max(dot(n, uSun), 0.), 1.6) * .75 + .08);

@@ -264,11 +264,13 @@ test('settle Maghreb: its own manner of building — flat roofs, courts within, 
   const out = blank(), { lobes } = mirrorSettle(ch, [], out); assert.equal(lobes.length, 1); assert.equal(lobes[0].cul, CULTURES.mag); assert.equal(out[lobes[0].k * 4 + 3], 200 + CULTURES.mag);
   clear();
   const g = settle.glsl;
-  for (const d of ['(code - 110) / SET_CULS', 'mod(ca - 110., float(SET_CULS)) + 1.', 'atlF = cuF > 1.5 && cuF < 2.5 ? 1. : 0.', 'float atl = cul > 1.5 && cul < 2.5 ? 1. : 0., mag = cul > 2.5 ? 1. : 0.;', 'setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court)', 'return settleMat(1, 2.,']) assert.ok(g.includes(d), d);
+  for (const d of ['(code - 110) / SET_CULS', 'mod(ca - 110., float(SET_CULS)) + 1.', 'atlF = cuF > 1.5 && cuF < 2.5 ? 1. : 0.', 'float atl = cul > 1.5 && cul < 2.5 ? 1. : 0., mag = cul > 2.5 ? 1. : 0.;', 'setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court)', 'return settleMag(1,']) assert.ok(g.includes(d), d);
+  // (the ground shader asks the colours by name, with the material written as a number: nothing is worked out there for a manner a pixel does not have)
+  { const calls = g.replace('vec3 settleMat(int m', '').replace('vec3 settleOf(int m', '').replace(/return settleMat\(m, min\(c, 1\.\)/, ''); assert.doesNotMatch(calls, /settleOf\(/); assert.doesNotMatch(calls, /settleMat\([a-z]/i); }
   // green glazed tile is a material of its own, and only the mosque is roofed with it: a market of the Maghreb is not green
   { const sh = buildShapes().shapes; assert.ok(sh[KIND.mosque].t.some(t => t.mat === MAT.glazed) && sh.every((s, i) => i === KIND.mosque || !s.t.some(t => t.mat === MAT.glazed))); assert.ok(PALETTE_GLSL.includes('if (m == 11) return')); }
   // the colours: a list of its own for roofs, walls, stone and yards; timber, cloth, hay and boats are everybody's
-  assert.ok(PALETTE_GLSL.includes('vec3 settleMag(int m, float t)') && PALETTE_GLSL.includes('if (atl > 1.5) { if (m < 4 || m == 8 || m == 10) return settleMag(m, t); atl = 0.; }'));
+  assert.ok(PALETTE_GLSL.includes('vec3 settleMag(int m, float t)') && PALETTE_GLSL.includes('vec3 settleOf(int m, float c, float t)') && PALETTE_GLSL.includes('if (c > 1.5 && (m < 4 || m == 8 || m == 10)) return settleMag(m, t);'));
 });
 
 test('settle classes: the mark of a settlement follows its people, as the owner set it', async () => {

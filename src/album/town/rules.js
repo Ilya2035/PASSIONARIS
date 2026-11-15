@@ -403,8 +403,6 @@ vec3 settleMag(int m, float t) {
   return (bed < .28 ? vec3(.49, .52, .30) : bed < .6 ? vec3(.70, .62, .47) : vec3(.64, .55, .41)) * (.95 + .08 * fract(t * 7.));
 }
 vec3 settleMat(int m, float atl, float t) {
-  if (m == 11) return mix(vec3(.27, .44, .35), vec3(.37, .50, .38), t);                       // green glazed tile
-  if (atl > 1.5) { if (m < 4 || m == 8 || m == 10) return settleMag(m, t); atl = 0.; }       // (timber, cloth, hay and boats are the same everywhere)
   if (m == 0) {
     vec3 tile = mix(vec3(.77, .51, .36), vec3(.65, .45, .34), smoothstep(.1, .7, t));        // new tile .. weathered
     tile = mix(tile, vec3(.79, .63, .47), step(.8, t));                                      // bleached by the sun
@@ -424,5 +422,13 @@ vec3 settleMat(int m, float atl, float t) {
     return mix(bed < .45 ? vec3(.47, .53, .28) : bed < .7 ? vec3(.60, .52, .36) : vec3(.66, .60, .46), bed < .6 ? vec3(.40, .49, .25) : vec3(.50, .49, .36), atl) * (.95 + .08 * fract(t * 7.));
   }
   return vec3(.38, .30, .23);
+}
+// the same for a block of any manner (c: 0 Mediterranean · 1 Atlantic · 2 the Maghreb). The ground shader does not
+// call this one: it asks settleMat() and settleMag() by name, with the material written as a number, so that nothing
+// is worked out there for the manners a pixel does not have.
+vec3 settleOf(int m, float c, float t) {
+  if (m == 11) return mix(vec3(.27, .44, .35), vec3(.37, .50, .38), t);                       // green glazed tile
+  if (c > 1.5 && (m < 4 || m == 8 || m == 10)) return settleMag(m, t);                        // (timber, cloth, hay and boats are the same everywhere)
+  return settleMat(m, min(c, 1.) * step(c, 1.5), t);
 }
 `;

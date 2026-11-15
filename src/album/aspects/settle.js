@@ -56,7 +56,7 @@ vec3 setRoofCol(float cls, vec2 fl, float turn, vec4 rnd, float atl, float day, 
     vec2 hq = fl * (cls < 2.5 ? 2. : 1.), hf = abs(fract(hq) - .5);
     float one = hash21(floor(hq) + 7. + rnd.z * 57.);
     if (cls < 2.5) court = clamp((.2 - max(hf.x, hf.y)) / .07, 0., 1.) * step(.5, one);
-    return settleMat(1, 2., fract(rnd.z + one * .16)) * (.92 + .14 * one);          // (a block is mostly of one tone, as its block of houses is: layers/towns.js)
+    return settleMag(1, fract(rnd.z + one * .16)) * (.92 + .14 * one);          // (a block is mostly of one tone, as its block of houses is: layers/towns.js)
   }
   if (cls < 1.5) { vec2 o = abs(fl.x) > abs(fl.y) ? vec2(sign(fl.x), 0.) : vec2(0., sign(fl.y)); n2 = o * (mx > .72 ? 1. : -1.); court = 1. - smoothstep(.40, .47, mx); }
   else if (cls < 2.5) n2 = vec2(0., sin(fl.y * 6.2832) > 0. ? 1. : -1.);
@@ -327,7 +327,7 @@ void aspSettle(Px p, inout Land L) {
   else if (cls > .5) {
     float paint = cover * (1. - blocks), court;
     if (paint > .003) {                                                    // no block stands here: the roof is painted
-      vec3 rc = setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court);
+      vec3 rc = setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court);          // (2: the flat roofs of the Maghreb)
       col = mix(col, mix(rc, earth * .62, court), paint);
       col += vec3(1.5, .9, .4) * night * paint * step(.45, rnd.y) * (1. - court);           // a light in the window
     }
@@ -338,7 +338,7 @@ void aspSettle(Px p, inout Land L) {
   // cells of a pixel or two melt into one tone; from high up, where a whole settlement is a few pixels, the tone is
   // that of its roofs, so the mark stands out from the land
   float far = smoothstep(.6, 2.5, px / S);
-  col = mix(col, mix(earth, settleMat(mag > .5 ? 1 : 0, atl + 2. * mag, .3) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));
+  col = mix(col, mix(earth, mix(settleMat(0, atl, .3), vec3(.80, .76, .68), mag) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));   // (a town of the Maghreb is pale from afar)
   // ---- a town: its main streets among the houses, and its wall around its middle, with a gate where a street
   // crosses it (town/plan.js keeps the blocks off both). A line thinner than a pixel is kept a pixel wide while it can
   // be told; from higher up it melts into the tone of the town.
