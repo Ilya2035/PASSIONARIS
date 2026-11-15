@@ -7,7 +7,7 @@ import { mercX, mercY } from '../geo.js';
 import { decodeCourses, mainRivers } from '../water/courses.js';
 import { fillHollows } from '../water/hollows.js';
 import { despike } from '../ground/despike.js';
-import { WMAP_W, WMAP_H, decodeWorldHeights, raiseIce, capSouth, joinHeights } from '../ground/world.js';
+import { WMAP_W, WMAP_H, decodeWorldHeights, raiseIce, capSouth, fitWorld, joinHeights } from '../ground/world.js';
 import { decodeWorldClimate, ICE_STEP } from '../ground/climate.js';
 
 export function loadAlbumData(root) {
@@ -28,8 +28,9 @@ export function loadAlbumData(root) {
     return ((p * (1 - fx) + q * fx) * (1 - fy) + (r * (1 - fx) + s * fx) * fy) / 4 - 8192;
   };
   // the height of any place of the Earth, as data.js gives it: the polygon's own inside it, the world map beyond and in
-  // a band at its edge (a chunk of the edge may reach a little beyond the polygon) — with the rock lifted to the ice
-  const at = joinHeights(regionAt, worldHeights(root));
+  // a band at its edge (a chunk of the edge may reach a little beyond the polygon) — with the rock lifted to the ice and
+  // the map fitted to the polygon's own heights at its edge
+  const at = joinHeights(regionAt, worldHeights(root, regionAt));
   const vectors = JSON.parse(readFileSync(join(dir, 'vectors.json'), 'utf8'));
   // the real courses of the rivers, as data.js gives them to the page
   const rf = join(root, 'public', 'assets', 'album', 'water', 'rivers.bin.gz'); let courses = null;
@@ -37,12 +38,9 @@ export function loadAlbumData(root) {
   return { meta, base: { ...b, at, regionAt }, vectors, courses };
 }
 // the world map of heights as data.js has it (ground/world.js), or null when it is not there (then beyond the polygon
-// all is deep sea, as in the page); read once a process (36 MB packed, 64 MB as heights)
-const WORLD = new Map();
-function worldHeights(root) {
-  if (!WORLD.has(root)) WORLD.set(root, readWorld(root));
-  return WORLD.get(root);
-}
+// all is deep sea, as in the page); read once a process (36 MB packed, 64 MB as heights). The steps and their order are
+// those of data.js: decode, the ice (or the cap of the south), then fitWorld to the heights of the polygon — the test
+// tests/album-division-bake.test.mjs holds the two files to the same steps.
 function readWorld(root) {
   const f = join(root, 'public', 'assets', 'map', 'height.delta.bin.gz'); if (!existsSync(f)) return null;
   const u = gunzipSync(readFileSync(f)), h = decodeWorldHeights(new Int16Array(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength)));
@@ -51,4 +49,9 @@ function readWorld(root) {
   if (existsSync(cf)) { const c = gunzipSync(readFileSync(cf)), d = decodeWorldClimate(c.buffer.slice(c.byteOffset, c.byteOffset + c.byteLength)); if (d) { raiseIce(h, d.ice, d.w, d.h, ICE_STEP); iced = true; } }
   if (!iced) capSouth(h);
   return h;
+}
+const WORLD = new Map();
+function worldHeights(root, regionAt) {
+  if (!WORLD.has(root)) { const h = readWorld(root); if (h) fitWorld(h, regionAt); WORLD.set(root, h); }
+  return WORLD.get(root);
 }
