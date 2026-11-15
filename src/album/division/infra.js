@@ -6,7 +6,7 @@
 // the rule the owner liked («через некоторые районы невозможно проложить главную дорогу… это крутая будет механика»):
 // a main road can be laid through a district when a band of its chunks of the main level joins two of its neighbours.
 import { LEVEL, infraLevels } from '../roads/infra.js';
-import { KN as FN, KNY as FNY, KKM } from './km.js';
+import { KN as FN, KNY as FNY, KKM, rowScale } from './km.js';
 import { LAND } from './build.js';
 
 export { LEVEL };
@@ -21,8 +21,9 @@ export function landOf(div) {
   return land;
 }
 // the levels as the roads work them out, without the roads that are laid (before the network is there, and in Node)
-// (the sixth argument: how many rows the raster has, for when it is not a square — roads/infra.js takes it up)
-export const chunkLevels = (div, roads = null) => infraLevels(div.raster.hgt, landOf(div), FN, KKM, roads, FNY);
+// (how many rows the raster has, and the true east–west step of a row: TRUE_SCALE of km.js — the same as the roads
+// lay their net by, so that the levels of chunks here and theirs never part)
+export const chunkLevels = (div, roads = null) => infraLevels(div.raster.hgt, landOf(div), FN, KKM, roads, FNY, rowScale);
 
 // div: the division; levels: a level a chunk → Uint8Array a district: 1 when a main road can be laid through it — its
 // chunks of the main level (4-neighbours, inside the district) hold one band that touches chunks of the main level of
