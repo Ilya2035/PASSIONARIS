@@ -11,7 +11,7 @@
 import { makeRibbons, smoothLine } from './ribbon.js';
 import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature, fineCache, crossedPairs, roadGround, chunkKinds, wayToMain } from '../roads/routes.js';
 import { infraLevels } from '../roads/infra.js';
-import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { KN, KNY, KKM, KX0, KY0, rowScale } from '../division/km.js';
 import { riverCrossings, squareBridges, fordSites, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN } from '../roads/crossings.js';
 import { makeWorks } from '../roads/works.js';
 import { sheetPull } from '../aspects/water.js';
@@ -157,7 +157,7 @@ export default async function init(album) {
     // knows how far it is from a main road. Worked out when asked, a few milliseconds a place, and kept.
     const atKm = (x, y) => { const g = llOf(x, y); return baseAt(g.lat, g.lon); };
     const toMain = (x, y) => {
-      const tx = Math.floor((x - KX0) / KKM), ty = Math.floor((y - KY0) / KKM); if (!(tx >= 0 && ty >= 0 && tx < KN && ty < KN)) return null;
+      const tx = Math.floor((x - KX0) / KKM), ty = Math.floor((y - KY0) / KKM); if (!(tx >= 0 && ty >= 0 && tx < KN && ty < KNY)) return null;
       const t = ty * KN + tx; if (ways.has(t)) return ways.get(t);
       ground ||= roadGround(div); kinds ||= chunkKinds(net.legs);
       const w = wayToMain(ground, t, kinds, baseAt ? atKm : null), r = w ? { km: w.km, cost: w.cost, road: w.road, pts: w.path.map(u => [KX0 + (u % KN + .5) * KKM, KY0 + (Math.floor(u / KN) + .5) * KKM]) } : null;
@@ -173,10 +173,10 @@ export default async function init(album) {
       crossed: crossedPairs(div, net.legs), fromFile: from === 'from the file',
       // km of road laid on the banks of the rivers it runs along (roads/banks.js); the network laid anew on the fine heights (the bake)
       banks, rebake, toMain,
-      // for every chunk (Uint8Array, KN × KN): the greatest road that runs through it — 3 main, 2 lesser, 1 track, 0 none;
+      // for every chunk (Uint8Array, KN × KNY): the greatest road that runs through it — 3 main, 2 lesser, 1 track, 0 none;
       // and what can be laid through it — the same numbers (roads/infra.js: the limits the network is laid by), never less than the road that is there
       chunkKinds: () => (kinds ||= chunkKinds(net.legs)),
-      infra: () => { if (!levels) { const land = new Uint8Array(KN * KN); for (let t = 0; t < land.length; t++) { const d = div.cells[t]; land[t] = d >= 0 && div.kinds[d] === 0 ? 1 : 0; } levels = infraLevels(div.raster.hgt, land, KN, KKM, kinds ||= chunkKinds(net.legs)); } return levels; },
+      infra: () => { if (!levels) { const land = new Uint8Array(KN * KNY); for (let t = 0; t < land.length; t++) { const d = div.cells[t]; land[t] = d >= 0 && div.kinds[d] === 0 ? 1 : 0; } levels = infraLevels(div.raster.hgt, land, KN, KKM, kinds ||= chunkKinds(net.legs), KNY, rowScale); } return levels; },
       // km from a point of the flat km plane to the nearest road as it is drawn (1e9 when none within 300 m): for whoever must keep off the roads
       near: (x, y) => (near ||= nearIndex(drawn.map(l => l.km), 2, .3))(x, y),
       signature: () => netSignature(div, div.centres, net.capitals),

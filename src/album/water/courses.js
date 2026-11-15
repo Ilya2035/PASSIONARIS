@@ -10,7 +10,7 @@
 // The page, the tests and the bake scripts all read this file. It imports nothing but the shape of the region: its
 // box (geo.js) and the square of the chunks (division/km.js) — no number of the region is typed in here.
 import { BBOX, KM_PER_DEG, COS_REF } from '../geo.js';
-import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { KN, KNY, KKM, KX0, KY0 } from '../division/km.js';
 
 export const BBOX_M = { lon0: Math.round(BBOX.lon0 * 1e5), lon1: Math.round(BBOX.lon1 * 1e5), lat0: Math.round(BBOX.lat0 * 1e5), lat1: Math.round(BBOX.lat1 * 1e5) };        // the region in 1e-5°
 // width of the water, km ↔ its byte: steps of 3 %, from 1.5 m to 4.6 km
@@ -74,7 +74,9 @@ export function mainRivers(courses, minW = .012, stepKm = .6) {
   return out;
 }
 
-// The raster of beaches (public/assets/album/water/coast.bin.gz, scripts/album/bake-coast.mjs): COAST_N × COAST_N
-// bytes over the album's square of flat km — the square of the chunks — from (COAST_X0, COAST_Y0), COAST_KM across;
-// row by row from the south. A cell is COAST_CELL km: 2048 × 2048 of them while the square is 1280 km across.
-export const COAST_CELL = .625, COAST_X0 = KX0, COAST_Y0 = KY0, COAST_KM = KN * KKM, COAST_N = Math.round(COAST_KM / COAST_CELL);
+// The raster of beaches (public/assets/album/water/coast.bin.gz, scripts/album/bake-coast.mjs): COAST_N × COAST_NY
+// bytes over the lattice of the chunks on the flat km plane — from (COAST_X0, COAST_Y0), COAST_KM across and
+// COAST_KMY from south to north; row by row from the south. A cell is COAST_CELL km: 2048 × 2048 of them while the
+// lattice is a square 1280 km across, 3072 × 4480 on the rectangle of stage 3 (1920 × 2800 km).
+export const COAST_CELL = .625, COAST_X0 = KX0, COAST_Y0 = KY0, COAST_KM = KN * KKM, COAST_KMY = KNY * KKM;
+export const COAST_N = Math.round(COAST_KM / COAST_CELL), COAST_NY = Math.round(COAST_KMY / COAST_CELL);

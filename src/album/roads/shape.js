@@ -17,7 +17,7 @@
 //     up again (the owner, 15.11.2026: «через каньон… вниз, а потом просто вверх. Но люди так не ходят») goes
 //     aslant, with bends, or round its head.
 // Plain JavaScript without the GPU: the same land always gives the same shape. The plains are not touched.
-import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { KN, KNY, KKM, KX0, KY0, scaleOfY } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { kmOf, llOf } from '../chunks.js';
 
@@ -37,7 +37,10 @@ export const FINE = {
   drape: .12,                        // km: over fine ground a road as it is drawn has a corner at least this often (dense())
 };
 const X0 = KX0, Y0 = KY0, F = FINE.step, K = Math.round(KKM / F);
-export const FW = KN * K;            // the fine cells: FW × FW of them over the same ground as the chunks; cell = j · FW + i
+export const FW = KN * K, FH = KNY * K;   // the fine cells: FW across and FH from south to north over the same ground as the chunks; cell = j · FW + i
+// The plane keeps the east–west scale of latitude 40°: a step east–west is truly scaleOfY() of its length on the
+// plane (division/km.js, TRUE_SCALE: 1 on the polygon of today, cos(lat)/cos 40° with stage 3). The fine way of a
+// leg counts its steps by the scale of the middle of its box — a leg is some tens of km long.
 // sixteen ways to step, in the order of their bearing
 export const DIRS = [[1, 0], [2, 1], [1, 1], [1, 2], [0, 1], [-1, 2], [-1, 1], [-2, 1], [-1, 0], [-2, -1], [-1, -1], [-1, -2], [0, -1], [1, -2], [1, -1], [2, -1]];
 const LEN = DIRS.map(([x, y]) => Math.hypot(x, y) * F);
@@ -51,8 +54,8 @@ export const cellChunk = c => chunkOf(c % FW, Math.floor(c / FW));     // the ch
 // The real courses of the rivers on the fine cells: for every chunk, a bit for each of its K × K cells that a river
 // at least `min` km wide runs through. courses: decodeCourses() of water/courses.js
 export function fineRivers(courses, min = .004) {
-  const bits = new Int32Array(KN * KN);
-  const mark = (i, j) => { if (i >= 0 && j >= 0 && i < FW && j < FW) bits[chunkOf(i, j)] |= 1 << ((j % K) * K + (i % K)); };
+  const bits = new Int32Array(KN * KNY);
+  const mark = (i, j) => { if (i >= 0 && j >= 0 && i < FW && j < FH) bits[chunkOf(i, j)] |= 1 << ((j % K) * K + (i % K)); };
   for (const r of courses.rivers) {
     let px = 0, py = 0;
     for (let n = 0; n < r.n; n++) {
@@ -80,15 +83,15 @@ export function climbs(G, path, at = null, kind = 0) {
   let lo = Infinity, hi = -Infinity;
   for (let j = 0; j < path.length; j++) {
     const h = G.hgt[path[j]]; if (h < lo) lo = h; if (h > hi) hi = h;
-    if (j) { const e = Math.abs(path[j] - path[j - 1]), run = (e === 1 || e === KN ? 1 : 1.4142) * KKM * 1000; if (Math.abs(h - G.hgt[path[j - 1]]) >= FINE.slope * run) return true; }
+    if (j) { const e = Math.abs(path[j] - path[j - 1]), sc = scaleOfY(Y0 + (Math.floor(path[j] / KN) + .5) * KKM), run = (e === KN ? 1 : e === 1 ? sc : 1.4142 * Math.sqrt((1 + sc * sc) / 2)) * KKM * 1000; if (Math.abs(h - G.hgt[path[j - 1]]) >= FINE.slope * run) return true; }
   }
   if (hi - lo >= FINE.range) return true;
   if (!at) return false;
   // the real ground between the middles of the chunks: a gully, a canyon, the edge of a tableland
   const most = FINE.steep * (FINE.grade[kind] ?? FINE.grade[2]) * FINE.probe * 1000; let last = 0;
   for (let j = 1; j < path.length; j++) {
-    const a = path[j - 1], b = path[j], ax = X0 + (a % KN + .5) * KKM, ay = Y0 + (Math.floor(a / KN) + .5) * KKM, bx = X0 + (b % KN + .5) * KKM, by = Y0 + (Math.floor(b / KN) + .5) * KKM, n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / FINE.probe));
-    for (let k = j > 1 ? 1 : 0; k <= n; k++) { const h = at(ax + (bx - ax) * k / n, ay + (by - ay) * k / n); if ((j > 1 || k) && Math.abs(h - last) >= most * Math.hypot(bx - ax, by - ay) / n / FINE.probe) return true; last = h; }
+    const a = path[j - 1], b = path[j], ax = X0 + (a % KN + .5) * KKM, ay = Y0 + (Math.floor(a / KN) + .5) * KKM, bx = X0 + (b % KN + .5) * KKM, by = Y0 + (Math.floor(b / KN) + .5) * KKM, run = Math.hypot((bx - ax) * scaleOfY(ay), by - ay), n = Math.max(1, Math.round(run / FINE.probe));
+    for (let k = j > 1 ? 1 : 0; k <= n; k++) { const h = at(ax + (bx - ax) * k / n, ay + (by - ay) * k / n); if ((j > 1 || k) && Math.abs(h - last) >= most * run / n / FINE.probe) return true; last = h; }
   }
   return false;
 }
@@ -100,7 +103,7 @@ export function climbs(G, path, at = null, kind = 0) {
 //     whatever wall of a gorge rises in it. A road there runs by the water (and is drawn so: roads/banks.js).
 // → (i, j: the column and row of the cell) → metres
 export function cellGround(heightAt, rivers = null) {
-  const bit = (i, j) => (i < 0 || j < 0 || i >= FW || j >= FW ? 0 : (rivers[chunkOf(i, j)] >> ((j % K) * K + (i % K))) & 1);
+  const bit = (i, j) => (i < 0 || j < 0 || i >= FW || j >= FH ? 0 : (rivers[chunkOf(i, j)] >> ((j % K) * K + (i % K))) & 1);
   const floor = (i, j) => { const x = X0 + (i + .5) * F, y = Y0 + (j + .5) * F, e = F / 3; return Math.min(heightAt(x, y), heightAt(x - e, y - e), heightAt(x + e, y - e), heightAt(x - e, y + e), heightAt(x + e, y + e)); };
   return (i, j) => {
     let h = floor(i, j); if (!rivers || bit(i, j)) return h;
@@ -126,8 +129,9 @@ export function fineWay(G, path, ends, kind, heightAt, rivers = null) {
   // the box of the leg and the cells the way may use
   let i0 = Infinity, j0 = Infinity, i1 = -Infinity, j1 = -Infinity; const R = Math.ceil(FINE.wide / F);
   for (const t of path) { const tx = t % KN, ty = (t - tx) / KN; if (tx < i0) i0 = tx; if (tx > i1) i1 = tx; if (ty < j0) j0 = ty; if (ty > j1) j1 = ty; }
-  i0 = Math.max(0, i0 * K - R - 1); j0 = Math.max(0, j0 * K - R - 1); i1 = Math.min(FW - 1, (i1 + 1) * K + R); j1 = Math.min(FW - 1, (j1 + 1) * K + R);
+  i0 = Math.max(0, i0 * K - R - 1); j0 = Math.max(0, j0 * K - R - 1); i1 = Math.min(FW - 1, (i1 + 1) * K + R); j1 = Math.min(FH - 1, (j1 + 1) * K + R);
   const w = i1 - i0 + 1, h = j1 - j0 + 1; room(w * h);
+  const sc = scaleOfY(Y0 + (j0 + j1 + 1) / 2 * F), LENS = sc === 1 ? LEN : DIRS.map(([x, y]) => Math.hypot(x * sc, y) * F);   // the true length of every step of this leg
   const leg = ++S.stamp, local = (x, y) => { const i = Math.floor((x - X0) / F) - i0, j = Math.floor((y - Y0) / F) - j0; return i < 0 || j < 0 || i >= w || j >= h ? -1 : j * w + i; };
   for (const t of path) {
     const cx = (t % KN + .5) * K - i0, cy = (Math.floor(t / KN) + .5) * K - j0;
@@ -145,7 +149,7 @@ export function fineWay(G, path, ends, kind, heightAt, rivers = null) {
   for (let e = 1; e < ends.length; e++) {
     const a = local(ends[e - 1][0], ends[e - 1][1]), b = local(ends[e][0], ends[e][1]); if (a < 0 || b < 0) return null;
     S.in[a] = S.in[b] = leg;
-    const stamp = ++S.stamp, bi = b % w, bj = (b - bi) / w, far = c => Math.hypot(c % w - bi, (c - c % w) / w - bj) * F * FINE.haste;
+    const stamp = ++S.stamp, bi = b % w, bj = (b - bi) / w, far = c => Math.hypot((c % w - bi) * sc, (c - c % w) / w - bj) * F * FINE.haste;
     heap.clear(); look(a);
     for (let d = 0; d < 16; d++) { const s = a * 16 + d; S.g[s] = 0; S.mark[s] = stamp; S.from[s] = -1; heap.push(far(a), s); }
     let end = -1;
@@ -160,7 +164,7 @@ export function fineWay(G, path, ends, kind, heightAt, rivers = null) {
         look(n); if (!(S.flag[n] & 2)) continue;
         let rn = S.flag[n] & 1, size = S.flag[n] >> 2; const m = MID[d2];
         if (m[0] || m[1]) for (let k = 0; k < 4; k += 2) { const u = (cj + m[k + 1]) * w + ci + m[k]; look(u); if (S.flag[u] & 1) { rn = 1; size = Math.max(size, S.flag[u] >> 2); } }
-        const len = LEN[d2], g = Math.abs(S.hgt[n] - hc) / (len * 1000 * gmax), over = g - 1;
+        const len = LENS[d2], g = Math.abs(S.hgt[n] - hc) / (len * 1000 * gmax), over = g - 1;
         const cost = gs + len * (1 + c1 * g + c2 * g * g + (over > 0 ? c3 * over * over : 0)) + (q <= 2 ? FINE.turn * q * q : FINE.hairpin) + (rn ? (rc ? FINE.along * len : FINE.cross[Math.min(3, size)]) : 0);
         if (S.mark[s2] !== stamp || cost < S.g[s2]) { S.g[s2] = cost; S.mark[s2] = stamp; S.from[s2] = s; heap.push(cost + far(n), s2); }
       }

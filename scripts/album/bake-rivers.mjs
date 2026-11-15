@@ -10,13 +10,21 @@
 // → public/assets/album/water/rivers.bin.gz (in git; © OpenStreetMap contributors, ODbL 1.0). Format: courses.js.
 //   node scripts/album/bake-rivers.mjs
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { OUT_DIR } from './osm-extract.mjs';
+import { workedNear } from './worked-near.mjs';
 import { encodeCourses, BBOX_M } from '../../src/album/water/courses.js';
 import { KM_PER_DEG, COS_REF } from '../../src/album/geo.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
+// The rivers are kept on the worked land and WORKED_NEAR km around it (worked-near.mjs): beyond it — the right bank
+// of the Rhine, Corsica, the Sahara south of the Atlas — a river is cut as it is cut at the edge of the region. The
+// water it carries is counted before that, over all of its course: a river that comes into the worked land comes
+// as wide as it is. PASSIONARIS_WORKED=0: no mask, everything in the region.
+const WORKED_NEAR = 3, worked = process.env.PASSIONARIS_WORKED === '0' ? null : workedNear(ROOT, WORKED_NEAR);
+// (PASSIONARIS_RIVERS_OUT: another file to write — to try a bake without touching the file in git)
+const OUT_FILE = process.env.PASSIONARIS_RIVERS_OUT || join(ROOT, 'public', 'assets', 'album', 'water', 'rivers.bin.gz');
 // Russian names of the rivers the album speaks of; OpenStreetMap has name:ru only here and there
 const RU = { Ebro: 'Эбро', Tajo: 'Тахо', Tejo: 'Тежу', Duero: 'Дуэро', Douro: 'Дору', Guadiana: 'Гвадиана', Guadalquivir: 'Гвадалквивир', Garonne: 'Гаронна', Júcar: 'Хукар', Xúquer: 'Хукар', Segura: 'Сегура',
   Miño: 'Миньо', Minho: 'Миньо', Dordogne: 'Дордонь', Rhône: 'Рона', Adour: 'Адур', Lot: 'Ло', Tarn: 'Тарн', Genil: 'Хениль', Jalón: 'Халон', Segre: 'Сегре', Cinca: 'Синка', Esla: 'Эсла', Pisuerga: 'Писуэрга',
@@ -144,6 +152,7 @@ function relax(xy, w, at) {
   return { xy: ox, w: ow };
 }
 const out = []; let nPts = 0, nRaw = 0, km = 0;
+let cutByMask = 0;                                // lines that end at the edge of the worked land or of the region
 for (const parts of chains) {
   const lon = [], lat = [], wRaw = [], at = [], seen = []; let d = 0, im = 0, len = 0; const byName = new Map();
   for (const r of parts) {
@@ -180,8 +189,8 @@ for (const parts of chains) {
   // only what lies in the region; a line that leaves it is cut there
   let run = null; const flush = () => { if (run && run.lon.length > 2) { out.push(run); nPts += run.lon.length; } run = null; };
   for (let i = 0; i < c.lon.length; i++) {
-    const inside = c.lon[i] > BBOX_M.lon0 && c.lon[i] < BBOX_M.lon1 && c.lat[i] > BBOX_M.lat0 && c.lat[i] < BBOX_M.lat1;
-    if (!inside) { flush(); continue; }
+    const inside = c.lon[i] > BBOX_M.lon0 && c.lon[i] < BBOX_M.lon1 && c.lat[i] > BBOX_M.lat0 && c.lat[i] < BBOX_M.lat1 && (!worked || worked(c.lat[i] / 1e5, c.lon[i] / 1e5));
+    if (!inside) { if (worked && run) cutByMask++; flush(); continue; }
     if (!run) run = { lon: [], lat: [], w: [], name: c.name, ru: c.ru, flags: c.flags, acc: c.acc };
     if (run.lon.length && (Math.abs(c.lon[i] - run.lon[run.lon.length - 1]) > 32000 || Math.abs(c.lat[i] - run.lat[run.lat.length - 1]) > 32000)) { flush(); run = { lon: [], lat: [], w: [], name: c.name, ru: c.ru, flags: c.flags, acc: c.acc }; }
     run.lon.push(c.lon[i]); run.lat.push(c.lat[i]); run.w.push(c.w[i]);
@@ -190,7 +199,7 @@ for (const parts of chains) {
 }
 // ---- the file
 const gz = gzipSync(Buffer.from(encodeCourses(out, { source: '© OpenStreetMap contributors, ODbL 1.0', rule: [A, Bx] })), { level: 9 });
-mkdirSync(join(ROOT, 'public', 'assets', 'album', 'water'), { recursive: true });
-writeFileSync(join(ROOT, 'public', 'assets', 'album', 'water', 'rivers.bin.gz'), gz);
+mkdirSync(dirname(OUT_FILE), { recursive: true });
+writeFileSync(OUT_FILE, gz);
 const wide = out.filter(c => Math.max(...c.w) >= .1).length;
-console.log(`${chains.length} rivers strung, ${out.length} kept (${wide} reach 100 m of width), ${Math.round(km)} km, ${nRaw} points thinned to ${nPts} → rivers.bin.gz ${(gz.length / 1e6).toFixed(2)} MB`);
+console.log(`${chains.length} rivers strung, ${out.length} kept (${wide} reach 100 m of width), ${Math.round(km)} km, ${nRaw} points thinned to ${nPts} → ${OUT_FILE.replace(/\\/g, '/').split('/').pop()} ${(gz.length / 1e6).toFixed(2)} MB; ${worked ? 'the worked land and ' + WORKED_NEAR + ' km around it, ' + cutByMask + ' lines cut at its edge or the edge of the region' : 'no mask of the worked land'}`);

@@ -8,7 +8,7 @@ import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
-import { KN as FN, KKM as FKM, KX0, KY0 } from '../src/album/division/km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0, KY0, TRUE_SCALE, rowScale } from '../src/album/division/km.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
@@ -16,7 +16,7 @@ import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns,
   STEEP, HIGH, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom, fineCache, crossedPairs, walkCost, WALK, chunkKinds, wayToMain, TO_MAIN } from '../src/album/roads/routes.js';
 import { INFRA, LEVEL, chunkEase, levelOf, infraLevels, STEEP as STEEP_INFRA, HIGH as HIGH_INFRA } from '../src/album/roads/infra.js';
 import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
-import { FINE, FW, cellXY, cellChunk, cellGround, fineRivers, climbs, finePoints } from '../src/album/roads/shape.js';
+import { FINE, FW, FH, cellXY, cellChunk, cellGround, fineRivers, climbs, finePoints } from '../src/album/roads/shape.js';
 import { riverCrossings, squareBridges, crossingType, fordable, fordSites, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
@@ -461,4 +461,34 @@ test('roads: the works at a river — a bridge of stone, of timber, a footbridge
   assert.ok(WORKS.stone.H > WORKS.timber.H && WORKS.timber.H > WORKS.foot.H && WORKS.stone.camber > 0 && WORKS.timber.camber === 0 && WORKS.abut === BRIDGE.abut);
   { const st = worksGeometry([at('stone', .08)]).attributes; let top = -1e9; for (let v = 0; v < st.aP.count; v++) if (st.aP.getW(v) === 0 && st.aN.getZ(v) > .9 && Math.abs(st.aP.getX(v)) < .01) top = Math.max(top, st.aP.getZ(v)); assert.ok(top >= WORKS.stone.camber, 'the middle of the deck: ' + top); }
   assert.equal(worksGeometry([]).attributes.aP.count, 0);
+});
+
+// Stage 3 laid in beforehand (the lead, 15.11.2026): the lattice of the chunks becomes a rectangle, 1920 × 2800 km,
+// and a step east–west is counted by its true length — cos(lat)/cos 40° of what it is on the plane.
+test('the roads on a rectangle of chunks, a step east–west by its true length', async () => {
+  const { stepLen } = await import('../src/album/roads/routes.js');
+  // today: a square, the true scale off — a step is what it has always been, to the bit
+  assert.equal(TRUE_SCALE, false, 'the true scale comes with stage 3: on, the network of today would be laid anew');
+  assert.equal(FW * FKM, FN * 5 * FKM); assert.equal(FH * FN, FW * FNY, 'the fine cells cover the lattice of the chunks: FW across, FH rows');
+  for (const t of [0, FN * 7 + 3, FN * (FNY - 2) + FN - 2]) {
+    assert.equal(stepLen(t, t + 1), 1); assert.equal(stepLen(t + FN, t), 1); assert.equal(stepLen(t, t + FN + 1), 1.4142); assert.equal(stepLen(t + FN, t + 1), 1.4142);
+    assert.equal(rowScale(Math.floor(t / FN)), 1);
+  }
+  // the levels of infrastructure on a rectangle: 6 chunks across, 4 rows. The ground climbs 10 % to the north and
+  // 2.2 % to the east: the only easy ways through a chunk are east and west.
+  const n = 6, ny = 4, hgt = new Float32Array(n * ny), land = new Uint8Array(n * ny).fill(1), at = (i, j) => j * n + i;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < n; i++) hgt[at(i, j)] = j * 100 + i * 22;
+  const ease = sx => { const s = 22 / (sx * 1000); return (1 + STEEP_INFRA[0] * s + STEEP_INFRA[1] * s * s) * (1 + (hgt[at(3, 2)] + 22) * HIGH_INFRA); };
+  for (const sx of [1, .78, 1.14]) assert.ok(Math.abs(chunkEase(hgt, land, n, at(3, 2), 1, ny, sx) - ease(sx)) < 1e-9, 'the ease of a chunk at scale ' + sx);
+  assert.equal(chunkEase(hgt, land, n, at(3, 2), 1, ny), chunkEase(hgt, land, n, at(3, 2), 1, ny, 1));
+  // in the Netherlands (.78) the same step is shorter and so steeper: a lesser road there is but a track; in the south of Morocco (1.14) it is easier
+  assert.ok(chunkEase(hgt, land, n, at(3, 2), 1, ny, .78) > chunkEase(hgt, land, n, at(3, 2), 1, ny) && chunkEase(hgt, land, n, at(3, 2), 1, ny) > chunkEase(hgt, land, n, at(3, 2), 1, ny, 1.14));
+  const lv = infraLevels(hgt, land, n, 1, null, ny), north = infraLevels(hgt, land, n, 1, null, ny, j => (j >= 2 ? .78 : 1));
+  assert.equal(lv.length, n * ny); assert.equal(north.length, n * ny);
+  assert.equal(lv[at(3, 2)], LEVEL.lesser); assert.equal(north[at(3, 2)], LEVEL.track); assert.equal(north[at(3, 1)], lv[at(3, 1)], 'a row the scale leaves alone');
+  // the last row is a row like any other, and nothing is read beyond it
+  assert.equal(lv[at(3, ny - 1)], LEVEL.lesser); assert.ok(chunkEase(hgt, land, n, at(n - 1, ny - 1), 1, ny) < Infinity);
+  // a square lattice asked the old way gives what it always gave
+  { const m = 5, h2 = new Float32Array(m * m), l2 = new Uint8Array(m * m).fill(1); for (let k = 0; k < m * m; k++) h2[k] = (k % m) * 30 + Math.floor(k / m) * 45;
+    assert.deepEqual([...infraLevels(h2, l2, m)], [...infraLevels(h2, l2, m, 1, null, m, () => 1)]); }
 });

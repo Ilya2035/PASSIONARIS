@@ -25,7 +25,7 @@
 // network out at every start: it is laid once (scripts/album/bake-roads.mjs) and kept in
 // public/assets/album/roads/roads.bin.gz; netSignature() tells whether the file was laid for this very division.
 import { kmOf, llOf } from '../chunks.js';
-import { KN as FN, KKM as FKM, KX0, KY0 } from '../division/km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0, KY0, TRUE_SCALE, rowScale, scaleOfY } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { HISTORIC } from './historic.js';
 import { shapeLegs, legKey, finePoints, fineSteps, thin, cellXY, cellChunk, DIRS, FW } from './shape.js';
@@ -48,17 +48,30 @@ export const POOR = 2.1;                           // a leg that costs this many
 export const PASS = { rise: 120, reach: 40, keep: 1.2, by: 2, top: 1 };
 export const NET_ALGO = 7;                         // changes whenever the rules above do: a kept network of another number is laid anew
 const NB = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
-const texelOf = (x, y) => { const tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FN ? -1 : ty * FN + tx; };
+// The lattice of the chunks is FN across and FNY from south to north (a square today, a rectangle with stage 3);
+// a chunk has the number row · FN + column.
+// The flat km plane keeps one east–west scale, that of latitude 40°: a step east–west is truly rowScale() of a side
+// long — cos(lat)/cos 40° (division/km.js, TRUE_SCALE: 1 on the polygon of today, in force with stage 3). Left out,
+// the slopes of the Netherlands would come out a quarter steeper than they are and the ways longer (the lead,
+// 15.11.2026). STEP_E, STEP_D: the true length of a step east–west and of a step aslant in every row, in sides of
+// a chunk; north–south it is 1. (1.4142 · √((1 + s²) / 2) is √(1 + s²) with the same 1.4142 the steps have always had.)
+const STEP_E = new Float64Array(FNY).fill(1), STEP_D = new Float64Array(FNY).fill(1.4142);
+if (TRUE_SCALE) for (let j = 0; j < FNY; j++) { const s = rowScale(j); STEP_E[j] = s; STEP_D[j] = 1.4142 * Math.sqrt((1 + s * s) / 2); }
+// the true length of the step between two neighbouring chunks, in sides of a chunk
+export const stepLen = (t, u) => { const e = Math.abs(t - u); return e === FN ? 1 : e === 1 ? STEP_E[(t / FN) | 0] : STEP_D[(Math.min(t, u) / FN) | 0]; };
+// the true distance between two points of the plane, km (the scale of the latitude half-way between them)
+const trueDist = (ax, ay, bx, by) => (TRUE_SCALE ? Math.hypot((bx - ax) * scaleOfY((ay + by) / 2), by - ay) : Math.hypot(bx - ax, by - ay));
+const texelOf = (x, y) => { const tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FNY ? -1 : ty * FN + tx; };
 const xyOf = t => [X0 + (t % FN + .5) * FKM, Y0 + (Math.floor(t / FN) + .5) * FKM];
 
 // the ground the roads are laid on: { land (1 where a land district is), hgt, riv } from the division
 export function roadGround(div) {
-  const n = FN * FN, land = new Uint8Array(n);
+  const n = FN * FNY, land = new Uint8Array(n);
   for (let t = 0; t < n; t++) { const d = div.cells[t]; land[t] = d >= 0 && div.kinds[d] === LAND ? 1 : 0; }
   return { land, hgt: div.raster.hgt, riv: div.raster.riv, g: new Float64Array(n), mark: new Int32Array(n), done: new Int32Array(n), from: new Int32Array(n), stamp: 0, heap: new Heap(1 << 12) };
 }
 export function stepCost(G, t, u, diag) {
-  const d = diag ? 1.4142 : 1, s = Math.abs(G.hgt[u] - G.hgt[t]) / (d * FKM * 1000);
+  const d = TRUE_SCALE ? stepLen(t, u) : diag ? 1.4142 : 1, s = Math.abs(G.hgt[u] - G.hgt[t]) / (d * FKM * 1000);
   return d * FKM * (1 + STEEP[0] * s + STEEP[1] * s * s) * (1 + G.hgt[u] * HIGH) + (G.riv[u] > 0 ? (G.riv[t] === 0 ? CROSSING[G.riv[u]] : ALONG) : 0);
 }
 // The price of the same step for one who looks at the ground itself (the owner, 15.11.2026, of the tracks: «может
@@ -72,7 +85,7 @@ export function stepCost(G, t, u, diag) {
 export const WALK = { probe: .25, climb: .028, grade: .18, over: 32 };
 export function walkCost(G, t, u, diag, at) {
   const ax = X0 + (t % FN + .5) * FKM, ay = Y0 + (Math.floor(t / FN) + .5) * FKM, bx = X0 + (u % FN + .5) * FKM, by = Y0 + (Math.floor(u / FN) + .5) * FKM;
-  const run = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(run / WALK.probe)), len = run / n; let last = at(ax, ay), first = last, walked = 0, steep = 0;
+  const run = TRUE_SCALE ? stepLen(t, u) * FKM : Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(run / WALK.probe)), len = run / n; let last = at(ax, ay), first = last, walked = 0, steep = 0;
   for (let k = 1; k <= n; k++) { const h = at(ax + (bx - ax) * k / n, ay + (by - ay) * k / n), d = Math.abs(h - last), over = d / (len * 1000 * WALK.grade) - 1; walked += d; if (over > 0) steep += len * WALK.over * over * over; last = h; }
   return stepCost(G, t, u, diag) + WALK.climb * Math.max(0, walked - Math.abs(last - first)) + steep;
 }
@@ -80,7 +93,7 @@ export function walkCost(G, t, u, diag, at) {
 // 1 a track, 0 none (the levels of roads/infra.js). legs: of roadNetwork(); a leg that was shaped is followed along
 // its fine way, the rest chunk by chunk.
 export function chunkKinds(legs) {
-  const out = new Uint8Array(FN * FN);
+  const out = new Uint8Array(FN * FNY);
   for (const L of legs) { if (L.kind === 3 || !L.path) continue; const v = 3 - L.kind;
     if (L.fine) for (const c of L.fine) { const t = cellChunk(c); if (out[t] < v) out[t] = v; } else for (const t of L.path) if (out[t] < v) out[t] = v; }
   return out;
@@ -99,7 +112,7 @@ export const TO_MAIN = { reach: 90, road: .6, box: 70 };
 export function wayToMain(G, t0, on, at = null) {
   if (t0 < 0 || !G.land[t0]) return null;
   if (on[t0] === 3) return { km: 0, cost: 0, road: 0, path: [t0] };
-  const ax = t0 % FN, ay = (t0 - ax) / FN, R = Math.ceil(TO_MAIN.box / FKM), x0 = Math.max(0, ax - R), x1 = Math.min(FN - 1, ax + R), y0 = Math.max(0, ay - R), y1 = Math.min(FN - 1, ay + R);
+  const ax = t0 % FN, ay = (t0 - ax) / FN, R = Math.ceil(TO_MAIN.box / FKM), x0 = Math.max(0, ax - R), x1 = Math.min(FN - 1, ax + R), y0 = Math.max(0, ay - R), y1 = Math.min(FNY - 1, ay + R);
   const stamp = ++G.stamp, heap = G.heap; heap.clear(); G.g[t0] = 0; G.mark[t0] = stamp; G.from[t0] = -1; heap.push(0, t0); let end = -1;
   while (heap.n) {
     const t = heap.pop(); if (G.done[t] === stamp) continue; G.done[t] = stamp; if (on[t] === 3) { end = t; break; }
@@ -107,13 +120,13 @@ export function wayToMain(G, t0, on, at = null) {
     for (let q = 0; q < 16; q += 2) {
       const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < x0 || uy < y0 || ux > x1 || uy > y1) continue;
       const u = uy * FN + ux; if (!G.land[u] || G.done[u] === stamp) continue;
-      const c = gt + (on[t] && on[u] ? (q >= 8 ? 1.4142 : 1) * FKM * TO_MAIN.road : at ? walkCost(G, t, u, q >= 8, at) : stepCost(G, t, u, q >= 8));
+      const c = gt + (on[t] && on[u] ? stepLen(t, u) * FKM * TO_MAIN.road : at ? walkCost(G, t, u, q >= 8, at) : stepCost(G, t, u, q >= 8));
       if (G.mark[u] !== stamp || c < G.g[u]) { G.g[u] = c; G.mark[u] = stamp; G.from[u] = t; heap.push(c, u); }
     }
   }
   if (end < 0) return null;
   const path = []; let km = 0, road = 0, open = 0, openKm = 0;
-  for (let t = end; t >= 0; t = G.from[t]) { path.push(t); const f = G.from[t]; if (f < 0) break; const len = (Math.abs(t - f) === 1 || Math.abs(t - f) === FN ? 1 : 1.4142) * FKM; km += len; if (on[t] && on[f]) road += len; else { open += G.g[t] - G.g[f]; openKm += len; } }
+  for (let t = end; t >= 0; t = G.from[t]) { path.push(t); const f = G.from[t]; if (f < 0) break; const len = stepLen(t, f) * FKM; km += len; if (on[t] && on[f]) road += len; else { open += G.g[t] - G.g[f]; openKm += len; } }
   path.reverse();
   if (km > TO_MAIN.reach || open > HARD * openKm + 6) return null;                 // too far, or the ground between the place and the roads is impassable
   return { km, cost: G.g[end], road, path };
@@ -124,9 +137,12 @@ const crossingsOf = (G, path) => { const out = []; for (let i = 1; i < path.leng
 export function legBetween(G, a, b) {
   if (a < 0 || b < 0 || !G.land[a] || !G.land[b]) return null;
   const ax = a % FN, ay = (a - ax) / FN, bx = b % FN, by = (b - bx) / FN, M = 8 + Math.round(Math.max(Math.abs(ax - bx), Math.abs(ay - by)) * .6);
-  const x0 = Math.max(0, Math.min(ax, bx) - M), x1 = Math.min(FN - 1, Math.max(ax, bx) + M), y0 = Math.max(0, Math.min(ay, by) - M), y1 = Math.min(FN - 1, Math.max(ay, by) + M);
+  const x0 = Math.max(0, Math.min(ax, bx) - M), x1 = Math.min(FN - 1, Math.max(ax, bx) + M), y0 = Math.max(0, Math.min(ay, by) - M), y1 = Math.min(FNY - 1, Math.max(ay, by) + M);
+  // (what is left of the way is guessed by the straight line; where a step east–west is shorter than it looks, the
+  // guess is taken by the shortest step of the box — it must never be more than the way really is)
+  const hs = TRUE_SCALE ? Math.min(1, STEP_E[y0], STEP_E[y1]) : 1;
   const stamp = ++G.stamp, heap = G.heap; heap.clear();
-  G.g[a] = 0; G.mark[a] = stamp; G.from[a] = -1; heap.push(Math.hypot(ax - bx, ay - by) * FKM, a);
+  G.g[a] = 0; G.mark[a] = stamp; G.from[a] = -1; heap.push(Math.hypot(ax - bx, ay - by) * FKM * hs, a);
   while (heap.n) {
     const t = heap.pop(); if (G.done[t] === stamp) continue; G.done[t] = stamp; if (t === b) break;
     const tx = t % FN, ty = (t - tx) / FN, gt = G.g[t];
@@ -134,19 +150,19 @@ export function legBetween(G, a, b) {
       const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < x0 || uy < y0 || ux > x1 || uy > y1) continue;
       const u = uy * FN + ux; if (!G.land[u] || G.done[u] === stamp) continue;
       const c = gt + stepCost(G, t, u, q >= 8);
-      if (G.mark[u] !== stamp || c < G.g[u]) { G.g[u] = c; G.mark[u] = stamp; G.from[u] = t; heap.push(c + Math.hypot(ux - bx, uy - by) * FKM, u); }
+      if (G.mark[u] !== stamp || c < G.g[u]) { G.g[u] = c; G.mark[u] = stamp; G.from[u] = t; heap.push(c + Math.hypot(ux - bx, uy - by) * FKM * hs, u); }
     }
   }
   if (G.done[b] !== stamp) return null;
   const path = []; let km = 0;
-  for (let t = b; t >= 0; t = G.from[t]) { path.push(t); const f = G.from[t]; if (f >= 0) km += (Math.abs(t - f) === 1 || Math.abs(t - f) === FN ? 1 : 1.4142) * FKM; }
+  for (let t = b; t >= 0; t = G.from[t]) { path.push(t); const f = G.from[t]; if (f >= 0) km += stepLen(t, f) * FKM; }
   path.reverse();
   return { path, cost: G.g[b], km, crossings: crossingsOf(G, path) };
 }
 // the cheapest ways from texel a to every land texel of the square that reaches R texels from it. While G.stamp is the
 // number returned, G.done[u] === that number tells that u was reached, G.g[u] is what the way costs and G.from leads back
 export function fanFrom(G, a, R) {
-  const ax = a % FN, ay = (a - ax) / FN, x0 = Math.max(0, ax - R), x1 = Math.min(FN - 1, ax + R), y0 = Math.max(0, ay - R), y1 = Math.min(FN - 1, ay + R);
+  const ax = a % FN, ay = (a - ax) / FN, x0 = Math.max(0, ax - R), x1 = Math.min(FN - 1, ax + R), y0 = Math.max(0, ay - R), y1 = Math.min(FNY - 1, ay + R);
   const stamp = ++G.stamp, heap = G.heap; heap.clear();
   G.g[a] = 0; G.mark[a] = stamp; G.from[a] = -1; heap.push(0, a);
   while (heap.n) {
@@ -207,7 +223,7 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
   const count = div.count, cells = div.cells;
   // which districts touch: sides of texels between two land districts
   const touch = new Map();
-  for (let ty = 0; ty < FN - 1; ty++) for (let tx = 0; tx < FN - 1; tx++) {
+  for (let ty = 0; ty < FNY - 1; ty++) for (let tx = 0; tx < FN - 1; tx++) {
     const t = ty * FN + tx, d = cells[t]; if (d < 0 || div.kinds[d] !== LAND) continue;
     for (const u of [t + 1, t + FN]) { const e = cells[u]; if (e < 0 || e === d || div.kinds[e] !== LAND) continue; const k = d < e ? d * 65536 + e : e * 65536 + d; touch.set(k, (touch.get(k) || 0) + 1); }
   }
@@ -218,7 +234,7 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
     const a = Math.floor(k / 65536), b = k % 65536; if (centres.texel[a] < 0 || centres.texel[b] < 0) continue;
     nbr[a].push(b); nbr[b].push(a);
     const L = legBetween(G, centres.texel[a], centres.texel[b]); if (!L) continue;
-    const straight = Math.hypot(centres.x[a] - centres.x[b], centres.y[a] - centres.y[b]);
+    const straight = trueDist(centres.x[a], centres.y[a], centres.x[b], centres.y[b]);
     if (L.cost > HARD * straight + 6) { hard++; continue; }                  // impassable: no road between these two
     const i = legs.length; legs.push({ a, b, cost: L.cost, km: L.km, path: L.path, crossings: L.crossings, kind: 3 }); of[a].push(i); of[b].push(i); pairLeg.set(k, i);
   }
@@ -269,7 +285,7 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
     { const sx = stop(x, y), sy = stop(y, sx), had = pairLeg.get(Math.min(sx, sy) * 65536 + Math.max(sx, sy)); if (sx !== sy && !(had !== undefined && legs[had].pass)) { x = sx; y = sy; } }
     const a = Math.min(x, y), b = Math.max(x, y), k = a * 65536 + b;
     const path = walk(centres.texel[a]).concat(walk(centres.texel[b]).slice(0, -1).reverse()); let km = 0;
-    for (let j = 1; j < path.length; j++) { const e = Math.abs(path[j] - path[j - 1]); km += (e === 1 || e === FN ? 1 : 1.4142) * FKM; }
+    for (let j = 1; j < path.length; j++) km += stepLen(path[j], path[j - 1]) * FKM;
     const L = { a, b, cost: G.g[centres.texel[a]] + G.g[centres.texel[b]], km, path, crossings: crossingsOf(G, path), kind: 3, pass: { name: P[2], t, x: px, y: py } };
     let i = pairLeg.get(k); if (i === undefined) { i = legs.length; legs.push(L); of[a].push(i); of[b].push(i); pairLeg.set(k, i); } else { L.kind = legs[i].kind; legs[i] = L; }
     return { i, x, y };

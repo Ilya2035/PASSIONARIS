@@ -12,7 +12,7 @@
 // whole sea, uWaterThaw, kept by the freeze model (layers/freeze.js).
 // One water for everything: WATER_CORE is the same code in the ground shader (the sea), in the lakes and in the rivers.
 import { Vector2, DataTexture, RedFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from 'three';
-import { COAST_N, COAST_X0, COAST_Y0, COAST_KM } from '../water/courses.js';
+import { COAST_N, COAST_NY, COAST_X0, COAST_Y0, COAST_KM, COAST_KMY } from '../water/courses.js';
 import { lightUniforms } from '../glsl.js';
 
 // Ice in retreat stands in melt water once it is no longer whole: none at MELT_TOP of ice and more, all of it MELT_SPAN
@@ -22,15 +22,20 @@ export const MELT_TOP = .92, MELT_SPAN = .14;
 export const WATER_UNIFORMS = { uWaterThaw: { value: new Vector2(0, 0) } };
 // The water's one texture in the ground shader: where the shore is a beach (water/courses.js, COAST_*). One empty
 // texel until the file is read.
-const coastTex = (data, n) => { const t = new DataTexture(data, n, n, RedFormat, UnsignedByteType); t.magFilter = t.minFilter = LinearFilter; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true; return t; };
+const coastTex = (data, n, ny = n) => { const t = new DataTexture(data, n, ny, RedFormat, UnsignedByteType); t.magFilter = t.minFilter = LinearFilter; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true; return t; };
 export const COAST_UNIFORMS = { tCoast: { value: coastTex(new Uint8Array(1), 1) } };
 async function loadCoast() {
   try {
     const r = await fetch('assets/album/water/coast.bin.gz'); if (!r.ok) return;
     const u = new Uint8Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-    if (u.length === COAST_N * COAST_N) COAST_UNIFORMS.tCoast.value = coastTex(u, COAST_N);
+    if (u.length === COAST_N * COAST_NY) COAST_UNIFORMS.tCoast.value = coastTex(u, COAST_N, COAST_NY);
   } catch { /* no beaches then: the shore is drawn without them */ }
 }
+
+// what the raster of beaches spans, as the shader divides by it: one number while the lattice is a square (the
+// text of the ground shader is then what it has always been — a change of it may cost a quarter of the frame:
+// docs/album/water.md, «Вода вне полигона»), two with the rectangle of stage 3
+const COAST_SPAN = COAST_KM === COAST_KMY ? `${COAST_KM}.` : `vec2(${COAST_KM}., ${COAST_KMY}.)`;
 
 export const WATER_CORE = /* glsl */`
 uniform vec2 uWaterThaw;
@@ -344,7 +349,7 @@ uniform sampler2D tCoast;
 vec3 aspShore(Px p, vec3 ground, inout float cover) {
   if (p.hl > 14. || p.h < -2.) return ground;
   cover *= smoothstep(1.2, 3.8, p.hl);
-  float beach = texture(tCoast, (p.pk - vec2(${COAST_X0}., ${COAST_Y0}.)) / ${COAST_KM}.).r;
+  float beach = texture(tCoast, (p.pk - vec2(${COAST_X0}., ${COAST_Y0}.)) / ${COAST_SPAN}).r;
   float d = p.hl / max(p.slope, .006);                                // metres to the waterline, from the height and the slope
   float near = smoothstep(.13, .035, p.px);                           // the band is drawn while it is about a pixel wide or more
   float rim = (1. - near) * beach * (1. - smoothstep(1., 6., p.hl)) * .55;
