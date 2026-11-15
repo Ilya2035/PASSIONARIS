@@ -37,7 +37,12 @@ async function start() {
   // the fine heights under the camera: a window of fine tiles in the mountains, or the square of a showcase place
   // (data.js, detailFor — the part «Земля и лес»); undefined: nothing to change
   async function pickDetail(s) { const d = await data.detailFor(s); if (d !== undefined) terrain.setDetail(d); }
-  cam.on(s => { terrain.update(s); pickDetail(s); });
+  // The camera flies over the whole Earth, and a part may meet a place it has no data for. A part that fails does
+  // not stop the picture: its error is written down once (album.broken, the console), the frame goes on.
+  album.broken = {};
+  const failed = (name, e) => { if (!album.broken[name]) { album.broken[name] = String(e?.stack || e); console.error(`[album] ${name} failed`, e); } };
+  const safe = (name, fn) => { try { return fn(); } catch (e) { failed(name, e); } };
+  cam.on(s => { safe('terrain', () => terrain.update(s)); pickDetail(s).catch(e => failed('detail', e)); });
 
   const { initLayers } = await import('./layers.js');
   await initLayers(album);
@@ -73,8 +78,8 @@ async function start() {
     cam.exag = terrain.u.uExag.value;
     cam.update(SHOT ? 1 : dt, size());
     terrain.u.uTime.value = t + (SHOT ? 40 : 0);
-    for (const l of Object.values(album.layers)) l.update?.(dt, t, cam);
-    chunks.flush();
+    for (const [name, l] of Object.entries(album.layers)) if (l.update) safe(name, () => l.update(dt, t, cam));
+    safe('chunks', () => chunks.flush());
     post.setSamples(auto <= .7 ? 0 : 4);
     album.draw();
     if (!SHOT) { // step the picture scale down when frames run late, back up when there is room

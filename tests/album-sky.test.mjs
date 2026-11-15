@@ -5,8 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, sunLongitude, equatorial } from '../src/album/sky/astro.js';
 import { LIGHT, lightUniforms, lightNumbers, lightFrame, FRAME, sunAt, HAZE_KM } from '../src/album/light.js';
-import { AlbumCamera, edgePush, keyPush, panStep, zoomAbout, H_MIN, H_MAX, TILT_MAX, EDGE_PX, PAN_RATE } from '../src/album/camera.js';
-import { KM_PER_DEG, BBOX, R } from '../src/album/geo.js';
+import { AlbumCamera, edgePush, keyPush, panStep, zoomAbout, tiltCap, nearLon, H_MIN, H_MAX, H_TILT, PAN_H, TILT_MAX, EDGE_PX, PAN_RATE } from '../src/album/camera.js';
+import { KM_PER_DEG, BBOX, R, LAT_MAX, fromWorld, distKm } from '../src/album/geo.js';
 import sky from '../src/album/aspects/sky.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
@@ -166,6 +166,9 @@ test('camera: the speed of the move grows with the height, and goes where the vi
   [e, n] = km(panStep(s, { x: 1, y: 0 }, 1)); near(e, 200 * PAN_RATE, 1e-6); near(n, 0, 1e-6);
   // ten times higher, ten times faster; Shift is faster still; twice the time, twice the way
   near(panStep({ ...s, h: 2000 }, { x: 0, y: 1 }, 1).lat / panStep(s, { x: 0, y: 1 }, 1).lat, 10, 1e-9);
+  // over the whole ball the speed stops growing: from PAN_H up the Earth turns the same way under the hand
+  assert.equal(panStep({ ...s, h: H_MAX }, { x: 0, y: 1 }, 1).lat, panStep({ ...s, h: PAN_H }, { x: 0, y: 1 }, 1).lat); assert.ok(PAN_H > 2000 && PAN_H < H_MAX);
+  assert.ok(panStep({ ...s, h: PAN_H }, { x: 0, y: 1 }, 1).lat < 90, 'not more than a quarter of the ball in a second');
   assert.ok(panStep(s, { x: 0, y: 1 }, 1, true).lat > 2 * panStep(s, { x: 0, y: 1 }, 1).lat); near(panStep(s, { x: 0, y: 1 }, .5).lat * 2, panStep(s, { x: 0, y: 1 }, 1).lat, 1e-12);
   // turned to the east, «forward» is east and «right» is south
   [e, n] = km(panStep({ ...s, heading: 90 }, { x: 0, y: 1 }, 1)); near(e, 200 * PAN_RATE, 1e-6); near(n, 0, 1e-6);
@@ -194,7 +197,7 @@ test('camera: the wheel keeps the point under the cursor in place', () => {
 test('camera: limits, easing, and the eye never under the ground', () => {
   const flat = new AlbumCamera(null, () => 0, { shot: true });
   flat.set({ lat: 99, lon: -99, h: 5, tilt: 120 }, true);
-  assert.deepEqual([flat.t.lat, flat.t.lon, flat.t.h, flat.t.tilt], [BBOX.lat1, BBOX.lon0, H_MIN, TILT_MAX]);
+  assert.deepEqual([flat.t.lat, flat.t.lon, flat.t.h, flat.t.tilt], [LAT_MAX, -99, H_MIN, TILT_MAX]);
   flat.set({ h: 1e6, tilt: -5 }, true); assert.deepEqual([flat.t.h, flat.t.tilt], [H_MAX, 0]);
   assert.ok(TILT_MAX > 80 && TILT_MAX < 90, 'the camera can look along the ground, at the horizon');
   // the shown state eases toward the target and arrives
@@ -221,4 +224,55 @@ test('camera: limits, easing, and the eye never under the ground', () => {
   assert.ok(wall.alt > 4.8 + .3, `eye at ${wall.alt} km over a ridge at 4.8 km`); assert.ok(wall.lift > 2);
   // in a still capture nothing moves by itself
   assert.equal(flat.edgePan, false); assert.ok(PAN_RATE > .3 && PAN_RATE < 2);
+});
+
+test('camera: the whole Earth — any place, the whole ball, across 180°, near the poles', () => {
+  const cam = new AlbumCamera(null, () => 0, { shot: true }), run = n => { for (let i = 0; i < n; i++) cam.update(.016, 1.6); };
+  // from the greatest height the whole ball stands in the window (its half-width in degrees is under half of the
+  // view, and fills most of it); the far plane lies beyond the edge of the ball, the near one before the ground
+  const half = Math.asin(R / (R + H_MAX)) / D; assert.ok(half < cam.cam.fov / 2 - 1 && half > cam.cam.fov / 2 * .7, `the ball is ${half}° of ${cam.cam.fov / 2}°`);
+  cam.set({ lat: 20, lon: 60, h: H_MAX, tilt: 0, heading: 0 }, true); cam.update(1, 1.6);
+  near(cam.alt, H_MAX, .01); assert.ok(cam.cam.far > Math.sqrt(2 * R * H_MAX + H_MAX * H_MAX)); assert.ok(cam.cam.near < H_MAX && cam.cam.near > 100);
+  // the camera stands over any place of the Earth and looks at it
+  for (const [lat, lon] of [[35.7, 139.7], [-33.9, 151.2], [0, -78.5], [64.1, -21.9], [-54.8, -68.3], [LAT_MAX, 179.5], [-LAT_MAX, -179.5], [40, -3]]) {
+    cam.set({ lat, lon, h: 300, tilt: 0, heading: 0 }, true); cam.update(1, 1.6);
+    const at = fromWorld(cam.target), eye = fromWorld(cam.cam.position);
+    assert.ok(distKm(at, { lat, lon }) < .01, `${lat},${lon}: looks at ${at.lat},${at.lon}`); assert.ok(distKm(eye, { lat, lon }) < .01); near(eye.h, 300, .01);
+    cam.set({ tilt: 70, heading: 200 }, true); cam.update(1, 1.6); assert.ok(Number.isFinite(cam.alt) && cam.alt > 50 && cam.alt < 300, `${lat},${lon}: tilted, eye at ${cam.alt}`);
+  }
+  // the latitude stops short of the poles, the longitude is any: 190° is 170° west
+  cam.set({ lat: 89, lon: 190, h: 500, tilt: 0 }, true); assert.deepEqual([cam.s.lat, cam.s.lon], [LAT_MAX, -170]);
+  cam.set({ lat: -89 }, true); assert.equal(cam.s.lat, -LAT_MAX);
+  // near a pole a kilometre is many degrees of longitude; the map still does not spin
+  const polar = panStep({ lat: LAT_MAX, lon: 0, h: 500, tilt: 0, heading: 0 }, { x: 1, y: 0 }, 1).lon; assert.ok(polar > 0 && polar <= 500 * PAN_RATE / (KM_PER_DEG * .2) + 1e-9, `${polar}° a second`);
+  // the nearest copy of a longitude
+  assert.deepEqual([nearLon(179, -179), nearLon(-179, 179), nearLon(10, 0), nearLon(-170, 540)], [-181, 181, 10, 550]);
+  // a flight across 180° takes the short way: from 179° E to 179° W is two degrees, not 358; the shown longitude
+  // stays inside −180…180 all the way and makes no step larger than the easing gives
+  cam.set({ lat: 10, lon: 179, h: 500, tilt: 0 }, true); cam.update(1, 1.6); cam.flyTo({ lon: -179 }); assert.equal(cam.t.lon, 181);
+  let prev = cam.s.lon, crossed = false;
+  for (let i = 0; i < 400; i++) {
+    cam.update(.016, 1.6); const d = nearLon(cam.s.lon, prev) - prev;
+    assert.ok(cam.s.lon >= -180 && cam.s.lon < 180, `frame ${i}: ${cam.s.lon}`); assert.ok(d >= 0 && d < .3, `frame ${i}: a step of ${d}°`);
+    if (cam.s.lon < 0) crossed = true; prev = cam.s.lon;
+  }
+  assert.ok(crossed); near(cam.s.lon, -179, 1e-3); near(cam.t.lon, -179, 1e-9); assert.equal(cam.update(.016, 1.6), false, 'at rest');
+  // the map pushed on past 180° (keys, the edge of the window): the same
+  cam.set({ lon: 179.9 }, true); cam.t.lon += 1; cam.limit(); run(400); near(cam.s.lon, -179.1, 1e-3);
+  // the wheel anchor crosses with the view
+  cam.set({ lat: 0, lon: 179.5, h: 400 }, true); cam.update(1, 1.6);
+  const P = { lat: .5, lon: 181 }; cam.anchor = { lat: P.lat, lon: P.lon, kLat: (cam.s.lat - P.lat) / cam.s.h, kLon: (cam.s.lon - P.lon) / cam.s.h };
+  Object.assign(cam.t, zoomAbout(cam.s, P, 100)); run(600); near(cam.s.h, 100, .01); near(cam.s.lon, nearLon(P.lon + (179.5 - P.lon) * .25, 0), 1e-3);
+  // the higher, the less tilt; the tilt asked for is kept and comes back on the way down
+  assert.equal(tiltCap(H_MIN), TILT_MAX); assert.equal(tiltCap(H_TILT), TILT_MAX); assert.equal(tiltCap(H_MAX), 0);
+  for (let h = H_TILT; h < H_MAX; h *= 1.3) assert.ok(tiltCap(h * 1.3) < tiltCap(h), `${h}`);
+  cam.set({ lat: 40, lon: -3, h: 500, tilt: 80 }, true); cam.update(1, 1.6); cam.flyTo({ h: H_MAX }); run(900);
+  near(cam.s.tilt, 0, .01); assert.equal(cam.t.tilt, 80); near(cam.alt, H_MAX, 1);
+  cam.flyTo({ h: 500 }); run(900); near(cam.s.tilt, 80, .01);
+  cam.set({ h: 6000, tilt: 80 }, true); near(cam.s.tilt, tiltCap(6000), 1e-9);
+  // the ground is asked with the longitude in −180…180, and a place with no heights does not break the camera
+  const asked = [], odd = new AlbumCamera(null, (lat, lon) => { asked.push(lon); return lon > 0 ? NaN : undefined; }, { shot: true });
+  odd.set({ lat: 0, lon: 179.9, h: 300, tilt: 70, heading: 270 }, true); odd.update(1, 1.6);
+  assert.ok(asked.length > 1 && asked.every(l => l >= -180 && l < 180), `${asked}`); assert.ok(asked.some(l => l < 0), 'the eye is beyond 180°');
+  assert.ok(Number.isFinite(odd.alt) && Number.isFinite(odd.cam.near) && Number.isFinite(odd.cam.far));
 });
