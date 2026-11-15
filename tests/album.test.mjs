@@ -1,7 +1,7 @@
 // Graphics album (docs/ALBUM.md): the parts that can be checked without a GPU.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWorld, fromWorld, frame, distKm, mercX, mercY, BBOX, CENTRE, R } from '../src/album/geo.js';
+import { toWorld, fromWorld, frame, distKm, mercX, mercY, BBOX, CENTRE, R, worldLL, wrapLon, inPolygon, LAT_MAX } from '../src/album/geo.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS, LOOKS, sunAt } from '../src/album/params.js';
 import { feedbackText } from '../src/album/feedback.js';
@@ -21,6 +21,19 @@ test('album geo: the frame centre is the origin with +Y up, and the local frame 
   const f = frame(42, 1);
   for (const [a, b] of [[f.up, f.east], [f.up, f.north], [f.east, f.north]]) assert.ok(Math.abs(a.dot(b)) < 1e-6);
   assert.ok(Math.abs(f.up.length() - 1) < 1e-9 && Math.abs(f.north.length() - 1) < 1e-9);
+});
+test('album geo: the whole sphere — any point of the Earth is a point of the map, the polygon is only where the detail is', () => {
+  // the far side of the planet and the southern hemisphere come back as they went in
+  for (const [lat, lon, h] of [[-33.9, 151.2, 0], [64.1, -21.9, 1.2], [-54.8, -68.3, 0], [35.7, 139.7, .04], [0, 177.25, 0]]) {
+    const b = fromWorld(toWorld(lat, lon, h));
+    assert.ok(Math.abs(b.lat - lat) < 1e-4 && Math.abs(wrapLon(b.lon - lon)) < 1e-4 && Math.abs(b.h - h) < 2e-3, `${lat},${lon},${h} → ${b.lat},${b.lon},${b.h}`);
+    assert.ok(Math.abs(toWorld(lat, lon, 0).length() ** 2 + 2 * R * toWorld(lat, lon, 0).y) < 1, 'on the sphere');
+  }
+  assert.deepEqual(worldLL(89, 200), { lat: LAT_MAX, lon: 200 });
+  assert.deepEqual(worldLL(-90, -3), { lat: -LAT_MAX, lon: -3 });
+  assert.equal(wrapLon(190), -170); assert.equal(wrapLon(-190), 170); assert.equal(wrapLon(540), -180); assert.equal(wrapLon(-3.7), -3.7);
+  assert.ok(inPolygon(40.4, -3.7) && inPolygon(43.6, 1.44), 'Madrid and Toulouse are in the polygon');
+  assert.ok(!inPolygon(48.85, 2.35) && !inPolygon(30, 31), 'Paris and Cairo are not — yet');
 });
 test('album geo: distances and the Web-Mercator helpers', () => {
   assert.ok(Math.abs(distKm({ lat: 40, lon: -3 }, { lat: 41, lon: -3 }) - Math.PI * R / 180) < .01);

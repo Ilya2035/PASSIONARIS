@@ -3,6 +3,9 @@
 import { Vector3 } from 'three';
 
 export const R = 6371;
+// BBOX is the worked polygon: chunks, districts, roads and settlements exist only inside it. The map itself is the
+// whole sphere (the owner, 15.11.2026: «Я должен видеть всю землю»): beyond the polygon lies the plain land and sea
+// of the world, drawn by the same rules without chunks (docs/BACKLOG.md, «Третий шаг»).
 export const BBOX = { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
 export const CENTRE = { lat: 40.0, lon: -2.75 };
 export const KM_PER_DEG = 111.195;
@@ -31,3 +34,10 @@ export function distKm(a, b) {
   return R * Math.acos(Math.min(1, Math.sin(f1) * Math.sin(f2) + Math.cos(f1) * Math.cos(f2) * Math.cos(dl)));
 }
 export const clampLL = (lat, lon) => ({ lat: Math.max(BBOX.lat0, Math.min(BBOX.lat1, lat)), lon: Math.max(BBOX.lon0, Math.min(BBOX.lon1, lon)) });
+// ---- the whole sphere
+// A point anywhere on the Earth: the latitude stops short of the poles (the flat km grid of the patterns folds
+// there), the longitude is left as it is — it may run past ±180°, and wrapLon() brings it back for a table or a text.
+export const LAT_MAX = 85;
+export const worldLL = (lat, lon) => ({ lat: Math.max(-LAT_MAX, Math.min(LAT_MAX, lat)), lon });
+export const wrapLon = lon => (lon >= -180 && lon < 180 ? lon : ((lon + 180) % 360 + 360) % 360 - 180);
+export const inPolygon = (lat, lon) => lat >= BBOX.lat0 && lat <= BBOX.lat1 && lon >= BBOX.lon0 && lon <= BBOX.lon1;
