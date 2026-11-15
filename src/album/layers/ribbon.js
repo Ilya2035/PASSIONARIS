@@ -178,7 +178,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         // (over a bog: more). On level ground both banks are built up; on a hillside the upper one is cut into the slope.
         float dz = dot(slope, vAcross) * sg * vRoad * 1000. - mix(uRaise, max(uRaise, 1.1), bog);
         float cut = step(0., dz);                                                                                  // 1 a cutting: the bank rises from the road · 0 it is built up and falls away
-        float bw = min(max(abs(dz) * .0026, 1.8 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel or two
+        float bw = min(max(abs(dz) * .0026, 1.4 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel and a half
         float off = abs(vX) - vRoad, bank = vol * min(1., uNear * 3.) * clamp(off / pk + .5, 0., 1.) * clamp((bw - off) / pk + .5, 0., 1.) * step(1e-6, bw);   // (the banks go with the cleared strip: beyond the room the ribbon keeps beside the road there is nothing to draw them on)
         vec3 nBed = normalize(vec3(-grade * uExag * uShade, 1.)), nBank = normalize(vec3(-(grade + vAcross * sg * mix(-.65, .84, cut)) * uExag * uShade, 1.));
         // the colours: the bed (over a bog — logs laid across, a dark gap between them when they can be seen); a cut bank is bare earth, a built one earth under grass; by a bog — the dark water of the ditch
@@ -189,8 +189,9 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         // ground beside it, or less. A cutting shows bare earth besides; by a bog the ditch is dark water.
         vec3 cVerge = mix(uVergeCol, uRideCol, woods), L0 = groundLit(gn, gs), LB = groundLit(nBank, gs);
         float lr = dot(LB, vec3(.3, .6, .1)) / (dot(L0, vec3(.3, .6, .1)) + 1e-4), bare = max(bog * .9, cut * .4);
-        float aBank = mix(lr > 1. ? min((lr - 1.) * .9, .6) : min((1. - lr) * 1.3, .78), .8, bare);
-        vec3 lBank = mix(lr > 1. ? vec3(.97, .92, .78) * L0 * min(lr, 1.7) : vec3(.07, .07, .06) * L0, mix(uCutCol, vec3(.16, .2, .17), bog) * LB, bare);
+        // (the shade of a bank is a soft line beside the road, never a dark stroke over it: a road stays a pale thing)
+        float aBank = mix(lr > 1. ? min((lr - 1.) * .9, .55) : min((1. - lr) * .8, .4), .8, bare);
+        vec3 lBank = mix(lr > 1. ? vec3(.97, .92, .78) * L0 * min(lr, 1.7) : vec3(.2, .18, .14) * L0, mix(uCutCol, vec3(.16, .2, .17), bog) * LB, bare);
         float soft = mix(1., uSoft, vol), wBed = core * soft, wBank = bank * (1. - core) * aBank, wVerge = verge * (1. - core) * (1. - bank), cover = wBed + wBank + wVerge, a = cover * fade * (1. - .44 * uDim * dim * (1. - bank));
         if (a < .004) discard;
         vec3 col;
