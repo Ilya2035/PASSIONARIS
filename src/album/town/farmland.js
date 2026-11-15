@@ -15,6 +15,7 @@
 // A great river stops the plough (the natural cells the caller says can be reached).
 // Plain JavaScript without the GPU: the same land and the same people always give the same fields.
 import { KN, KNY, KKM, KX0, KY0, JITTER, kmHash, CLASS_SLOPE, HIGH_M, ORDER_WEIGHT, cellsOfChunks } from '../division/km.js';
+import { LINE_REF, lineOfChunks } from './rules.js';
 
 export const HA_PER_PERSON = 1;                // hectares of fields a person lives from (this work's estimate; knob «Угодья на жителя»)
 // how much of a chunk can be ploughed, by the class of its ground (km.js: 1 level .. 5 mountain, 0 water)
@@ -74,8 +75,10 @@ function roughClass(at, i, j) {
 //            one state, bog or fields) } once the land is divided; without it the class of a chunk is read off the
 //            relief as the chunk is asked for
 //   swamp(k) the share of swamp of natural cell k by nature, 0..1 (may be left out)
-export function farmGround(ch, at, land = null, swamp = null) {
-  const n = KN * KNY, room = new Float32Array(n).fill(-1), cls = land ? land.cls : new Uint8Array(n), cellOf = cellsOfChunks(ch);
+//   treeline(x, y) → metres, where the trees stop there (may be left out: FARM_HIGH is then plain metres; with it,
+//            the same shares of the tree line — rules.js LINE_REF, the rule of stage 3)
+export function farmGround(ch, at, land = null, swamp = null, treeline = null) {
+  const n = KN * KNY, room = new Float32Array(n).fill(-1), cls = land ? land.cls : new Uint8Array(n), cellOf = cellsOfChunks(ch), lineAt = treeline ? lineOfChunks(treeline) : null;
   // (the swamps are kept by the natural cells of 100 km²: a cell that is a third swamp leaves two thirds of each of
   // its chunks to the plough. Where exactly the wet ground lies the ground shader knows, and paints no field there.)
   const dry = new Float32Array(ch.count).fill(1); if (swamp) for (let k = 0; k < ch.count; k++) { const w = swamp(k); dry[k] = w >= FARM_WET ? 0 : 1 - w; }
@@ -85,8 +88,9 @@ export function farmGround(ch, at, land = null, swamp = null) {
       let v = room[c]; if (v >= 0) return v;
       let k = cls[c], h = land ? land.hgt[c] : 0;
       if (!land) { const i = c % KN; [k, h] = roughClass(at, i, (c - i) / KN); cls[c] = k; }
-      const cell = cellOf.cell[c];
-      v = land?.bog?.[c] ? 0 : FARM_CAP[k] * (1 - step(FARM_HIGH[0], FARM_HIGH[1], h)) * (cell < ch.count ? dry[cell] : 1) * KKM * KKM;
+      // (a square with no natural cell lies beyond the worked land — chunks.js NONE, from stage 3: nothing is ploughed there)
+      const cell = cellOf.cell[c], line = lineAt ? lineAt(c) / LINE_REF : 1;
+      v = land?.bog?.[c] ? 0 : FARM_CAP[k] * (1 - step(FARM_HIGH[0] * line, FARM_HIGH[1] * line, h)) * (cell < ch.count ? dry[cell] : 0) * KKM * KKM;
       return room[c] = v < FARM_LEAST ? 0 : v;
     } };
   return g;

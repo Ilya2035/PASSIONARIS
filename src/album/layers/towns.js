@@ -15,7 +15,7 @@
 import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, BufferGeometry, Points, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
 import { SWAMP_RULES } from '../aspects/swamp.js';
-import { KM_PER_DEG, COS_REF } from '../geo.js';
+import { KM_PER_DEG, COS_REF, STAGE } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
@@ -172,6 +172,9 @@ export default async function init(album) {
   };
   const env = { at, river: (x, y) => (riverK <= 0 ? 1e9 : bank(x, y, riverMin, riverK)),
     swamp: (x, y) => { const q = llOf(x, y), k = ch.at(q.lat, q.lon); return k < 0 ? 0 : ch.get('swamp', k); } };
+  // from stage 3 the heights of villages and fields go by the tree line of the place (town/rules.js LINE_REF); up to
+  // stage 2 they are the plain metres they were, and no place of the present polygon moves
+  const lineXY = STAGE >= 3 ? (x, y) => { const q = llOf(x, y); return treelineAt(q.lat, q.lon); } : null;
 
   // ---- growth: the places and the knob become the state of the chunks; after a reset of the chunks, again
   const written = new Map(), byteOf = (name, k) => Math.round(ch.get(name, k) * 255);
@@ -186,7 +189,7 @@ export default async function init(album) {
     // what the chunks of 1 km² can give: from the division once the land is divided, from the relief before that
     const dv = album.division, dvN = dv ? dv.version : -1;
     // (the chunks the division marks as bog are never ploughed: its reason № 4, km.js SETTLE_WHY)
-    if (groundOf !== dvN) { groundOf = dvN; const why = dv?.settleFacts?.()?.why; ground = farmGround(ch, at, dv ? { cls: dv.chunkFacts().cls, hgt: dv.data.raster.hgt, bog: why ? why.map(w => (w === 4 ? 1 : 0)) : null } : null, k => ch.getNatural('swamp', k)); }
+    if (groundOf !== dvN) { groundOf = dvN; const why = dv?.settleFacts?.()?.why; ground = farmGround(ch, at, dv ? { cls: dv.chunkFacts().cls, hgt: dv.data.raster.hgt, bog: why ? why.map(w => (w === 4 ? 1 : 0)) : null } : null, k => ch.getNatural('swamp', k), lineXY); }
     model = growTowns(ch, places, grown, at, (x, y) => bank(x, y, 0, 1), { ground, ha: haSeen }); farmN++;
     for (let k = 0; k < ch.count; k++) {
       const b = model.built[k], f = model.fields[k], keep = model.keep[k];
@@ -514,7 +517,7 @@ export default async function init(album) {
       if (dv && (dv.version !== divSeen || vk !== villSeen)) {
         const t0 = performance.now(), nb = album.data.vectors.places.length;
         // every district gets its list of places (the same every time), and the knob says how many of them are used
-        if (dv.version !== divSeen || !siteList) { siteList = districtSites(dv.data, dv.chunkFacts(), dv.sites, { base: nb, at, swamp: (x, y) => { const q = llOf(x, y), k = ch.at(q.lat, q.lon); return k < 0 ? 0 : ch.getNatural('swamp', k); } }); siteOfBase = siteNumbers(siteList); }
+        if (dv.version !== divSeen || !siteList) { siteList = districtSites(dv.data, dv.chunkFacts(), dv.sites, { base: nb, at, swamp: (x, y) => { const q = llOf(x, y), k = ch.at(q.lat, q.lon); return k < 0 ? 0 : ch.getNatural('swamp', k); }, treeline: lineXY }); siteOfBase = siteNumbers(siteList); }
         divSeen = dv.version; villSeen = vk;
         const t1 = performance.now();
         // one town to a district: a place of the album that is not the centre of its district is a village of it

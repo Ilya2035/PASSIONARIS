@@ -158,9 +158,10 @@ test('tracks of the album: every place has a way to the roads of its district, s
     const lines = trackLines(tree, p => (p ? .06 : .3)); pieces += lines.length; for (const l of lines) km += l.km;
   }
   const ms = Date.now() - t0; lens.sort((a, b) => a - b);
-  assert.ok(trees > 1800 && ways > 30000 && none < ways * .01, `${ways} places with a way, ${none} without`);
+  // (by the districts there are, not by numbers of the present polygon: there 1 922 trees, 33 889 ways, 2.6 s)
+  assert.ok(trees > 100 && ways > 12 * trees && none < ways * .01, `${ways} places with a way in ${trees} districts, ${none} without`);
   const mid = lens[lens.length >> 1]; assert.ok(mid > 3 && mid < 10, `a way is ${mid.toFixed(1)} km in the middle`);
   assert.ok(km < sum * .75 && km > sum * .2, `${Math.round(km)} km of track for ${Math.round(sum)} km of ways: the ways of a district share their tracks`);
   assert.ok(pieces > ways * .8 && pieces <= ways, `${pieces} pieces for ${ways} places`);
-  assert.ok(ms < 6000, `the trees and tracks of every district: ${ms} ms`);
+  assert.ok(ms < 3.2 * trees, `the trees and tracks of every district: ${ms} ms for ${trees} districts`);
 });

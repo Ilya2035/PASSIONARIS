@@ -13,8 +13,8 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { decodeSites } from '../src/album/town/sites.js';
-import { GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, TOWN_R, CULTURES, CULTURE_N, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, peopleOf, classOf, RULES_GLSL } from '../src/album/town/rules.js';
-import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE, PER, DENSE, GAP, NEAR, MOST, MADE_R, MADE_POP, GOOD, TOO_HIGH, SWAMP } from '../src/album/town/villages.js';
+import { GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, TOWN_R, CULTURES, CULTURE_N, LINE_REF, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, peopleOf, classOf, RULES_GLSL } from '../src/album/town/rules.js';
+import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE, PER, DENSE, GAP, NEAR, MOST, MADE_R, MADE_POP, GOOD, HIGH, TOO_HIGH, SWAMP } from '../src/album/town/villages.js';
 import { growTowns, centrePlaces, fullRadius, FIELD_FLOOR, KEEP_OFF } from '../src/album/town/grow.js';
 import { mirrorSettle, mirrorVillages, packAtlas, settleBytes, atlasBytes, villageBytes, settleTex } from '../src/album/town/state.js';
 import { planLobe, ROW } from '../src/album/town/plan.js';
@@ -42,6 +42,30 @@ function madeDiv() {
   return { div, facts: { cls }, x, y };
 }
 const within = (list, d) => Array.from({ length: list.first[d + 1] - list.first[d] }, (_, k) => list.first[d] + k);
+
+test('villages: from stage 3 the heights a place goes by are shares of the tree line — higher under the Atlas, the same where the trees stop as in the Pyrenees', () => {
+  // district 0 lifted to 1900 m: above TOO_HIGH, no place is made there
+  const { div, facts, x, y } = madeDiv(), hgt = div.raster.hgt;
+  for (let c = 0; c < hgt.length; c++) if (div.cells[c] === 0) hgt[c] = 1900;
+  const sites = [{ x: x(I0 + 10), y: y(J0 + 10), pop: 40000, name: 'Центр' }];
+  const made = l => within(l, 0).filter(s => l.kind[s] === SITE.made).length, key = l => `${[...l.x].join()}|${[...l.y].join()}|${[...l.kind].join()}|${[...l.good].join()}`;
+  const plain = districtSites(div, facts, sites); assert.equal(made(plain), 0, '1900 m is above the last height of Spain');
+  assert.ok(TOO_HIGH < 1900 && TOO_HIGH / LINE_REF * 3000 > 1900 && HIGH / LINE_REF * 3000 < 1900);
+  // the tree line of the Pyrenees: the same list, number for number
+  assert.equal(key(districtSites(div, facts, sites, { treeline: () => LINE_REF })), key(plain));
+  // the Atlas, trees to 3000 m: places are made at 1900 m — fewer than on low ground, the ground counts half
+  const atlas = districtSites(div, facts, sites, { treeline: () => 3000 }); assert.ok(made(atlas) > 3, `${made(atlas)} places at 1900 m under a tree line of 3000 m`);
+  assert.ok(Math.abs(atlas.good[0] - plain.good[0]) < 1e-6, 'above the first height the ground counts half, under either rule');
+  for (let c = 0; c < hgt.length; c++) if (div.cells[c] === 0) hgt[c] = 1400;
+  const low = districtSites(div, facts, sites), lowAtlas = districtSites(div, facts, sites, { treeline: () => 3000 });
+  assert.ok(Math.abs(lowAtlas.good[0] - 2 * low.good[0]) < 1e-3 && made(lowAtlas) > made(low), 'at 1400 m the ground is half as good in Spain and whole under the Atlas');
+  // a low tree line (the Vosges, 1300 m): no place at 1400 m, above the trees
+  assert.equal(made(districtSites(div, facts, sites, { treeline: () => 1300 })), 0);
+  // the layer of settlements gives the tree line from stage 3 only: on stage 2 no place of the present polygon moves
+  const src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+  assert.match(src, /const lineXY = STAGE >= 3 \? \(x, y\) => \{ const q = llOf\(x, y\); return treelineAt\(q\.lat, q\.lon\); \} : null;/);
+  assert.match(src, /treeline: lineXY \}\); siteOfBase = siteNumbers\(siteList\);/); assert.match(src, /k => ch\.getNatural\('swamp', k\), lineXY\); \}/);
+});
 
 test('villages: a district has its list of places — the centre, the real places, then the best free ground', () => {
   const { div, facts, x, y } = madeDiv();
@@ -176,7 +200,7 @@ test('villages: their patches lie in the fine grid of the one settlement texture
   assert.ok(v.lobes.find(l => l.fine === Dv.fine).rivals.includes(r.lobes[0]), 'a village knows the town beside it');
   // the texture holds both grids below the rows of the chunks of 1 km²: the fine one, and the coarse one beside it
   assert.equal(settleTex.image.width, TEX_W); assert.equal(settleTex.image.height, TEX_H); assert.equal(atlasBytes.length, TEX_W * TEX_H * 4); assert.equal(villageBytes.length, VN * VNY * 4);
-  assert.deepEqual([TEX_W, TEX_H, FINE_AT, COARSE_AT], [KN, KN + VN, [0, KN], [VN, KN]]); assert.ok(COARSE_AT[0] + GN <= TEX_W && FINE_AT[1] + VN <= TEX_H, 'both grids fit beside each other');
+  assert.deepEqual([TEX_W, TEX_H, FINE_AT, COARSE_AT], [KN, KNY + VNY, [0, KNY], [VN, KNY]]); assert.ok(COARSE_AT[0] + GN <= TEX_W && FINE_AT[1] + VNY <= TEX_H, 'both grids fit beside each other');
   mirrorSettle(ch, m.towns); mirrorVillages(ch, m.towns, r.lobes); packAtlas();
   const g = r.lobes[0].k; assert.equal(atlasBytes[((COARSE_AT[1] + Math.floor(g / GN)) * TEX_W + COARSE_AT[0] + g % GN) * 4 + 2], settleBytes[g * 4 + 2]);
   assert.equal(atlasBytes[((FINE_AT[1] + Math.floor(A.fine / VN)) * TEX_W + FINE_AT[0] + A.fine % VN) * 4 + 2], radiusByte(A.R));
@@ -190,8 +214,8 @@ test('villages: their patches lie in the fine grid of the one settlement texture
 });
 
 test('villages: the ground shader reads both grids; a village has no mark from afar', () => {
-  assert.equal(VN, 512); assert.equal(VK, 2.5); assert.equal(VN * VK, GN * GK);
-  assert.match(RULES_GLSL, /#define SET_VN 512/); assert.match(RULES_GLSL, /#define SET_VK 2\.50/);
+  assert.equal(VN, 4 * GN); assert.equal(VNY, 4 * GNY); assert.equal(VK, 2.5); assert.equal(VN * VK, GN * GK);   // (four squares of villages to a square of towns, whatever the size of the lattice)
+  assert.match(RULES_GLSL, new RegExp(`#define SET_VN ${VN}\\n`)); assert.match(RULES_GLSL, new RegExp(`#define SET_VNY ${VNY}\\n`)); assert.match(RULES_GLSL, /#define SET_VK 2\.50/);
   const g = settle.glsl;
   assert.match(g, /texelFetch\(tSettle, c \+ \(fine \? SET_FINE : SET_COARSE\), 0\)/, 'each grid at its own place in the texture');
   assert.match(RULES_GLSL, new RegExp(`#define SET_FINE ivec2\\(0, ${KNY}\\)`)); assert.match(RULES_GLSL, new RegExp(`#define SET_COARSE ivec2\\(${VN}, ${KNY}\\)`));   // (below the KNY rows of the chunks)
@@ -242,8 +266,10 @@ test('villages of the album: about nine to a district, on level ground by the wa
   perD.sort((a, b) => a - b);
   const kinds = [0, 0, 0]; for (const k of list.kind) kinds[k]++;
   assert.ok(centres > landD * .98); assert.equal(kinds[0], centres);
-  if (osm.length) assert.ok(kinds[1] > 5000 && kinds[1] < 8000, `${kinds[1]} real places besides the centres`);
-  assert.ok(kinds[2] > 15000 && kinds[2] < 40000, `${kinds[2]} made places at the greatest density`);
+  // (by the districts there are, not by numbers of the present polygon: there 1 922 districts, 6 849 real places and
+  // 27 049 made ones — 17.6 to a district. A land with more real villages has fewer made ones: the two are counted together.)
+  if (osm.length) assert.ok(kinds[1] > 2 * landD && kinds[1] < 60 * landD, `${kinds[1]} real places besides the centres of ${landD} districts`);
+  { const per = (kinds[1] + kinds[2]) / landD; assert.ok(per > 9 && per < 80 && kinds[2] > 0, `${kinds[1]} real and ${kinds[2]} made places at the greatest density: ${per.toFixed(1)} to a district`); }
   const mid = perD[perD.length >> 1]; assert.ok(mid >= 6 && mid <= 12, `a district has ${mid} villages in the middle`);
   // where the made places stand: level ground, never mountains, never too high, each in its own district
   const cls = [0, 0, 0, 0, 0, 0]; let byWater = 0;

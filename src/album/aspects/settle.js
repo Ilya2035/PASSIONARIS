@@ -25,9 +25,15 @@
 // one must be added, is called at the very head of aspSettle; and land-20 and land-far are timed before and after
 // every change. (Thresholds of smoothstep written in the code were a second, lesser cause; the build of the shader
 // now moves them into a table.)
-import { RULES_GLSL, PALETTE_GLSL, FARM_TURNS } from '../town/rules.js';
+import { RULES_GLSL, PALETTE_GLSL, FARM_TURNS, LINE_REF } from '../town/rules.js';
+import { FARM_HIGH } from '../town/farmland.js';
+import { STAGE } from '../geo.js';
 import { settleUniforms } from '../town/state.js';
 
+// The height to which fields are painted (town/farmland.js FARM_HIGH, the same numbers as the model of the fields
+// uses): plain metres up to stage 2; from stage 3 the same shares of the tree line of the pixel — gTreeline of the
+// ground shader (town/rules.js LINE_REF): under the Atlas the fields climb higher, in the Vosges they end lower.
+export const FIELD_H = FARM_HIGH.map(h => (STAGE >= 3 ? `(gTreeline * ${(h / LINE_REF).toFixed(4)})` : `${h}.`));
 const GLSL = /* glsl */`
 uniform sampler2D tSettle; uniform vec4 uSettle;   // cell of the lattice km · blocks standing 0..1 · height of houses × · settlements shown 0 / 1
 uniform vec4 uSetA, uSetB, uSetC;                  // the rules that ask «is the thing still there», with the tilt and the height of the camera in them (town/state.js, setTilt)
@@ -250,7 +256,7 @@ void aspSettle(Px p, inout Land L) {
   // furlongs can be told: from higher up they would be pale specks, one by every village. So they come in as the
   // camera comes down; a land that is ploughed in earnest keeps its fields at any height.
   float seen = setSeen(px, p.cC.g);
-  if (tilled && seen > .003 && tm < .997 && p.slope < .6 && p.hl < 1700.) {
+  if (tilled && seen > .003 && tm < .997 && p.slope < .6 && p.hl < ${FIELD_H[1]}) {
     // how much of the land here is ploughed: the share of the chunk, more beside the houses, a little more or less
     // from place to place. Fields keep together: a chunk ploughed for the most part is ploughed whole, one ploughed
     // for the lesser part has its fields in a few clumps, and the edge of the fields is a furlong or two wide
@@ -267,7 +273,7 @@ void aspSettle(Px p, inout Land L) {
         fm = mix(fm, step(setHash(ivec2(cid), 3, 14), want), near);
       }
       // the common case, good level land, costs nothing more; only shores, swamps, slopes and heights are weighed
-      if (p.h < 2. || p.cA.a > .3 || p.slope > .42 || p.hl > 1300. || tm > 0.) fm *= smoothstep(.4, 2., p.h) * (1. - smoothstep(.3, .5, p.cA.a)) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(1300., 1700., p.hl)) * (1. - tm);
+      if (p.h < 2. || p.cA.a > .3 || p.slope > .42 || p.hl > ${FIELD_H[0]} || tm > 0.) fm *= smoothstep(.4, 2., p.h) * (1. - smoothstep(.3, .5, p.cA.a)) * (1. - smoothstep(.42, .6, p.slope)) * (1. - smoothstep(${FIELD_H[0]}, ${FIELD_H[1]}, p.hl)) * (1. - tm);
       // No field on a bog (the owner: «важно, чтобы чанки не перемешивались»): the swamp aspect, painted before this
       // one, leaves in fSwampW how much of the pixel it has painted; where half the pixel and more is bog there is no
       // field. Nothing is worked out for it here: see the note on the speed of this shader at the head of the file.

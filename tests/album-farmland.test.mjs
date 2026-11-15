@@ -14,13 +14,14 @@ import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { packDivision } from '../src/album/division/gpu.js';
 import { decodeSites } from '../src/album/town/sites.js';
-import { GN, GNY, VN, VNY, GK, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, FARM_WARP, FARM_UNEVEN, FARM_SHARP, RULES_GLSL } from '../src/album/town/rules.js';
+import { GN, GNY, VN, VNY, GK, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, FARM_WARP, FARM_UNEVEN, FARM_SHARP, RULES_GLSL, LINE_REF, LINE_BLOCK, lineOfChunks } from '../src/album/town/rules.js';
 import { farmGround, farmRun, farmWithCells, farmOfDistricts, HA_PER_PERSON, FARM_CAP, FARM_HIGH, FARM_WET, FARM_REACH, FARM_LEAST, FARM_PATCH, FARM_LOBES, FARM_CLIMB, FARM_FADE, farmPatch, farmWay, farmBand, farmShare } from '../src/album/town/farmland.js';
 import { growTowns, centrePlaces, reachOf, FIELD_FLOOR, FELL_FROM, FELL } from '../src/album/town/grow.js';
 import { districtSites, villagePlaces, GOOD } from '../src/album/town/villages.js';
 import { mirrorFarm, farmAt, farmBytes, atlasBytes, settleTex } from '../src/album/town/state.js';
 import { landOfAlbum, farmRank } from '../src/album/save/land.js';
-import settle from '../src/album/aspects/settle.js';
+import settle, { FIELD_H } from '../src/album/aspects/settle.js';
+import { STAGE } from '../src/album/geo.js';
 import division from '../src/album/aspects/division.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
@@ -117,6 +118,19 @@ test('farmland: the ground by its class, its height and its swamps; the cells a 
   assert.equal(g.room(600 * KN + 600), FARM_CAP[1]); assert.equal(g.room(600 * KN + 645), FARM_CAP[3]); assert.equal(g.room(600 * KN + 660), 0); assert.equal(g.room(100 * KN + 100), 0, 'water');
   assert.deepEqual(FARM_CAP, GOOD, 'as much of a chunk can be ploughed as counts as good ground for a village');
   assert.ok(g.room(620 * KN + 600) > 0 && g.room(620 * KN + 600) < FARM_CAP[1] && g.room(640 * KN + 600) === 0, 'the fields thin out with the height'); assert.ok(FARM_HIGH[0] < 1500 && FARM_HIGH[1] < 2000);
+  // from stage 3 the two heights go by the tree line of the place (rules.js LINE_REF): where the trees stop at the
+  // height of the Pyrenees nothing changes; under a higher line — the Atlas — the fields climb higher, under a lower
+  // one — the Vosges — they end lower. The line is asked once for a block of chunks.
+  { let asked = 0; const same = farmGround(world, flat, { cls, hgt }, null, () => { asked++; return LINE_REF; });
+    for (const c of [600 * KN + 600, 620 * KN + 600, 640 * KN + 600, 600 * KN + 645]) assert.ok(Math.abs(same.room(c) - g.room(c)) < 1e-6, `chunk ${c}`);
+    assert.ok(asked >= 1 && asked <= 4, `the tree line was asked ${asked} times for four chunks`); assert.equal(LINE_BLOCK, 16);
+    const atlas = farmGround(world, flat, { cls, hgt }, null, () => 3000), vosges = farmGround(world, flat, { cls, hgt }, null, () => 1300);
+    assert.ok(Math.abs(atlas.room(620 * KN + 600) - FARM_CAP[1]) < 1e-6, 'at 1500 m under a tree line of 3000 m the fields are whole'); assert.ok(atlas.room(640 * KN + 600) > 0 && atlas.room(640 * KN + 600) < FARM_CAP[1], 'and at 2000 m they thin out');
+    hgt[605 * KN + 600] = 900; assert.ok(Math.abs(farmGround(world, flat, { cls, hgt }).room(605 * KN + 600) - FARM_CAP[1]) < 1e-6); assert.ok(vosges.room(605 * KN + 600) < FARM_CAP[1] * .8, 'at 900 m under a tree line of 1300 m they thin out already'); hgt[605 * KN + 600] = 300;
+    const line = lineOfChunks((x, y) => x * 1000 + y), c = 37 * KN + 53, bx = KX0 + (Math.floor(53 / 16) + .5) * 16, by = KY0 + (Math.floor(37 / 16) + .5) * 16; assert.equal(line(c), bx * 1000 + by, 'the tree line of a chunk is that of the middle of its block'); }
+  // the ground shader paints the fields to the same heights: plain metres up to stage 2, shares of its tree line from stage 3
+  if (STAGE >= 3) { assert.deepEqual(FIELD_H, FARM_HIGH.map(h => `(gTreeline * ${(h / LINE_REF).toFixed(4)})`)); assert.match(FIELD_H[1], /^\(gTreeline \* \.?0?\.79/); } else assert.deepEqual(FIELD_H, ['1300.', '1700.']);
+  assert.ok(settle.glsl.includes(`p.slope < .6 && p.hl < ${FIELD_H[1]}) {`) && settle.glsl.includes(`(1. - smoothstep(${FIELD_H[0]}, ${FIELD_H[1]}, p.hl))`) && settle.glsl.includes(`p.hl > ${FIELD_H[0]} || tm > 0.`));
   // a settlement on the level ground by the hills: the hills are ploughed less, and count as lying farther
   const run = farmRun(g), x = KX0 + 636.5, y = KY0 + 590.5, got = run.claim(x, y, 200, 30), st = run.done();
   assert.ok(Math.abs(got - 200) < .01); assert.ok([...st.list].every(c => cls[c] === 1 || cls[c] === 3) && [...st.list].every(c => st.km[c] <= Math.round(FARM_CAP[cls[c]] * 255)));
@@ -134,7 +148,7 @@ test('farmland: the ground by its class, its height and its swamps; the cells a 
 });
 
 test('farmland: the chunks in the settlement texture — the share, the seed, and what the chunks around hold', () => {
-  assert.deepEqual([TEX_W, TEX_H], [KN, KN + VN]); assert.equal(settleTex.image.width, KN); assert.equal(settleTex.image.height, KN + VN);
+  assert.deepEqual([TEX_W, TEX_H], [KN, KNY + VNY]); assert.equal(settleTex.image.width, KN); assert.equal(settleTex.image.height, KNY + VNY);
   assert.equal(farmBytes.length, KN * KNY * 4); assert.equal(farmBytes.buffer, atlasBytes.buffer); assert.equal(farmBytes.byteOffset, 0, 'the chunks are the first rows of the texture');
   assert.ok(FINE_AT[1] >= KNY && COARSE_AT[1] >= KNY && COARSE_AT[0] >= FINE_AT[0] + VN && COARSE_AT[0] + GN <= TEX_W && FINE_AT[1] + VNY <= TEX_H && COARSE_AT[1] + GNY <= TEX_H, 'the grids of the settlements lie below the chunks, side by side');
   const out = new Uint8Array(KN * KNY * 4), m = growTowns(ch, [place(-205, 4405, 650000)], 1, at), f = m.farm, t = m.towns[0];
@@ -248,7 +262,8 @@ test('farmland of the album: a few chunks by every village, the plains by the to
   // nearly everybody has the hectare: the land of the album has room for its people at this growth
   assert.ok(f.area > people / 100 * .97 && f.area <= people / 100 + 1, `${f.area.toFixed(0)} km² ploughed for ${people} people`);
   assert.ok(f.area / landKm2 > .025 && f.area / landKm2 < .045, `${(f.area / landKm2 * 100).toFixed(2)} % of the land under fields at growth 1`);
-  assert.ok(f.list.length > 40000 && f.list.length < 100000, `${f.list.length} chunks have fields`);
+  // (by the land there is, not by a number of the present polygon: 8.5 % of its chunks have fields — 65 810 of 772 618)
+  assert.ok(f.list.length > .05 * landKm2 && f.list.length < .13 * landKm2, `${f.list.length} chunks have fields, of ${Math.round(landKm2)} km² of land`);
   // nothing where nothing grows: no water, no mountain, nothing above the height where fields end, never more than the ground gives
   for (const c of f.list) {
     const k = facts.cls[c], d = div.cells[c];

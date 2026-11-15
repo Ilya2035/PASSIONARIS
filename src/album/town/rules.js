@@ -47,6 +47,22 @@ export const FARM_TURNS = [[.866, .5], [.342, .940], [.985, -.174], [.643, -.766
 export const FARM_BESIDE = .45;   // the land next to the houses is ploughed first: this much is added to the share of its chunk right at the houses
 export const RMAX = 6;           // km: the largest radius a patch can have (a chunk built up from edge to edge)
 export const CELL = .085;        // km: one block with its street, as in life
+// ---- the heights of the land the settlements go by. Up to stage 2 they are plain numbers of metres, chosen in Spain
+// (town/villages.js HIGH, TOO_HIGH; town/farmland.js FARM_HIGH). From stage 3 (geo.js STAGE) the land reaches the
+// Alps and the Atlas, and each of them is the same SHARE of the tree line of the place as it is of LINE_REF — the
+// tree line of the Pyrenees, and the one ground/climate.js gives where the climate is not known. So where the trees
+// stop at 2150 m nothing changes; under the Atlas, where the forest climbs to 3000 m, villages and fields stand
+// higher, in the Vosges lower.
+export const LINE_REF = 2150, LINE_BLOCK = 16;   // m · km: the tree line is asked once for a block of so many km (it changes over tens of km)
+// treeline(x, y) → metres at a point of the flat km plane.  → c → the tree line of chunk c of 1 km²
+export function lineOfChunks(treeline) {
+  const lines = new Map();
+  return c => {
+    const i = c % KN, bi = Math.floor(i / LINE_BLOCK), bj = Math.floor((c - i) / KN / LINE_BLOCK), key = bj * 8192 + bi; let v = lines.get(key);
+    if (v === undefined) lines.set(key, v = treeline(KX0 + (bi + .5) * LINE_BLOCK * KKM, KY0 + (bj + .5) * LINE_BLOCK * KKM));
+    return v;
+  };
+}
 export const BEND = .35;         // how far the lattice is bent, in cells
 // (CULTURE_N: how many manners there are — the codes of the squares in the texture count by it, town/state.js.
 // MEDINA: the Maghreb builds dense, the lanes of a medina are a few steps wide — so much more of a cell its blocks take)

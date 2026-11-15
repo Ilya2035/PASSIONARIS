@@ -3,11 +3,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
+import { farmGround } from '../src/album/town/farmland.js';
+import { Chunks, kmOf, llOf, NONE } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 import settle from '../src/album/aspects/settle.js';
-import { RMAX, CELL, GN, GNY, GK, GX0, GY0, CULTURES, CULTURE_N, MEDINA, inAfrica, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
+import { RMAX, CELL, LOBE, GN, GNY, GK, GX0, GY0, CULTURES, CULTURE_N, MEDINA, inAfrica, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
   RULES_GLSL, PALETTE_GLSL, MAT, FARM_PIECE, FARM_TURNS } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
@@ -147,7 +148,8 @@ test('settle mirror and plan: the blocks are drawn from the state of the chunks'
     assert.equal(out[(gq + 1) * 4 + 3], 0, 'a settlement in the middle of its square is no business of the squares around'); assert.equal(out[(gq - GN) * 4 + 3], 0); assert.equal(out[(gq + 3) * 4 + 3], 0);
     const plan = rows(planLobe(L, S, env)); counts.push(plan.length);
     for (const r of plan) assert.ok(r[3] >= 0 && r[3] < KINDS.length && r[8] > 0 && r[8] <= 2 && r[9] > 0 && r[9] <= 2 && r[10] >= 0 && r[10] <= 1, `row ${r}`);
-    for (const r of plan) assert.ok(Math.hypot(...centreOf(r).map((v, i) => v - [L.x, L.y][i])) < L.r + .6, 'a block far outside its patch');
+    // (a town is no circle: it reaches out up to 1.2 · LOBE of its radius one way — rules.js lobesAt; which way goes by the number of its square)
+    for (const r of plan) assert.ok(Math.hypot(...centreOf(r).map((v, i) => v - [L.x, L.y][i])) < L.r * (1 + 1.2 * LOBE) + .6, 'a block far outside its patch');
   }
   for (let i = 1; i < counts.length; i++) assert.ok(counts[i] > counts[i - 1] * 1.3, `blocks by the size of the settlement: ${counts}`);
   // a settlement by the edge of its square: the square its fields reach into knows of it, the others do not
@@ -203,6 +205,26 @@ test('settle plan: two patches that meet leave an open strip, their blocks never
   for (const p of pts) { const key = `${Math.floor(p[0] / .1)},${Math.floor(p[1] / .1)}`; (grid.get(key) || grid.set(key, []).get(key)).push(p); }
   for (const p of pts) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const q of grid.get(`${Math.floor(p[0] / .1) + dx},${Math.floor(p[1] / .1) + dy}`) || []) if (q[2] !== p[2] && Math.hypot(p[0] - q[0], p[1] - q[1]) < S * .5) clash++;
   assert.equal(clash, 0, 'blocks of two patches overlap');
+});
+
+test('beyond the worked land — from stage 3 chunks stand only under its mask — nothing is founded, ploughed or built', () => {
+  // the land of the tests, worked only west of x = −100 km: east of it the texels hold NONE and there is no chunk
+  const half = new Chunks((lat, lon) => at(...kmOf(lat, lon)), [], [], (lat, lon) => (kmOf(lat, lon)[0] < -100 ? 1 : 0));
+  const inside = llOf(-205, 4405), outside = llOf(-50, 4405);
+  assert.ok(half.cell.includes(NONE) && half.at(inside.lat, inside.lon) >= 0); assert.equal(half.at(outside.lat, outside.lon), -1);
+  // no settlement is founded beyond it
+  const m = growTowns(half, [place(-205, 4405, 650000), place(-50, 4405, 650000)], 1, at);
+  assert.equal(m.towns.length, 1); assert.ok(Math.abs(m.towns[0].x + 205) < 3, 'the town of the worked land stands');
+  half.set('built', m.towns[0].home, m.built[m.towns[0].home]);
+  const mirrored = mirrorSettle(half, m.towns, blank()); assert.equal(mirrored.lobes.length, 1);
+  // nothing is ploughed beyond it: neither by the ground itself nor by the town, however far its fields reach
+  const g = farmGround(half, at); assert.ok(g.room(squareOf(-205, 4405)) > 0); assert.equal(g.room(squareOf(-50, 4405)), 0);
+  const big = growTowns(half, [place(-108, 4405, 3000000)], 3, at, undefined, { ground: g }); let east = 0, west = 0;
+  for (const c of big.farm.list) { if (g.cell[c] === NONE) east++; else west++; } assert.ok(west > 50, `${west} chunks ploughed`); assert.equal(east, 0, 'a chunk beyond the worked land is ploughed');
+  // no yard stands beyond it, though every chunk is «ploughed» in this test
+  const ctx = { ...yardCtx([]), cell: half.cell, land: c => half.kind[c] === 1 };
+  assert.equal(yardsAround(ctx, -50, 4405, 4).length, 0); assert.ok(yardsAround(ctx, -205, 4405, 4).length > 20);
+  assert.match(readFileSync(new URL('../src/album/town/yards.js', import.meta.url), 'utf8'), /if \(c === NONE \|\| !ctx\.land\(c\)\) return null;/);
 });
 
 test('settle album: the aspect, its knobs and its pages', () => {
@@ -437,7 +459,7 @@ test('yards in the save: a chunk of 1 km² and one of its sixteen places; the ch
   assert.equal(order.rank[squareOf(L.x - 3, L.y)], 0); assert.equal(order.rank[squareOf(L.x + 3, L.y)], 0); assert.equal(order.rank[squareOf(150, L.y)], -1, 'a chunk of water has no number');
   assert.ok(order.rank[squareOf(L.x - 9, L.y)] > order.rank[squareOf(L.x - 5.5, L.y + 3)] && order.rank[squareOf(L.x - 5.5, L.y + 3)] > order.rank[squareOf(L.x - 4, L.y)]);
   assert.ok(order.rank[steepOne] > order.rank[squareOf(L.x - 6.5, L.y)], 'the steep chunk 2 km from the centre is taken up after the level one 3.5 km from it');
-  { const d0 = order.list.subarray(order.first[0], order.first[1]); assert.equal(d0.length, 675 * KN); assert.equal(new Set(d0).size, d0.length); assert.ok(d0.every((c, r) => r > 2000 || (cells[c] === 0 && order.rank[c] === r))); }
+  { const d0 = order.list.subarray(order.first[0], order.first[1]); assert.equal(d0.length, 675 * KNY); assert.equal(new Set(d0).size, d0.length); assert.ok(d0.every((c, r) => r > 2000 || (cells[c] === 0 && order.rank[c] === r))); }
   const places = all.map(y => yardPlace(y.i, y.j));
   const farms = farmsteadsOfAlbum(places, { cells, rank: order.rank, n: KN });
   assert.equal(farms.length, all.length);

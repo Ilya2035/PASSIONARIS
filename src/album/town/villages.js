@@ -16,7 +16,7 @@
 // Plain JavaScript without the GPU.
 import { kmOf, llOf } from '../chunks.js';
 import { KN, KNY, KKM, KX0, KY0, seedOf, kmHash, kmData } from '../division/km.js';
-import { VK, VN, VNY, GX0, GY0 } from './rules.js';
+import { VK, VN, VNY, GX0, GY0, LINE_REF, lineOfChunks } from './rules.js';
 
 const LAND = 0;
 export const SITE = { centre: 0, real: 1, made: 2 };
@@ -35,15 +35,18 @@ export const WORSE = { cls: [0, 0, .3, 1, 2.6], perM: 1 / 400, onRiver: .6, byRi
 // sites: [{ lat, lon, pop, name }] or [{ x, y, pop, name }], the most important first; base: how many of the first
 // sites the album draws as towns anyway; at(x, y) → metres at a point of the flat km plane (may be left out: a made
 // place then stands on the seed of its chunk); swamp(x, y) → the share of swamp there by nature, 0..1 (may be left
-// out): no place is made in wet land (SWAMP)
+// out): no place is made in wet land (SWAMP); treeline(x, y) → metres, where the trees stop there (may be left out:
+// HIGH and TOO_HIGH are then plain metres; with it they are the same shares of the tree line — rules.js LINE_REF,
+// the rule of stage 3)
 // → { count, first: Uint32Array (count + 1: where the places of a district begin), x, y: Float64Array (flat km),
 //     kind: Uint8Array (SITE), src: Int32Array (index into sites, −1 none), chunk: Int32Array (the chunk of 1 km² it
 //     stands in), size: Float32Array (km, the radius of a made place at full growth), good: Float32Array (count: km²
 //     of good ground), real: Uint16Array (count: real places besides the centre) }
 export const SWAMP = .1;                        // the share of swamp by nature from which no place is made
-export function districtSites(div, facts, sites = [], { base = 0, at = null, swamp = null } = {}) {
+export function districtSites(div, facts, sites = [], { base = 0, at = null, swamp = null, treeline = null } = {}) {
   const count = div.count, cells = div.cells, kinds = div.kinds, cen = div.centres, { hgt, riv } = div.raster, n = KN * KNY;
   const landAt = c => { const d = cells[c]; return d >= 0 && kinds[d] === LAND; };
+  const lineAt = treeline ? lineOfChunks(treeline) : null, high = c => (lineAt ? HIGH / LINE_REF * lineAt(c) : HIGH), tooHigh = c => (lineAt ? TOO_HIGH / LINE_REF * lineAt(c) : TOO_HIGH);
   const X = [], Y = [], per = Array.from({ length: count }, () => []), held = new Map();
   const fine = (x, y) => { const i = Math.floor((x - GX0) / VK), j = Math.floor((y - GY0) / VK); return i < 0 || j < 0 || i >= VN || j >= VNY ? -1 : j * VN + i; };
   const nearer = (x, y, gap) => {                                  // does a place stand nearer than gap?
@@ -68,7 +71,7 @@ export function districtSites(div, facts, sites = [], { base = 0, at = null, swa
   });
   // ---- the made places: the best chunks of every district, well apart
   const good = new Float32Array(count), low = new Float32Array(count).fill(1e9), key = new Float32Array(n);
-  for (let c = 0; c < n; c++) { if (!landAt(c)) continue; const d = cells[c]; good[d] += GOOD[facts.cls[c]] * (hgt[c] < HIGH ? 1 : .5); if (hgt[c] < low[d]) low[d] = hgt[c]; }
+  for (let c = 0; c < n; c++) { if (!landAt(c)) continue; const d = cells[c]; good[d] += GOOD[facts.cls[c]] * (hgt[c] < high(c) ? 1 : .5); if (hgt[c] < low[d]) low[d] = hgt[c]; }
   const NB = [-1, -1, 0, -1, 1, -1, -1, 0, 1, 0, -1, 1, 0, 1, 1, 1], W = WORSE;
   // the most level spot of a chunk: its seed or the middle of one of its quarters
   const spot = c => {
@@ -88,7 +91,7 @@ export function districtSites(div, facts, sites = [], { base = 0, at = null, swa
     const list = [];
     for (let j = box.y0[d]; j <= box.y1[d]; j++) for (let i = box.x0[d], c = j * KN + i; i <= box.x1[d]; i++, c++) {
       if (cells[c] !== d) continue;
-      const cls = facts.cls[c]; if (cls < 1 || cls > 4 || hgt[c] > TOO_HIGH) continue;
+      const cls = facts.cls[c]; if (cls < 1 || cls > 4 || hgt[c] > tooHigh(c)) continue;
       let river = false, brook = false, water = false;
       for (let q = 0; q < 16; q += 2) { const u = i + NB[q], v = j + NB[q + 1]; if (u < 0 || v < 0 || u >= KN || v >= KNY) { water = true; continue; } const t = v * KN + u; if (!landAt(t)) water = true; else if (riv[t] > 1) river = true; else if (riv[t] === 1) brook = true; }
       key[c] = W.cls[cls] + (hgt[c] - low[d]) * W.perM + (riv[c] > 1 ? W.onRiver : river ? W.byRiver : riv[c] === 1 ? W.onBrook : brook ? W.byBrook : 0) + (water ? W.byWater : 0) + (kmHash(i, j, 11) - .5) * W.chance;

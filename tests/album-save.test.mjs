@@ -125,7 +125,8 @@ test('save of the land: the whole world of the album is a few kilobytes — far 
     assert.equal(landBytes(thin).farmsteads, land.length * 60 * 2); assert.equal(landBytes(thick).farmsteads, landBytes(thin).farmsteads);
     const got = unpackLand((await decodeSave(await encodeSave({ meta: { t: 0 }, sections: thick }))).sections).farmsteads;
     assert.equal(got.length, land.length * 60 * 16); assert.deepEqual(got[17], { district: land[0], chunk: 1, slot: 1 }); }
-  assert.ok(raw < 70000 && file.length < 26000, `the land of the album: ${raw} bytes, ${file.length} in the save file`);
+  // (by the land there is, not by a number of the present polygon: there 54 818 bytes, 17 678 in the file, for 772 806 km²)
+  assert.ok(file.length / landKm2 * 1000 < 34, `the land of the album: ${raw} bytes, ${file.length} in the save file — ${(file.length / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
   assert.ok(raw / landKm2 * 1000 < 85, `${(raw / landKm2 * 1000).toFixed(1)} bytes for 1 000 km² of land`);
   assert.ok(raw / landKm2 * 149e6 < 13e6, 'the land of the whole world at this density is under 13 MB before packing');
   // people are not lost on the way: a village keeps every one of its own, a city to a part in a thousand

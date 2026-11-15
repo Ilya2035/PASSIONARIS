@@ -11,7 +11,7 @@
 // A yard is drawn as a block of its own (layers/towns.js), like the blocks of a settlement. The ground shader knows
 // nothing of yards, so they cost the land nothing; the price is that the fine noise of the fields cannot be read
 // here, and now and then a yard stands on the rough pasture beside a field instead of on the field.
-import { FKM, FNX, FNY } from '../chunks.js';
+import { FKM, FNX, FNY, NONE } from '../chunks.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
 import { GK, GN, GNY, GX0, GY0, CELL, CULTURES, FARM_SHARP, FARM_BESIDE, FARM_PIECE, FARM_TURNS, lobesToward, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
 import { KIND } from './shapes.js';
@@ -87,7 +87,7 @@ export function yardAt(ctx, i, j) {
   if (h0 * 16 >= K * YARDS_PER_KM2[2]) return null;                 // no manner of building is that dense: most places end here
   const x = GX0 + (i + .5) * YARD_STEP + (cellHash(i, j, 0, 22) - .5) * JITTER, y = GY0 + (j + .5) * YARD_STEP + (cellHash(i, j, 0, 23) - .5) * JITTER;
   const tx = Math.floor((x - GX0) / FKM), ty = Math.floor((y - GY0) / FKM); if (tx < 0 || ty < 0 || tx >= FNX || ty >= FNY) return null;   // (the raster of the outlines: FNX wide, FNY high)
-  const c = ctx.cell[ty * FNX + tx]; if (!ctx.land(c)) return null;
+  const c = ctx.cell[ty * FNX + tx]; if (c === NONE || !ctx.land(c)) return null;   // (NONE: beyond the worked land there are no chunks, and no yards)
   const kx = Math.floor(i / YARD_SIDE), ky = Math.floor(j / YARD_SIDE);
   if (ctx.farmSquare && !(ctx.farmSquare(kx, ky) >= YARD_FARM)) return null;
   if (ctx.landSquare && !ctx.landSquare(kx, ky)) return null;
