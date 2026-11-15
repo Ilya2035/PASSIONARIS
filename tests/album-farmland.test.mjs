@@ -174,7 +174,8 @@ test('farmland in the album: the shader draws the fields from the chunks; the kn
   assert.match(g, /exp\(-SET_SOFT \* dot\(v, v\)\)/); assert.match(g, /float farm = setFarm\(p\.pk\);/);
   assert.match(g, /float want = \(farm \+ \.45 \* beside \+ \(\.5 - p\.n2 \* \.6 - p\.n3 \* \.4\) \* SET_UNEVEN - \.5\) \* SET_SHARP \+ \.5;/, 'the share of the chunk is the share of its furlongs');
   assert.match(g, /step\(setHash\(ivec2\(cid\), 3, 14\), want\)/); assert.ok(!/fieldsV|setFieldsSeen|fld\./.test(g), 'no fields in rings around the houses any more');
-  assert.match(g, /if \(uSettle\.w < \.5 \|\| p\.h < \.4\) return;/); assert.match(g, /float seen = p\.cC\.g >= \.12 \? 1\./, 'a land ploughed here and there shows its fields only from near');
+  assert.match(g, /if \(uSettle\.w < \.5 \|\| p\.h < \.4\) return;/); assert.match(g, /float seen = setSeen\(px, p\.cC\.g\);/, 'a land ploughed here and there shows its fields only from near');
+  assert.match(g, /float setSeen\(float px, float ploughed\) \{ return ploughed >= \.12 \? 1\./, '…by the rule the forest asks too (setSeen: by the width of a pixel, so a tilted camera takes no field away)');
   // the knob and the pages
   const k = settle.params.find(p => p.key === 'farmHa'); assert.ok(k && k.value === HA_PER_PERSON && k.min === 0 && k.max === 3 && k.group === 'scale' && DEFS.some(d => d.key === 'farmHa'));
   for (const id of ['farm', 'farm-hills', 'farm-200']) { const pg = PAGES.find(p => p.id === id); assert.ok(pg && pg.group === 'Города и дороги' && pg.note.length > 60, id); }

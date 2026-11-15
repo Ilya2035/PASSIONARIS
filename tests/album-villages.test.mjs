@@ -197,8 +197,8 @@ test('villages: the ground shader reads both grids; a village has no mark from a
   assert.match(RULES_GLSL, new RegExp(`#define SET_FINE ivec2\\(0, ${KN}\\)`)); assert.match(RULES_GLSL, new RegExp(`#define SET_COARSE ivec2\\(${VN}, ${KN}\\)`));
   assert.match(g, /setSquares\(code, c0, false/); assert.match(g, /setSquares\(vcode, v0, true/);
   assert.match(g, /ck = village \? SET_GN \* SET_GN \+ bc\.y \* SET_VN \+ bc\.x/);
-  assert.match(g, /bool small = village \|\| r < SET_TOWN_R;/); assert.match(g, /if \(small\) tm \*= 1\. - smoothstep/, 'a village melts into the land from afar: no mark');
-  assert.match(g, /mt = m \+ \(small \? 0\. : max\(0\., 2\.2 \* px - r\)\)/, 'only a place of a thousand people and more has a mark from afar');
+  assert.match(g, /bool small = village \|\| r < SET_TOWN_R;/); assert.match(g, /if \(small\) tm \*= 1\. - setStep\(uSetA\.zw, px \/ max\(r, \.02\)\);/, 'a village melts into the land from afar: no mark');
+  assert.match(g, /mt = m \+ \(small \? 0\. : max\(0\., uSetB\.x \* px - r\)\)/, 'only a place of a thousand people and more has a mark from afar');   // (uSetB.x: 2.2 pixels, by the width of a pixel — town/state.js MARK_PX)
   assert.ok(Math.abs(TOWN_R - .2523) < 1e-3 && peopleOf(TOWN_R) >= 999 && peopleOf(TOWN_R) <= 1001 && classOf(peopleOf(TOWN_R + .01)) === 1 && classOf(peopleOf(TOWN_R - .01)) === 0);
   // the yards: every patch is known
   const idx = patchIndex([{ x: -205, y: 4405, r: .9 }, { x: -203, y: 4405, r: .08 }, { x: -150, y: 4405, r: .08 }]);
