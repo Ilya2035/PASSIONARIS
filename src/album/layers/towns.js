@@ -18,7 +18,7 @@ import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
-import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict, passRank, CULTURES } from '../town/rules.js';
+import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict, passRank, CULTURES, fineOf } from '../town/rules.js';
 import { settleTex, settleUniforms, setTilt, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
@@ -26,7 +26,7 @@ import { loadPlaceNames, namePlaces } from '../town/sites.js';
 import { buildShapes, SLOTS, KINDS, KIND } from '../town/shapes.js';
 import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks, groundCan } from '../town/grow.js';
 import { treelineAt } from '../ground/climate.js';
-import { planLobe, planShowcase, planHospice, ROW } from '../town/plan.js';
+import { planLobe, planShowcase, planHospice, hospiceYard, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
 import { KN, KKM, KX0, KY0, squareOf } from '../division/km.js';
 import { roadChunks, districtTracks, trackLines, trackIndex, TRACK_SNAP } from '../town/tracks.js';
@@ -236,7 +236,9 @@ export default async function init(album) {
   // ---- the mirror of the chunk state for the shaders, and the patches for the plan
   let lobes = [], seen = -1, mirrorN = 0, farmSig = '', farmSeen = -1, farmShown = null, farmV = 0, farmPer = null;
   function mirror() {
-    const r = mirrorSettle(ch, model.towns), v = mirrorVillages(ch, model.towns, r.lobes), gatesNew = mirrorGates(r.lobes, gatesFor);
+    // (the yards of the hospices at the great passes go to the ground shader as patches of their own: bare ground, no forest)
+    const yardsOfPasses = hospices.map(q => { const y = hospiceYard(q, q.dir, CELL, at), ll = llOf(y.x, y.y); return { x: y.x, y: y.y, R: y.r, fine: fineOf(y.x, y.y), home: ch.at(ll.lat, ll.lon) }; });
+    const r = mirrorSettle(ch, model.towns), v = mirrorVillages(ch, model.towns, r.lobes, undefined, yardsOfPasses), gatesNew = mirrorGates(r.lobes, gatesFor);
     // the fields of the chunks of 1 km²: what the model ploughed; a natural cell whose share of fields someone has
     // changed since (the brush, the demonstrations of the album) gives that share to every chunk in it
     const over = new Map();
@@ -426,6 +428,7 @@ export default async function init(album) {
     const near = lobes.filter(L => Math.hypot(L.x - tx, L.y - ty) < D + L.r).sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
     const parts = []; let total = 0;
     for (const L of near) {
+      if (L.free) continue;                                           // the yard of a hospice: its buildings are planned below, not by the rule of a village
       let rows = cache.get(L.k); if (!rows) { rows = planLobe(L, S, planEnv); cache.set(L.k, rows); }
       parts.push(rows); total += rows.length; if (total >= MAX_BLOCKS * ROW) break;
     }

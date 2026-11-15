@@ -192,12 +192,16 @@ export function mirrorSettle(ch, towns = [], out = settleBytes, more = out === s
 // towns beside it. A village whose natural cell has lost all its houses (a brush) is gone with them.
 // Returns the patches of the villages and whether anything changed.
 const scratch = new Uint8Array(VN * VN * 4);
-export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes) {
+// extra: patches that are no villages of the model — the yards of the hospices at the great passes, [{ x, y, R, fine,
+// home }]; each gets the ground of a small settlement (bare, cleared of forest) where its square holds no village, and
+// its patch comes back marked `free`: no blocks are planned on it, its buildings are its owner's.
+export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes, extra = []) {
   const C = ch.bytes.C, at = new Map(), around = new Map();
   for (const t of towns) {
     if (!t.village || !(t.fine >= 0) || !C[t.home * 4]) continue;
     at.set(t.fine, { x: t.x, y: t.y, r: t.R, home: t.home, cul: C[t.home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med });
   }
+  for (const t of extra) if (t.fine >= 0 && t.home >= 0 && t.R > 0 && !at.has(t.fine)) at.set(t.fine, { x: t.x, y: t.y, r: t.R, home: t.home, cul: C[t.home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med, free: true });
   // which of the 3 × 3 squares around a square hold a village whose houses or fields reach into it
   for (const [v, q] of at) {
     const vx = v % VN, vy = (v / VN) | 0, reach = q.r + fieldsBeyond(q.r) + .32;   // nothing of a village is drawn farther from its site (aspSettle)
@@ -212,7 +216,7 @@ export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes) 
   for (const [v, q] of at) {
     const o = v * 4, [bx, by] = fineBytes(q.x, q.y), rb = radiusByte(q.r), a = around.get(v) || [];
     scratch[o] = bx; scratch[o + 1] = by; scratch[o + 2] = rb; scratch[o + 3] = a.length === 0 ? 200 + q.cul : a.length === 1 ? 110 + 2 * a[0] + (q.cul - 1) : 210 + q.cul;
-    const L = villageLobe(v, bx, by, rb, q.cul); L.home = q.home; lobes.push(L); byV.set(v, L);
+    const L = villageLobe(v, bx, by, rb, q.cul); L.home = q.home; if (q.free) L.free = true; lobes.push(L); byV.set(v, L);
   }
   for (const [g, a] of around) if (!at.has(g)) { a.sort((p, q) => p - q); scratch[g * 4 + 3] = a.length === 1 ? 1 + a[0] : a.length === 2 ? 10 + 9 * a[0] + a[1] : 100; }
   let changed = false;

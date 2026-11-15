@@ -233,17 +233,46 @@ const SHOW = { quarter: [.9, .9], quarterU: [.9, .9], quarterL: [.9, .9], palace
 // travellers are taken in, a chapel, a watch tower. They stand on the side of the road where the ground is nearer the
 // height of the road — on the ledge, not over the drop. It is no settlement: nobody is counted there, no chunk is
 // built up, the ground under it stays as it is.
-export const HOSPICE = { off: .9, hall: [.8, .7], chapel: [.7, .7], tower: [.4, .4], along: [0, 1.05, -.85] };   // in cells: off the axis of the road · sizes · where along it
+// No two alike (the owner's review of 15.11.2026, what was left of the second step: «приюты у перевалов одинаковые и
+// стоят на нерасчищенной земле»). What stands at a great pass goes by its name: the monastery at Ibañeta
+// (Roncesvalles), the hospice of Santa Cristina at Somport; elsewhere, by the letters of the name, an inn with its
+// stable, a watch tower with its guard, or a hospice. Each is a few blocks beside the road:
+// [kind, along the road, farther from the road (cells, from the first block), size x, y, quarter turns against the road]
+export const HOSPICE_KINDS = {
+  hospice: [['villa', 0, 0, .8, .7, 0], ['temple', 1.05, 0, .7, .7, 0], ['tower', -.85, 0, .4, .4, 0], ['farm', .1, 1, .62, .52, 1]],
+  monastery: [['temple', 0, 0, .95, .95, 0], ['quarter', 1.2, .1, .9, .9, 0], ['villa', -1.15, 0, .8, .7, 0], ['farm', .2, 1.2, .66, .56, 1], ['farm', 1.35, 1.25, .6, .5, 0]],
+  inn: [['villa', 0, 0, .85, .7, 0], ['farm', 1.05, .05, .7, .6, 1], ['house', -.85, 0, .5, .3, 0]],
+  watch: [['tower', 0, 0, .46, .46, 0], ['house', .8, 0, .5, .3, 0], ['house', -.75, .1, .5, .3, 1], ['farm', .1, .95, .6, .5, 0]],
+};
+export const HOSPICE_OF = { 'Ибаньета': 'monastery', 'Сомпорт': 'hospice' };
+export const HOSPICE_TITLES = { hospice: 'приют', monastery: 'монастырь', inn: 'постоялый двор', watch: 'сторожевая башня' };
+// what stands at the pass of this name
+export function hospiceKind(name = '') {
+  if (HOSPICE_OF[name]) return HOSPICE_OF[name];
+  let h = 7; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return ['inn', 'watch', 'hospice', 'inn', 'watch'][h % 5];
+}
+export const HOSPICE = { off: .9, yard: .1 };   // cells: the first block off the axis of the road · km: the radius of the yard cleared round the buildings
+// which side of the road it stands on (1: left of the way the road runs, −1: right): the side whose ground is nearer
+// the height of the road
+export function hospiceSide(q, dir, S, at = null) {
+  if (!at) return 1;
+  const ux = Math.cos(dir), uy = Math.sin(dir), off = HOSPICE.off * S * 1.4, h0 = at(q.x, q.y);
+  return Math.abs(at(q.x - uy * off, q.y + ux * off) - h0) <= Math.abs(at(q.x + uy * off, q.y - ux * off) - h0) ? 1 : -1;
+}
+// the yard of the hospice: { x, y (its middle, flat km), r (km) } — ground cleared of forest and trodden bare round
+// its buildings. The layer gives it to the ground shader as a patch of its own (layers/towns.js, state.js).
+export function hospiceYard(q, dir, S, at = null) {
+  const ux = Math.cos(dir), uy = Math.sin(dir), d = (HOSPICE.off + .45) * S * hospiceSide(q, dir, S, at);
+  return { x: q.x - uy * d, y: q.y + ux * d, r: HOSPICE.yard };
+}
 // q: { x, y } the pass on the road, flat km · dir: radians, the way the road runs there · S: the cell, km ·
 // env: { at(x, y) → m, atl: Atlantic manner of building }  → rows of ROW numbers, a block each
 export function planHospice(q, dir, S, env = {}) {
-  const ux = Math.cos(dir), uy = Math.sin(dir), off = HOSPICE.off * S, at = env.at;
-  let side = 1;
-  if (at) { const h0 = at(q.x, q.y), l = Math.abs(at(q.x - uy * off * 1.4, q.y + ux * off * 1.4) - h0), r = Math.abs(at(q.x + uy * off * 1.4, q.y - ux * off * 1.4) - h0); side = l <= r ? 1 : -1; }
-  const cx = q.x - uy * side * off, cy = q.y + ux * side * off, fl = env.atl ? FLAG_ATL : 0, k = Math.round(q.x * 7 + q.y * 13), out = [];
-  [[KIND.villa, HOSPICE.hall], [KIND.temple, HOSPICE.chapel], [KIND.tower, HOSPICE.tower]].forEach(([kind, size], n) => {
-    const a = HOSPICE.along[n] * S;
-    out.push(cx + ux * a, cy + uy * a, dir, kind, 0, 0, 0, fl, size[0], size[1], cellHash(n, 5, k, 3), 1);
+  const ux = Math.cos(dir), uy = Math.sin(dir), side = hospiceSide(q, dir, S, env.at), fl = env.atl ? FLAG_ATL : 0, k = Math.round(q.x * 7 + q.y * 13), out = [];
+  HOSPICE_KINDS[hospiceKind(q.name)].forEach(([what, along, away, sx, sy, turn], n) => {
+    const a = along * S, d = (HOSPICE.off + away) * S * side;
+    out.push(q.x + ux * a - uy * d, q.y + uy * a + ux * d, dir + turn * 1.5707963, KIND[what], 0, 0, 0, fl, sx, sy, cellHash(n, 5, k, 3), 1);
   });
   return out;
 }

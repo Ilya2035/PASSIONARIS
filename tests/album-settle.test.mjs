@@ -734,26 +734,48 @@ test('settle in the mountains: a village stands on the floor of a valley or on a
   assert.doesNotMatch(lab, /if \(!m\.name/); assert.match(lab, /const nameA = it\.name \? s\.name : 0;/);
 });
 
-test('settle hospice: at a great pass a hall, a chapel and a tower stand in a row beside the road, at real size, on the level side', async () => {
-  const { planHospice, HOSPICE } = await import('../src/album/town/plan.js');
-  const S = cellSize(20, 1), q = { x: 100, y: 200 };
+test('settle hospice: at a great pass a few buildings stand beside the road, at real size, on the level side — no two passes alike, each on a yard cleared of forest', async () => {
+  const { planHospice, hospiceKind, hospiceSide, hospiceYard, HOSPICE, HOSPICE_KINDS, HOSPICE_OF, HOSPICE_TITLES } = await import('../src/album/town/plan.js');
+  const S = cellSize(20, 1), q = { x: 100, y: 200, name: 'Сомпорт' };
   // the road runs east; the ground drops away to the south of it and is level to the north
   const at = (x, y) => (y >= 200 ? 1600 : 1600 - (200 - y) * 900);
-  const rows = planHospice(q, 0, S, { at });
-  assert.equal(rows.length, 3 * ROW);
-  const b = [0, 1, 2].map(n => ({ x: rows[n * ROW], y: rows[n * ROW + 1], turn: rows[n * ROW + 2], kind: rows[n * ROW + 3], flags: rows[n * ROW + 7], sx: rows[n * ROW + 8], sy: rows[n * ROW + 9] }));
-  assert.deepEqual(b.map(o => KINDS[o.kind]), ['villa', 'temple', 'tower']);
-  for (const o of b) {
-    assert.ok(o.y > 200, 'on the level side of the road'); assert.equal(o.turn, 0); assert.equal(o.flags, 0);
-    assert.ok(o.y - 200 - o.sy * S / 2 > .02, 'no building stands on the road'); assert.ok(Math.hypot(o.x - q.x, o.y - q.y) < .2, 'within two hundred metres of the pass');
-    assert.ok(o.sx <= 1 && o.sy <= 1, 'a building is no larger than a block of a town: real size');
+  const blocks = flat => rows(flat).map(r => ({ x: r[0], y: r[1], turn: r[2], kind: KINDS[r[3]], flags: r[7], sx: r[8], sy: r[9] }));
+  // what stands where goes by the name of the pass: the hospice of Santa Cristina at Somport, the monastery at Ibañeta
+  assert.equal(hospiceKind('Сомпорт'), 'hospice'); assert.equal(hospiceKind('Ибаньета'), 'monastery'); assert.equal(HOSPICE_OF['Ибаньета'], 'monastery');
+  const b = blocks(planHospice(q, 0, S, { at }));
+  assert.deepEqual(b.map(o => o.kind), ['villa', 'temple', 'tower', 'farm'], 'a hall, a chapel, a tower and a stable');
+  const mon = blocks(planHospice({ ...q, name: 'Ибаньета' }, 0, S, { at }));
+  assert.deepEqual(mon.map(o => o.kind), ['temple', 'quarter', 'villa', 'farm', 'farm'], 'a church, a cloister, a hall and two farm buildings');
+  // no two alike among the great passes of the roads' list: four manners, at least three of them in use
+  const names = ['Сомпорт', 'Ибаньета', 'Пахарес', 'Гвадаррама', 'Сомосьерра', 'Фуэнфрия', 'Пюиморан', 'Тоза', 'Мансаналь', 'Пьедрафита', 'Бехар', 'Деспеньяперрос', 'Пертюс'];
+  const kinds = names.map(hospiceKind); assert.ok(new Set(kinds).size >= 4, kinds.join(' ')); for (const k of kinds) assert.ok(HOSPICE_KINDS[k] && HOSPICE_TITLES[k]);
+  assert.equal(hospiceKind('Пахарес'), hospiceKind('Пахарес'), 'the same name, the same hospice'); assert.ok(HOSPICE_KINDS[hospiceKind('')]);
+  for (const [kind, list] of Object.entries(HOSPICE_KINDS)) {
+    const p = blocks(planHospice({ x: 100, y: 200, name: Object.keys(HOSPICE_OF).find(n => HOSPICE_OF[n] === kind) || names.find(n => hospiceKind(n) === kind) }, 0, S, { at }));
+    assert.equal(p.length, list.length, kind); assert.ok(p.length >= 3 && p.length <= 5);
+    for (const o of p) {
+      const quarter = Math.abs(Math.sin(o.turn)) > .5, hx = (quarter ? o.sy : o.sx) * S / 2, hy = (quarter ? o.sx : o.sy) * S / 2; o.hx = hx; o.hy = hy;
+      assert.ok(o.y > 200, `${kind}: on the level side of the road`); assert.equal(o.flags, 0);
+      assert.ok(o.y - 200 - hy > .02, `${kind}: no building stands on the road`); assert.ok(Math.hypot(o.x - 100, o.y - 200) < .26, `${kind}: within a quarter of a kilometre of the pass`);
+      assert.ok(o.sx <= 1 && o.sy <= 1, 'a building is no larger than a block of a town: real size');
+    }
+    // the buildings do not stand on one another
+    for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) assert.ok(Math.abs(p[i].x - p[j].x) >= p[i].hx + p[j].hx - 1e-9 || Math.abs(p[i].y - p[j].y) >= p[i].hy + p[j].hy - 1e-9, `${kind}: ${p[i].kind} on ${p[j].kind}`);
   }
-  // the buildings do not stand on one another along the road
-  const along = b.map(o => [o.x - o.sx * S / 2, o.x + o.sx * S / 2]).sort((u, v) => u[0] - v[0]); for (let i = 1; i < 3; i++) assert.ok(along[i][0] >= along[i - 1][1] - 1e-9);
   // the other way round the hospice stands on the other side; a road running north turns it with the road
+  assert.equal(hospiceSide(q, 0, S, at), 1); assert.equal(hospiceSide(q, 0, S, (x, y) => at(x, 400 - y)), -1); assert.equal(hospiceSide(q, 0, S), 1);
   const flip = planHospice(q, 0, S, { at: (x, y) => at(x, 400 - y) }); assert.ok(flip[1] < 200);
   const north = planHospice(q, Math.PI / 2, S, {}); assert.ok(Math.abs(north[0] - q.x) > HOSPICE.off * S * .99 && Math.abs(north[1] - q.y) < 1e-9); assert.equal(north[2], Math.PI / 2);
   assert.equal(planHospice(q, 0, S, { atl: true })[7], 1, 'the Atlantic manner of building where the land is Atlantic');
+  // its yard: ground cleared of forest round the buildings, on their side of the road, a patch of its own for the ground shader
+  const yard = hospiceYard(q, 0, S, at); assert.ok(yard.y > 200 + .05 && Math.abs(yard.x - 100) < 1e-9 && yard.r === HOSPICE.yard && yard.r >= .07 && yard.r <= .15);
+  assert.ok(b.slice(0, 3).every(o => Math.hypot(o.x - yard.x, o.y - yard.y) < yard.r + .04), 'the hall, the chapel and the tower stand on the yard');
+  assert.ok(hospiceYard(q, 0, S, (x, y) => at(x, 400 - y)).y < 200);
+  { const { mirrorVillages } = await import('../src/album/town/state.js'), { fineOf } = await import('../src/album/town/rules.js');
+    const out = new Uint8Array((await import('../src/album/town/state.js')).villageBytes.length), home = ch.at(...Object.values(llOf(-205, 4405)));
+    const extra = [{ x: -205, y: 4405, R: HOSPICE.yard, fine: fineOf(-205, 4405), home }];
+    const m = mirrorVillages(ch, [], [], out, extra); assert.equal(m.lobes.length, 1); assert.ok(m.lobes[0].free && Math.abs(m.lobes[0].r - HOSPICE.yard) < .01 && Math.hypot(m.lobes[0].x + 205, m.lobes[0].y - 4405) < .02, 'the yard is a patch of bare ground of its own');
+    assert.equal(mirrorVillages(ch, [], [], out, [{ ...extra[0], fine: -1 }]).lobes.length, 0); assert.equal(mirrorVillages(ch, [], [], out).lobes.length, 0); }
   // the layer: only the great passes, at the road as it is drawn; nothing without the list of the roads
   const { readFileSync } = await import('node:fs'), src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
   assert.match(src, /Array\.isArray\(roadSeen\?\.passes\) \? roadSeen\.passes : \[\]/); assert.match(src, /passRank\(q\) !== 0/); assert.match(src, /const hit = roadPoint\(q\.x, q\.y\);/);
