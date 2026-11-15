@@ -168,8 +168,9 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float reach = hw * mix(1. + (uVerge - 1.) * .55, uVerge, woods);
         float verge = strip * (1. - smoothstep(hw, reach, x)) * min(1., uVergeA * (1. + .8 * woods));
         float dim = woods * (1. - .55 * strip);                                                                   // (on its ride the road is still a little darker than in the open)
-        // ---- the road as a thing with volume (uVol; a road a pixel and a half wide or more)
-        float vol = uVol * smoothstep(.75, 1.5, hw), bog = vol * smoothstep(.2, .5, state.a);
+        // ---- the road as a thing with volume (uVol). A road is hardly ever wider than a couple of pixels — the camera does not
+        // come nearer than a few km — so the volume is in its banks: each a pixel or two wide, whatever the road.
+        float vol = uVol, bog = vol * smoothstep(.2, .5, state.a);
         vec3 gn; vec2 gs = groundShade(vLL, px, gn);
         vec2 slope = -gn.xy / max(gn.z, .05) / max(uExag * uShade, .05), run = vec2(vAcross.y, -vAcross.x), grade = run * dot(slope, run);   // the rise of the ground, east and north; the same along the road only
         float sg = vX < 0. ? -1. : 1.;

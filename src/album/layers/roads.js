@@ -53,7 +53,7 @@ export const VOL = [50, 100];
 // The bed of each kind of road: how many metres it stands over level ground (a main road is a low causeway; a track
 // is worn into the ground), and how much of its paint the road keeps near the ground («Малая дорога вблизи: текстура
 // дороги должна быть очень незаметной. Вблизи можно будет её увидеть как маленький 3D-объект»).
-export const BED = [{ raise: .7, soft: 1 }, { raise: .6, soft: 1 }, { raise: .35, soft: .72 }, { raise: -.3, soft: .62 }];
+export const BED = [{ raise: .9, soft: 1 }, { raise: .8, soft: 1 }, { raise: .6, soft: .72 }, { raise: -.5, soft: .62 }];
 // the cleared strip, both sides and the road, in widths of the road: that wide in the woods (a ride of some forty
 // metres), two thirds of it on open land (the worn verge); what the two look like
 const VERGE = { verge: 3.4, vergeColour: 0x77714a, vergeAlpha: .42, rideColour: 0x58803c };
