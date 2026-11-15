@@ -71,7 +71,7 @@ case "$cmd" in
     mkdir -p "$A/userdata"; OUT="$(abs "$A/$NAME.png")"
     EVJ=""; [ -n "$EV" ] && EVJ=",\"evaluate\":$(evjson "$EV")"
     PASSIONARIS_USERDATA="$(abs "$A/userdata")" PASSIONARIS_DIST="$(abs "$A/dist")" PASSIONARIS_CAPTURE="{\"page\":\"album.html\",\"query\":\"shot=1&$Q\",\"width\":$W,\"height\":$H,\"out\":\"$OUT\"$EVJ}" \
-      timeout 240 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -12
+      timeout 240 "$ELECTRON" . --disable-gpu-sandbox --passionaris-safe-gpu 2>&1 | grep -E "^\[capture\]" | tail -"${HARNESS_LINES:-12}"   # HARNESS_LINES=80 shows the whole log of the page
     jpg "$OUT" "$(abs "$A/$NAME.jpg")" ;;
   acapp)
     # several album pages in a row: <A>/<prefix>-<page id>.png + .jpg
