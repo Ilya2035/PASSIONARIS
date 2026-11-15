@@ -356,20 +356,24 @@ test('roads: the real settlement sites, the pages and the switches of the map', 
   assert.equal(PAGES.find(p => p.id === 'roads-main').p.roadMinor, 0);
 });
 
-test('roads: from high up — below 300 km a road is as it is near the ground; higher it thins and fades, the lesser kinds first', () => {
+test('roads: from high up — below 300 km a road is as it is near the ground; higher it thins; tracks go by 135 km, lesser roads by 300, main roads between 1000 and 1200', () => {
   const pxOf = h => 2 * h * Math.tan(16 * Math.PI / 180) / 900, [TRUNK, MAIN, LESSER, TRACK] = [0, 1, 2, 3];
   assert.deepEqual(LOOK.map(l => l.id), ['trunk', 'main', 'lesser', 'track']);
   // the main roads up to 300 km, the lesser up to 200 km, the tracks up to 90 km: whole, at their near width
-  for (const [set, top] of [[TRUNK, 300], [MAIN, 300], [LESSER, 200], [TRACK, 90]]) for (const h of [20, 50, 90, 200, 300]) { if (h > top) continue; const f = roadFar(set, pxOf(h)); assert.ok(f.alpha > .99 && Math.abs(f.minPx - LOOK[set].px[0]) < .02, LOOK[set].id + ' from ' + h + ' km'); }
+  for (const [set, top] of [[TRUNK, 300], [MAIN, 300], [LESSER, 200], [TRACK, 90]]) for (const h of [20, 50, 90, 200, 300]) { if (h > top) continue; const f = roadFar(set, pxOf(h), h); assert.ok(f.alpha > .99 && Math.abs(f.minPx - LOOK[set].px[0]) < .02, LOOK[set].id + ' from ' + h + ' km'); }
   // higher: never stronger, never wider, without a jump
-  for (let set = 0; set < 4; set++) { let last = roadFar(set, .01); for (let px = .012; px < 1.4; px *= 1.02) { const f = roadFar(set, px); assert.ok(f.alpha <= last.alpha + 1e-9 && f.minPx <= last.minPx + 1e-9 && last.alpha - f.alpha < .3 && f.alpha >= 0 && f.alpha <= 1); last = f; } }
-  // the kinds go one after another: tracks by 135 km, lesser roads by 300 km, main roads between provinces by 600 km
-  assert.equal(roadFar(TRACK, pxOf(135)).alpha, 0); assert.ok(roadFar(TRACK, pxOf(100)).alpha > .9);
-  assert.equal(roadFar(LESSER, pxOf(300)).alpha, 0); assert.ok(roadFar(LESSER, pxOf(215)).alpha > .95);
-  assert.ok(roadFar(MAIN, pxOf(400)).alpha < .85 && roadFar(MAIN, pxOf(500)).alpha < .35 && roadFar(MAIN, pxOf(600)).alpha === 0, 'main roads between provinces fade above 400 km');
-  // a great road of history stays, a faint thin thread: from 820 km — the height the game opens at — a fifth of its strength
-  const open = roadFar(TRUNK, pxOf(820)); assert.ok(Math.abs(open.alpha - LOOK[TRUNK].keep) < 1e-9 && open.alpha <= .25 && open.alpha > .1 && Math.abs(open.minPx - LOOK[TRUNK].px[1]) < 1e-9 && open.minPx <= 1.3);
-  assert.ok(roadFar(TRUNK, pxOf(500)).alpha < .6 && roadFar(TRUNK, pxOf(2000)).alpha === open.alpha && THIN[0] >= pxOf(295));
+  for (let set = 0; set < 4; set++) { let last = roadFar(set, .01, 16); for (let px = .012; px < 1.4; px *= 1.02) { const f = roadFar(set, px, px / pxOf(1)); assert.ok(f.alpha <= last.alpha + 1e-9 && f.minPx <= last.minPx + 1e-9 && last.alpha - f.alpha < .3 && f.alpha >= 0 && f.alpha <= 1); last = f; } }
+  // the kinds go one after another: tracks by 135 km, lesser roads by 300 km
+  assert.equal(roadFar(TRACK, pxOf(135), 135).alpha, 0); assert.ok(roadFar(TRACK, pxOf(100), 100).alpha > .9);
+  assert.equal(roadFar(LESSER, pxOf(300), 300).alpha, 0); assert.ok(roadFar(LESSER, pxOf(215), 215).alpha > .95);
+  // the main roads (the owner, 15.11.2026): whole from 1000 km, a thin thread; gone by 1200 km — by the height of the
+  // camera, whatever the window: a pixel twice as large or half as large changes nothing
+  for (const set of [TRUNK, MAIN]) for (const k of [.5, 1, 2]) {
+    for (const h of [400, 600, 820, 1000]) assert.equal(roadFar(set, pxOf(h) * k, h).alpha, 1, LOOK[set].id + ' from ' + h + ' km');
+    const mid = roadFar(set, pxOf(1100) * k, 1100).alpha; assert.ok(mid > .3 && mid < .7);
+    for (const h of [1200, 1500, 2600]) assert.equal(roadFar(set, pxOf(h) * k, h).alpha, 0, LOOK[set].id + ' from ' + h + ' km');
+  }
+  const open = roadFar(TRUNK, pxOf(820), 820); assert.ok(Math.abs(open.minPx - LOOK[TRUNK].px[1]) < 1e-9 && open.minPx <= 1.3 && THIN[0] >= pxOf(295));
 });
 
 test('roads: a road takes the light of the ground — the sun, the sky, and the Moon once the light of the album knows it', () => {
