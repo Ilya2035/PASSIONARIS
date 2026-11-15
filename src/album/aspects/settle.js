@@ -180,6 +180,12 @@ float setFarm(vec2 pk) {
   }
   return sum / all;
 }
+// The same on the ground as it lies: fields keep to level ground — the floor of a valley, a terrace, the gentle foot
+// of a slope — and leave its steep sides alone. slope: rise over run at the pixel. (The owner, 15.11.2026, of the
+// fields and the clearings of the villages: «маленькие кружочки… больше по местности».) The fields are drawn by
+// this one; for the clearing of a village in a forest to run along its valley too, the forest must ask this one
+// instead of setFarm() — aspects/forest.js, the part «Земля и лес».
+float setFarmOn(vec2 pk, float slope) { return setFarm(pk) * (1. - smoothstep(.10, .26, slope)); }
 void aspSettle(Px p, inout Land L) {
   if (uSettle.w < .5 || p.h < .4) return;
   vec2 gp = p.pk - SET_G0;
@@ -187,7 +193,7 @@ void aspSettle(Px p, inout Land L) {
   if (c0.x < 0 || c0.y < 0 || c0.x >= SET_GN || c0.y >= SET_GN) return;
   vec4 t0 = texelFetch(tSettle, c0 + SET_COARSE, 0), tv = texelFetch(tSettle, v0 + SET_FINE, 0);
   int code = int(t0.a * 255. + .5), vcode = int(tv.a * 255. + .5);
-  float farm = setFarm(p.pk);
+  float farm = setFarmOn(p.pk, p.slope);
   bool tilled = farm > .004, search = code != 0 || vcode != 0;
   if (!search && !tilled) return;
   // the commonest case by far: the only patches near are the town and the village of these very squares, and the
@@ -217,6 +223,12 @@ void aspSettle(Px p, inout Land L) {
   float px = p.px, S = uSettle.x, W = .5 + 2.5 * r, m = r > 0. ? own : -1e3;        // W: how far the fields reach beyond the houses
   bool close = m > -W - .3;                                                         // near a patch: its houses, its lanes
   if (!tilled && !close) return;
+  float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
+  if (close) {
+    cs = cos(th); sn = sin(th); vec2 dl = p.pk - site, dr = vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y);
+    q = setBend(dr / S, th);
+    m += setLobes(dr - vec2(cs * sh.x + sn * sh.y, -sn * sh.x + cs * sh.y), r, ck);  // a town is no circle: it reaches out one way more than another (rules.js; nothing for a village)
+  }
   if (m > -.6) m += min(.25, .3 * r) * setWob(p.pk) * min(1., 1. + m / .6);          // the wobble of the edge fades out away from it
   // in a chunk that is ploughed in part, the land next to the houses is ploughed first
   float beside = close ? clamp(1. + m / W, 0., 1.) * min(1., farm * 5.) : 0.;
@@ -230,8 +242,6 @@ void aspSettle(Px p, inout Land L) {
   float tm = 0., mt = m + (small ? 0. : max(0., uSetB.x * px - r));
   if (mt > -.03) tm = smoothstep(-.03, .015, mt) * smoothstep(.4, 2., p.h) * (1. - smoothstep(.26, .44, p.slope)) * (1. - smoothstep(.3, .5, p.cA.a));
   if (small) tm *= 1. - setStep(uSetA.zw, px / max(r, .02));
-  float cs = 1., sn = 0.; vec2 q = vec2(0.);                                         // the point in the bent lattice of the patch
-  if (close) { cs = cos(th); sn = sin(th); vec2 dl = p.pk - site; q = setBend(vec2(cs * dl.x + sn * dl.y, -sn * dl.x + cs * dl.y) / S, th); }
 
   // ---- fields: as much of the chunk as its state says, the land next to the houses first. Where the land around is
   // ploughed only here and there (the share of the natural cell, p.cC.g), the fields are a picture only while their

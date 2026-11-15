@@ -9,13 +9,14 @@
 // (the directions are L.gates: state.js mirrorGates()); a WALL rings the middle of a town from WALL_FROM km on, with
 // a GATE where every main street crosses it; a smaller town has a CASTLE on its highest ground instead, a great one
 // besides. No block stands on a street, on a road or on the wall: a block that would is made smaller, or left out.
-import { cellRule, cellHash, wob, depthAt, unbend, bendTurn, midOf, wallAt, CULTURES, STAGES, WALL_SHARE, WALL_FROM, CASTLE_FROM, KEEP_FROM, WALL_W, WALL_CLEAR, WALL_SEG, STREET_W, GATE_W } from './rules.js';
+import { cellRule, cellHash, wob, depthAt, lobesAt, LOBE, unbend, bendTurn, midOf, wallAt, CULTURES, STAGES, WALL_SHARE, WALL_FROM, CASTLE_FROM, KEEP_FROM, WALL_W, WALL_CLEAR, WALL_SEG, STREET_W, GATE_W } from './rules.js';
 import { KIND } from './shapes.js';
 
 export const ROW = 12;   // numbers per block: site x, y, turn of the lattice, kind · cell i, j, own turn, flags · size x, y, tint, height
 export const FLAG_ATL = 1, FLAG_WATER = 2;                          // Atlantic colours · may stand over water (a pier)
 const VILLAGE = STAGES[2].r, SMALLTOWN = STAGES[3].r, TOWN = STAGES[4].r, TAU = 6.283185307179586;
 export const LEAST = .45;                                           // a block made smaller than this share of itself is left out
+export const RIBBON = [.3, .9];                                     // km: how far past the last houses of a town houses stand along its roads — the least, the most
 
 // env: at(x, y) → metres · river(x, y) → km to the bank of the nearest river · swamp(x, y) → 0..1 ·
 //      road(x, y) → km to the nearest road as it is drawn (may be left out)
@@ -155,7 +156,7 @@ export function planLobe(L, S, env) {
   if (L.r >= VILLAGE && detailed) {                                 // mills just outside the last houses
     const n = L.r >= TOWN ? 3 : L.r >= SMALLTOWN ? 2 : 1;
     for (let m = 0; m < n; m++) for (let t = 0; t < 6; t++) {
-      const a = cellHash(m, t, L.k, 9) * 6.2831853, dx = Math.cos(a), dy = Math.sin(a), d = R + L.amp * wob(mx + dx * R, my + dy * R) + 1.2 * S, x = mx + dx * d, y = my + dy * d;
+      const a = cellHash(m, t, L.k, 9) * 6.2831853, dx = Math.cos(a), dy = Math.sin(a), d = R + lobesAt(L, cs * dx + sn * dy, -sn * dx + cs * dy) + L.amp * wob(mx + dx * R, my + dy * R) + 1.2 * S, x = mx + dx * d, y = my + dy * d;
       if (!groundOk(env, x, y, .3 * S, .3) || L.rivals.some(o => depthAt(o, x, y) > -.4 * S) || keepOut.some(k => Math.hypot(x - k.x, y - k.y) < k.r + .4 * S) || room(x, y, .3 * S) < 1) continue;
       free(KIND.mill, x, y, cellHash(m, t, L.k, 10) * 6.2831853, .5, .5, cellHash(m, t, L.k, 3));
       keepOut.push({ x, y, r: .35 * S }); break;
@@ -181,7 +182,7 @@ export function planLobe(L, S, env) {
     }
   }
   // ---- the lattice
-  const N = Math.ceil((R + Math.hypot(ax, ay) + L.amp + Math.min(1.5 * S, .15)) / S) + 1;
+  const N = Math.ceil((R * (1 + 1.2 * LOBE) + Math.hypot(ax, ay) + L.amp + Math.min(1.5 * S, .15)) / S) + 1;
   for (let j = -N; j <= N; j++) for (let i = -N; i <= N; i++) {
     const rule = cellRule(i, j, L, S); if (!rule || blocked.has(`${i},${j}`)) continue;
     const [x0, y0] = world(i, j), own = R - Math.hypot(i * S - ax, j * S - ay);
@@ -198,6 +199,27 @@ export function planLobe(L, S, env) {
     const kind = kindOf(rule, L, atl), flip = rule.cls < 2.5 && kind !== KIND.market ? Math.floor(rule.h1 * 97 % 1 * 4) * 1.5707963 : 0;   // a block may face any of the four streets
     const k = (kind === KIND.market ? .96 : 1) * fit, quarter = flip % 3.1415926 > 1;
     cell(kind, qi, qj, rule.rot + turn + flip + (kind === KIND.site ? Math.floor(rule.h3 * 4) * 1.5707963 : 0), (quarter ? rule.hy : rule.hx) * 2 * k, (quarter ? rule.hx : rule.hy) * 2 * k, rule.h3);
+  }
+  // ---- houses along the roads out of a town (the owner, 15.11.2026: «рядом, по дороге шли какие-то небольшие»): on
+  // past the last houses of the town a few small houses stand on either side of every main street, thinning out —
+  // RIBBON km at the most. They stand by the road as it is drawn: where the road has turned away from the line of the
+  // street, the houses end.
+  if (streets && detailed && L.r >= SMALLTOWN) {
+    const reach = Math.min(RIBBON[1], RIBBON[0] + .45 * R);
+    L.gates.forEach((a, g) => {
+      const ux = Math.cos(a), uy = Math.sin(a);
+      let t0 = .5 * R; while (t0 < 2.6 * R + 1 && depthAt(L, L.x + ux * t0, L.y + uy * t0) > -.02) t0 += .02;      // where the street leaves the houses
+      let n = 0;
+      for (let t = t0 + .6 * S; t < t0 + reach; t += S * (.7 + .6 * cellHash(n, g, L.k, 33)), n++) for (const side of [-1, 1]) {
+        const h = cellHash(n, g * 2 + (side > 0 ? 1 : 0), L.k, 31), v = cellHash(n, g * 2 + (side > 0 ? 1 : 0), L.k, 32);
+        if (h < .3 + .55 * (t - t0) / reach) continue;                                // fewer and fewer of them
+        const kind = v < .55 ? KIND.house : v < .85 ? KIND.farm : KIND.villa, sx = kind === KIND.house ? .5 : kind === KIND.farm ? .62 : .66, sy = kind === KIND.house ? .3 : .52, half = Math.max(sx, sy) * .5 * S;
+        const off = STREET_W / 2 + .014 + half + .5 * S * cellHash(n, g * 2 + (side > 0 ? 1 : 0), L.k, 34), x = L.x + ux * t - uy * side * off, y = L.y + uy * t + ux * side * off;
+        if (depthAt(L, x, y) > -.5 * half || !groundOk(env, x, y, half, .26) || L.rivals.some(o => depthAt(o, x, y) > -.4 * S) || keepOut.some(k => Math.hypot(x - k.x, y - k.y) < k.r + half)) continue;
+        if (env.road) { const dr = env.road(x, y); if (dr < half + .011 || dr > off + .05) continue; }   // by the road, not on it
+        free(kind, x, y, a + (side > 0 ? 0 : 3.1415927) + (v - .5) * .24, sx, sy, h);
+      }
+    });
   }
   return out;
 }

@@ -511,7 +511,8 @@ test('settle towns by the water: the middle of a town lies off its site, toward 
   const S0 = cellSize(20), cs = Math.cos(H.th), sn = Math.sin(H.th), toCell = (dx, dy) => [Math.round((cs * dx + sn * dy) / S0), Math.round((-sn * dx + cs * dy) / S0)];
   let east = 0, west = 0; for (let d = .9; d < 1.12; d += .04) for (let s = -.2; s <= .2; s += .08) { if (cellRule(...toCell(d, s), H, S0)) east++; if (cellRule(...toCell(-d, s), H, S0)) west++; }
   assert.ok(east > 12 && west === 0, `cells built ${east} toward the water, ${west} away from it`);
-  { const even = { ...H, amp: 0 }; assert.ok(Math.abs(R.depthAt(even, H.cx, H.cy) - H.re) < 1e-9 && Math.abs(R.depthAt(even, H.x, H.y) - (H.re - H.sx)) < 1e-9, 'the patch is deepest at its middle'); }
+  { const even = { ...H, amp: 0 }; // (a town reaches out along its lattice — lobesAt: toward its long end a point counts as lying deeper than by the circle alone)
+    const at = R.depthAt(even, H.x, H.y); assert.ok(Math.abs(R.depthAt(even, H.cx, H.cy) - H.re) < 1e-9 && at >= H.re - H.sx - 1e-9 && at <= H.re - H.sx + 1.2 * R.LOBE * H.re + 1e-9, 'the depth of a patch is counted from its middle'); }
   const built = rows(planLobe(H, S, env)).map(centreOf); assert.ok(Math.abs(built.reduce((s, p) => s + p[0], 0) / built.length - H.cx) < .08, 'its blocks lie around its middle');
   // its chunks lie around its middle
   const own = builtChunks(m.towns); assert.equal(own.owner.get(squareOf(t.x + t.sx, t.y)), 0); assert.equal(own.owner.get(squareOf(t.x, t.y)), 0, 'and the chunk of its site is its own');
@@ -545,7 +546,8 @@ test('settle wall, gates and streets: a town has main streets along its roads, a
   }
   for (const r of plan.filter(q => KINDS[q[3]] === 'wall')) assert.ok(P.wallDist(L, r[0], r[1]) < .004 && P.streetAt(L, r[0], r[1]) > R.GATE_W * .3, 'a piece of the wall lies on its ring and leaves the gateways open');
   // the same town without streets and wall has more and larger blocks
-  const bare = patch(-205, 4405, .85), small = plan.filter(r => !['wall', 'gate'].includes(KINDS[r[3]])).length;
+  // (the houses along the roads out of the town are not counted: they stand outside it, and only where there are roads)
+  const bare = patch(-205, 4405, .85), small = plan.filter(r => !['wall', 'gate'].includes(KINDS[r[3]]) && R.depthAt(L, ...centreOf(r)) > -.02).length;
   assert.ok(rows(planLobe(bare, S, env)).filter(r => !['wall', 'gate'].includes(KINDS[r[3]])).length > small, 'blocks give way to the streets');
   // a small town: no wall, a castle; a village: neither
   const T = patch(-205, 4405, .32); T.gates = [.3, 2.4, 4.4].map(a => R.gateOf(R.gateByte(a)));
@@ -838,4 +840,58 @@ test('settle and the roads: the panel of a district says how far each settlement
   assert.match(src, /\{ \.\.\.rowOf\(t\), way: wayOf\(t\) \}/);
   const panel = readFileSync(new URL('../src/album/division/panel.js', import.meta.url), 'utf8');
   assert.match(panel, /const way = s\.partOf \? '' : wayTitle\(s\.way\)/);
+});
+
+test('settle towns are no circles: a town reaches out along its lattice, a village stays round; houses stand along the roads out of a town', async () => {
+  const R = await import('../src/album/town/rules.js'), P = await import('../src/album/town/plan.js');
+  const { LOBE, LOBE_FULL, TOWN_R, lobesAt, lobesToward, depthAt } = R;
+  // nothing for a village, the whole of it from LOBE_FULL km of radius on, steadily between
+  assert.equal(lobesAt({ r: .2, re: .2, k: 4 }, 1, 0), 0); assert.equal(lobesAt({ r: TOWN_R, re: TOWN_R, k: 4 }, 1, 0), 0);
+  const T = { r: .85, re: .85, k: 4 }, far = lobesAt(T, 1, 0), back = lobesAt(T, -1, 0);
+  assert.ok(Math.abs(far - 1.2 * LOBE * .85) < 1e-9 && Math.abs(back - .2 * LOBE * .85) < 1e-9, 'out by 1.2 × LOBE of its radius one way, a little the other');
+  assert.equal(lobesAt(T, 0, 1), 0); assert.equal(lobesAt(T, 0, -1), 0, 'not at all across');
+  for (let a = 0; a < 6.3; a += .1) assert.ok(lobesAt(T, Math.cos(a), Math.sin(a)) >= 0, 'a town only ever reaches out: its round middle stays');
+  assert.ok(Math.abs(lobesAt({ ...T, k: 5 }, -1, 0) - far) < 1e-9, 'which end is the long one goes by the number of the patch');
+  assert.ok(lobesAt({ r: .4, re: .4, k: 4 }, 1, 0) > 0 && lobesAt({ r: .4, re: .4, k: 4 }, 1, 0) / .4 < far / .85 && LOBE > .15 && LOBE <= .5 && LOBE_FULL > TOWN_R);
+  assert.equal(lobesAt(T, 3, 0), far, 'by the direction alone');
+  // on the land: the lattice of the patch is turned, its middle may lie off its site
+  const L = patch(-205, 4405, .85), cs = Math.cos(L.th), sn = Math.sin(L.th), sg = L.k & 1 ? -1 : 1;
+  assert.ok(Math.abs(lobesToward(L, L.x + sg * cs, L.y + sg * sn) - 1.2 * LOBE * L.re) < 1e-9);
+  const even = { ...L, amp: 0 }; assert.ok(Math.abs(depthAt(even, L.x + sg * cs * 1.1, L.y + sg * sn * 1.1) - (L.re * (1 + 1.2 * LOBE) - 1.1)) < 1e-9 && depthAt(even, L.x - sn * 1.1, L.y + cs * 1.1) < -.2);
+  // the cells: built on past the circle along the long end, open ground as far out across
+  // (on an even edge: the edge of a patch wanders by a quarter of a kilometre of its own)
+  let along = 0, across = 0; const built = (i, j) => cellRule(i, j, even, S)?.cls < 5;
+  for (let d = 1; d < 1.15; d += .03) for (let s = -.12; s <= .12; s += .06) {
+    if (built(Math.round(sg * d / S), Math.round(s / S))) along++;
+    if (built(Math.round(s / S), Math.round(d / S))) across++;
+  }
+  assert.ok(along > 10 && across === 0, `${along} cells past the circle along the long end, ${across} across`);
+  const V = patch(-205, 4405, .2); let out = 0; for (let i = -8; i <= 8; i++) for (let j = -8; j <= 8; j++) if (Math.hypot(i, j) * S > V.re + V.amp + .03 && cellRule(i, j, V, S)?.cls < 5) out++;
+  assert.equal(out, 0, 'a village keeps its round outline');
+  // the blocks follow: a town is longer than it is wide
+  const blocks = rows(planLobe(L, S, env)).map(centreOf).map(([x, y]) => [cs * (x - L.x) + sn * (y - L.y), -sn * (x - L.x) + cs * (y - L.y)]);
+  const ext = k => Math.max(...blocks.map(b => b[k])) - Math.min(...blocks.map(b => b[k]));
+  assert.ok(ext(0) > ext(1) * 1.15, `the town is ${ext(0).toFixed(2)} km long and ${ext(1).toFixed(2)} km wide`);
+  // the twin in the shader
+  assert.match(R.RULES_GLSL, new RegExp(`#define SET_LOBE ${LOBE.toFixed(3)}`)); assert.match(R.RULES_GLSL, new RegExp(`#define SET_LOBE_FULL ${LOBE_FULL.toFixed(3)}`));
+  assert.match(R.RULES_GLSL, /return r \* e \* max\(0\., \.7 \* \(u\.x \* u\.x - u\.y \* u\.y\) \+ \.5 \* u\.x \* \(4\. \* u\.x \* u\.x - 3\.\)\);/);
+  assert.match(R.RULES_GLSL, /float m = r - length\(ij \* S - sh\) \+ setLobes\(ij \* S - sh, r, k\) \+/);
+  assert.match(settle.glsl, /m \+= setLobes\(dr - vec2\(cs \* sh\.x \+ sn \* sh\.y, -sn \* sh\.x \+ cs \* sh\.y\), r, ck\);/);
+  // ---- houses along the roads out of a town
+  const W = patch(-205, 4405, .85); W.gates = [.2, 1.8, 3.4, 5].map(a => R.gateOf(R.gateByte(a)));
+  const plan = rows(planLobe(W, S, env)), ribbon = plan.filter(r => (r[0] !== W.x || r[1] !== W.y) && ['house', 'farm', 'villa'].includes(KINDS[r[3]]));
+  assert.ok(ribbon.length >= 8 && ribbon.length < 90, `${ribbon.length} houses along the roads`);
+  for (const r of ribbon) {
+    const half = Math.max(r[8], r[9]) * .5 * S, st = P.streetAt(W, r[0], r[1]);
+    assert.ok(depthAt(W, r[0], r[1]) < 0, 'past the last houses of the town'); assert.ok(depthAt(W, r[0], r[1]) > -P.RIBBON[1] - .3, 'and no farther than RIBBON km');
+    assert.ok(st >= R.STREET_W / 2 + half && st < R.STREET_W / 2 + .02 + 2 * half + .5 * S, 'beside a main street, not on it');
+  }
+  // the farther from the town, the fewer
+  const dist = ribbon.map(r => -depthAt(W, r[0], r[1])).sort((a, b) => a - b); assert.ok(dist[Math.floor(dist.length / 2)] < (dist[dist.length - 1] + dist[0]) / 2 + .02, 'more of them near the town than far from it');
+  assert.ok(P.RIBBON[0] >= .15 && P.RIBBON[1] <= 1.5 && P.RIBBON[1] > P.RIBBON[0]);
+  // a town without roads has none, nor has a village
+  const B = patch(-205, 4405, .85); assert.equal(rows(planLobe(B, S, env)).filter(r => (r[0] !== B.x || r[1] !== B.y) && ['house', 'farm', 'villa'].includes(KINDS[r[3]])).length, 0);
+  const U = patch(-205, 4405, .2); U.gates = [.2, 3.4]; assert.equal(rows(planLobe(U, S, env)).filter(r => r[0] !== U.x || r[1] !== U.y).length, 0);
+  // where the road has turned away from the line of the street, the houses end
+  const none = rows(planLobe(W, S, { ...env, road: () => 1e9 })).filter(r => (r[0] !== W.x || r[1] !== W.y) && ['house', 'farm', 'villa'].includes(KINDS[r[3]])); assert.equal(none.length, 0);
 });

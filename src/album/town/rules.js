@@ -196,8 +196,27 @@ export function villageLobe(v, bx, by, rb, cul) {
   return { k: GN * GN + v, fine: v, vx, vy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
     x, y, sx: 0, sy: 0, cx: x, cy: y, gates: [], rivals: [] };
 }
+// ---- A town is no circle. The owner, 15.11.2026: «города плохо сделаны… все они строятся вокруг точечки одной… все
+// они одинаковой формы — должны быть не одинаковой формы». A town reaches out along its lattice: by up to 1.2 × LOBE
+// of its radius one way, a little the opposite way, hardly at all across — so no two towns have one outline (the
+// lattice of every town is turned its own way, and which end is the long one goes by the number of its patch). It
+// only ever reaches OUT: the round middle with its wall and its square stays as it was. A village keeps its round
+// outline (the owner: «деревни хорошо сделаны»); a town has the whole of it from LOBE_FULL km of radius on.
+export const LOBE = .35, LOBE_FULL = .6;
+const ease = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// how much farther than its radius patch L reaches toward (vx, vy): from its middle, in its lattice, km
+export function lobesAt(L, vx, vy) {
+  const e = LOBE * ease(TOWN_R, LOBE_FULL, L.r); if (!(e > 0)) return 0;
+  const d = Math.hypot(vx, vy) || 1e-4, ux = (L.k & 1 ? -vx : vx) / d, uy = vy / d;
+  return (L.re ?? L.r) * e * Math.max(0, .7 * (ux * ux - uy * uy) + .5 * ux * (4 * ux * ux - 3));
+}
+// the same toward a point of the land (x, y: flat km)
+export function lobesToward(L, x, y) {
+  const th = L.th || 0, cs = Math.cos(th), sn = Math.sin(th), dx = x - (L.cx ?? L.x), dy = y - (L.cy ?? L.y);
+  return lobesAt(L, cs * dx + sn * dy, -sn * dx + cs * dy);
+}
 // how deep a point lies inside a patch, km (negative outside)
-export const depthAt = (L, x, y) => L.re - Math.hypot(x - (L.cx ?? L.x), y - (L.cy ?? L.y)) + L.amp * wob(x, y);
+export const depthAt = (L, x, y) => L.re - Math.hypot(x - (L.cx ?? L.x), y - (L.cy ?? L.y)) + lobesToward(L, x, y) + L.amp * wob(x, y);
 // The lattice is bent: a point q of the straight lattice (cell units) lies at bend(q) of the bent one, in which the
 // cells are counted. unbend() goes back: where in the straight lattice the middle of a bent cell lies.
 export const bend = (L, qx, qy) => [qx + BEND * Math.sin(qy * .55 + L.th * 7), qy + BEND * Math.sin(qx * .47 + L.th * 13)];
@@ -221,7 +240,8 @@ export function cellRule(i, j, L, S) {
   }
   const cs = Math.cos(L.th), sn = Math.sin(L.th), sx = L.sx || 0, sy = L.sy || 0;
   // (how deep the cell lies in the patch is told from the middle of the patch: the shift, turned into the lattice)
-  const m = R - Math.hypot(i * S - (cs * sx + sn * sy), j * S - (-sn * sx + cs * sy)) + L.amp * wob(L.x + (cs * i - sn * j) * S, L.y + (sn * i + cs * j) * S) + (hamlet ? .03 : 0);   // a hamlet keeps its few farmsteads
+  const vx = i * S - (cs * sx + sn * sy), vy = j * S - (-sn * sx + cs * sy);
+  const m = R - Math.hypot(vx, vy) + lobesAt(L, vx, vy) + L.amp * wob(L.x + (cs * i - sn * j) * S, L.y + (sn * i + cs * j) * S) + (hamlet ? .03 : 0);   // a hamlet keeps its few farmsteads
   if (m <= -.012) {                                                 // just outside: the next houses are being built
     if (m > -Math.min(1.5 * S, .15) && cellHash(i, j, L.k, 5) < .2) return { cls: 5, hx: .36, hy: .36, ox: 0, oy: 0, rot: 0, m, h1: 0, h2: 0, h3: cellHash(i, j, L.k, 3), h4: 0 };
     return null;
@@ -280,6 +300,8 @@ export const RULES_GLSL = /* glsl */`
 #define SET_PIECE ${FARM_PIECE.toFixed(2)}
 #define SET_TOWN_R ${TOWN_R.toFixed(4)}
 #define SET_BEND ${BEND.toFixed(3)}
+#define SET_LOBE ${LOBE.toFixed(3)}
+#define SET_LOBE_FULL ${LOBE_FULL.toFixed(3)}
 float setWob(vec2 pk) { return sin(pk.x * 9. + 1.3 * sin(pk.y * 7.)); }
 float setHash(ivec2 id, int k, int salt) {
   uint h = uint(id.x + 4096) * 0x27d4eb2du ^ uint(id.y + 4096) * 0x165667b1u ^ uint(k * 16 + salt) * 0x9e3779b1u;
@@ -290,6 +312,13 @@ float setHash(ivec2 id, int k, int salt) {
 vec2 setBend(vec2 q, float th) { return q + SET_BEND * vec2(sin(q.y * .55 + th * 7.), sin(q.x * .47 + th * 13.)); }
 // how far from the middle of a patch its wall runs in direction a (twin of wallAt() in town/rules.js)
 float setWall(float r, float th, float a) { return ${WALL_SHARE.toFixed(3)} * r * (1. + .07 * sin(3. * a + th * 5.) + .05 * sin(5. * a + th * 11.)); }
+// How much farther than its radius a town reaches in direction v of its lattice (v: from the middle of the patch,
+// km; k: the number of the patch): twin of lobesAt() in town/rules.js. Nothing for a village.
+float setLobes(vec2 v, float r, int k) {
+  float e = SET_LOBE * smoothstep(SET_TOWN_R, SET_LOBE_FULL, r); if (e <= 0.) return 0.;
+  vec2 u = v / max(length(v), 1e-4); if ((k & 1) == 1) u.x = -u.x;
+  return r * e * max(0., .7 * (u.x * u.x - u.y * u.y) + .5 * u.x * (4. * u.x * u.x - 3.));
+}
 // What stands in lattice cell id of a patch (twin of cellRule() in town/rules.js): returns the class 0..5.
 // r is the radius of the patch, cs sn the cosine and sine of the turn of its lattice, sh the shift of its middle from
 // its site, turned into the lattice, km.
@@ -302,7 +331,7 @@ float setCell(ivec2 id, vec2 site, vec2 sh, float r, float cs, float sn, float c
     return atl || hamlet ? 3. : 2.;
   }
   vec2 ij = vec2(id);
-  float m = r - length(ij * S - sh) + min(.25, .3 * r) * setWob(site + vec2(cs * ij.x - sn * ij.y, sn * ij.x + cs * ij.y) * S) + (hamlet ? .03 : 0.);
+  float m = r - length(ij * S - sh) + setLobes(ij * S - sh, r, k) + min(.25, .3 * r) * setWob(site + vec2(cs * ij.x - sn * ij.y, sn * ij.x + cs * ij.y) * S) + (hamlet ? .03 : 0.);
   if (m <= -.012) {
     if (m > -min(1.5 * S, .15) && setHash(id, k, 5) < .2) { hs = vec2(.36); rnd.z = setHash(id, k, 3); return 5.; }
     return 0.;
