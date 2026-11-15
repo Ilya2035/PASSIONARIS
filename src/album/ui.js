@@ -3,6 +3,7 @@
 // Working interface (docs/UI.md): flat panels and the one button of src/shared/theme.css, coloured by purpose —
 // blue: navigation, green / red: the marks «Подходит» / «Не то», red: back to the page's own values, grey: not chosen.
 import { DEFS } from './params.js';
+import { H_MAX } from './camera.js';
 import { saveFeedback, loadFeedback, feedbackText } from './feedback.js';
 
 // The knob panel is built from DEFS (params.js): a section per group found there — the known groups in this order and
@@ -71,7 +72,8 @@ export function initUI(album) {
 
   // ---- camera, places, modes
   const hOut = el('span', 'L'), heights = el('div', 'row');
-  for (const h of [20, 50, 200, 500]) { const b = button('sm', `${h} км`); b.onclick = () => album.cam.flyTo({ h }); heights.append(b); }
+  // the same heights as the keys 1–6 (camera.js); the last one shows the whole ball of the Earth
+  for (const h of [20, 50, 200, 500, 2000, H_MAX]) { const b = button('sm', h === H_MAX ? 'Весь шар' : `${h} км`); b.onclick = () => album.cam.flyTo({ h }); heights.append(b); }
   const places = el('select'); places.append(Object.assign(el('option', null, 'Перелететь к месту…'), { value: '' }));
   for (const pl of album.data.places) places.append(Object.assign(el('option', null, pl.name), { value: pl.id }));
   places.onchange = () => { const pl = album.data.places.find(x => x.id === places.value); if (pl) album.cam.flyTo({ lat: pl.lat, lon: pl.lon, h: Math.min(album.cam.t.h, 120), tilt: 50 }); places.value = ''; };
