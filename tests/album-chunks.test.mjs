@@ -47,7 +47,8 @@ test('chunks: under a mask of the worked land only its texels get chunks; the re
   // worked: everything west of 0° — land west of 2.75° W, its sea up to 0°; east of 0° is the world
   const w = new Chunks((lat, lon) => (lon < -2.75 ? 300 : -100), [], [], (lat, lon) => (lon >= 0 ? 0 : lon < -2.75 ? 1 : 2));
   let none = 0; for (const v of w.cell) { if (v === NONE) none++; else assert.ok(v < w.count, 'a chunk that exists'); }
-  assert.ok(none > FNX * FNY * .2 && none < FNX * FNY * .45, `texels of the world: ${none / (FNX * FNY)}`);
+  let east = 0; for (let tx = 0; tx < FNX; tx++) if (llOf(CI0 * CHUNK_KM + (tx + .5) * FKM, 0).lon >= 0) east++;   // columns of texels east of 0°
+  assert.ok(east > 0 && east < FNX); assert.equal(none, east * FNY, 'exactly the texels the mask calls the world');
   assert.equal(w.whole, false); assert.equal(flat.whole, true); assert.ok(!flat.cell.includes(NONE));
   assert.equal(w.at(40, 2), -1, 'the world has no chunk'); assert.equal(w.kind[w.at(40, -5)], 1); assert.equal(w.kind[w.at(40, -1)], 0);
   assert.ok(w.count < CNX * CNY, 'a square with no worked ground has no seed and no number');
@@ -64,7 +65,7 @@ test('chunks: under a mask of the worked land only its texels get chunks; the re
 
 test('chunks: points map to chunks and back; the mapped square covers the whole region of the album', () => {
   for (const [lat, lon] of [[BBOX.lat0, BBOX.lon0], [BBOX.lat1, BBOX.lon1], [BBOX.lat0, BBOX.lon1], [BBOX.lat1, BBOX.lon0], [40, -2.75]]) assert.ok(flat.at(lat, lon) >= 0, `${lat},${lon} is inside`);
-  assert.equal(flat.at(50, 0), -1); assert.equal(flat.at(40, 20), -1);
+  assert.equal(flat.at(60, 0), -1); assert.equal(flat.at(40, 20), -1);   // (beyond the lattice of either stage)
   let inside = 0;
   for (let k = 3000; k < 5000; k++) { const c = flat.centre(k); if (flat.at(c.lat, c.lon) === k) inside++; }
   assert.ok(inside > 1900, `the middle of a chunk lies in the chunk: ${inside} of 2000`);

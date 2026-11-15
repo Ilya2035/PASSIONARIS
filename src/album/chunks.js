@@ -10,14 +10,16 @@
 // state of the chunks around it, joined smoothly (CHUNK_GLSL in glsl.js), so neighbouring chunks merge without a
 // visible seam and a change of state (a forest cut down, a sea freezing) spreads chunk by chunk.
 import { DataTexture, RGBAFormat, RGFormat, UnsignedByteType, LinearFilter, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
-import { KM_PER_DEG, COS_REF, BBOX } from './geo.js';
+import { KM_PER_DEG, COS_REF, BBOX, STAGE } from './geo.js';
 
 // Chunks grow from seeds, one seed in every square of a lattice of 10 km, CNX squares wide and CNY high (now
 // 128 × 128; the lattice of stage 3 is a rectangle, 192 × 280: docs/BACKLOG.md). Chunks are numbered in the order of
 // their seeds' squares, row by row from the south-west; chunks added later (islands, lagoons) follow after. While
 // every square has a seed — no mask of the worked land — the number is that of the square,
 // k = (j − CJ0) · CNX + (i − CI0); under a mask the squares with no worked ground have no seed and no number.
-export const CHUNK_KM = 10, CNX = 128, CNY = 128, CI0 = -88, CJ0 = 388;
+// (the lattice goes with the polygon: geo.js STAGE — the square of stage 2, the rectangle of stage 3 that reaches
+// from the Anti-Atlas to the Frisian islands)
+export const CHUNK_KM = 10, CNX = STAGE >= 3 ? 192 : 128, CNY = STAGE >= 3 ? 280 : 128, CI0 = -88, CJ0 = STAGE >= 3 ? 324 : 388;
 // the fine raster the outlines live on: FNX × FNY texels of 1.25 km (now 1024 × 1024)
 export const FKM = 1.25, FNX = CNX * CHUNK_KM / FKM, FNY = CNY * CHUNK_KM / FKM;
 // The old names of the side, from when the lattice could only be a square. They are the WIDTH (and the step of a

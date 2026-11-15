@@ -1,7 +1,7 @@
 // Graphics album (docs/ALBUM.md): the parts that can be checked without a GPU.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWorld, fromWorld, frame, distKm, mercX, mercY, BBOX, CENTRE, R, worldLL, wrapLon, inPolygon, LAT_MAX } from '../src/album/geo.js';
+import { toWorld, fromWorld, frame, distKm, mercX, mercY, BBOX, CENTRE, R, worldLL, wrapLon, inPolygon, LAT_MAX, STAGE } from '../src/album/geo.js';
 import { H_MIN, H_MAX } from '../src/album/camera.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS, LOOKS, sunAt } from '../src/album/params.js';
@@ -34,7 +34,8 @@ test('album geo: the whole sphere — any point of the Earth is a point of the m
   assert.deepEqual(worldLL(-90, -3), { lat: -LAT_MAX, lon: -3 });
   assert.equal(wrapLon(190), -170); assert.equal(wrapLon(-190), 170); assert.equal(wrapLon(540), -180); assert.equal(wrapLon(-3.7), -3.7);
   assert.ok(inPolygon(40.4, -3.7) && inPolygon(43.6, 1.44), 'Madrid and Toulouse are in the polygon');
-  assert.ok(!inPolygon(48.85, 2.35) && !inPolygon(30, 31), 'Paris and Cairo are not — yet');
+  assert.equal(inPolygon(48.85, 2.35), STAGE >= 3, 'Paris is in it from stage 3'); assert.ok(!inPolygon(30, 31), 'Cairo is not');
+  assert.ok(STAGE === 2 || STAGE === 3, 'the one switch of the polygon');
 });
 test('album geo: distances and the Web-Mercator helpers', () => {
   assert.ok(Math.abs(distKm({ lat: 40, lon: -3 }, { lat: 41, lon: -3 }) - Math.PI * R / 180) < .01);

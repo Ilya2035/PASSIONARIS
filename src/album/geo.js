@@ -3,10 +3,18 @@
 import { Vector3 } from 'three';
 
 export const R = 6371;
-// BBOX is the worked polygon: chunks, districts, roads and settlements exist only inside it. The map itself is the
-// whole sphere (the owner, 15.11.2026: «Я должен видеть всю землю»): beyond the polygon lies the plain land and sea
-// of the world, drawn by the same rules without chunks (docs/BACKLOG.md, «Третий шаг»).
-export const BBOX = { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
+// STAGE is the one switch of the polygon (docs/BACKLOG.md, «Этап 3, общий выпуск»). 2: the polygon of the Iberian
+// Peninsula the album grew up on. 3: Western Europe up to the Rhine and the whole Maghreb — a larger rectangle of
+// detailed heights, a rectangular lattice of chunks (chunks.js), chunks only under the mask of the worked land
+// (worked.js). Everything that differs between the two is told from this number, so the change is one line here,
+// made together with the new data and the re-baked files of every part, in one release. To try stage 3 in a
+// worktree, change the number there and do not commit it.
+export const STAGE = 2;
+// BBOX is the rectangle of the detailed heights. At stage 2 it is also the worked polygon: chunks, districts, roads
+// and settlements exist everywhere inside it. At stage 3 they exist only under the mask of the worked land. The map
+// itself is the whole sphere (the owner, 15.11.2026: «Я должен видеть всю землю»): beyond lies the plain land and
+// sea of the world, drawn by the same rules without chunks (docs/BACKLOG.md, «Третий шаг»).
+export const BBOX = STAGE >= 3 ? { lon0: -10.3, lon1: 11.7, lat0: 29.3, lat1: 53.7 } : { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
 export const CENTRE = { lat: 40.0, lon: -2.75 };
 export const KM_PER_DEG = 111.195;
 export const COS_REF = Math.cos(CENTRE.lat * Math.PI / 180); // one fixed east-west scale for the whole grid
