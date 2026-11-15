@@ -15,13 +15,12 @@
 // the loaders of the page and of Node skip those steps.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import { STAGE, BBOXES } from '../../src/album/geo.js';
 import { despike, mendPockets } from '../../src/album/ground/despike.js';
 import { fillHollows } from '../../src/album/water/hollows.js';
-import { decodeWorked, WORKED } from '../../src/album/worked.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const MAIN = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).split('\n')[0].slice(9).trim();
@@ -73,26 +72,56 @@ async function pool(items, n, fn) { let i = 0, done = 0; await Promise.all(Array
 // (a tile already fetched may lie in the cache of this folder or of the main one; a new one goes to the main folder,
 // where the leading session keeps the raw material)
 const tileFile = (z, x, y) => { const here = join(CACHE, 'terrarium', String(z), String(x), `${y}.png`); return existsSync(here) ? here : join(MAIN, 'data', 'album', 'terrarium', String(z), String(x), `${y}.png`); };
-// The polders of the Low Countries lie below the sea, and the dikes and dunes that keep it out are thinner than a
-// point of the base: by the heights alone Holland is sea and Lelystad stands in a lake (found by the division
-// session on the first data of stage 3). Where the mask of the worked land says LAND — the outline of the country
-// without its lakes, Natural Earth — the ground at or below the sea is lifted to POLDER_M: flat land just above the
-// water. Only inside POLDERS: everywhere else land below the sea is a lagoon or a shore, and there the heights know
-// better than a coarse outline. The IJsselmeer and the Wadden Sea are not land in the mask and stay water.
-export const POLDERS = { lon0: 1.5, lon1: 7.3, lat0: 50.7, lat1: 53.7 }, POLDER_M = 1;
-function liftPolders(out, z, x0, y0, W, H) {
-  const f = join(ROOT, 'public', 'assets', 'album', 'worked.bin.gz'); if (!existsSync(f)) return 0;
-  const mz = gunzipSync(readFileSync(f)), mask = decodeWorked(mz.buffer.slice(mz.byteOffset, mz.byteOffset + mz.length));
-  const n = 2 ** z * 256, low = (POLDER_M + 8192) * 4;
-  const i0 = Math.max(0, Math.floor(tx(POLDERS.lon0, z) * 256 - x0 * 256)), i1 = Math.min(W - 1, Math.ceil(tx(POLDERS.lon1, z) * 256 - x0 * 256));
-  const j0 = Math.max(0, Math.floor(ty(POLDERS.lat1, z) * 256 - y0 * 256)), j1 = Math.min(H - 1, Math.ceil(ty(POLDERS.lat0, z) * 256 - y0 * 256));
+// Land that lies below the sea and is not sea. By the heights alone it would be drawn as water, so where the outline
+// of a country (Natural Earth) says land, ground at or below the sea is lifted to LOW_M: flat land just above the
+// water. Only inside these boxes — everywhere else land below the sea is a lagoon or a shore, and there the heights
+// know better than an outline. The outlines are laid LOW_FINE times finer than the base, and a point of the base is
+// lifted by the share of it that is land: the shore of the lifted ground is a smooth line, without stairs or teeth.
+//   the polders of the Low Countries: the dikes and dunes that keep the sea out are thinner than a point of the base;
+//     by the heights Holland is sea and Lelystad stands in a lake (found by the division session, 15.11.2026). The
+//     lakes of the outline are cut out: the IJsselmeer stays water, Flevoland inside it stays land.
+//   the chotts of the Sahara (Melrhir, Merouane, el Gharsa): salt pans down to 40 m below the sea — dry ground, not
+//     lakes of blue water.
+export const LOWLANDS = [
+  { name: 'the polders of the Low Countries', lon0: 1.5, lon1: 7.3, lat0: 50.7, lat1: 53.7, lakes: true },
+  { name: 'the chotts of the Sahara', lon0: 4.5, lon1: 9.7, lat0: 32.8, lat1: 35.0, lakes: false },
+];
+export const LOW_M = 1, LOW_FINE = 4;
+function liftLowlands(out, z, x0, y0, W, H) {
+  if (!RAW) return 0;
+  const px = lon => tx(lon, z) * 256 - x0 * 256, py = lat => ty(lat, z) * 256 - y0 * 256, low = (LOW_M + 8192) * 4;
+  const rd = f => JSON.parse(readFileSync(join(RAW, f), 'utf8')).features;
+  const polysOf = g => (!g ? [] : g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []);
+  const countries = rd('ne_10m_admin_0_countries.geojson').flatMap(f => polysOf(f.geometry));
+  const lakes = rd('ne_10m_lakes.geojson').filter(f => f.properties.featurecla !== 'Reservoir').flatMap(f => polysOf(f.geometry));
   let lifted = 0;
-  for (let j = j0; j <= j1; j++) {
-    const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y0 * 256 + j + .5) / n))) * 180 / Math.PI;
-    for (let i = i0; i <= i1; i++) {
-      if (out[j * W + i] >= low) continue;
-      if (mask.at(lat, (x0 * 256 + i + .5) / n * 360 - 180) === WORKED) { out[j * W + i] = low; lifted++; }
+  for (const b of LOWLANDS) {
+    const i0 = Math.max(0, Math.floor(px(b.lon0))), i1 = Math.min(W - 1, Math.ceil(px(b.lon1))), j0 = Math.max(0, Math.floor(py(b.lat1))), j1 = Math.min(H - 1, Math.ceil(py(b.lat0)));
+    if (i1 < i0 || j1 < j0) continue;
+    const Q = LOW_FINE, bw = (i1 - i0 + 1) * Q, bh = (j1 - j0 + 1) * Q, land = new Uint8Array(bw * bh), xs = [];
+    // the fine points whose middle lies inside a polygon (even-odd: its holes stay out) are set to v
+    const fill = (poly, v) => {
+      const rings = poly.map(r => r.map(p => [(px(p[0]) - i0) * Q, (py(p[1]) - j0) * Q]));
+      let ya = 1e9, yb = -1e9, xa = 1e9, xb = -1e9;
+      for (const p of rings[0]) { if (p[1] < ya) ya = p[1]; if (p[1] > yb) yb = p[1]; if (p[0] < xa) xa = p[0]; if (p[0] > xb) xb = p[0]; }
+      if (yb < 0 || ya > bh || xb < 0 || xa > bw) return;
+      for (let j = Math.max(0, Math.floor(ya)); j <= Math.min(bh - 1, Math.ceil(yb)); j++) {
+        const y = j + .5; xs.length = 0;
+        for (const r of rings) for (let k = 0, c = r.length - 1; k < r.length; c = k++) { const p = r[k], q = r[c]; if ((p[1] > y) !== (q[1] > y)) xs.push(p[0] + (y - p[1]) * (q[0] - p[0]) / (q[1] - p[1])); }
+        xs.sort((p, q) => p - q);
+        for (let k = 0; k + 1 < xs.length; k += 2) for (let i = Math.max(0, Math.ceil(xs[k] - .5)); i <= Math.min(bw - 1, Math.ceil(xs[k + 1] - .5) - 1); i++) land[j * bw + i] = v;
+      }
+    };
+    for (const p of countries) fill(p, 1);
+    if (b.lakes) for (const p of lakes) fill(p, 0);
+    let n = 0;
+    for (let j = 0; j < bh / Q; j++) for (let i = 0; i < bw / Q; i++) {
+      const t = (j0 + j) * W + i0 + i; if (out[t] >= low) continue;
+      let share = 0; for (let b2 = 0; b2 < Q; b2++) for (let a2 = 0; a2 < Q; a2++) share += land[(j * Q + b2) * bw + i * Q + a2];
+      if (share) { out[t] = Math.round(out[t] + (low - out[t]) * share / (Q * Q)); n++; }
     }
+    console.log(`  ${b.name}: ${n} points lifted above the sea`);
+    lifted += n;
   }
   return lifted;
 }
@@ -111,7 +140,7 @@ async function mosaic(z, x0, x1, y0, y1, outName, mend = false) {
     }
   }
   if (missing) console.log(`  ${missing} tiles of ${tiles.length} are missing — run again`);
-  if (mend) { const lifted = liftPolders(out, z, x0, y0, W, H); if (lifted) console.log(`  polders of the Low Countries: ${lifted} points lifted above the sea`); }
+  if (mend) liftLowlands(out, z, x0, y0, W, H);
   if (mend) { despike(out, W, H); mendPockets(out, W, H); fillHollows(out, W, H); }   // the page and Node then take the base as it is
   let lo = 1e9, hi = -1e9;
   for (let i = 0; i < out.length; i++) { const h = out[i] / 4 - 8192; if (h < lo) lo = h; if (h > hi) hi = h; }
