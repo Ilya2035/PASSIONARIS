@@ -17,7 +17,7 @@ import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns,
 import { INFRA, LEVEL, chunkEase, levelOf, infraLevels, STEEP as STEEP_INFRA, HIGH as HIGH_INFRA } from '../src/album/roads/infra.js';
 import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
 import { FINE, FW, cellXY, cellChunk, cellGround, fineRivers, climbs, finePoints } from '../src/album/roads/shape.js';
-import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
+import { riverCrossings, squareBridges, crossingType, fordable, fordSites, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
 import { GROUND_LIGHT } from '../src/album/layers/ribbon.js';
@@ -179,7 +179,13 @@ test('roads: the network is kept in a file and read back as it was; a file for a
 
 test('roads: where a road meets a river — a bridge, a ford or a ferry by the road and the width of the water', () => {
   assert.equal(crossingType(0, .15), 'bridge'); assert.equal(crossingType(1, .05), 'bridge'); assert.equal(crossingType(1, .2), 'ferry');
-  assert.equal(crossingType(2, .02), 'ford'); assert.equal(crossingType(2, .1), 'ferry'); for (const k of [0, 1, 2]) assert.equal(crossingType(k, .006), 'ford');
+  // a track: a ford where the river can be forded, else a footbridge over narrow water, else a ferry (the owner, 15.11.2026)
+  assert.equal(crossingType(2, .02, true), 'ford'); assert.equal(crossingType(2, .02), 'bridge'); assert.equal(crossingType(2, .06, true), 'ferry'); assert.equal(crossingType(2, .1), 'ferry'); for (const k of [0, 1, 2]) assert.equal(crossingType(k, .006), 'ford');
+  assert.equal(crossingType(1, .12), 'bridge', 'a lesser road has its bridge'); assert.equal(crossingType(1, .03, true), 'bridge'); assert.equal(crossingType(0, .03, true), 'bridge');
+  // a river can be forded where it is not wide and both banks are low; a river dry for a part of the year — anywhere
+  { const low = () => 100, gorge = (x, y) => 100 + Math.abs(x) * 300;
+    assert.ok(fordable(.03, 0, 0, 1, 0, low) && !fordable(.03, 0, 0, 1, 0, gorge) && !fordable(.06, 0, 0, 1, 0, low) && fordable(.2, 0, 0, 1, 0, gorge, true) && fordable(.03, 0, 0, 1, 0, null));
+    assert.ok(FORD.max > BRIDGE.footMax && FORD.max < BRIDGE.lesserMax && FORD.every > FORD.clear); }
   assert.ok(FORD_MIN < BRIDGE.min && BRIDGE.min < BRIDGE.lesserMax && BRIDGE.fade[0] < BRIDGE.fade[1] && WEAVE > 1);
   // a road running east; rivers running north across it: 60 m wide at x = 10, a brook of 2 m at x = 14, 200 m at x = 20
   const X = -200, Y = 4400, riverAt = (x, w, name) => { const n = 9, ll = new Float64Array(n * 2); for (let i = 0; i < n; i++) { const p = llOf(X + x, Y - 2 + i * .5); ll[i * 2] = p.lon; ll[i * 2 + 1] = p.lat; } return { n, ll, w: new Float32Array(n).fill(w), name, ru: '' }; };
@@ -190,6 +196,17 @@ test('roads: where a road meets a river — a bridge, a ford or a ferry by the r
   assert.ok(Math.abs(m.x - (X + 10)) < .02 && Math.abs(m.y - Y) < .02 && Math.abs(m.at - 10) < .05 && Math.abs(m.dx - 1) < 1e-6 && Math.abs(m.width - .06) < 1e-3);
   assert.ok(Math.abs(m.span - (.06 + 2 * BRIDGE.abut)) < 2e-3, 'the deck reaches from bank to bank and a little onto each');
   assert.deepEqual(main.map(c => c.type).sort(), ['bridge', 'bridge']); assert.deepEqual(lesser.map(c => c.type).sort(), ['bridge', 'ferry']); assert.deepEqual(track.map(c => c.type).sort(), ['ferry', 'ferry']);
+  // a track over a river 30 m wide: a ford between low banks, a footbridge in a gorge
+  { const small = { rivers: [riverAt(10, .03, 'Малая')] }, level = () => 200, walls = (x, y) => 200 + Math.abs(x - (X + 10)) * 400;
+    assert.deepEqual(riverCrossings([road(2)], small, 1, level).map(c => c.type), ['ford']); assert.deepEqual(riverCrossings([road(2)], small, 1, walls).map(c => c.type), ['bridge']);
+    assert.deepEqual(riverCrossings([road(1)], small, 1, level).map(c => c.type), ['bridge'], 'a lesser road keeps its bridge at a ford');
+    // the fords of the rivers no road comes to: one in every stretch of FORD.every km where the banks are low, none by a crossing that is there, none in a gorge
+    const long = n => { const ll = new Float64Array(n * 2); for (let i = 0; i < n; i++) { const p = llOf(X + 10, Y - 10 + i * .1); ll[i * 2] = p.lon; ll[i * 2 + 1] = p.lat; } return { rivers: [{ n, ll, w: new Float32Array(n).fill(.03), name: 'Долгая', ru: '' }] }; };
+    const free = fordSites(long(201), level), taken = fordSites(long(201), level, [{ x: X + 10, y: Y }]);
+    assert.ok(free.length >= 3 && free.length <= 5, free.length + ' fords on 20 km'); for (const s of free) assert.ok(Math.abs(s.x - (X + 10)) < .01 && Math.abs(s.dx) > .99 && Math.abs(s.ry) > .99 && Math.abs(s.width - .03) < 1e-3);
+    for (let k = 1; k < free.length; k++) assert.ok(Math.hypot(free[k].x - free[k - 1].x, free[k].y - free[k - 1].y) > FORD.clear);
+    assert.ok(taken.every(s => Math.hypot(s.x - (X + 10), s.y - Y) >= FORD.clear), 'no ford by a crossing that is there');
+    assert.equal(fordSites(long(201), walls).length, 0, 'no ford in a gorge'); assert.equal(fordSites({ rivers: [{ ...long(201).rivers[0], w: new Float32Array(201).fill(.2) }] }, level).length, 0, 'none on a great river'); }
   // a road that touches a bend of the river it runs beside: over and straight back — two shallows, no bridges
   const bend = { n: 5, ll: Float64Array.from([[10, -3], [10, -.2], [10.6, .4], [10, 1], [10, 4]].flatMap(([x, y]) => { const p = llOf(X + 10 + (x - 10) * 1, Y + y); return [p.lon, p.lat]; })), w: new Float32Array(5).fill(.05), name: 'Излучина', ru: '' };
   const beside = { kind: 0, km: Array.from({ length: 41 }, (_, i) => [X + 10.3, Y - 4 + i * .2]) }, w = riverCrossings([beside], { rivers: [bend] });

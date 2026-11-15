@@ -2,9 +2,19 @@
 // прокладывается дорога и показывается перепутье. И мы потом там строим мост»; the task of 13.11.2026: bridges and
 // fords, and a road never runs over the houses).
 //   • A CROSSING is a point where a road as it is drawn meets the real course of a river (water/courses.js). What
-//     stands there depends on the road and on the width of the water: a main road has a bridge over any river, a
-//     lesser road a bridge over a river it can span and a ferry over a great one, a track fords what it can and is
-//     ferried over the rest. A brook is forded by everyone.
+//     stands there depends on the road and on the water (the owner, 15.11.2026: «Малая дорога без инфраструктуры не
+//     может пересекаться… Там должен быть мост»; of a track: «мосты должны быть, какие-то маленькие, или нужно
+//     просчитать, где у реки броды… А если нету брода, то тропа не пересекает реку и идёт на следующей стороне, как
+//     будто там переправа. Надо визуально домик какой-нибудь нарисовать»):
+//       a main road    a bridge of stone over any river;
+//       a lesser road  a bridge of timber over a river it can span, a ferry over a great one;
+//       a track        a ford where the river can be forded; else a footbridge over narrow water; else a ferry.
+//     A brook is stepped through by everyone, and that too is a ford.
+//   • A FORD is where a river can be waded: the water is not wide and both banks are low (fordable()). The fords of
+//     a river are found all along it, whether a road comes to them or not (fordSites()): «на всех реках, как в
+//     реальности, надо попытаться отметить все места брода».
+//   • A FERRY is where there is neither: the road comes down to the bank, a hut and a boat stand there, and the road
+//     goes on from the other bank.
 //   • A road STOPS at the first houses of a settlement: inside, the streets of the settlement take over.
 // Plain JavaScript without the GPU. Everything is in flat km (chunks.js, kmOf).
 import { kmOf } from '../chunks.js';
@@ -12,24 +22,37 @@ import { kmOf } from '../chunks.js';
 export const FORD_MIN = .004;                       // km: water narrower than this is stepped over and is no crossing at all
 // bridges: over water at least `min` km wide; a lesser road spans no more than `lesserMax`; `abut` km of deck on each
 // bank; `wide`: the deck against the road; `fade`: the sizes of a pixel (km) between which bridges go as the camera rises
-export const BRIDGE = { min: .01, lesserMax: .09, trackFord: .03, abut: .012, wide: 2, fade: [.035, .075] };
+export const BRIDGE = { min: .01, lesserMax: .15, footMax: .04, abut: .012, wide: 2, fade: [.035, .075] };
+// fords: water no wider than `max` km; both banks, `reach` km from the middle of the water, no higher than `bank`
+// metres over it; a river dry for a part of the year is forded anywhere. Along a river a ford is marked no oftener
+// than every `every` km, and none within `clear` km of a place where a road crosses already.
+export const FORD = { max: .045, bank: 6, reach: .12, every: 5, clear: 1.5, step: .2 };
 export const WEAVE = 2.5;                           // km along a road: see riverCrossings()
 export const TOWN_EDGE = .92;                       // a road stops at this share of the radius of a settlement
 const SOFT = .04;                                   // km over which it fades out there
 
-// what stands where a road of `kind` (0 main, 1 lesser, 2 track) meets water `w` km wide: 'bridge' | 'ford' | 'ferry'
-export function crossingType(kind, w) {
+// what stands where a road of `kind` (0 main, 1 lesser, 2 track) meets water `w` km wide: 'bridge' | 'ford' | 'ferry'.
+// shallow: the river can be forded there (fordable())
+export function crossingType(kind, w, shallow = false) {
   if (w < BRIDGE.min) return 'ford';
   if (kind === 0) return 'bridge';
   if (kind === 1) return w <= BRIDGE.lesserMax ? 'bridge' : 'ferry';
-  return w <= BRIDGE.trackFord ? 'ford' : 'ferry';
+  if (shallow && w <= FORD.max) return 'ford';
+  return w <= BRIDGE.footMax ? 'bridge' : 'ferry';
+}
+// Can water w km wide be forded at (x, y), where it is crossed along the unit vector (dx, dy)? heightAt(x, y) → metres
+// on the flat km plane (without it only the width tells); dry: the river is dry for a part of the year
+export function fordable(w, x, y, dx, dy, heightAt = null, dry = false) {
+  if (dry) return true; if (w > FORD.max) return false; if (!heightAt) return true;
+  const h = heightAt(x, y), r = FORD.reach + w / 2;
+  return heightAt(x + dx * r, y + dy * r) - h <= FORD.bank && heightAt(x - dx * r, y - dy * r) - h <= FORD.bank;
 }
 
 const key = (i, j) => i * 100003 + j;
 // lines: [{ km: [[x, y] …], kind }] (the roads as drawn); courses: decodeCourses() of water/courses.js
 // → [{ x, y, type, road (kind), line (its number), at (km along that line), width (km of water), river (name), dry, dx, dy (the way the road
 //      runs, a unit vector), rx, ry (the way the river runs), span (km: the deck from bank to bank along the road, with its abutments) }]
-export function riverCrossings(lines, courses, cell = 1) {
+export function riverCrossings(lines, courses, cell = 1, heightAt = null) {
   const grid = new Map(), out = [], ats = [];                    // ats: km along every line to each of its points
   lines.forEach((l, li) => {
     const at = new Float32Array(l.km.length); ats.push(at);
@@ -54,7 +77,8 @@ export function riverCrossings(lines, courses, cell = 1) {
             const a = lines[li].km[s - 1], b = lines[li].km[s], rx = b[0] - a[0], ry = b[1] - a[1], sx = qx - px, sy = qy - py, den = rx * sy - ry * sx; if (Math.abs(den) < 1e-12) continue;
             const t = ((px - a[0]) * sy - (py - a[1]) * sx) / den, u = ((px - a[0]) * ry - (py - a[1]) * rx) / den; if (t < 0 || t >= 1 || u < 0 || u >= 1) continue;
             const len = Math.hypot(rx, ry) || 1, w = r.w[n - 1] + (r.w[n] - r.w[n - 1]) * u, sin = Math.max(.5, Math.abs(den) / (len * (Math.hypot(sx, sy) || 1)));
-            out.push({ at: ats[li][s - 1] + len * t, x: a[0] + rx * t, y: a[1] + ry * t, type: crossingType(lines[li].kind, w), road: lines[li].kind, line: li, width: w, river: r.ru || r.name || '', dry: !!r.dry, dx: rx / len, dy: ry / len, rx: sx / (Math.hypot(sx, sy) || 1), ry: sy / (Math.hypot(sx, sy) || 1), sin, span: w / sin + 2 * BRIDGE.abut });
+            const cx = a[0] + rx * t, cy = a[1] + ry * t, shallow = lines[li].kind === 2 && w >= BRIDGE.min && fordable(w, cx, cy, rx / len, ry / len, heightAt, !!r.dry);
+            out.push({ at: ats[li][s - 1] + len * t, x: cx, y: cy, type: crossingType(lines[li].kind, w, shallow), road: lines[li].kind, line: li, width: w, river: r.ru || r.name || '', dry: !!r.dry, dx: rx / len, dy: ry / len, rx: sx / (Math.hypot(sx, sy) || 1), ry: sy / (Math.hypot(sx, sy) || 1), sin, span: w / sin + 2 * BRIDGE.abut });
           }
         }
       }
@@ -73,6 +97,39 @@ export function riverCrossings(lines, courses, cell = 1) {
     for (let i = 0; i + 1 < list.length; i++) { const a = list[i], b = list[i + 1]; if (a.river === b.river && b.at - a.at < WEAVE && a.type !== 'ford' && b.type !== 'ford') { a.type = b.type = 'ford'; a.weave = b.weave = true; i++; } }
   }
   return kept;
+}
+
+// The fords of the rivers, whether a road comes to them or not: along every river that can be waded, the best place
+// of every stretch of FORD.every km — the lowest banks. courses: decodeCourses(); heightAt(x, y) → metres; taken:
+// [{ x, y }] places where a road crosses already (riverCrossings()) — no ford is marked within FORD.clear km of one.
+// → [{ x, y, width, river, dx, dy (across the river: a unit vector), rx, ry (the way the river runs) }]
+export function fordSites(courses, heightAt, taken = []) {
+  const out = [], grid = new Map(), C = FORD.clear;
+  for (const t of taken) { const k = key(Math.floor(t.x / C), Math.floor(t.y / C)); (grid.get(k) || grid.set(k, []).get(k)).push(t); }
+  const near = (x, y) => { for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) for (const t of grid.get(key(Math.floor(x / C) + i, Math.floor(y / C) + j)) || []) if (Math.hypot(t.x - x, t.y - y) < C) return true; return false; };
+  for (const r of courses.rivers) {
+    if (r.dry) continue;                                           // a dry river is forded anywhere: nothing to mark
+    // (the river is told off in stretches of FORD.every km from its source; of two places with banks as low, the one nearer the middle of its stretch)
+    let px = 0, py = 0, run = 0, from = 0, best = null, next = 0;
+    const flush = () => { if (best) { out.push(best); const k = key(Math.floor(best.x / C), Math.floor(best.y / C)); (grid.get(k) || grid.set(k, []).get(k)).push(best); } best = null; from += FORD.every; };
+    for (let n = 0; n < r.n; n++) {
+      const [qx, qy] = kmOf(r.ll[n * 2 + 1], r.ll[n * 2]);
+      if (n) {
+        const len = Math.hypot(qx - px, qy - py); run += len; while (run - from >= FORD.every) flush();
+        const w = (r.w[n] + r.w[n - 1]) / 2;
+        if (w >= BRIDGE.min && w <= FORD.max && run >= next && len > 1e-6) {
+          next = run + FORD.step;
+          const sx = (qx - px) / len, sy = (qy - py) / len, x = (px + qx) / 2, y = (py + qy) / 2, h = heightAt(x, y), reach = FORD.reach + w / 2;
+          const up = Math.max(heightAt(x - sy * reach, y + sx * reach) - h, heightAt(x + sy * reach, y - sx * reach) - h), score = Math.max(0, up) + Math.abs(run - from - FORD.every / 2) * .2;
+          if (up <= FORD.bank && !near(x, y) && (!best || score < best.score)) best = { score, x, y, width: w, river: r.ru || r.name || '', dx: -sy, dy: sx, rx: sx, ry: sy, up };
+        }
+      }
+      px = qx; py = qy;
+    }
+    flush();
+  }
+  for (const s of out) delete s.score;
+  return out;
 }
 
 // A bridge stands square across its river, and the road turns to it: the points of the road within reach of the

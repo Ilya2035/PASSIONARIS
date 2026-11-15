@@ -4,13 +4,16 @@
 // between districts, tracks over hard ground; a great road takes a range at its real pass. A road lies on the ground (layers/ribbon.js): on the slope, in the same
 // light and shade as the land, the colour of trodden earth, with a cleared verge that reads as a ride where it runs
 // through a forest. From high up it is a thin thread, and the lesser kinds go first. It stops at the first houses
-// of a settlement — inside, the streets of the settlement take over — and where it meets a river there is a bridge
-// or a ford (roads/crossings.js).
+// of a settlement — inside, the streets of the settlement take over — and where it meets a river there is a bridge,
+// a ford or a ferry (roads/crossings.js): a bridge of stone, of timber, a footbridge — things with volume
+// (roads/works.js) —, the pale shallow of a ford, the hut and the boat of a ferry. The fords of the rivers are marked
+// all along them, whether a road comes to them or not.
 import { makeRibbons, smoothLine } from './ribbon.js';
 import { roadNetwork, roadLine, decodeNet, encodeNet, netSignature, fineCache, crossedPairs, roadGround, chunkKinds, wayToMain } from '../roads/routes.js';
 import { infraLevels } from '../roads/infra.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
-import { riverCrossings, squareBridges, cutAtTowns, townIndex, nearIndex, BRIDGE } from '../roads/crossings.js';
+import { riverCrossings, squareBridges, fordSites, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN } from '../roads/crossings.js';
+import { makeWorks } from '../roads/works.js';
 import { sheetPull } from '../aspects/water.js';
 import { riverDrawn, riverFar, MID } from './rivers.js';
 import { dense, fineCover } from '../roads/shape.js';
@@ -43,12 +46,29 @@ export function roadFar(set, px, h = 0) {
   const L = LOOK[set];
   return { minPx: L.px[0] + (L.px[1] - L.px[0]) * ss(THIN[0], THIN[1], px), alpha: (L.fade ? 1 - ss(L.fade[0], L.fade[1], px) : 1) * (L.high ? 1 - ss(L.high[0], L.high[1], h) : 1) };
 }
+// Near the ground a road is a thing with volume (the owner, 15.11.2026: «Где-то уже на 100-м километре они
+// превращаются в 3D-объекты. Потихонечку. От 100 до 50 километров»): between these heights of the camera (km) the
+// level bed, the banks cut into a slope or built up, the causeway over a bog come in (layers/ribbon.js, uVol).
+export const VOL = [50, 100];
+// The bed of each kind of road: how many metres it stands over level ground (a main road is a low causeway; a track
+// is worn into the ground), and how much of its paint the road keeps near the ground («Малая дорога вблизи: текстура
+// дороги должна быть очень незаметной. Вблизи можно будет её увидеть как маленький 3D-объект»).
+export const BED = [{ raise: .7, soft: 1 }, { raise: .6, soft: 1 }, { raise: .35, soft: .72 }, { raise: -.3, soft: .62 }];
 // the cleared strip, both sides and the road, in widths of the road: that wide in the woods (a ride of some forty
 // metres), two thirds of it on open land (the worn verge); what the two look like
 const VERGE = { verge: 3.4, vergeColour: 0x77714a, vergeAlpha: .42, rideColour: 0x58803c };
-// a bridge by the kind of its road: stone on a main road, timber on a lesser one (a track has none)
-const DECK = [{ light: 0xa2957f, ink: 0x3a2a1c, look: 1 }, { light: 0x8a6f4c, ink: 0x4a3622, look: 2 }];
-const DECK_RIM = { verge: 1.82, vergeColour: 0x3a342b, vergeAlpha: .8 };     // the parapets and the shade of the deck on the water
+// What lies flat on the water where a road meets it. Under a bridge — the shade of its deck (the bridge itself has
+// volume: roads/works.js; on paper the flat deck is the bridge, in ink): of stone on a main road, of timber on a
+// lesser one, a footbridge on a track. At a ford — the pale shallow from bank to bank. look: whose road (LOOK);
+// wide: against the road; alpha: how strong on the natural land.
+const DECK = [
+  { type: 'bridge', road: 0, look: 1, wide: BRIDGE.wide, light: 0x25262a, ink: 0x3a2a1c, alpha: .4 },
+  { type: 'bridge', road: 1, look: 2, wide: BRIDGE.wide, light: 0x25262a, ink: 0x4a3622, alpha: .4 },
+  { type: 'bridge', road: 2, look: 3, wide: BRIDGE.wide * .5, light: 0x25262a, ink: 0x4a3622, alpha: .36 },
+  { type: 'ford', road: -1, look: 2, wide: 2.6, light: 0xd9cfab, ink: 0x8f7c58, alpha: .55 },
+];
+const DECK_RIM = { verge: 1.5, vergeColour: 0x25262a, vergeAlpha: .35 };     // the soft edge of the shade
+const WORK = ['stone', 'timber', 'foot'];                                    // the bridge of a main road, of a lesser one, of a track
 // how much darker a road is in the woods: near the ground, from high up; between which sizes of a pixel (km) the one gives way to the other (60 and 110 km of height)
 export const WOODS_DIM = [.3, .5], WOODS_NEAR = [.04, .07];
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -65,27 +85,34 @@ export default async function init(album) {
   const p = album.params, division = album.division;
   if (!division?.data?.cells) { console.warn('[album] roads: no division to lay them over'); return null; }
   const file = await loadFile();
-  let ribbons = [], decks = [], net = null, drawn = [], fords = [], modelSeen, near = null, version = 0, spanSeen = '';
+  let ribbons = [], decks = [], works = [], sites = [], net = null, drawn = [], fords = [], modelSeen, near = null, version = 0, spanSeen = '';
   let ground = null, kinds = null, levels = null, ways = new Map();       // for toMain() and infra(): made when first asked for
   const towns = () => album.layers.towns?.model?.() || null;
   const drop = list => { for (const r of list) { album.scene.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose(); } };
 
   // the ribbons: every line as it is drawn, cut where it enters a settlement; the decks of the bridges
   function draw() {
-    drop(ribbons); drop(decks);
+    drop(ribbons); drop(decks); drop(works);
     const model = towns(); modelSeen = model;
     // (sx, sy: how far the middle of a town lies from its point, where the settlements say so)
     const outside = townIndex((model?.towns || []).map(t => ({ x: t.x + (t.sx || 0), y: t.y + (t.sy || 0), r: t.R }))), sets = LOOK.map(() => []);
     // (bank: a corner on the bank of a river says which way the water lies and how wide it is — roads/banks.js)
     for (const l of drawn) for (const c of cutAtTowns(l.km, outside)) sets[l.set].push({ pts: c.pts.map(q => { const g = llOf(q[0], q[1]); return [g.lon, g.lat]; }), bank: c.pts.some(q => q.bank) ? c.pts.map(q => q.bank || null) : null, fade: c.fade, width: LOOK[l.set].w });
     ribbons = sets.map((lines, k) => ({ ...makeRibbons(album, lines, { colour: LOOK[k].light, minPx: LOOK[k].px[0], lift: .005, ground: true, ...VERGE }), set: k }));
-    for (const r of ribbons) { r.u.uRiverLeast.value[0] = MID.least[0]; r.u.uRiverLeast.value[1] = MID.least[1]; }
+    for (const r of ribbons) { r.u.uRiverLeast.value[0] = MID.least[0]; r.u.uRiverLeast.value[1] = MID.least[1]; r.u.uRaise.value = BED[r.set].raise; r.u.uSoft.value = BED[r.set].soft; }
     decks = DECK.map((d, kind) => {
-      const list = fords.filter(f => f.type === 'bridge' && f.road === kind); if (!list.length) return null;
-      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * BRIDGE.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * BRIDGE.wide, lift: .005, ground: true, sea: false, woods: 0, ...DECK_RIM });
+      // (a ford is marked where a road wades water that is more than a step wide, and at the fords of the rivers no road comes to)
+      const list = d.type === 'ford' ? [...fords.filter(f => f.type === 'ford' && !f.weave && f.width >= FORD_MIN), ...sites.map(s => ({ ...s, sin: 1, site: true }))] : fords.filter(f => f.type === 'bridge' && f.road === d.road); if (!list.length) return null;
+      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * d.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * d.wide, lift: .005, ground: true, sea: false, woods: 0, ...(d.type === 'ford' ? {} : DECK_RIM) });
       rib.mesh.renderOrder = -4;                                    // over the water of the rivers (−5)
-      return { ...rib, kind, list };
+      return { ...rib, kind, list, d };
     }).filter(Boolean);
+    // the bridges themselves and the ferries: by the kind of their road, so that each can be switched off with it
+    works = WORK.map((name, kind) => {
+      const list = fords.filter(f => (f.type === 'bridge' || f.type === 'ferry') && f.road === kind).map(f => { const g = llOf(f.x, f.y); return { lat: g.lat, lon: g.lon, dx: f.dx, dy: f.dy, width: f.width, sin: f.sin, kind: f.type === 'ferry' ? 'ferry' : name, road: LOOK[kind + 1].w, minPx: LOOK[kind + 1].px[0] }; });
+      return list.length ? { ...makeWorks(album, list, { wide: BRIDGE.wide }), kind } : null;
+    }).filter(Boolean);
+    for (const w of works) { w.u.uRiverLeast.value[0] = MID.least[0]; w.u.uRiverLeast.value[1] = MID.least[1]; }
     spanSeen = ''; sync();
   }
   // A deck reaches from bank to bank of the river as it is drawn: from high up a river is wider than life (it is never
@@ -94,7 +121,7 @@ export default async function init(album) {
     for (const d of decks) {
       const ll = d.mesh.geometry.attributes.aLL, dir = d.mesh.geometry.attributes.aDir;
       d.list.forEach((f, i) => {
-        const half = riverDrawn(f.width * kr, px) / f.sin / 2 + BRIDGE.abut + px * .5;
+        const half = riverDrawn(f.width * kr, px) / f.sin / 2 + (d.d.type === 'ford' ? .002 : BRIDGE.abut) + px * .5;
         const a = llOf(f.x - f.dx * half, f.y - f.dy * half), b = llOf(f.x + f.dx * half, f.y + f.dy * half), c = Math.cos(a.lat * Math.PI / 180);
         let ex = (b.lon - a.lon) * c, ey = b.lat - a.lat; const len = Math.hypot(ex, ey) || 1; ex /= len; ey /= len;
         for (let v = 0; v < 4; v++) { const q = v < 2 ? a : b; ll.setXY(i * 4 + v, q.lat, q.lon); dir.setXY(i * 4 + v, ex, ey); }
@@ -116,7 +143,9 @@ export default async function init(album) {
     drawn = net.lines.map(l => ({ set: setOf(l), kind: l.kind, km: smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0])) }));
     // a road that runs along a river over ground that stands above it — in a gorge — is laid on the bank of that river
     const banks = album.data.courses && baseAt ? hugBanks(drawn, album.data.courses, (x, y) => { const g = llOf(x, y); return baseAt(g.lat, g.lon); }) : { stretches: 0, km: 0 };
-    fords = album.data.courses ? squareBridges(drawn, riverCrossings(drawn, album.data.courses)) : [];   // a bridge stands square across its river, the road turns to it
+    const atKm0 = baseAt ? (x, y) => { const g = llOf(x, y); return baseAt(g.lat, g.lon); } : null;
+    fords = album.data.courses ? squareBridges(drawn, riverCrossings(drawn, album.data.courses, 1, atKm0)) : [];   // a bridge stands square across its river, the road turns to it
+    sites = album.data.courses && atKm0 ? fordSites(album.data.courses, atKm0, fords) : [];                        // the fords of the rivers that no road comes to
     // Over the fine heights of the mountains the ribbon gets a corner every 120 m, not every 350: between two corners
     // it runs straight, and fine ground would rise over it (roads/shape.js, dense). The line itself is the same.
     const cover = fineCover(album.data.meta?.fine); let corners = 0;
@@ -136,6 +165,8 @@ export default async function init(album) {
     };
     const s = net.stats, nb = fords.filter(f => f.type === 'bridge').length;
     album.roadNet = { main: s.main, minor: s.lesser, tracks: s.track, km: s.km, crossings: net.crossings, impassable: s.hard, lines: net.lines, legs: net.legs, stats: s, capitals: net.capitals, fords, version,
+      // the fords of the rivers no road comes to: [{ x, y, width, river, dx, dy (across the river), rx, ry }] (roads/crossings.js, fordSites)
+      fordSites: sites,
       // the passes: { x, y (flat km), h (metres), name, kind (of the road), a, b (districts), rank (0 a pass of history, 1 of a main road, 2 other), leg }
       passes: net.passes,
       // the pairs of districts whose common boundary a road crosses: Set of a · 65536 + b, a < b (no wall of the division stands there)
@@ -151,13 +182,14 @@ export default async function init(album) {
       signature: () => netSignature(div, div.centres, net.capitals),
       // the network as the file keeps it, base64 (scripts/album/bake-roads.mjs)
       encode: () => { const u = new Uint8Array(encodeNet(net, div, div.centres)); let b = ''; for (let i = 0; i < u.length; i += 8192) b += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(b); } };
-    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped${s.reused ? ' (' + s.reused + ' from the file)' : ''}${corners ? ', ' + corners + ' corners added over the fine heights' : ''}, ${banks.km} km on the banks of rivers (${(performance.now() - t0).toFixed(0)} ms)`);
+    console.log(`[album] roads (${from}): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${fords.length} river crossings with ${nb} bridges, ${fords.filter(f => f.type === 'ferry').length} ferries and ${fords.filter(f => f.type === 'ford' && !f.weave && f.width >= FORD_MIN).length} fords, ${sites.length} fords more along the rivers, ${s.hard} impassable, ${s.unreached} districts without a road, ${net.passes.length} passes (${s.passes[0]} of history), ${s.shaped} legs shaped${s.reused ? ' (' + s.reused + ' from the file)' : ''}${corners ? ', ' + corners + ' corners added over the fine heights' : ''}, ${banks.km} km on the banks of rivers (${(performance.now() - t0).toFixed(0)} ms)`);
     draw();
   }
   function sync() {
     const dark = p.get('look') === 'paper' || p.get('look') === 'atlas';
     for (const r of ribbons) { r.u.uK.value = p.get('roads'); r.u.uColour.value.set(dark ? LOOK[r.set].ink : LOOK[r.set].light); }
-    for (const d of decks) { d.u.uK.value = p.get('roads'); d.u.uColour.value.set(dark ? DECK[d.kind].ink : DECK[d.kind].light); }
+    for (const d of decks) { d.u.uK.value = p.get('roads'); d.u.uColour.value.set(dark ? d.d.ink : d.d.light); d.dark = dark; }
+    for (const w of works) { w.u.uK.value = p.get('roads'); w.dark = dark; }
   }
   // The network laid anew on the fine heights of the mountains (a point every 57 m; the page itself keeps a point
   // every 230 m in memory): for the bake only — scripts/album/bake-roads.mjs. Every fine tile is read, a hundred
@@ -188,6 +220,7 @@ export default async function init(album) {
       const crown = typeof album.layers.forest?.top === 'number' ? album.layers.forest.top : 0, pull = crown > 0 ? crown * 1.04 + .002 : 0;
       // the rivers as they are drawn now: a road on a bank moves aside with the water, which from high up is wider than life
       const kr = p.get('riversOn') ? p.get('rivers') ?? 1 : 0, rf = riverFar(px);
+      const look = p.get('look'), vol = look === 'paper' || look === 'atlas' ? 0 : 1 - ss(VOL[0], VOL[1], cam.s.h);   // on paper a road is a drawn line at any height
       for (const r of ribbons) {
         const far = roadFar(r.set, px, cam.s.h);
         r.mesh.visible = on && far.alpha > 0 && p.get(LOOK[r.set].key) !== 0;
@@ -201,14 +234,20 @@ export default async function init(album) {
         r.u.uVerge.value = px < .05 ? VERGE.verge : 1;
         // in the woods a road is darker, as it was from high up; below some 60 km less so: a road over a pass must be seen in the dark forest of the mountains
         r.u.uDim.value = WOODS_DIM[1] + (WOODS_DIM[0] - WOODS_DIM[1]) * (1 - ss(WOODS_NEAR[0], WOODS_NEAR[1], px));
-        r.u.uRiver.value[0] = px * rf.minPx; r.u.uRiver.value[1] = rf.lean; r.u.uRiver.value[2] = kr;
+        r.u.uRiver.value[0] = px * rf.minPx; r.u.uRiver.value[1] = rf.lean; r.u.uRiver.value[2] = kr; r.u.uVol.value = vol;
       }
       // a bridge is seen while it is a few pixels long; it lies over the water, which itself is pulled over the crowns
       const bf = 1 - ss(BRIDGE.fade[0], BRIDGE.fade[1], px), over = sheetPull(album, cam) + .006;
       const key = `${Math.round(Math.log(px) * 12)}|${kr}`; if (bf > 0 && kr > 0 && key !== spanSeen) { spanSeen = key; span(px, kr); }
       for (const d of decks) {
-        d.mesh.visible = on && bf > 0 && kr > 0 && p.get(LOOK[d.kind ? 2 : 1].key) !== 0; if (!d.mesh.visible) continue;
-        d.setPx(cam, dom); d.u.uLift.value = over; d.u.uAlpha.value = bf;
+        d.mesh.visible = on && bf > 0 && kr > 0 && (d.d.type === 'ford' ? p.get('roadTracks') !== 0 : p.get(LOOK[d.d.look].key) !== 0); if (!d.mesh.visible) continue;
+        d.setPx(cam, dom); d.u.uLift.value = over; d.u.uAlpha.value = bf * (d.dark ? 1 : d.d.alpha);
+      }
+      // the bridges and the ferries: things with volume, on the natural land (on paper the flat deck is the bridge)
+      for (const w of works) {
+        w.mesh.visible = on && bf > 0 && kr > 0 && !w.dark && p.get(LOOK[w.kind + 1].key) !== 0; if (!w.mesh.visible) continue;
+        w.u.uPx.value = px; w.u.uAlpha.value = bf; w.u.uPull.value = .6 * (.02 + cam.s.h * .0005);
+        w.u.uRiver.value[0] = px * rf.minPx; w.u.uRiver.value[1] = rf.lean; w.u.uRiver.value[2] = kr;
       }
     } };
 }

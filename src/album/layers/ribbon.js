@@ -8,6 +8,15 @@
 //     slides off it when the camera tilts. It is lit as the ground is — the same sun, the shadows of the relief, the
 //     same air — so in the shade of a mountain the road is in the shade too. What stands on the ground (trees) must
 //     not hide it: its depth is written `uLift` km toward the eye, the way the rivers do it.
+//     Near the ground a road is a thing with VOLUME, not a stripe of paint (the owner, 15.11.2026: «наложены, и в них
+//     нет 3D-эффекта, как будто это просто текстура»; «более 3D-объектом, который взаимодействует с окружением»; «от
+//     100 до 50 километров»). Its bed is level from edge to edge and takes the sun as a level thing does. Where the
+//     ground beside the bed stands over it, a bank is cut into the slope; where it falls away, a bank is built up
+//     under the road: on a hillside the road is a shelf, over a hollow an embankment, through a spur a cutting, and
+//     on level ground a low causeway (a track: a worn hollow way). Each bank is lit by its own slope: the one that
+//     faces the sun is light, the other lies in its shade. Over a bog the road is a causeway of logs between two
+//     dark ditches. All of it comes in between 100 and 50 km of height (uVol); from higher up the road is the line
+//     it was.
 //   • A MARK (a border of a land) floats `lift` km above the ground and is drawn in its own flat colour, as before.
 // makeRibbons() takes a road for a ribbon with lift ≤ .006 unless told otherwise (`ground`): the callers that lay
 // roads and tracks pass .005, the borders .015.
@@ -42,11 +51,12 @@ export function smoothLine(pts, step = 1.5, rounds = 2) {
 const MOON = LIGHT.includes('albumMoonLit(') ? ' + albumMoonLit(n)' : '';
 export const GROUND_LIGHT = /* glsl */`
 uniform float uShade;
-vec3 groundLight(vec2 ll, float px) {
+// the shadow the relief casts on a point of the ground (x) and how open the place is (y); n: the slope of the ground there
+vec2 groundShade(vec2 ll, float px, out vec3 n) {
   // (the step of the slope is never finer than the height data: 0.23 km a cell, 0.03 km around the showcase places — as in terrain.js)
   float cl = cos(radians(ll.x)), e = clamp(px * 1.3, mix(.24, .035, detailWeight(merc(ll))), 6.), lod0 = log2(max(px, .234) / .234);
   float h0 = heightLod(ll, lod0), hE = heightLod(ll + vec2(0., e / (KM * cl)), lod0), hN = heightLod(ll + vec2(e / KM, 0.), lod0), hl = max(h0, 0.);
-  vec3 n = normalize(vec3(-vec2(hE - h0, hN - h0) / (e * 1000.) * uExag * uShade, 1.));
+  n = normalize(vec3(-vec2(hE - h0, hN - h0) / (e * 1000.) * uExag * uShade, 1.));
   vec2 sd = normalize(uSun.xy + 1e-4); float tanEl = uSun.z / max(1e-3, length(uSun.xy)), sh = 1., d = max(e * 2., .4);
   for (int i = 0; i < 5; i++) {
     vec2 q = ll + vec2(sd.y * d / KM, sd.x * d / (KM * cl));
@@ -54,8 +64,13 @@ vec3 groundLight(vec2 ll, float px) {
     sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.)); d *= 2.2;
   }
   float rad = .234 * exp2(lod0 + 3.5), ao = 1. - clamp((max(heightLod(ll, lod0 + 3.5), 0.) - hl) * uExag / (rad * 260.), 0., 1.) * .72;
-  return albumSunCol() * max(dot(n, uSun), 0.) * sh * 1.25 + albumSkyCol() * (.4 + .6 * n.z) * ao${MOON};
-}`;
+  return vec2(sh, ao);
+}
+// the light on a face with slope n (east, north, up) in that shadow and that openness
+vec3 groundLit(vec3 n, vec2 s) { return albumSunCol() * max(dot(n, uSun), 0.) * s.x * 1.25 + albumSkyCol() * (.4 + .6 * n.z) * s.y${MOON}; }
+vec3 groundLight(vec2 ll, float px) { vec3 n; vec2 s = groundShade(ll, px, n); return groundLit(n, s); }
+// the same light on a face that is not the ground itself — a wall, a roof, a deck — by its own slope m
+vec3 groundLightOn(vec2 ll, float px, vec3 m) { vec3 n; vec2 s = groundShade(ll, px, n); return groundLit(m, s); }`;
 
 // lines: [{ pts: [[lon, lat], ...], width: km, fade: [0..1 for every point] (may be left out) }]
 // ground: the ribbon is a road that lies on the ground (see above); verge: how many widths of the road the cleared
@@ -93,6 +108,9 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T),
     uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: minPx }, uColour: { value: new Color(colour) }, uDash: { value: dash }, uLift: { value: lift }, uAlpha: { value: 1 },
+    // uVol: how much of a thing with volume the road is (0 from high up .. 1 near the ground); uRaise: metres its bed stands over level ground
+    // (under it: a worn hollow way); uSoft: how much of its paint a lesser road keeps near the ground; the colours of a cut bank, a built one, the logs of a causeway
+    uVol: { value: 0 }, uRaise: { value: .6 }, uSoft: { value: 1 }, uCutCol: { value: new Color(0x7d6a50) }, uFillCol: { value: new Color(0x857a52) }, uLogCol: { value: new Color(0x86714f) },
     uRiver: { value: [0, 0, 0] }, uRiverLeast: { value: [.42, 1.3] },   // the least width of a river as drawn km, how far the rule of the middle heights is in force, the «Ширина рек» knob · that rule (layers/rivers.js, MID.least)
     uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uDim: { value: .5 }, uWoods: { value: ground ? woods : 0 }, uRideCol: { value: new Color(rideColour) }, uNear: { value: 1 }, ...(ground ? album.chunks.uniforms : {}),
     // (albumWet() of glsl.js may read the baked climate: the ground shader brings these two for it, when it has them)
@@ -103,7 +121,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
     vertexShader: `${COMMON}
       attribute vec2 aLL, aDir, aW; attribute float aSide, aFade; uniform float uPx, uK, uMinPx, uLift, uVerge; uniform vec4 uMesh;   // uMesh: the point the camera looks at (lat, lon), the finest cell of the ground grid km, the least pull km
       ${bk ? 'attribute vec4 aBank; uniform vec3 uRiver; uniform vec2 uRiverLeast;' : ''}
-      varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
+      varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW, vAcross;
       // the cell of the grid the ground is drawn with at a point: nested squares around the camera target, each twice as coarse (terrain.js)
       float groundCell(vec2 ll) {
         vec2 d = abs(vec2((ll.y - uMesh.y) * KM * COSREF, (ll.x - uMesh.x) * KM));
@@ -120,7 +138,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         }` : ''}
         vec2 ll = aLL + vec2(off.y / KM, off.x / (KM * cos(radians(aLL.x))));
         float c = groundCell(ll), h = max(heightLod(ll, max(0., log2(c / .234))), 0.) * uExag / 1000. + .0012;      // on the slope, where the ground is drawn
-        vX = aSide * full * .5; vRoad = road * .5; vDist = aW.y; vFade = aFade; vLL = ll;
+        vX = aSide * full * .5; vRoad = road * .5; vDist = aW.y; vFade = aFade; vLL = ll; vAcross = vec2(-aDir.y, aDir.x);
         vWorld = worldOf(ll, h);
         gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.);
         vec3 eye = normalize(cameraPosition - vWorld);                                                            // seen aslant, a crown hides more of the ground behind it
@@ -130,7 +148,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
       ${CHUNK_GLSL}
       ${LIGHT}
       ${GROUND_LIGHT}
-      uniform vec3 uColour, uVergeCol, uRideCol; uniform float uDash, uAlpha, uVerge, uVergeA, uSea, uWoods, uNear, uDim; varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
+      uniform vec3 uColour, uVergeCol, uRideCol, uCutCol, uFillCol, uLogCol; uniform float uDash, uAlpha, uVerge, uVergeA, uSea, uWoods, uNear, uDim, uVol, uRaise, uSoft; varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW, vAcross;
       void main() {
         float pk = max(fwidth(vX), 1e-7), x = abs(vX) / pk, hw = vRoad / pk, px = length(fwidth(vWorld));       // this pixel across the road, km; from the middle of the road, pixels; half the road, pixels
         float core = clamp(hw + .5 - x, 0., 1.) - clamp(.5 - hw - x, 0., 1.);                                    // how much of the pixel the road covers
@@ -142,19 +160,34 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         float h0 = heightLod(vLL, 0.);
         if (uSea > 0.) fade *= smoothstep(-2., .5, h0);                                                          // a road is not drawn over the sea (a bridge is: uSea 0)
         // Where the land is wet enough for forest and the forest of the chunk still stands, the road runs in the woods.
-        vec2 pkm = vec2(vLL.y * KM * COSREF, vLL.x * KM);
-        float woods = uWoods > 0. ? uWoods * smoothstep(.36, .58, albumWet(vLL, max(h0, 0.), fbm(pkm / 38.))) * textureLod(tChunkA, chunkUV(pkm), 0.).r : 0.;
+        vec2 pkm = vec2(vLL.y * KM * COSREF, vLL.x * KM); vec4 state = uWoods > 0. ? textureLod(tChunkA, chunkUV(pkm), 0.) : vec4(0.);   // the chunk: r forest, a bog
+        float woods = uWoods > 0. ? uWoods * smoothstep(.36, .58, albumWet(vLL, max(h0, 0.), fbm(pkm / 38.))) * state.r : 0.;
         // Near the ground the woods are cut back from the road: a ride, wider than the worn verge of open land, the
         // colour of grass among the trees. From above, where no ride can be seen, the road in the woods is dark
         // earth under the trees — darker and fainter — not a pale line across the green.
         float reach = hw * mix(1. + (uVerge - 1.) * .55, uVerge, woods);
         float verge = strip * (1. - smoothstep(hw, reach, x)) * min(1., uVergeA * (1. + .8 * woods));
         float dim = woods * (1. - .55 * strip);                                                                   // (on its ride the road is still a little darker than in the open)
-        float cover = core + verge * (1. - core), a = cover * fade * (1. - .44 * uDim * dim);
+        // ---- the road as a thing with volume (uVol; a road a pixel and a half wide or more)
+        float vol = uVol * smoothstep(.75, 1.5, hw), bog = vol * smoothstep(.2, .5, state.a);
+        vec3 gn; vec2 gs = groundShade(vLL, px, gn);
+        vec2 slope = -gn.xy / max(gn.z, .05) / max(uExag * uShade, .05), run = vec2(vAcross.y, -vAcross.x), grade = run * dot(slope, run);   // the rise of the ground, east and north; the same along the road only
+        float sg = vX < 0. ? -1. : 1.;
+        // metres the ground at the edge of the bed stands over the bed: the slope across the road; a spur cut through or a hollow filled; the bed itself, raised a little (over a bog: more)
+        float dz = dot(slope, vAcross) * sg * vRoad * 1000. + (h0 - heightLod(vLL, 2.5)) * .5 - mix(uRaise, max(uRaise, 1.1), bog);
+        float cut = step(0., dz);                                                                                  // 1 a cutting: the bank rises from the road · 0 it is built up and falls away
+        float bw = min(max(abs(dz) * .0026, 1.5 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel and a half
+        float off = abs(vX) - vRoad, bank = vol * clamp(off / pk + .5, 0., 1.) * clamp((bw - off) / pk + .5, 0., 1.) * step(1e-6, bw);
+        vec3 nBed = normalize(vec3(-grade * uExag * uShade, 1.)), nBank = normalize(vec3(-(grade + vAcross * sg * mix(-.65, .84, cut)) * uExag * uShade, 1.));
+        // the colours: the bed (over a bog — logs laid across, a dark gap between them when they can be seen); a cut bank is bare earth, a built one earth under grass; by a bog — the dark water of the ditch
+        float per = max(.003, px * 4.), gap = bog * .24 * smoothstep(.2, .35, abs(fract(vDist / per) - .5));    // (a log is wider than life from higher up: never under a couple of pixels)
+        vec3 cBed = mix(uColour, uLogCol, bog) * (1. - gap) * (1. - uDim * dim) * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5)));
+        vec3 cBank = mix(mix(uFillCol, uCutCol, cut), vec3(.16, .2, .17), bog * .85), cVerge = mix(uVergeCol, uRideCol, woods);
+        float soft = mix(1., uSoft, vol), wBed = core * soft, wBank = bank * (1. - core), wVerge = verge * (1. - core) * (1. - bank), cover = wBed + wBank + wVerge, a = cover * fade * (1. - .44 * uDim * dim * (1. - bank));
         if (a < .004) discard;
-        vec3 seen = mix(mix(uVergeCol, uRideCol, woods), uColour * (1. - uDim * dim) * (1. - .2 * wide * smoothstep(.5, 1., x / max(hw, .5))), core / max(cover, 1e-4));
-        vec3 col = uStyle == 2 || uStyle == 3 || uStyle == 6 ? mix(pow(seen * (.35 + .65 * albumDay()), vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld))
-          : albumFinish(albumAir(seen * groundLight(vLL, px), vWorld));
+        vec3 col;
+        if (uStyle == 2 || uStyle == 3 || uStyle == 6) col = mix(pow((cBed * wBed + cBank * wBank + cVerge * wVerge) / max(cover, 1e-4) * (.35 + .65 * albumDay()), vec3(1. / 2.2)), albumFinish(albumHazeCol()), albumHaze(vWorld));
+        else { vec3 L0 = groundLit(gn, gs); col = albumFinish(albumAir((cBed * mix(L0, groundLit(nBed, gs), vol) * wBed + cBank * groundLit(nBank, gs) * wBank + cVerge * L0 * wVerge) / max(cover, 1e-4), vWorld)); }
         gl_FragColor = vec4(col, a);
         gl_FragDepth = clamp(vZW.x / vZW.y * .5 + .5, 0., 1.);
       }`,
