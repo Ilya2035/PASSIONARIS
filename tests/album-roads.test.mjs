@@ -260,7 +260,7 @@ test('roads: the great roads of history are chains of towns inside the album; th
   assert.ok(head.names.includes('Августова дорога') && head.lines.some(l => l[0] === 0) && head.lines.some(l => l[0] === 1) && head.lines.some(l => l[0] === 2));
   // the passes are kept with the network: every pass of history by its name, and the passes of the other roads
   assert.ok(Array.isArray(head.passes) && head.passes.length > 100 && head.passes.every(q => q.length === 5 && q[0] < head.legs && q[3] > 0 && q[3] < 3500));
-  for (const p of PASSES) assert.ok(head.passes.some(q => q[4] && head.names[q[4] - 1] === p.name), p.name + ' is in the file');
+  for (const p of PASSES) assert.ok(head.passes.some(q => q[4] && head.names[q[4] - 1] === p.name), p.name + ' is in the file (laid for this polygon? node scripts/album/bake-roads.mjs)');
 });
 
 test('roads: a pass of history — the great road is led over that very point; every road over a crest has its pass in the list', () => {
