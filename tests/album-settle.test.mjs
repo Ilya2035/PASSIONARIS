@@ -2,6 +2,7 @@
 // growth and the plan of the blocks — everything that can be checked without a GPU.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
@@ -402,6 +403,16 @@ test('yards: light blocks with their own plot; the knob and the pages are in the
   }
   assert.ok(KINDS.every((k, i) => YARD_KINDS.includes(k) || !s.shapes[i].t.some(t => t.mat === MAT.plot)), 'the blocks of a settlement have no plot: their ground is painted');
   assert.match(PALETTE_GLSL, /m == 10/);
+  // a yard does not stand in a swamp as it is painted: the plan knows only the share of swamp of the natural cell, so
+  // the shader of the yards asks the rules of the swamp at the middle of the yard — the yards only, not the towns
+  { const src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+    assert.match(src, /import \{ SWAMP_RULES \} from '\.\.\/aspects\/swamp\.js';/); assert.match(src, /\$\{CHUNK_GLSL\}\s+\$\{SWAMP_RULES\}/);
+    assert.match(src, /if \(uBog > \.5 && show > \.5\) \{\s+float sw = textureLod\(tChunkA, chunkUV\(centre\), 0\.\)\.a;/);
+    assert.match(src, /if \(swampDepth\(sw, swampField\(centre, fbm\(centre \/ 7\.3 \+ 5\.\), vnoise\(centre \/ 1\.1\), 0\.\), llc, hs, swampSlope\(llc, hs\), cold\) > -\.03\) show = 0\.;/);
+    assert.match(src, /uYard: \{ value: new Vector4\(0, 0, 0, 1\) \}, uBog: \{ value: 0 \} \} \}\);/); assert.match(src, /\.\.\.mat\.uniforms, uYard: \{ value: new Vector4\(0, 0, 0, 1\) \}, uBog: \{ value: 1 \} \}/);
+    // (the noises are the ground's own at their near values: terrain.js)
+    const ground = readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
+    assert.ok(ground.includes('fbm(pk / 7.3 + 5.)') && ground.includes('vnoise(pk / 1.1)'), 'the noises of the ground the swamp is painted with'); }
   const knob = DEFS.find(d => d.key === 'yards'); assert.ok(knob && knob.value === 1 && knob.min === 0 && knob.max * YARDS_PER_KM2[CULTURES.atl] <= 16.001, 'at most every place is taken');
   const ids = settle.pages.map(p => p.id); for (const id of ['yards', 'yards-dense', 'yards-atl', 'yards-50']) assert.ok(ids.includes(id), id);
   assert.equal(settle.pages.find(p => p.id === 'yards-dense').p.yards, 3);

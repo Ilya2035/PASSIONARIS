@@ -13,7 +13,8 @@
 // From every village a track leads to the roads of its district (town/tracks.js): thin ribbons, like the roads, laid
 // around the point the camera looks at and shown while the villages themselves can be told.
 import { InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, BufferGeometry, Points, Mesh, ShaderMaterial, DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, Vector4 } from 'three';
-import { COMMON, LIGHT, lightUniforms } from '../glsl.js';
+import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
+import { SWAMP_RULES } from '../aspects/swamp.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
@@ -45,8 +46,11 @@ export function viewReach(h, tilt, fov, aspect) {
   return Math.hypot(up * (Math.tan(far) - Math.tan(ti)), up / Math.cos(far) * Math.tan(vf) * aspect);
 }
 const VERT = /* glsl */`${COMMON}
+  ${CHUNK_GLSL}
+  ${SWAMP_RULES}
   attribute vec4 aA, aB, aC;        // site x, y (flat km), turn of the lattice, kind · cell i, j, own turn, flags · size x, y, tint, height
   uniform sampler2D tShapes; uniform float uS, uH, u3D, uLod;
+  uniform float uBog;               // 1: the blocks of this mesh do not stand in a swamp (the yards among the fields)
   uniform vec4 uYard;               // yards among the fields: the point the camera looks at (flat km), how far from it they stand (0 = everywhere), their size ×
   varying vec3 vN, vW, vL; varying vec4 vM;
   void main() {
@@ -59,6 +63,20 @@ const VERT = /* glsl */`${COMMON}
     vec2 lxy = lp.xy * aC.xy * uS * grow, pkv = centre + vec2(cr * lxy.x - sr * lxy.y, sr * lxy.x + cr * lxy.y);
     vec2 llc = vec2(centre.y / KM, centre.x / (KM * COSREF)), llv = vec2(pkv.y / KM, pkv.x / (KM * COSREF));
     float show = max(mod(floor(aB.w * .5), 2.), step(.6, heightLod(llc, 0.))) * step(.02, grow);  // never on water (a pier may reach over it: the second bit of its flags)
+    // A yard among the fields does not stand in a swamp AS IT IS PAINTED. The plan (town/yards.js) knows only the
+    // share of swamp of the natural cell, 100 km²; where in the cell the swamp lies is decided by the ground shader,
+    // pixel by pixel, from its noises — the fields keep off it there (aspects/settle.js, fSwampW), and a yard left
+    // in it stood in the reeds (w3-ground on the flood plain of the Ebro at Zaragoza, 15.11.2026). So the yard asks
+    // the rules of the swamp themselves (aspects/swamp.js), with the noises of the ground at their near values, and
+    // is not drawn where its middle lies in the swamp. (The share of raised bog is taken by the cold alone: a yard
+    // more is left out on a gentle slope of a cold land, never one less.)
+    if (uBog > .5 && show > .5) {
+      float sw = textureLod(tChunkA, chunkUV(centre), 0.).a;
+      if (sw > .004) {
+        float hs = swampHeight(llc), cold = smoothstep(11.5, 9., 17.5 - (llc.x - 38.) * .75 - hs * .0062);
+        if (swampDepth(sw, swampField(centre, fbm(centre / 7.3 + 5.), vnoise(centre / 1.1), 0.), llc, hs, swampSlope(llc, hs), cold) > -.03) show = 0.;
+      }
+    }
     float hv = max(heightLod(llv, uLod), 0.) * uExag / 1000.;                            // every corner stands on the relief
     vW = worldOf(llv, hv + lp.z * uS * uH * aC.w * (lp.z > 0. ? u3D : 1.) * grow + .0015);
     vN = vec3(cr * ln.x - sr * ln.y, sr * ln.x + cr * ln.y, ln.z);
@@ -257,8 +275,8 @@ export default async function init(album) {
   tShapes.magFilter = tShapes.minFilter = NearestFilter; tShapes.needsUpdate = true;
   const slots = new Float32Array(SLOTS * 3); for (let i = 0; i < SLOTS; i++) slots[i * 3] = i;
   const mat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG,
-    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T),
-      tShapes: { value: tShapes }, uS: { value: CELL }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 }, uYard: { value: new Vector4(0, 0, 0, 1) } } });
+    uniforms: { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, ...lightUniforms(T), ...album.chunks.uniforms,
+      tShapes: { value: tShapes }, uS: { value: CELL }, uH: { value: 1.25 }, u3D: { value: 1 }, uLod: { value: 0 }, uYard: { value: new Vector4(0, 0, 0, 1) }, uBog: { value: 0 } } });
   // a set of blocks: one mesh, every block an instance of the same strip of corners. Yards are light, so their strip is shorter.
   function blockSet(material, strip, most) {
     const mesh = new Mesh(new InstancedBufferGeometry(), material); mesh.frustumCulled = false; mesh.visible = false; album.scene.add(mesh);
@@ -285,7 +303,7 @@ export default async function init(album) {
   const town = blockSet(mat, slots, MAX_BLOCKS), mesh = town.mesh, fill = town.fill;
   // ---- yards among the fields (town/yards.js): the same blocks, the same shader, a mesh of their own
   const ySlots = Math.max(...YARD_KINDS.map(k => shapes.tris[KIND[k]])) * 3;
-  const ymat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { ...mat.uniforms, uYard: { value: new Vector4(0, 0, 0, 1) } } });
+  const ymat = new ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { ...mat.uniforms, uYard: { value: new Vector4(0, 0, 0, 1) }, uBog: { value: 1 } } });
   const yard = blockSet(ymat, slots.subarray(0, ySlots * 3), MAX_YARDS);
   // roads as the yards must know them: no yard stands on a road
   let roadSeen = null, roadN = 0, roadMirrored = -1, rsegs = [], rkind = [], rgrid = new Map(), hospices = []; const RC = 2, PASS_REACH = 1.5;   // km: how far from a pass its road is looked for
