@@ -22,7 +22,11 @@ for (const f of readdirSync(OUT_DIR).filter(f => f.endsWith('.places.json.gz')))
   const lat = p.lat / 1e6, lon = p.lon / 1e6; if (lat <= BOX.lat0 || lat >= BOX.lat1 || lon <= BOX.lon0 || lon >= BOX.lon1) continue;
   const pop = p.pop || GUESS[kind]; if (pop < 400) continue;                       // a village of unknown size is left out
   const key = `${Math.round(lon * 500)},${Math.round(lat * 500)},${p.name}`; if (seen.has(key)) continue; seen.add(key);
-  sites.push([Math.round(lon * 1e4), Math.round(lat * 1e4), pop, kind, p.ru || p.name || '']);
+  // (A name written in Arabic letters only cannot be read into Russian letter by letter: Arabic leaves the short vowels
+  // out — «Тблба» for Teboulba. Where the extract keeps the French or the English name of such a place — p.fr, p.en:
+  // scripts/album/osm-extract.mjs, when it stores them — that one is transcribed instead.)
+  const local = p.name && !/[A-Za-zÀ-ɏ]/.test(p.name) && (p.fr || p.en) ? p.fr || p.en : p.name;
+  sites.push([Math.round(lon * 1e4), Math.round(lat * 1e4), pop, kind, p.ru || local || '']);
 }
 sites.sort((a, b) => b[2] - a[2] || a[0] - b[0] || a[1] - b[1]);
 const units = JSON.parse(readFileSync(join(ROOT, 'public', 'assets', 'album', 'division', 'admin.json'), 'utf8')).units;

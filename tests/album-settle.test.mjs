@@ -774,6 +774,8 @@ test('settle names: every name of a settlement is Russian — transcribed by rul
   for (const [name, ru] of Object.entries({ 'St John': 'Сент-Джон', 'St. Brelade': 'Сент-Брелад', 'St Saviour': 'Сент-Сейвьер', 'St Clement': 'Сент-Клемент', 'St Lawrence': 'Сент-Лоренс', 'St Peter Port': 'Сент-Питер-Порт' })) assert.equal(T.toRussian(name, 'en'), ru, name);
   // a place without a name is left out when the list is baked
   assert.match(readFileSync(new URL('../scripts/album/bake-sites.mjs', import.meta.url), 'utf8'), /sites\.push\(\.\.\.named\.filter\(s => s\[4\]\)\);/);
+  // …and a name in Arabic letters only gives way to the French or English name of the place, where the extract keeps one
+  assert.match(readFileSync(new URL('../scripts/album/bake-sites.mjs', import.meta.url), 'utf8'), /const local = p\.name && !\/\[A-Za-zÀ-ɏ\]\/\.test\(p\.name\) && \(p\.fr \|\| p\.en\) \? p\.fr \|\| p\.en : p\.name;/);
   const unitAt = T.unitFinder({ 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } });
   assert.equal(unitAt(1, 1), 'ESP-1'); assert.equal(unitAt(-2, 1), 'PRT-2'); assert.equal(unitAt(-.8, 1), 'PRT-2', 'a place on the shore takes the nearest unit');
   // records: the Russian name, and the name of the data as the sixth number
