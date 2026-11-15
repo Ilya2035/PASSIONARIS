@@ -27,12 +27,15 @@ vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slop
   float g2 = vnoise(pk / 23. + 31.), fine = .5, bush = 0.;
   // Beyond the polygon the land is seen from the height of continents. There the soils and the seas of sand go in
   // regions of hundreds of km, as they do on the Earth (the ergs and the stony plateaux of the Sahara); with the
-  // patches of tens of km alone a desert seen from 2000 km was a camouflage cloth. Those patches stay as the ragged
-  // edge of the regions, and fade once they are a pixel or two across.
-  if (wild > 0.) {
-    float nearK = smoothstep(3., .8, px);
-    g2 = mix(g2, vnoise(pk / 310. + 11.) * .7 + mix(.5, g2, nearK) * .3, wild);
-    nz.x = mix(nz.x, vnoise(pk / 420. + 57.) * .7 + mix(.5, nz.x, nearK) * .3, wild);
+  // patches of tens of km alone a desert seen from 2000 km was a camouflage cloth. The regions come in with the
+  // height of the camera, from 0.35 to 1.4 km a pixel (some 400 to 1600 km): nearer, the land beyond the polygon
+  // has the very patches of the polygon — with regions at every height the ground changed its whole look at the
+  // border, pale and even on the far side (the lead, 15.11.2026). The patches stay as the ragged edge of the
+  // regions, and fade once they are a pixel or two across.
+  if (wild > 0. && px > .35) {
+    float farK = wild * smoothstep(.35, 1.4, px), nearK = smoothstep(3., .8, px);
+    g2 = mix(g2, vnoise(pk / 310. + 11.) * .7 + mix(.5, g2, nearK) * .3, farK);
+    nz.x = mix(nz.x, vnoise(pk / 420. + 57.) * .7 + mix(.5, nz.x, nearK) * .3, farK);
   }
   if (px < .12) fine = mix(.5, vnoise(mat2(.8, -.6, .6, .8) * pk / .21 + 5.), smoothstep(.12, .04, px));
   if (px < .02) bush = smoothstep(.80, .92, vnoise(pk / .017 + 3.)) * smoothstep(.02, .009, px) * smoothstep(.10, .22, wet);   // bushes one by one, in the near view

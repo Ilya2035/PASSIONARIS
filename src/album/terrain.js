@@ -15,9 +15,9 @@ import { ASPECT_GLSL, ASPECT_UNIFORMS } from './aspects/index.js';
 import { R, KM_PER_DEG, COS_REF, wrapLon, LAT_MAX, BBOX } from './geo.js';
 import { FKM } from './chunks.js';
 import { GROUND_TILES } from './data.js';
-import { CLIM_N, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY } from './ground/climate.js';
+import { CLIM_N, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K } from './ground/climate.js';
 import { stepTable } from './ground/steps.js';
-import { REGION_FADE, STATE_FADE } from './ground/world.js';
+import { REGION_FADE, STATE_FADE, WORLD_LOD0 } from './ground/world.js';
 
 const M = 160, LEVELS = 9;
 const POLE_LAT = 88;   // a level of the grid is drawn only if it ends short of this latitude
@@ -158,15 +158,33 @@ struct Land {
 // (snowlineOf() in ground/climate.js is its twin)
 float worldWarm(vec4 cw) { return mix(${f1(WARM_WORLD[0])}, ${f1(WARM_WORLD[1])}, cw.b); }
 float worldSnow(float warm, float lat) { return (warm - ${f1(SNOW_WARM)} + ${f1(SNOW_DRY)} * smoothstep(26., 36., warm) + ${f1(SNOW_TROPIC)} * (1. - smoothstep(10., 30., abs(lat)))) / ${LAPSE}; }
-// rg: inRegion() of the pixel; lw: the level of detail of the world map for it (0 = a point of the map, 4.9 km)
+// The height of the map of the whole Earth for a pixel, m. lw: the level of detail the pixel wants of it, 0 = a point
+// of the map (4.9 km), negative = finer than the map has.
+// Seen from near, the map is much coarser than a pixel. Joined plainly between its four nearest points, the land
+// is a quilt of creased squares 5 km a side; with the slope taken over a whole cell instead, a quilt of square
+// bumps (the lead on the border of the polygon in Algeria, 15.11.2026). So below its own size the heights are joined
+// as a smooth surface — a cubic B-spline, four reads of the texture; from the size of a point up, plainly.
+// (Written into the one shader of the ground this slowed Spain down by a half; the variant of the polygon — ZONE 1
+// — has no use for it and never runs it.)
+float worldPix(vec2 ll, float lw) {
+  vec2 uv = vec2(ll.y / 360. + .5, .5 - ll.x / 180.);
+  if (lw >= 1.) return textureLod(tWorld, uv, lw).r;
+  vec2 sz = vec2(textureSize(tWorld, 0)), t = uv * sz - .5, f = fract(t), i = t - f;
+  vec2 g0 = f * (f * (2. * f - 3.) - 3.) + 5., g1 = f * (f * (3. - 2. * f) + 3.) + 1.;                     // the weights of the two pairs of points, × 6
+  vec2 u0 = (i - .5 + (f * f * (3. * f - 6.) + 4.) / g0) / sz, u1 = (i + 1.5 + f * f * f / g1) / sz;
+  float hs = ((textureLod(tWorld, u0, 0.).r * g0.x + textureLod(tWorld, vec2(u1.x, u0.y), 0.).r * g1.x) * g0.y
+    + (textureLod(tWorld, vec2(u0.x, u1.y), 0.).r * g0.x + textureLod(tWorld, u1, 0.).r * g1.x) * g1.y) / 36.;
+  return lw > 0. ? mix(hs, textureLod(tWorld, uv, lw).r, lw) : hs;
+}
+// rg: inRegion() of the pixel; lw: the level of detail of the world map for it (worldPix)
 float heightPix(vec2 ll, float rg, float lw) {
 #if ZONE == 3
-  return textureLod(tWorld, vec2(ll.y / 360. + .5, .5 - ll.x / 180.), lw).r;
+  return worldPix(ll, lw);
 #else
   vec2 m = merc(ll);
   float hb = texture(uBase, (m - uBaseRect.xy) * uBaseRect.zw).r;
   if (uDetOn > .5) { float w = detailWeight(m), hd = texture(uDet, (m - uDetRect.xy) * uDetRect.zw).r; hb = mix(hb, hd > .6 ? hd : min(hb, -1.5), w); }
-  if (rg < 1.) hb = mix(textureLod(tWorld, vec2(ll.y / 360. + .5, .5 - ll.x / 180.), lw).r, hb, rg);
+  if (rg < 1.) hb = mix(worldPix(ll, lw), hb, rg);
   return hb;
 #endif
 }
@@ -255,13 +273,7 @@ void main() {
   float dw = detailWeight(bu), e = clamp(px * 1.3, mix(.24, 17.92 / uDetRect.z, dw), 6.);   // (17.92 / uDetRect.z: .035, .07 or .14 km — a point and a quarter of the fine heights)
   bu = (bu - uBaseRect.xy) * uBaseRect.zw;                           // where the pixel lies in the height texture of the region
 #endif
-  // (Beyond the polygon the step is never finer than the world map, a point every 4.9 km. Between four points the
-  // map is joined plainly, and the slope of such a surface breaks at every row of points: taken with a finer step
-  // the land was a quilt of creased squares 5 km a side. Over a step of a whole cell the slope changes evenly.
-  // A smooth surface through sixteen points — four reads for every height — was tried first: it is what made the
-  // whole shader half as slow again, in Spain as well.)
-  if (rg < 1.) e = max(e, 4.9 * (1. - rg));
-  float lw = max(log2(px / 6.), 0.);                               // (a point of the world map is 4.9 km; px is 1.4 pixels)
+  float lw = log2(max(px, .02) / 6.);                              // (a point of the world map is 4.9 km; px is 1.4 pixels)
   float h0 = heightPix(ll, rg, lw), hE = heightPix(ll + vec2(0., e / (KM * cl)), rg, lw), hN = heightPix(ll + vec2(e / KM, 0.), rg, lw);
   vec2 g = vec2(hE - h0, hN - h0) / (e * 1000.);                    // rise over run toward east and north
   // (Beyond the polygon the heights are means over 5 km. The slope of such a surface is about a third of that of
@@ -322,7 +334,7 @@ void main() {
     }
   }
   // Beyond the polygon a mountain range is a smooth swell: the world map has a point every 5 km. So ridges and
-  // valleys are folded into its slopes by rule — a noise folded at its middle, as in ribs(), of two sizes: 7 km
+  // valleys are folded into its slopes by rule — a noise folded at its middle, as in ribs(), of two sizes: 7–9 km
   // and 2.6 km from ridge to ridge, some 300 and 100 m high, in no one direction. Hills have them faintly,
   // mountains in full. They are not the real ridges of the place (those come when the region gets its own
   // heights); they make a range read as a range from 200 km and from 2000: rock on the steep flanks, forest in the
@@ -332,10 +344,14 @@ void main() {
   if (rg < 1. && px < 1.6 && h0 > 0.) {
     float sw = smoothstep(.03, .25, slope) * (1. - rg) * smoothstep(1.6, .5, px);
     if (sw > 0.) {
-      vec3 fa = vnoiseD(pk / 3.4 + 13.), fb = vnoiseD(pk / 1.3 + 31.);
-      float ta = 2. * fa.x - 1., tb = 2. * fb.x - 1., ra = sqrt(ta * ta + .04), rb = sqrt(tb * tb + .04), fine = smoothstep(.7, .25, px);
-      gm += (fa.yz * (-.35 * ta / ra) + fb.yz * (-.31 * tb / rb * fine)) * sw;
-      rib += ((1. - 2. * ra) * .7 + (1. - 2. * rb) * .3 * fine) * sw;
+      // (Every noise is read on a grid turned by its own angle, and the larger size is two noises laid together: a
+      // noise read along the axes of the map shows its square cells, and the folds stood in rows of square bumps,
+      // like stamps — the lead on the border in Algeria, 15.11.2026.)
+      mat2 RA = mat2(.83, .56, -.56, .83), RB = mat2(.37, -.93, .93, .37), RC = mat2(.62, .78, -.78, .62);
+      vec3 fa = vnoiseD(RA * pk / 3.4 + 13.), fb = vnoiseD(RB * pk / 4.3 + 71.), fd = vnoiseD(RC * pk / 1.3 + 31.);
+      float ta = 2. * fa.x - 1., tb = 2. * fb.x - 1., td = 2. * fd.x - 1., ra = sqrt(ta * ta + .04), rb = sqrt(tb * tb + .04), rd = sqrt(td * td + .04), fine = smoothstep(.7, .25, px);
+      gm += ((fa.yz * RA) * (-.175 * ta / ra) + (fb.yz * RB) * (-.14 * tb / rb) + (fd.yz * RC) * (-.31 * td / rd * fine)) * sw;
+      rib += ((1. - ra - rb) * .7 + (1. - 2. * rd) * .3 * fine) * sw;
     }
   }
   float slopeD = length(g + gm);                                    // the slope with all of that: what is rock, where snow holds
@@ -349,24 +365,30 @@ void main() {
 
   // sun: shadows cast by the relief, and how open the sky is above the point
   float lod0 = log2(max(px, .234) / .234);
-  // The Sun as east, north, up. Over the polygon it is one direction, that of the place the camera looks at (uSun).
-  // Beyond it, it is the Sun of the place itself (uSunW, a direction of the world): on the ball of the Earth it
-  // stands low toward the edge of the day and is gone on the night side.
-  vec3 sun = uSun;
-  if (rg < 1.) sun = normalize(mix(vec3(dot(uSunW, east), dot(uSunW, north), dot(uSunW, up)), uSun, rg));
-  vec2 sd = normalize(sun.xy + 1e-4); float tanEl = sun.z / max(1e-3, length(sun.xy));
-  float sh = 1., d = max(e * 2., .4);
+  // (The Sun is one for the whole frame, in the polygon and beyond it: uSun, as east, north, up. From a height the
+  // sky draws the frame with the highest Sun in view and then dims every place to its own light in the finishing
+  // pass — sky/globe.js. The ground must not count the Sun of the place itself as well: for a day, v0.6.114, the
+  // land beyond the polygon did, and from on high it was dimmed twice.)
+  vec2 sd = normalize(uSun.xy + 1e-4); float tanEl = uSun.z / max(1e-3, length(uSun.xy));
+  // Shadows cast by the relief are for the near and middle heights: there a shadow lies in its valley and shows
+  // the shape of the mountain. From afar the same shadows are dark blots inside a range that no shape explains (the
+  // owner, 15.11.2026: «какие-то тени внутри»; large shadows must go as the camera rises). They fade from 0.3 to
+  // 1.1 km a pixel — from about 350 to 1300 km of height; the light of the slopes and the darker valley floors
+  // (far, depth) carry the relief there.
+  // (The fade is a factor inside the loop. The loop under a condition, skipped where no shadow shows, or the fade
+  // laid on after it, cost 30 ms of the 170 of a frame: the same picture, 204 and 197 ms against 169.)
+  float sh = 1., d = max(e * 2., .4), shK = 1. - smoothstep(.30, 1.10, px);
   for (int i = 0; i < 5; i++) {
     vec2 q = ll + vec2(sd.y * d / KM, sd.x * d / (KM * cl));
     float occ = (max(heightLod(q, lod0 + float(i) * .8), 0.) - hl) * uExag - d * 1000. * tanEl;
-    sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.));
+    sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.) * shK);
     d *= 2.2;
   }
   float rad = .234 * exp2(lod0 + 3.5);
   float conc = (max(heightLod(ll, lod0 + 3.5), 0.) - hl) * uExag / (rad * 260.);
   float ao = 1. - clamp(conc, 0., 1.) * .72, ridge = clamp(-conc, 0., 1.);
-  float nl = max(dot(n, sun), 0.), day = albumDay();
-  nl = max(sun.z + (nl - sun.z) * (1. + .6 * far), 0.) * (1. + depth);   // (from afar the light of a slope differs more from that of level ground)
+  float nl = max(dot(n, uSun), 0.), day = albumDay();
+  nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);   // (from afar the light of a slope differs more from that of level ground)
   vec3 sunCol = albumSunCol(), skyCol = albumSkyCol();
 
   Px p;
@@ -387,8 +409,7 @@ void main() {
     // (the largest, 38 km, fades from 4 km a pixel: the whole ball of the Earth is drawn at 10 and more)
     float n1 = px < 12. ? mix(.5, fbm(pk / 38.), smoothstep(12., 4., px)) : .5, n2 = px < 5. ? mix(.5, fbm(pk / 7.3 + 5.), smoothstep(5., 1.5, px)) : .5;
     // the climate of the place; a slope that faces north and the floor of a valley are wetter than the ridge above
-    // Beyond the polygon: the climate of the whole Earth, by the same rule (worldClimate). The country a place stands
-    // in is taken as its own height there — the heights of the world map are means of 5 km already.
+    // Beyond the polygon: the climate of the whole Earth, by the same rule (worldClimate).
     vec4 clim = albumClimate(ll); float treeW = 0.;
     if (rg < 1.) {
       vec4 cw = worldClimate(ll); float ww = worldWarm(cw);
@@ -397,11 +418,19 @@ void main() {
       // summer counts as green only as far as the year is wet)
       cw.a = min(cw.a, cw.g * 1.6);
       // (The tree line of the polygon rises slowly above 2200 m — the rule of the hot dry sierras of Spain. On the
-      // high lands of the world that rule left Tibet, the Altiplano and the Rockies bare grey rock from 3800 m. There
-      // the line goes by warmth alone, as in the Alps, lower for a dry summer: Alps 2200 m, Colorado 3200, the
-      // Andes of Quito 3350, Lhasa 4800. worldTreelineOf() in ground/climate.js is its twin.)
-      treeW = (ww - ${f1(TREE_WARM)}) / ${LAPSE} - (1. - cw.a) * ${f1(TREE_DRY)};
-      cw.r = hl / 4096.; clim = mix(cw, clim, rg);
+      // high lands of the world that rule left Tibet, the Altiplano and the Rockies bare grey rock from 3800 m. So
+      // the slow rise is kept only where the summer is dry — the Maghreb, Iran: there the line of the world is the
+      // line of the polygon, and no belt of forest jumps a kilometre of height at the border. Where the summer is
+      // green the line goes by warmth alone, as in the Alps: Alps 2200 m, Colorado 3050, the Andes of Quito 3350,
+      // Lhasa 4800. worldTreelineOf() in ground/climate.js is its twin.)
+      treeW = (ww - ${f1(TREE_WARM)}) / ${LAPSE};
+      if (treeW > ${f1(TREE_SOFT)}) treeW = ${f1(TREE_SOFT)} + (treeW - ${f1(TREE_SOFT)}) * mix(${TREE_SOFT_K}, 1., smoothstep(.35, .7, cw.a));
+      treeW -= (1. - cw.a) * ${f1(TREE_DRY)};
+      // (the country a place stands in: the world map smoothed over some 20 km — two of its levels up. A place below
+      // its country is drier and one above it wetter, in the polygon and beyond it alike. Taken as the height of the
+      // place itself, every lowland beyond the polygon was a little wetter than the same lowland inside: greener,
+      // with open woodland all over it, right from the border.)
+      cw.r = max(worldLod(ll, ${(WORLD_LOD0 + 2).toFixed(2)}), 0.) / 4096.; clim = mix(cw, clim, rg);
     }
     gRise = clim.r * 4096.; gTreeline = albumTreelineOf(clim); gSummer = clim.a;
     if (rg < 1.) gTreeline = mix(treeW, gTreeline, rg);
@@ -544,7 +573,7 @@ void main() {
     // (The water work smooths the bottom of the shallows from the heights of the polygon; far from it those are
     // read off the edge of their texture, and the bays of the world came out speckled with surf. Beyond the
     // polygon the sea is never shallower than the depth from which that smoothing begins.)
-    else if (rgW <= 0. && p.h < 0.) p.h = min(p.h, -14.5);
+    else if (p.h < 0.) p.h = min(p.h, -14.5 * (1. - rgW));         // (reached evenly across the band of the border: at a line it was a straight edge on the water)
   }
   vec3 sea = vec3(0.);
   if (h0 < 25. || lakeA > 0.) sea = aspWater(p);
@@ -552,15 +581,15 @@ void main() {
   vec3 col = landA <= 0. ? sea : (landA >= 1. ? land : mix(sea, land, landA));   // (a bad number on one side must not leak into the other)
 
   // ---- the ice of the polar seas, beyond the polygon (inside it the ice is a state of the chunks, drawn by the water).
-  // The sea is frozen where lasting snow would lie at sea level: the line of the snow by the climate (worldSnow) is
-  // at 0 m or under it — the Arctic Ocean, the seas round the Antarctic. The same rule whitens the «seas» inside
-  // Greenland and the Antarctic: the height map of the world holds the rock under their ice, and much of it lies
-  // under the sea. The edge of the ice is broken by a noise taken in space (round a pole the patterns of pk fan
-  // out); the ice is lit as level snow is.
+  // The sea is frozen where the warmest month at sea level is about 5 °C and colder — the line of the snow by the
+  // climate (worldSnow) half a kilometre under the sea: the Arctic Ocean north of Svalbard, the east coast of
+  // Greenland, the seas round the Antarctic. (At 8 °C, the line of the snow itself, the ice reached Iceland and the
+  // North Cape: the pack of early spring.) The edge of the ice is broken by a noise taken in space (round a pole the
+  // patterns of pk fan out); the ice is lit as level snow is.
   if (rgW < 1. && landA < 1. && abs(lat) > 50.) {
     vec3 q = (vPos + vec3(0., RKM, 0.)) / 70.;
-    float ice = (1. - smoothstep(-150., 150., worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) - .5) * 500.)) * (1. - landA) * (1. - rgW);
-    if (ice > .003) col = mix(col, vec3(.61, .66, .75) * (sunCol * max(dot(uSunW, normalize(q)), 0.) * 1.25 + skyCol * vec3(.86, .97, 1.2)) * (.94 + .12 * vnoise3(q * 2.9 + 9.)), ice);
+    float ice = (1. - smoothstep(-650., -350., worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) - .5) * 500.)) * (1. - landA) * (1. - rgW);
+    if (ice > .003) col = mix(col, vec3(.61, .66, .75) * (sunCol * max(uSun.z, 0.) * 1.25 + skyCol * vec3(.86, .97, 1.2)) * (.94 + .12 * vnoise3(q * 2.9 + 9.)), ice);
   }
 
   // ---- map modes drawn on the ground

@@ -8,7 +8,7 @@ import { despike } from './ground/despike.js';
 import { loadCourses, mainRivers } from './water/courses.js';
 import { fillHollows } from './water/hollows.js';
 import { decodeClimate, useClimate, decodeWorldClimate, ICE_STEP } from './ground/climate.js';
-import { WMAP_W, WMAP_H, decodeWorldHeights, raiseIce, capSouth, joinHeights } from './ground/world.js';
+import { WMAP_W, WMAP_H, decodeWorldHeights, raiseIce, capSouth, fitWorld, joinHeights } from './ground/world.js';
 
 const BASE = 'album-data/', GROUND = 'assets/album/ground/', WORLD = 'assets/map/height.delta.bin.gz';
 // the grain of the ground: the layers of the ground texture, in their order there (terrain.js)
@@ -83,7 +83,7 @@ async function loadWorld() {
       }
     } catch (e) { console.warn('[album] no climate of the world:', e.message); }
     if (!iced) capSouth(h);                                         // (without the ice the copied rows round the south pole are a fan of ridges)
-    return { h, w: WMAP_W, rows: WMAP_H, tex: worldHeightTexture(h, WMAP_W, WMAP_H), clim };
+    return { h, w: WMAP_W, rows: WMAP_H, tex: null, clim };        // (the texture is made in loadData(), once the map is fitted to the polygon)
   } catch (e) { console.warn('[album] no heights of the world:', e.message); return null; }
 }
 // rect of a baked mosaic in normalised Web-Mercator: (u0, v0, 1/width, 1/height); uv = (merc − u0v0) * inv
@@ -108,6 +108,9 @@ export async function loadData(onProgress = () => {}) {
   };
   onProgress('высоты мира');
   const world = await worldJob;
+  // round the polygon the world map is made to agree with the polygon's own heights (ground/world.js), then it
+  // becomes a texture
+  if (world) { fitWorld(world.h, regionAt); world.tex = worldHeightTexture(world.h, world.w, world.rows); }
   // the height of any place of the Earth, m: the polygon's own inside it, the world map beyond (ground/world.js)
   base.at = joinHeights(regionAt, world?.h || null);
   onProgress('реки и поселения');

@@ -19,8 +19,10 @@ export const WMAP_KM = 40030 / WMAP_W, WORLD_LOD0 = Math.log2(WMAP_KM / .234);
 // border; inside the border they are the polygon's own, whole.
 export const REGION_FADE = .2;
 // the state of the chunks gives way to the natural state over the last kilometres inside the border, between these
-// two depths, degrees (past the border the chunks are sea; a pattern reads them up to 3 km aside)
-export const STATE_FADE = [.04, .15];
+// two depths, degrees (past the border the chunks are sea; a pattern reads them up to 3 km aside). Some 35 km: the
+// land of the polygon is ploughed and felled, the land beyond it is as nature made it, and over 15 km the change
+// read as a line along the border (the lead, 15.11.2026).
+export const STATE_FADE = [.04, .35];
 
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // how deep inside the polygon a place lies, degrees; negative outside it (regionEdge() in glsl.js is its twin)
@@ -77,6 +79,30 @@ export function worldAt(h, lat, lon, w = WMAP_W, rows = WMAP_H) {
   const x = (lon + 180) / 360 * w - .5, y = Math.max(0, Math.min(rows - 1, (90 - lat) / 180 * rows - .5));
   const i = Math.floor(x), j = Math.min(rows - 2, Math.floor(y)), fx = x - i, fy = y - j, i0 = ((i % w) + w) % w, i1 = (i0 + 1) % w, r = j * w;
   return (h[r + i0] * (1 - fx) + h[r + i1] * fx) * (1 - fy) + (h[r + w + i0] * (1 - fx) + h[r + w + i1] * fx) * fy;
+}
+// The world map and the heights of the polygon are two measurements of the same land, and they do not agree: along
+// the border they stand 40–80 m apart on the average and up to 500 m in the mountains of the Maghreb. Joined as they
+// were, a range that crosses the border changed its height on the way. So round the polygon the world map is made
+// to say what the polygon says: every point of it there takes the mean of the polygon's heights over its own cell.
+// What is left between the two at the border is the detail the world map cannot hold, and that fades out evenly.
+//   h         the world map, decoded (changed in place)
+//   regionAt  the heights of the polygon, (lat, lon) → m; they must reach FIT_REACH degrees beyond its border
+// The fit is whole out to REGION_FADE + FIT_PAD beyond the border and is gone FIT_FEATHER further.
+export const FIT_PAD = .02, FIT_FEATHER = .06, FIT_REACH = REGION_FADE + FIT_PAD + FIT_FEATHER;
+export function fitWorld(h, regionAt, w = WMAP_W, rows = WMAP_H) {
+  const dLat = 180 / rows, dLon = 360 / w, K = 5;
+  const y0 = Math.max(0, Math.floor((90 - BBOX.lat1 - FIT_REACH) / dLat)), y1 = Math.min(rows - 1, Math.ceil((90 - BBOX.lat0 + FIT_REACH) / dLat));
+  const x0 = Math.floor((BBOX.lon0 - FIT_REACH + 180) / dLon), x1 = Math.ceil((BBOX.lon1 + FIT_REACH + 180) / dLon);
+  let n = 0;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const lat = 90 - (y + .5) * dLat, lon = -180 + (x + .5) * dLon, k = ss(-FIT_FEATHER, 0, regionEdge(lat, lon) + REGION_FADE + FIT_PAD);
+    if (k <= 0) continue;
+    let sum = 0;
+    for (let b = 0; b < K; b++) for (let a = 0; a < K; a++) sum += regionAt(lat + ((b + .5) / K - .5) * dLat, lon + ((a + .5) / K - .5) * dLon);
+    const o = y * w + ((x % w) + w) % w;
+    h[o] = Math.round(h[o] + (sum / (K * K) - h[o]) * k); n++;
+  }
+  return n;
 }
 // The heights of the polygon and of the world as one: (lat, lon) → m. Inside the polygon regionAt() answers alone;
 // beyond it the world map, and over REGION_FADE between them a mix of the two — the rule of heightLod() in glsl.js.

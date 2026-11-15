@@ -190,7 +190,7 @@ test('mountains: relief the height data cannot hold is added to the slope, never
   assert.ok(glsl.includes('vec3 vnoiseD(vec2 p) {'), 'a noise that gives its slope in one call');
   assert.ok(terrain.includes('vec3 ribs(vec2 pk, vec2 d, float f, float w) {') && terrain.includes('ra = sqrt(ta * ta + .03)'), 'ribs and gullies down the fall line; their fold is rounded, or every flank is a flat facet');
   assert.ok(terrain.includes('g += (g - vec2(bE - bC, bN - bC) / (eb * 1000.)) * ((.8 * uCrisp * own * smoothstep(.30, .10, px) - .4 * far) * rg);'), 'near, the forms of the data are sharpened against the land smoothed over 700 m; from afar the small forms are calmed');
-  assert.ok(terrain.includes('nl = max(sun.z + (nl - sun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(textureLod(uBase, bu, 6.).r, 0.)) / 900., -1., 1.) * .25 * far * rg;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
+  assert.ok(terrain.includes('nl = max(uSun.z + (nl - uSun.z) * (1. + .6 * far), 0.) * (1. + depth);') && terrain.includes('depth = clamp((hl - max(textureLod(uBase, bu, 6.).r, 0.)) / 900., -1., 1.) * .25 * far * rg;') && !terrain.includes('light *= 1. + clamp('), 'from afar the light carries the relief: more contrast, darker valley floors, lighter high ground');
   assert.ok(terrain.includes('float slopeD = length(g + gm);'), 'the slope with the added relief');
   assert.ok(/steep = smoothstep\([^;]*slopeD\);/.test(terrain), 'rock goes by the slope of the pixel, with its ribs');
   assert.ok(terrain.includes('float solid = smoothstep(.55, 1.05, slopeD + crest);') && terrain.includes('crest = crest * .25 + rib * .15;'), 'solid rock on walls and crests, scree below them; one number is kept for it');
@@ -221,4 +221,13 @@ test('the size of a pixel does not depend on how the camera is turned: a rock wa
   assert.ok(terrain.includes('uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope))'));
   assert.ok(terrain.includes('steep = smoothstep(.55 + .15 * humid, 1.0 + .12 * humid, slopeD)') && terrain.includes('rockW *= 1. - .18 * humid *'));
   assert.ok(terrain.includes('rockCol *= mix(1.10, .88 + .22 * (.5 + .5 * sin(hl / 38. + rk * 5.))'), 'scree a tenth lighter than the rock, not a third');
+});
+
+test('shadows cast by the relief fade with the height of the camera', () => {
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(terrain.includes('float sh = 1., d = max(e * 2., .4), shK = 1. - smoothstep(.30, 1.10, px);'), 'from 0.3 to 1.1 km a pixel: about 350 to 1300 km of height');
+  assert.ok(terrain.includes('sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.) * shK);') && !terrain.includes('if (shK > 0.)') && !terrain.includes('sh = mix(1., sh, shK)'), 'the fade is a factor inside the loop: under a condition or laid on after it, it cost 30 ms a frame');
+  // one Sun for the frame: the sky dims every place in the finishing pass (sky/globe.js)
+  const main = terrain.slice(terrain.lastIndexOf('void main() {')).replace(/\/\/[^\n]*/g, '');
+  assert.ok(!main.includes('uSunW'), 'the ground does not count the Sun of the place itself');
 });

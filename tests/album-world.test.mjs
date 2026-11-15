@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { BBOX } from '../src/album/geo.js';
-import { WORLD_W, WORLD_H, WARM, WARM_WORLD, ICE_STEP, LAPSE, TREE_WARM, TREE_DRY, encodeWorldClimate, decodeWorldClimate, snowlineOf, treelineOf, worldTreelineOf, SNOW_WARM, SNOW_DRY, SNOW_TROPIC } from '../src/album/ground/climate.js';
-import { WMAP_W, WMAP_H, WMAP_KM, WORLD_LOD0, REGION_FADE, STATE_FADE, regionEdge, regionWeight, decodeWorldHeights, worldAt, joinHeights, raiseIce, capSouth, CAP_LAT } from '../src/album/ground/world.js';
+import { WORLD_W, WORLD_H, WARM, WARM_WORLD, ICE_STEP, LAPSE, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K, encodeWorldClimate, decodeWorldClimate, snowlineOf, treelineOf, worldTreelineOf, SNOW_WARM, SNOW_DRY, SNOW_TROPIC } from '../src/album/ground/climate.js';
+import { WMAP_W, WMAP_H, WMAP_KM, WORLD_LOD0, REGION_FADE, STATE_FADE, FIT_PAD, FIT_FEATHER, FIT_REACH, regionEdge, regionWeight, decodeWorldHeights, worldAt, joinHeights, raiseIce, capSouth, fitWorld, CAP_LAT } from '../src/album/ground/world.js';
 
 const FILE = new URL('../public/assets/album/ground/world.bin.gz', import.meta.url), MAP = new URL('../public/assets/map/height.delta.bin.gz', import.meta.url);
 // (a checkout on Windows may give the files its own line ends)
@@ -71,6 +71,23 @@ test('world heights: the ice sheets are lifted to their surface, and the copied 
   assert.equal(CAP_LAT, 85);
 });
 
+test('world heights: round the polygon the world map says what the polygon says', () => {
+  // a world map of 720 × 360 points (half a degree) at 100 m everywhere; the polygon stands at 900 m
+  const w = 720, rows = 360, h = new Int16Array(w * rows).fill(100), mid = [(BBOX.lat0 + BBOX.lat1) / 2, (BBOX.lon0 + BBOX.lon1) / 2];
+  const n = fitWorld(h, () => 900, w, rows);
+  assert.ok(n > 300, 'the points of the map inside the polygon and a little beyond');
+  assert.equal(worldAt(h, mid[0], mid[1], w, rows), 900, 'inside: the height of the polygon');
+  assert.equal(worldAt(h, BBOX.lat1 + 3, mid[1], w, rows), 100, 'far beyond: the world as it was');
+  assert.equal(worldAt(h, -20, 120, w, rows), 100);
+  // the mean over a cell: a polygon that is a slope gives every point the height at its own middle
+  const s2 = new Int16Array(w * rows); fitWorld(s2, (lat, lon) => (lat - 35) * 1000, w, rows);
+  const lat = 90 - (Math.floor((90 - 40) / .5) + .5) * .5;
+  assert.ok(Math.abs(s2[Math.floor((90 - lat) / .5) * w + Math.floor((mid[1] + 180) / .5)] - (lat - 35) * 1000) < 2);
+  assert.ok(Math.abs(FIT_REACH - (REGION_FADE + FIT_PAD + FIT_FEATHER)) < 1e-12 && FIT_REACH < .29, 'the fit stays inside what the heights of the polygon cover beyond its border');
+  const data = read('../src/album/data.js');
+  assert.ok(data.includes('if (world) { fitWorld(world.h, regionAt); world.tex = worldHeightTexture(world.h, world.w, world.rows); }'), 'fitted before it becomes a texture');
+});
+
 test('world file: the format keeps every number to a byte', () => {
   const w = 8, h = 4, n = w * h, f = k => Float32Array.from({ length: n }, (_, o) => k(o % w, (o / w) | 0));
   const src = { w, h, lake: f((i, j) => (i === 3 && j === 2 ? 1 : 0)), wet: f((i, j) => (i + j) / 11), warm: f((i, j) => -5 + j * 12 + i), summer: f(i => (i % 2 ? .25 : 1)), ice: f((i, j) => (j === 0 ? 3008 : 0)) };
@@ -99,11 +116,14 @@ test('world rules: the snow line of the lands with a winter and of the tropics, 
   assert.ok(Math.abs(worldTreelineOf(23.6, 1) - treelineOf(23.6, 1)) < 30);
   assert.equal(worldTreelineOf(40.3, 1), (40.3 - TREE_WARM) / LAPSE);
   assert.ok(worldTreelineOf(40.3, 1) - treelineOf(40.3, 1) > 1500, 'Lhasa: 4800 m, not 3100');
-  assert.equal(worldTreelineOf(30, .5), (30 - TREE_WARM) / LAPSE - .5 * TREE_DRY);
+  assert.equal(worldTreelineOf(18, .5), (18 - TREE_WARM) / LAPSE - .5 * TREE_DRY, 'under 2200 m: warmth, less the dryness of the summer');
+  for (const [warm, summer] of [[34, .2], [38, 0], [29.5, .3]]) assert.ok(Math.abs(worldTreelineOf(warm, summer) - treelineOf(warm, summer)) < 1e-6, 'a dry summer: the line of the polygon itself — no belt of forest jumps at its border');
+  assert.ok(worldTreelineOf(32.8, .62) > 2900 && worldTreelineOf(32.8, .62) < 3300, 'Colorado');
   // the shader counts the same
   const terrain = read('../src/album/terrain.js');
   assert.ok(terrain.includes('float worldSnow(float warm, float lat) { return (warm - ${f1(SNOW_WARM)} + ${f1(SNOW_DRY)} * smoothstep(26., 36., warm) + ${f1(SNOW_TROPIC)} * (1. - smoothstep(10., 30., abs(lat)))) / ${LAPSE}; }'));
-  assert.ok(terrain.includes('treeW = (ww - ${f1(TREE_WARM)}) / ${LAPSE} - (1. - cw.a) * ${f1(TREE_DRY)};'));
+  assert.ok(terrain.includes('treeW = (ww - ${f1(TREE_WARM)}) / ${LAPSE};') && terrain.includes('if (treeW > ${f1(TREE_SOFT)}) treeW = ${f1(TREE_SOFT)} + (treeW - ${f1(TREE_SOFT)}) * mix(${TREE_SOFT_K}, 1., smoothstep(.35, .7, cw.a));') && terrain.includes('treeW -= (1. - cw.a) * ${f1(TREE_DRY)};'));
+  assert.ok(TREE_SOFT === 2200 && TREE_SOFT_K === .35);
   assert.ok(terrain.includes('float worldWarm(vec4 cw) { return mix(${f1(WARM_WORLD[0])}, ${f1(WARM_WORLD[1])}, cw.b); }') && terrain.includes('cw.b = clamp((ww - ${f1(WARM[0])}) / ${f1(WARM[1] - WARM[0])}, 0., 1.);'), 'the wider scale of the world is brought onto that of the polygon');
 });
 
@@ -145,20 +165,19 @@ test('world: the ground shader draws the Earth beyond the polygon by the rules o
   const terrain = read('../src/album/terrain.js'), glsl = read('../src/album/glsl.js'), ground = read('../src/album/aspects/ground.js');
   assert.ok(terrain.includes('const VERT = /* glsl */`\n#define ALBUM_WORLD 1\n'), 'the grids of the ground stand on the heights of the whole Earth');
   assert.ok(glsl.includes('#else\n  return mix(-3200., hb, inRegion(ll));\n#endif'), 'whoever does not ask sees deep sea beyond the polygon, as before');
-  assert.ok(terrain.includes('if (rg < 1.) hb = mix(textureLod(tWorld, vec2(ll.y / 360. + .5, .5 - ll.x / 180.), lw).r, hb, rg);'), 'the height of a pixel: one read of the world map');
-  assert.ok(terrain.includes('if (rg < 1.) e = max(e, 4.9 * (1. - rg));'), 'and a slope taken over a whole cell of that map, so that its cells do not show as creased squares');
+  assert.ok(terrain.includes('if (rg < 1.) hb = mix(worldPix(ll, lw), hb, rg);') && terrain.includes('#if ZONE == 3\n  return worldPix(ll, lw);'), 'the height of a pixel');
+  assert.ok(terrain.includes('vec2 sz = vec2(textureSize(tWorld, 0)), t = uv * sz - .5, f = fract(t), i = t - f;') && !terrain.includes('e = max(e, 4.9'), 'the world map is joined as a smooth surface below its own size — in the variants that draw the world');
+  assert.ok(terrain.includes('else if (p.h < 0.) p.h = min(p.h, -14.5 * (1. - rgW));'), 'the least depth of the sea is reached evenly across the border');
   assert.ok(terrain.includes('clim = mix(cw, clim, rg);') && terrain.includes('if (rg < 1.) gTreeline = mix(treeW, gTreeline, rg);') && terrain.includes('if (rgS < 1.) snowline = mix(worldSnow(worldWarm(worldClimate(ll)), lat), snowline, rgS);'), 'climate, tree line and snow line');
   assert.ok(terrain.includes('float snowline = 2980. - (lat - 37.) * 55., rgS = REGION(ll);'), 'the snow line of the polygon is as the owner approved it');
   assert.ok(terrain.includes('p.cB *= rs; p.cC *= rs;') && terrain.includes('p.cA = mix(vec4(1., clamp(.06 + .82 * mont + .5 * smoothstep(.56, .36, wet) * (1. - mont), 0., 1.)'), 'no chunks: the natural state');
-  assert.ok(terrain.includes('if (rg < 1.) g *= 1. + 2. * (1. - rg);') && terrain.includes('gm += (fa.yz * (-.35 * ta / ra) + fb.yz * (-.31 * tb / rb * fine)) * sw;'), 'the coarse heights of the world: a steeper slope and ridges by rule');
-  assert.ok(terrain.includes('if (rg < 1.) sun = normalize(mix(vec3(dot(uSunW, east), dot(uSunW, north), dot(uSunW, up)), uSun, rg));'), 'the Sun of the place itself');
+  assert.ok(terrain.includes('if (rg < 1.) g *= 1. + 2. * (1. - rg);') && terrain.includes('gm += ((fa.yz * RA) * (-.175 * ta / ra) + (fb.yz * RB) * (-.14 * tb / rb) + (fd.yz * RC) * (-.31 * td / rd * fine)) * sw;'), 'the coarse heights of the world: a steeper slope and ridges by rule');
   assert.ok(terrain.includes('lakeA = smoothstep(.5 - lw2, .5 + lw2, worldClimate(ll).r) * (1. - rgW);') && terrain.includes('if (h0 < 25. || lakeA > 0.) sea = aspWater(p);'), 'the lakes of the world');
   assert.ok(terrain.includes('worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) - .5) * 500.'), 'the ice of the polar seas');
   assert.ok(ground.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk, float wild) {') && terrain.includes('conc, pk, 1. - rg);'), 'the bare ground is told that it lies beyond the polygon');
   // nothing of the world is carried through the aspects: how far inside the polygon a pixel lies is counted again where it is needed
   const main = terrain.slice(terrain.lastIndexOf('void main() {')), after = main.slice(main.indexOf('aspForest(p, L);'));
   assert.ok(!/[^a-zA-Z]rg[^a-zA-Z]/.test(after.replace(/\/\/[^\n]*/g, '')), 'rg is not used after the aspects');
-  assert.ok(!/[^a-zA-Z.]sun\./.test(after.replace(/\/\/[^\n]*/g, '')), 'nor is the Sun of the place');
   // the grids: a level that would reach a pole is not drawn, the globe draws the rest by the same program
   assert.ok(terrain.includes('shown = shown && (!fine || fine.half < 2600) && Math.abs(lat) + half / KM_PER_DEG < POLE_LAT;'));
   assert.ok(terrain.includes('this.globes = grids(ggeo, { uCentre: { value: new Vector2(0, 0) }, uCell: { value: KM_PER_DEG }'), 'one more «level»: no more programs to compile');
@@ -176,6 +195,7 @@ test('world: three variants of the ground shader, and the polygon keeps the one 
   const main = terrain.slice(terrain.lastIndexOf('void main() {'), terrain.indexOf('// The numbers written as the edges of smoothstep()')).replace(/\/\/[^\n]*/g, '');
   assert.ok(!main.includes('inRegion(') && !main.includes('regionEdge('), 'the shader asks REGION() and STATE() only: inside the polygon and beyond it they are numbers, and the rules of the other side fall out when it is compiled');
   assert.equal(main.split('REGION(ll)').length - 1, 3, 'at the top, at the snow and at the lakes: never carried through the aspects');
+  assert.ok(terrain.includes('cw.r = max(worldLod(ll, ${(WORLD_LOD0 + 2).toFixed(2)}), 0.) / 4096.; clim = mix(cw, clim, rg);'), 'the country round a place beyond the polygon: the world map smoothed over 20 km');
   assert.ok(main.includes('if (rsW < 1.) p.cB = mix(vec4(0., 0., 0., .30 + .13 * smoothstep(200., 3000., -h0)), p.cB, rsW);'), 'the sea beyond the chunks is not becalmed');
   // inside the polygon heightLod() is the polygon's own, beyond it the world's alone
   assert.ok(glsl.includes('#if defined(ALBUM_WORLD) && ALBUM_WORLD == 2\n  return worldLod(ll, lod);\n#else') && glsl.includes('#if defined(ALBUM_WORLD) && ALBUM_WORLD == 1\n  float rg = inRegion(ll);'));

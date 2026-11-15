@@ -148,10 +148,12 @@ export function yearAt(lat, lon, h = 0) { const c = climateAt(lat, lon); return 
 export const TREE_WARM = 9.5, TREE_SOFT = 2200, TREE_SOFT_K = .35, TREE_DRY = 1200;
 export const treelineOf = (warm, summer = 1) => { const t = (warm - TREE_WARM) / LAPSE; return (t < TREE_SOFT ? t : TREE_SOFT + (t - TREE_SOFT) * TREE_SOFT_K) - (1 - summer) * TREE_DRY; };
 export function treelineAt(lat, lon) { const c = climateAt(lat, lon); return c ? treelineOf(c[2], c[1]) : 2150; }
-// Beyond the polygon the line goes by warmth alone, lower for a dry summer (summer: no greener than the year is wet,
-// as the shader takes it): the slow rise above TREE_SOFT is the rule of the sierras of Spain, and on the high lands
-// of the world it left Tibet, the Altiplano and the Rockies bare from 3800 m.
-export const worldTreelineOf = (warm, summer = 1) => (warm - TREE_WARM) / LAPSE - (1 - summer) * TREE_DRY;
+// Beyond the polygon (summer: no greener than the year is wet, as the shader takes it). The slow rise above TREE_SOFT
+// is the rule of the hot dry sierras; on the high lands of the world with a green summer it left Tibet, the
+// Altiplano and the Rockies bare from 3800 m. So it is kept where the summer is dry (under .35: the Maghreb, Iran —
+// there this is treelineOf() itself, and the forest belts do not jump at the border of the polygon) and gone where
+// it is green (from .7): there the line goes by warmth alone.
+export const worldTreelineOf = (warm, summer = 1) => { const t = (warm - TREE_WARM) / LAPSE; return (t < TREE_SOFT ? t : TREE_SOFT + (t - TREE_SOFT) * (TREE_SOFT_K + (1 - TREE_SOFT_K) * ss(.35, .7, summer))) - (1 - summer) * TREE_DRY; };
 
 // ---- the climate as the shaders read it: one picture of n × n texels over the square of the chunks, 4 bytes each —
 // mean height of the land around / 4096 m (counted here, from the heights of the album), wet, warm, summer
