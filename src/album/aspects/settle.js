@@ -56,7 +56,7 @@ vec3 setRoofCol(float cls, vec2 fl, float turn, vec4 rnd, float atl, float day, 
     vec2 hq = fl * (cls < 2.5 ? 2. : 1.), hf = abs(fract(hq) - .5);
     float one = hash21(floor(hq) + 7. + rnd.z * 57.);
     if (cls < 2.5) court = clamp((.2 - max(hf.x, hf.y)) / .07, 0., 1.) * step(.5, one);
-    return settleMat(1, 2., fract(rnd.z * 5.3 + one * .45)) * (.9 + .18 * one);
+    return settleMat(1, 2., fract(rnd.z + one * .16)) * (.92 + .14 * one);          // (a block is mostly of one tone, as its block of houses is: layers/towns.js)
   }
   if (cls < 1.5) { vec2 o = abs(fl.x) > abs(fl.y) ? vec2(sign(fl.x), 0.) : vec2(0., sign(fl.y)); n2 = o * (mx > .72 ? 1. : -1.); court = 1. - smoothstep(.40, .47, mx); }
   else if (cls < 2.5) n2 = vec2(0., sin(fl.y * 6.2832) > 0. ? 1. : -1.);

@@ -43,7 +43,7 @@ test('settle shapes: twenty-nine kinds of a few triangles each, all in one small
     const [a, b, c] = t.p, u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
     const g = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
     assert.ok(g[0] * t.n[0] + g[1] * t.n[1] + g[2] * t.n[2] > 0, `${KINDS[k]}: a face is wound against its normal`);
-    assert.ok(Math.abs(Math.hypot(...t.n) - 1) < 1e-6 && t.mat >= 0 && t.mat <= 10);
+    assert.ok(Math.abs(Math.hypot(...t.n) - 1) < 1e-6 && t.mat >= 0 && t.mat <= 11);
   }
   // heights are real against the plan: nothing but towers and sails rises above a quarter of a block
   for (const name of ['quarter', 'quarterU', 'quarterL', 'rows', 'lanes', 'terrace', 'cluster', 'farm', 'villa', 'house', 'market', 'site', 'riad', 'medina', 'dar', 'hawsh', 'douar']) assert.ok(Math.max(...s.shapes[KIND[name]].t.flatMap(t => t.p.map(p => p[2]))) <= .2, name);
@@ -55,7 +55,7 @@ test('settle rules: real sizes, one hash and one rule for the plan and for the s
   assert.equal(seen.size, 64, 'the hash fills its range'); assert.ok(Math.abs(sum / 6400 - .5) < .02);
   assert.equal(cellHash(3, -5, 1234, 2), cellHash(3, -5, 1234, 2)); assert.notEqual(cellHash(3, -5, 1234, 2), cellHash(3, -5, 1234, 3));
   for (const d of [`#define SET_RMAX ${RMAX.toFixed(4)}`, `#define SET_GN ${GN}`, `#define SET_GK ${GK.toFixed(1)}`, 'float setHash(ivec2 id, int k, int salt)', 'float setWob(vec2 pk)', 'vec2 setBend(vec2 q, float th)', 'float setCell(']) assert.ok(RULES_GLSL.includes(d), d);
-  assert.ok(PALETTE_GLSL.includes('vec3 settleMat(int m, float atl, float t)')); assert.equal(Object.keys(MAT).length, 11);
+  assert.ok(PALETTE_GLSL.includes('vec3 settleMat(int m, float atl, float t)')); assert.equal(Object.keys(MAT).length, 12);
   // one to one: a block with its street is 85 m at any camera height; the knob alone changes it
   assert.equal(CELL, .085); assert.equal(cellSize(20), cellSize(500)); assert.equal(cellSize(20, 2), CELL * 2);
   // a radius survives its byte, finely for small settlements
@@ -265,6 +265,8 @@ test('settle Maghreb: its own manner of building — flat roofs, courts within, 
   clear();
   const g = settle.glsl;
   for (const d of ['(code - 110) / SET_CULS', 'mod(ca - 110., float(SET_CULS)) + 1.', 'atlF = cuF > 1.5 && cuF < 2.5 ? 1. : 0.', 'float atl = cul > 1.5 && cul < 2.5 ? 1. : 0., mag = cul > 2.5 ? 1. : 0.;', 'setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court)', 'return settleMat(1, 2.,']) assert.ok(g.includes(d), d);
+  // green glazed tile is a material of its own, and only the mosque is roofed with it: a market of the Maghreb is not green
+  { const sh = buildShapes().shapes; assert.ok(sh[KIND.mosque].t.some(t => t.mat === MAT.glazed) && sh.every((s, i) => i === KIND.mosque || !s.t.some(t => t.mat === MAT.glazed))); assert.ok(PALETTE_GLSL.includes('if (m == 11) return')); }
   // the colours: a list of its own for roofs, walls, stone and yards; timber, cloth, hay and boats are everybody's
   assert.ok(PALETTE_GLSL.includes('vec3 settleMag(int m, float t)') && PALETTE_GLSL.includes('if (atl > 1.5) { if (m < 4 || m == 8 || m == 10) return settleMag(m, t); atl = 0.; }'));
 });

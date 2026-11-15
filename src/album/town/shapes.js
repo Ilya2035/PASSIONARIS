@@ -278,8 +278,8 @@ const DEFS = [
     .box(-.5, .3, -.3, .5, .13, { z0: .07, v: 1 })],
   // мечеть: naves side by side under tiled ridges, a walled court before them, a square minaret with its lantern
   ['mosque', 'Мечеть', () => S()
-    .bar(-.3, -.5, -.02, .12, .1, { rise: .035, wall: MAT.stone, v: 0 })
-    .bar(-.02, -.5, .26, .12, .1, { rise: .035, wall: MAT.stone, sides: 'b', v: 0 })
+    .bar(-.3, -.5, -.02, .12, .1, { rise: .035, roof: MAT.glazed, wall: MAT.stone, v: 0 })
+    .bar(-.02, -.5, .26, .12, .1, { rise: .035, roof: MAT.glazed, wall: MAT.stone, sides: 'b', v: 0 })
     .box(-.3, .12, .26, .5, .055, { side: MAT.stone, faces: 'new', lid: false })
     .box(.26, .2, .5, .44, .3, { side: MAT.stone, v: 1 })
     .box(.32, .26, .44, .38, .37, { z0: .3, side: MAT.stone, v: 1 })],

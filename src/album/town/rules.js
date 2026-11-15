@@ -388,12 +388,14 @@ float setCell(ivec2 id, vec2 site, vec2 sh, float r, float cs, float sn, float c
 // before light. m: 0 pitched roof · 1 flat roof · 2 wall · 3 dressed stone · 4 timber · 5 cloth · 6 hay and sand ·
 // 7 dark opening · 8 yard wall · 9 boat · 10 the plot of a yard among the fields. atl: 0 Mediterranean (tile, whitewash)
 // .. 1 Atlantic (slate, thatch, granite) · 2 the Maghreb (flat roofs under lime and clay, whitewashed and earthen
-// walls, rammed earth; green glazed tile on the few pitched roofs — a mosque)
-export const MAT = { roof: 0, flat: 1, wall: 2, stone: 3, timber: 4, cloth: 5, hay: 6, dark: 7, fence: 8, hull: 9, plot: 10 };
+// walls, rammed earth; green glazed tile on a mosque)
+// (11 glazed tile: the green roofs of a mosque — the same in every manner)
+export const MAT = { roof: 0, flat: 1, wall: 2, stone: 3, timber: 4, cloth: 5, hay: 6, dark: 7, fence: 8, hull: 9, plot: 10, glazed: 11 };
 export const PALETTE_GLSL = /* glsl */`
 vec3 settleMag(int m, float t) {
-  if (m == 0) return mix(vec3(.27, .44, .35), vec3(.37, .50, .38), t);
-  if (m == 1) return mix(mix(vec3(.81, .76, .67), vec3(.72, .63, .51), smoothstep(.2, .75, t)), vec3(.88, .85, .79), step(.84, t));
+  if (m == 0) return mix(vec3(.73, .53, .40), vec3(.65, .50, .40), t);                         // the tile of the hill villages, paler than Spain's
+  // a flat roof: whitewash, lime gone grey and cream, bare clay — a town is mostly white, a house here and there of earth
+  if (m == 1) return t < .5 ? mix(vec3(.84, .81, .75), vec3(.78, .74, .66), t * 2.) : mix(vec3(.76, .69, .58), vec3(.66, .54, .41), smoothstep(.5, .95, t));
   if (m == 2) return mix(vec3(.87, .83, .75), vec3(.76, .62, .47), smoothstep(.5, .7, t)) * (.95 + .08 * fract(t * 5.));
   if (m == 3) return vec3(.74, .61, .45) * (.94 + .1 * t);
   if (m == 8) return vec3(.69, .58, .44);
@@ -401,6 +403,7 @@ vec3 settleMag(int m, float t) {
   return (bed < .28 ? vec3(.49, .52, .30) : bed < .6 ? vec3(.70, .62, .47) : vec3(.64, .55, .41)) * (.95 + .08 * fract(t * 7.));
 }
 vec3 settleMat(int m, float atl, float t) {
+  if (m == 11) return mix(vec3(.27, .44, .35), vec3(.37, .50, .38), t);                       // green glazed tile
   if (atl > 1.5) { if (m < 4 || m == 8 || m == 10) return settleMag(m, t); atl = 0.; }       // (timber, cloth, hay and boats are the same everywhere)
   if (m == 0) {
     vec3 tile = mix(vec3(.77, .51, .36), vec3(.65, .45, .34), smoothstep(.1, .7, t));        // new tile .. weathered
