@@ -43,6 +43,8 @@ test('swamp rules: the numbers on the CPU are the numbers of the shader', () => 
   for (const s of ['ss(3, 8, h)', 'ss(11.5, 9,', 'ss(.56, .70, wet)', 'ss(.58, .70, wet)', '17.5 - (lat - 38) * .75 - h * .0062']) assert.ok(js.includes(s), `CPU rule: ${s}`);
   for (const f of ['vec4 swampKind(vec2 ll, float hs, float wet)', 'float swampDepth(', 'float swampTreeless(float s, vec2 pk, vec2 ll, float wet, float n2, float n3)', 'float swampTide(vec2 ll)']) assert.ok(SWAMP_RULES.includes(f), f);
   assert.ok(!/uniform|dFdx|fwidth|texDetail/.test(SWAMP_RULES), 'the shared rules need nothing but COMMON: a vertex shader can use them');
+  // what the settlements call from the vertex shader of their yards (layers/towns.js, v0.6.140): a contract
+  for (const f of ['float swampHeight(vec2 ll)', 'float swampSlope(vec2 ll, float hs)', 'float swampField(vec2 pk, float n2, float n3, float px)', 'float swampDepth(float s, float f, vec2 ll, float hs, float slope, float bog)']) assert.ok(SWAMP_RULES.includes(f), `the settlements call it: ${f}`);
 });
 
 test('swamp aspect: the contract function, its uniforms, knobs and pages', () => {

@@ -138,6 +138,10 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
 
 // ---- rules in GLSL, shared with anything that must know what a swamp is at a point.
 // They need COMMON of glsl.js (heightLod, vnoise) and nothing else: no uniforms, no screen derivatives.
+// Used outside this file: the forest (swampTreeless) and, since v0.6.140, the vertex shader of the yards of the
+// settlements (layers/towns.js: swampHeight, swampSlope, swampField, swampDepth — a yard is not drawn where the
+// swamp lies). Their signatures are a contract: with another signature that shader does not compile and no house is
+// drawn at all. Change them only together with the settlements, and run acheck.
 export const SWAMP_RULES = /* glsl */`
 // smooth gradient noise, 0..1 (about .5 ± .3): its level lines wander freely, without the square grain of vnoise
 float swampNoise(vec2 p) {
