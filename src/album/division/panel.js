@@ -34,6 +34,10 @@ export const classTitle = s => (s.partOf ? `часть города ${s.partOf}`
 // a pass in words, as the list of the panel writes it: what it is, the road over it, the district beyond
 export const passTitle = q => [q.rank === 0 ? PASS_RANKS[0].title : '', PASS_ROAD[q.kind], q.to ? `в район ${q.to}` : ''].filter(Boolean).join(' · ');
 
+// How far a settlement is from a main road, in words. w: what the roads say of the way (album.roadNet.toMain) —
+// { km } · null: no way can be laid · undefined: the roads have not laid their net yet (nothing is written).
+export const wayTitle = w => (w === undefined ? '' : w === null ? 'пути к главной дороге нет' : !(w.km >= .75) ? 'на главной дороге'
+  : `до главной дороги ${w.km < 9.5 ? w.km.toFixed(1).replace('.', ',') : Math.round(w.km).toLocaleString('ru-RU')} км`);
 export function createPanel(onClose, onGo = null) {
   const box = el('div', 'panel pn district-info');
   if (typeof document !== 'undefined' && !document.getElementById('district-info-css')) document.head.append(Object.assign(document.createElement('style'), { id: 'district-info-css', textContent: CSS }));
@@ -57,12 +61,14 @@ export function createPanel(onClose, onGo = null) {
     g.append(el('span'), el('span', 'hd', 'Название и класс'), el('span', 'hd r', 'Жителей'), el('span', 'hd r', 'Площадь'));
     for (const s of all) {
       const mk = el('span', 'mk'); mk.innerHTML = s.partOf ? '' : markSvg(s.cls, s.rank, false);            // (the mark is this file's own markup; the name below is text)
-      const nm = el('span', s.town ? 'nm tw' : 'nm'); nm.append(el('span', null, s.name || 'Без названия'), el('small', null, classTitle(s)));
-      nm.title = `${s.name || 'Без названия'} — ${classTitle(s)}. Щелчок: показать на карте`;
+      const way = s.partOf ? '' : wayTitle(s.way), under = way ? `${classTitle(s)} · ${way}` : classTitle(s);
+      // (a row that says the way to the road is two lines high, like that of the town: the way must not be cut short)
+      const nm = el('span', s.town || way ? 'nm tw' : 'nm'); nm.append(el('span', null, s.name || 'Без названия'), el('small', null, under));
+      nm.title = `${s.name || 'Без названия'} — ${under}. Щелчок: показать на карте`;
       if (s.lat !== undefined) nm.onclick = e => { e.stopPropagation(); go(s); };
       g.append(mk, nm, el('span', 'r', s.partOf ? '' : num(s.people)), el('span', 'r', s.partOf ? '' : `${num(s.areaKm2)} км²`));
     }
-    towns.append(g, el('div', 'S', 'Площадь — число чанков по 1 км², на которых стоят дома поселения.'));
+    towns.append(g, el('div', 'S', `Площадь — число чанков по 1 км², на которых стоят дома поселения.${all.some(s => s.way !== undefined) ? ' Путь до главной дороги — как идёт пешеход: по земле до ближайшей тропы или дороги и дальше по ним.' : ''}`));
   }
   // the passes on the border of the district: mark, name, the road and the district beyond, height
   function passes(st) {

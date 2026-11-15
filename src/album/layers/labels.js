@@ -1,20 +1,24 @@
-// Marks and names of settlements over the map, by the height of the camera. The owner, 13.11.2026: «совсем далеко —
-// ничего; около 500 км — точки самых крупных городов и столиц; 200 км — города поменьше; 100 км — ещё меньше; ближе —
-// отметки разной формы у города и деревни. Деревни пропадают первыми, столицы видны дольше всех»; names: «на 20 км их
-// не показывать — там смотрят на сам город; показывать около 50 км, дальше убирать».
+// Marks and names of settlements over the map, by the height of the camera. The owner's ladder, 15.11.2026: «с 70
+// километров у нас видны деревушки, уже точечки… с 200 километров у нас видны малые города, города видны с тысячи. Как
+// маленькие точки… с 25 километров и выше уже видно точечку, потом название»; «Столица должна быть видна с 2000
+// километров. Выше нет… Просто красная точка… Крупная. И потом приближаем, и потихонечку там подпись „Мадрид“».
 //
-// • How long a settlement stays marked is told by its RANK (town/rules.js, RANKS): a village — to 45 km, the town of a
-//   district — to 110 km, a greater town — to 230 km, the chief town of a province and the greatest cities — to
-//   560 km, the chief town of a land — to 760 km, of a region — to 900 km. Higher than that the map carries no marks.
-// • From high up a mark is a DOT, the larger the higher the rank; below SHAPES_TO km it is a SHAPE that tells the
-//   class of the settlement (rules.js, CLASSES): circle — village, triangle — small town, diamond — middling town,
-//   square — city, pentagon — megapolis. A chief town has a dark heart; that of a land or a region a ring as well.
-// • A mark stands while the settlement itself is too small on the screen to be read; when its houses can be seen the
-//   mark fades. So from 20 km there is neither mark nor name: there one looks at the town itself.
-// • Names come in between NAME_FROM km and go at the height of their rank (RANKS[].name): about 50 km all of them
-//   stand, from 200 km none. The knob «Названия столиц издалека» keeps the names of the chief towns while they are marked.
-// • The town of a district is marked even while it has no name (a made place: in the mountains most are): its mark
-//   stands alone. A village without a name is not marked.
+// • How long a settlement stays marked is told by its RANK (town/rules.js, RANKS): a village — to 100 km, the town of
+//   a district — to 150 km, a greater town — to 200 km, the chief town of a province or of a land and the greatest
+//   cities — to 1000 km, the capital (the chief town of a region, while there are no countries) — to 2000 km. Higher
+//   than that the map carries no marks. Below MARK_FROM km (25) there is neither mark nor name: there one looks at
+//   the settlement itself.
+// • From high up a mark is a DOT, the larger the higher the rank; from DOTS_SMALL_FROM km up the dots of the towns
+//   are small ones. Below SHAPES_TO km a mark is a SHAPE that tells the class of the settlement (rules.js, CLASSES):
+//   circle — village, triangle — small town, diamond — middling town, square — city, pentagon — megapolis. A chief
+//   town has a dark heart; that of a land a ring as well. The capital is red and large at every height.
+// • A mark stands while the settlement itself is too small on the screen to be read: over a town whose houses fill
+//   the middle of the picture no mark stands.
+// • Names come in as the camera comes down, the higher the rank the earlier (RANKS[].name): the capital from 1250 km,
+//   the chief town of a land from 520, of a province from 320, a town from 110, the town of a district from 75, a
+//   village from 45; all go between NAME_FROM km. The knob «Названия столиц издалека» keeps the names of the chief
+//   towns while they are marked.
+// • Every settlement is marked, with a name or without (a made place has none: its dot stands alone).
 // • Nothing overlaps: the greater settlement takes the room first; a mark that would touch another mark or a name is
 //   left out, and a name that has no room is left out while its mark stays.
 // • Under a tilted camera the ground toward the horizon is far away: a settlement more than FAR times farther from
@@ -30,16 +34,18 @@
 // says what that size is.
 import { toWorld, R as EARTH } from '../geo.js';
 import { llOf } from '../chunks.js';
-import { CLASSES, RANKS, NAME_FROM, SHAPES_TO, CELL, classOf, PASS_RANKS, passRank, passText } from '../town/rules.js';
+import { CLASSES, RANKS, NAME_FROM, SHAPES_TO, MARK_FROM, DOTS_SMALL_FROM, CAPITAL_RANK, classOf, PASS_RANKS, passRank, passText } from '../town/rules.js';
 import { createScaleBar, kmPerPixel } from '../town/scale.js';
 
 export const MARK_TO = RANKS.map(r => r.to);                        // the greatest camera height, km, from which a rank is still marked
 const SIZE = [7, 11, 12, 12, 15];                                   // px across: the shape of a class
-const DOT = [5, 7.5, 8.5, 9.5, 11, 13];                             // px across: the dot of a rank
+const DOT = [5, 7.5, 8.5, 9.5, 11, 16];                             // px across: the dot of a rank
+const DOT_SMALL = [5, 6, 6, 6, 7.5, 15];                            // …and from DOTS_SMALL_FROM km up: the towns are small dots, the capital stays large
 // The town of a district that is still of village size keeps the circle of its class, drawn larger than a village:
 // it is the town of its district and must be found on a dark mountain forest from 60 km and more.
 const shapeSize = (cls, rank) => SIZE[cls] + (cls === 0 && rank >= 1 ? 3.5 : 0);
 const FILL = '#fff8e6', INK = '#15100a';                            // working colours: a pale mark with a dark edge reads on any land
+const RED = '#e02a1c';                                              // the capital (the owner: «просто красная точка… крупная»)
 const SHAPES = {
   circle: s => `<circle r="${s / 2 - 1}"/>`,
   triangle: s => `<polygon points="0,${-s * .56} ${s * .54},${s * .4} ${-s * .54},${s * .4}"/>`,
@@ -47,14 +53,18 @@ const SHAPES = {
   square: s => `<rect x="${-s * .44}" y="${-s * .44}" width="${s * .88}" height="${s * .88}"/>`,
   pentagon: s => `<polygon points="${[0, 1, 2, 3, 4].map(i => { const a = -Math.PI / 2 + i * Math.PI * .4; return `${(Math.cos(a) * s * .56).toFixed(2)},${(Math.sin(a) * s * .56).toFixed(2)}`; }).join(' ')}"/>`,
 };
+// far: 0 (or false) the shape of the class · 1 (or true) the dot of the rank · 2 its small dot, from very high up
+const sizeOf = (cls, rank, far) => (+far > 1 ? DOT_SMALL[rank] : far ? DOT[rank] : shapeSize(cls, rank));
+const ringed = (rank, far) => rank === 4 && +far < 2;               // the chief town of a land; from very high up it is a dot like the rest
 // how wide a mark is on the screen, px (with its ring)
-export const markSize = (cls, rank, far) => (far ? DOT[rank] : shapeSize(cls, rank)) + (rank >= 4 ? 9 : 0);
-// The mark of a settlement of class cls and rank `rank`: its shape, or (far) its dot.
+export const markSize = (cls, rank, far) => sizeOf(cls, rank, far) + (ringed(rank, far) ? 9 : 0);
+// The mark of a settlement of class cls and rank `rank`: its shape, or (far) its dot. The capital is red, without
+// heart or ring: a large red dot.
 export function markSvg(cls, rank = cls > 0 ? 2 : 0, far = false) {
-  const s = far ? DOT[rank] : shapeSize(cls, rank), body = far ? `<circle r="${(s / 2).toFixed(1)}"/>` : SHAPES[CLASSES[cls].mark](s);
-  const heart = rank >= 3 ? `<circle r="${far ? 1.4 : 1.7}" fill="${INK}" stroke="none"/>` : '';
-  const rr = (s / 2 + 3.2).toFixed(1), ring = rank >= 4 ? `<circle r="${rr}" fill="none" stroke="${INK}" stroke-width="3.2"/><circle r="${rr}" fill="none" stroke="${FILL}" stroke-width="1.4"/>` : '';
-  return `<svg width="20" height="20" viewBox="-10 -10 20 20" style="flex:none;overflow:visible;transition:opacity .3s"><g fill="${FILL}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round">${ring}${body}${heart}</g></svg>`;
+  const s = sizeOf(cls, rank, far), capital = rank >= CAPITAL_RANK, body = far ? `<circle r="${(s / 2).toFixed(1)}"/>` : SHAPES[CLASSES[cls].mark](s);
+  const heart = rank >= 3 && !capital ? `<circle r="${far ? 1.4 : 1.7}" fill="${INK}" stroke="none"/>` : '';
+  const rr = (s / 2 + 3.2).toFixed(1), ring = ringed(rank, far) ? `<circle r="${rr}" fill="none" stroke="${INK}" stroke-width="3.2"/><circle r="${rr}" fill="none" stroke="${FILL}" stroke-width="1.4"/>` : '';
+  return `<svg width="20" height="20" viewBox="-10 -10 20 20" style="flex:none;overflow:visible;transition:opacity .3s"><g fill="${capital ? RED : FILL}" stroke="${INK}" stroke-width="${capital ? 2 : 1.6}" stroke-linejoin="round">${ring}${body}${heart}</g></svg>`;
 }
 // The mark of a pass: two arcs back to back. A great pass (rank 0) is drawn a little larger and heavier.
 export const passSize = (rank, far) => (far ? 9 : 12) + (rank === 0 ? 2 : 0);
@@ -68,10 +78,10 @@ export function passSvg(rank = 2, far = false) {
 const fade = (h, to) => Math.max(0, Math.min(1, (to - h) / (to * .08)));
 const rise = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // What is shown at camera height h of a settlement of this rank, before anything is known of the screen:
-// { mark: 0..1, name: 0..1, far: a dot instead of a shape }. farNames: the names of the chief towns stay with their marks.
+// { mark: 0..1, name: 0..1, far: 0 a shape · 1 a dot · 2 a small dot }. farNames: the names of the chief towns stay with their marks.
 export function shownAt(rank, h, farNames = false) {
-  const R = RANKS[rank], mark = fade(h, R.to);
-  return { mark, name: mark * rise(NAME_FROM[0], NAME_FROM[1], h) * (farNames && rank >= 3 ? 1 : fade(h, R.name)), far: h > SHAPES_TO };
+  const R = RANKS[rank], mark = fade(h, R.to) * rise(MARK_FROM[0], MARK_FROM[1], h);
+  return { mark, name: mark * rise(NAME_FROM[0], NAME_FROM[1], h) * (farNames && rank >= 3 ? 1 : fade(h, R.name)), far: h > DOTS_SMALL_FROM ? 2 : h > SHAPES_TO ? 1 : 0 };
 }
 // What is shown of a pass of this rank (PASS_RANKS) at camera height h: { mark, name: 0..1, far: the smaller mark }
 export function passShownAt(rank, h) {
@@ -100,12 +110,12 @@ export function declutter(list) {
 
 export default async function init(album) {
   const box = document.createElement('div'); box.className = 'map-labels'; document.body.insertBefore(box, document.getElementById('ui'));
-  const v = toWorld(0, 0), p = album.params, byIndex = new Map(), byPass = new Map(); let items = [], tick = 0, seen = -2, passSeen;
+  const v = toWorld(0, 0), p = album.params, byIndex = new Map(), byPass = new Map(); let items = [], tick = 0, seen = -2, passSeen, made = 0;
   const sig = (it, far) => `${it.pass ? 'p' : it.cls}|${it.rank}|${far}|${it.name}`;
   // (there are thousands of villages: the mark and the name of a place are made when it is first shown)
   const dress = it => {
-    if (!it.el) { it.el = document.createElement('div'); it.el.className = 'ml'; it.el.style.cssText = 'margin:-10px 0 0 -10px;height:20px;gap:0'; box.appendChild(it.el); }
-    const small = 'font-size:var(--fs-s);letter-spacing:.04em;', style = it.pass ? (it.rank ? small : '') : it.rank === 0 ? small : it.rank >= 4 ? 'font-size:1.14em;' : '';
+    if (!it.el) { it.el = document.createElement('div'); it.el.className = 'ml'; it.el.style.cssText = 'margin:-10px 0 0 -10px;height:20px;gap:0'; box.appendChild(it.el); made++; }
+    const small = 'font-size:var(--fs-s);letter-spacing:.04em;', style = it.pass ? (it.rank ? small : '') : it.rank === 0 ? small : it.rank >= CAPITAL_RANK ? 'font-size:1.3em;' : it.rank >= 4 ? 'font-size:1.14em;' : '';
     it.el.innerHTML = `${it.pass ? passSvg(it.rank, it.far) : markSvg(it.cls, it.rank, it.far)}<span style="${style}transition:opacity .3s"></span>`; it.svg = it.el.firstChild; it.span = it.el.lastChild;
     it.span.textContent = it.name;                                  // (a name is text, never markup)
     it.wide = it.span.offsetWidth || it.wide; it.dressed = sig(it, it.far);
@@ -130,14 +140,13 @@ export default async function init(album) {
     const marks = towns?.marks?.() || album.data.vectors.places.map((pl, index) => { const cls = classOf(pl.pop / 60); return { index, name: pl.name, cls, rank: cls > 0 ? 2 : 1, town: true, people: pl.pop / 60, radius: 0, lat: pl.lat, lon: pl.lon }; });
     const keep = new Set();
     for (const m of marks) {
-      if (!m.name && !(m.rank >= 1)) continue;                      // a village without a name is never marked; the town of a district is, by its mark alone
       let it = byIndex.get(m.index); if (!it) { it = { index: m.index, el: null, shown: false, far: false, wide: 0 }; byIndex.set(m.index, it); }
       keep.add(m.index);
       it.name = m.name; it.cls = m.cls; it.rank = it.pri = m.rank; it.people = m.people; it.r = m.radius; it.lat = m.lat; it.lon = m.lon;
       it.alt = Math.max(0, album.data.base.at(m.lat, m.lon));
       if (!it.wide && m.name) it.wide = 8 + m.name.length * (m.rank ? 8.5 : 7);  // until the name is measured on the page, its length is told from its letters
     }
-    for (const [index, it] of byIndex) if (!keep.has(index)) { it.el?.remove(); byIndex.delete(index); }
+    for (const [index, it] of byIndex) if (!keep.has(index)) { if (it.el) { it.el.remove(); made--; } byIndex.delete(index); }
     order();
   }
   // the greater place takes the room first; a pass has its turn among the settlements (PASS_RANKS[].order), the higher first
@@ -150,10 +159,12 @@ export default async function init(album) {
     const on = !!p.get('labels'), passOn = p.get('passMarks') !== 0, farNames = !!p.get('labelsFar'), h = cam.s.h, w = innerWidth, hh = innerHeight, k = Math.tan(cam.cam.fov * Math.PI / 360) * 2 / hh;
     const reach = Math.max(.6, h * .07), cl = cam.s.lat, co = cam.s.lon;       // degrees around the point the camera looks at: villages farther off are not looked at
     cand.length = rows.length = 0;
+    // (which ranks are marked at all from this height — asked once, not for each of the twenty thousand settlements)
+    const rankOn = RANKS.map((_, r) => shownAt(r, h, farNames).mark > 0), passRankOn = PASS_RANKS.map((_, r) => passOn && passShownAt(r, h).mark > 0);
     for (const it of items) {
       it.want = 0;
       if (!on) continue;
-      if (it.pass ? !passOn || !(passShownAt(it.rank, h).mark > 0) : !(shownAt(it.rank, h, farNames).mark > 0)) continue;
+      if (!(it.pass ? passRankOn : rankOn)[it.rank]) continue;
       if (it.pri <= 0 && !(Math.abs(it.lat - cl) < reach && Math.abs(it.lon - co) < reach * 1.4)) continue;   // (villages and lesser passes)
       toWorld(it.lat, it.lon, it.alt * cam.exag / 1000, v);
       const eye = cam.cam.position, dist = eye.distanceTo(v);
@@ -163,11 +174,10 @@ export default async function init(album) {
       v.project(cam.cam);
       const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * hh - (it.pass ? PASS_LIFT : 0);
       if (!(v.z < 1 && x > 20 && x < w - 20 && y > 20 && y < hh - 20)) continue;
-      // the houses are readable: no mark over them. A settlement of village size is a few houses — the town of a
-      // district may be no more than that: its mark goes as soon as a single house can be told (the owner: the name
-      // «не прикрывает саму деревушку»; from 20 km one looks at the settlement itself)
-      // (a pass has no houses: its mark stands at every height it is shown from)
-      const markA = it.pass ? s.mark : s.mark * Math.max(0, Math.min(1, (20 - rpx) / 8, it.cls ? 1 : (4.5 - CELL / kmPx) / 1.5));
+      // the houses of a town fill the middle of the picture: no mark over them. (A village keeps its dot down to
+      // MARK_FROM km — the owner, 15.11.2026: «с 25 километров и выше уже видно точечку»; below that one looks at the
+      // settlement itself. A pass has no houses: its mark stands at every height it is shown from.)
+      const markA = it.pass ? s.mark : s.mark * Math.max(0, Math.min(1, (20 - rpx) / 8));
       const nameA = it.name ? s.name : 0;
       if (!(markA > 0 || nameA > 0)) continue;
       it.x = x; it.y = y; it.markA = markA; it.nameA = nameA; it.wantFar = s.far;
@@ -187,5 +197,7 @@ export default async function init(album) {
       }
       if (show !== it.shown) { it.shown = show; it.el?.classList.toggle('on', show); }
     }
+    // there are thousands of villages, each marked: the marks of those left far behind are taken off the page
+    if (made > 700 && tick % 240 === 1) for (const it of byIndex.values()) if (it.el && !it.shown && it.rank === 0) { it.el.remove(); it.el = null; it.dressed = ''; made--; }
   } };
 }

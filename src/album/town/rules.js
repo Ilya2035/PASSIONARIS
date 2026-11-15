@@ -65,18 +65,29 @@ export const peopleOf = r => Math.round(Math.PI * r * r * DENSITY);
 // the map from afar; a village has none (the owner: «деревня до 1000 человек не показывается на карте»)
 export const TOWN_R = Math.sqrt(1000 / (Math.PI * DENSITY));
 export const classOf = (people, areaKm2 = 0) => { let c = 0; for (let i = 0; i < CLASSES.length; i++) if (people >= CLASSES[i].people || areaKm2 >= CLASSES[i].area) c = i; return c; };
-// ---- how long a settlement stays marked as the camera rises (the owner, 13.11.2026: «совсем далеко — ничего; около
-// 500 км — точки самых крупных городов и столиц; 200 км — города поменьше; 100 км — ещё меньше; ближе — отметки разной
-// формы у города и деревни. Деревни пропадают первыми, столицы видны дольше всех»). `to`: the greatest camera height,
-// km, from which a settlement of that rank is still marked; `name`: the greatest height its name is written from.
+// ---- how long a settlement stays marked as the camera rises. The owner's ladder of 15.11.2026: «с 70 километров у нас
+// видны деревушки, уже точечки… Со 100 километров точнее, с 200 километров у нас видны малые города, города видны с
+// тысячи. Как маленькие точки. Когда приближаем, уже может название показаться, а потом пропасть, когда при
+// приближении… с 25 километров и выше уже видно точечку, потом название»; «Столица должна быть видна с 2000
+// километров. Выше нет… Просто красная точка, как сейчас. Крупная. И потом приближаем, и потихонечку там подпись
+// „Мадрид“, вот как это в Хойке сделано». (His first ladder, 13.11.2026, was half as high: villages to 45 km, the
+// greatest cities to 900.) `to`: the greatest camera height, km, from which a settlement of that rank is still
+// marked; `name`: the greatest height its name is written from — the higher the rank, the earlier the name comes in
+// as the camera comes down.
+// There are no countries yet: the capital is the chief town of a region (CAPITAL_RANK) — Madrid is one.
 export const RANKS = [
-  { id: 'village', title: 'деревня', to: 45, name: 45 },
-  { id: 'town', title: 'город района', to: 110, name: 75 },
-  { id: 'bigtown', title: 'город', to: 230, name: 110 },
-  { id: 'province', title: 'главный город провинции', to: 560, name: 150 },
-  { id: 'land', title: 'главный город земли', to: 760, name: 180 },
-  { id: 'region', title: 'главный город региона', to: 900, name: 180 },
+  { id: 'village', title: 'деревня', to: 100, name: 45 },
+  { id: 'town', title: 'город района', to: 150, name: 75 },
+  { id: 'bigtown', title: 'город', to: 200, name: 110 },
+  { id: 'province', title: 'главный город провинции', to: 1000, name: 320 },
+  { id: 'land', title: 'главный город земли', to: 1000, name: 520 },
+  { id: 'region', title: 'главный город региона', to: 2000, name: 1250 },
 ];
+export const CAPITAL_RANK = 5;
+// Below these heights, km, a settlement has neither mark nor name: from there one looks at the settlement itself
+// (the owner: «с 25 километров и выше уже видно точечку, потом название»). The mark comes in between the two.
+export const MARK_FROM = [23.5, 26];
+export const DOTS_SMALL_FROM = 420;   // km: from here up the dots of the towns are small ones («как маленькие точки»); the capital keeps its size
 // t: { town (the town of its district; a village is not), cls (CLASSES), capital ('province', 'land', 'region' or nothing) }.
 // The greatest cities (a middling town and more) stay as long as the chief towns of provinces.
 export const rankOf = t => (t.capital === 'region' ? 5 : t.capital === 'land' ? 4 : t.capital === 'province' || (t.town && t.cls >= 2) ? 3 : !t.town ? 0 : t.cls >= 1 ? 2 : 1);

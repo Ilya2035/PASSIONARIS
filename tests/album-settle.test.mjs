@@ -228,7 +228,7 @@ test('settle classes: the mark of a settlement follows its people, as the owner 
   const big = m.towns.find(t => t.index === 0), small = m.towns.find(t => t.index === 1);
   assert.equal(big.cls, 3); assert.equal(big.people, peopleOf(big.R)); assert.equal(small.cls, classOf(small.people));
   const { MARK_TO, markSvg } = await import('../src/album/layers/labels.js');
-  assert.ok(MARK_TO[0] < 60 && MARK_TO.every((h, i) => !i || h > MARK_TO[i - 1]), 'villages are marked only from close by, greater places from higher');
+  assert.ok(MARK_TO[0] <= 100 && MARK_TO.every((h, i) => !i || h >= MARK_TO[i - 1]), 'villages are marked only from close by, greater places from higher');
   for (let c = 0; c < 5; c++) assert.match(markSvg(c), c === 0 ? /<circle/ : c === 3 ? /<rect/ : /<polygon/);
   const ids = settle.pages.map(p => p.id); assert.ok(ids.includes('town-marks') && ids.includes('town-marks-near') && ids.includes('town-districts') && ids.includes('town-districts-map'));
 });
@@ -417,29 +417,42 @@ test('settle towns: one town to a district; towns grown together are one town; a
   assert.equal(builtChunks(big.towns, () => false).owner.size, 0, 'no chunk of water is built up');
 });
 
-test('settle marks: the scheme of the owner by the height of the camera — far nothing, 500 km capitals, 200 km towns, 100 km lesser towns, villages last; names about 50 km', async () => {
-  const { RANKS, rankOf, NAME_FROM, SHAPES_TO } = await import('../src/album/town/rules.js');
+test('settle marks: the ladder of the owner by the height of the camera — the capital from 2000 km, cities from 1000, small towns from 200, villages as dots from 100, nothing below 25; names come in as the camera comes down', async () => {
+  const { RANKS, rankOf, NAME_FROM, SHAPES_TO, MARK_FROM, DOTS_SMALL_FROM, CAPITAL_RANK } = await import('../src/album/town/rules.js');
   const { shownAt, declutter, markSvg, markSize, MARK_TO } = await import('../src/album/layers/labels.js');
   assert.deepEqual(RANKS.map(r => r.id), ['village', 'town', 'bigtown', 'province', 'land', 'region']); assert.deepEqual(MARK_TO, RANKS.map(r => r.to));
   assert.deepEqual([{ cls: 0 }, { town: true, cls: 0 }, { town: true, cls: 1 }, { town: true, cls: 2 }, { town: true, cls: 0, capital: 'province' }, { town: true, cls: 1, capital: 'land' }, { town: true, cls: 2, capital: 'region' }, { cls: 1 }].map(rankOf),
     [0, 1, 2, 3, 3, 4, 5, 0], 'a village first, the town of a district, a greater town, the greatest cities with the chief towns of provinces, of lands, of regions');
   const marked = h => RANKS.map((_, r) => shownAt(r, h).mark > 0), named = h => RANKS.map((_, r) => shownAt(r, h).name > .5);
-  assert.deepEqual(marked(1000), [false, false, false, false, false, false], 'from very far: nothing');
-  assert.deepEqual(marked(500), [false, false, false, true, true, true], 'about 500 km: the greatest cities and the capitals');
-  assert.deepEqual(marked(200), [false, false, true, true, true, true], '200 km: lesser towns');
-  assert.deepEqual(marked(100), [false, true, true, true, true, true], '100 km: lesser still');
-  assert.deepEqual(marked(40), [true, true, true, true, true, true], 'closer: villages too');
-  assert.ok(RANKS.every((r, i) => !i || (r.to > RANKS[i - 1].to && r.name >= RANKS[i - 1].name)), 'villages go first, capitals stay the longest');
-  assert.deepEqual(named(20), [false, false, false, false, false, false], 'from 20 km no names: one looks at the town itself');
-  assert.deepEqual(named(50), [false, true, true, true, true, true]); assert.deepEqual(named(40), [true, true, true, true, true, true], 'about 50 km the names stand');
-  assert.deepEqual(named(200), [false, false, false, false, false, false], 'farther they are gone');
-  assert.ok(NAME_FROM[0] > 20 && NAME_FROM[1] < 45 && RANKS.every(r => r.name <= 180 && r.name <= r.to));
-  assert.deepEqual(RANKS.map((_, r) => shownAt(r, 500, true).name > .5), [false, false, false, true, true, true], 'the knob keeps the names of the chief towns while they are marked');
-  assert.ok(!shownAt(1, 60).far && shownAt(1, 100).far && SHAPES_TO > 50 && SHAPES_TO < 100, 'near — a shape by the class, from 100 km — a dot');
+  assert.deepEqual(marked(2100), [false, false, false, false, false, false], 'higher than 2000 km: nothing');
+  assert.deepEqual(marked(1500), [false, false, false, false, false, true], 'from 2000 km down: the capital alone');
+  assert.deepEqual(marked(900), [false, false, false, true, true, true], 'from 1000 km: the cities');
+  assert.deepEqual(marked(185), [false, false, true, true, true, true], 'from 200 km: small towns');
+  assert.deepEqual(marked(135), [false, true, true, true, true, true], '…and the towns of the districts a little lower');
+  assert.deepEqual(marked(90), [true, true, true, true, true, true], 'from 100 km: villages'); assert.equal(shownAt(0, 90).far, 1, '…as dots');
+  assert.deepEqual(marked(30), [true, true, true, true, true, true]);
+  assert.deepEqual(marked(22), [false, false, false, false, false, false], 'below 25 km neither mark…'); assert.deepEqual(named(22), [false, false, false, false, false, false], '…nor name: one looks at the settlement itself');
+  assert.ok(MARK_FROM[0] >= 20 && MARK_FROM[1] <= 27 && shownAt(0, 27).mark === 1, 'from 25 km and up the dot stands');
+  assert.deepEqual(RANKS.map(r => r.to), [100, 150, 200, 1000, 1000, 2000]); assert.equal(RANKS[CAPITAL_RANK].id, 'region');
+  assert.ok(RANKS.every((r, i) => !i || (r.to >= RANKS[i - 1].to && r.name > RANKS[i - 1].name)), 'villages go first, the capital stays the longest; the higher the rank, the earlier its name');
+  // names come in as the camera comes down: first the capital, then the cities, the towns, the villages
+  assert.deepEqual(named(1000), [false, false, false, false, false, true]); assert.deepEqual(named(450), [false, false, false, false, true, true]);
+  assert.deepEqual(named(280), [false, false, false, true, true, true]); assert.deepEqual(named(100), [false, false, true, true, true, true]);
+  assert.deepEqual(named(70), [false, true, true, true, true, true]); assert.deepEqual(named(40), [true, true, true, true, true, true]);
+  assert.ok(NAME_FROM[0] > 20 && NAME_FROM[1] < 45 && RANKS.every(r => r.name <= r.to));
+  assert.deepEqual(RANKS.map((_, r) => shownAt(r, 900, true).name > .5), [false, false, false, true, true, true], 'the knob keeps the names of the chief towns while they are marked');
+  assert.ok(shownAt(1, 60).far === 0 && shownAt(1, 100).far === 1 && shownAt(3, 600).far === 2 && SHAPES_TO > 50 && SHAPES_TO < 100 && DOTS_SMALL_FROM > 300, 'near — a shape by the class, from 100 km — a dot, from very high — a small dot');
   // the marks: a shape near, a dot far; a chief town has a heart, that of a land a ring too
   assert.match(markSvg(1, 2, false), /<polygon/); assert.doesNotMatch(markSvg(1, 2, true), /<polygon/);
   assert.equal((markSvg(1, 3, true).match(/<circle/g) || []).length, 2); assert.equal((markSvg(1, 4, true).match(/<circle/g) || []).length, 4);
   assert.ok(markSize(0, 5, true) > markSize(0, 3, true) && markSize(0, 3, true) > markSize(0, 1, true), 'the higher the rank, the larger the dot');
+  // from very high the towns are small dots without a ring; the capital is a large red dot at every height, without heart or ring
+  assert.equal((markSvg(1, 4, 2).match(/<circle/g) || []).length, 2); assert.ok(markSize(1, 3, 2) < markSize(1, 3, 1) && markSize(1, 4, 2) < 10);
+  for (const far of [1, 2]) { const svg = markSvg(3, CAPITAL_RANK, far); assert.equal((svg.match(/<circle/g) || []).length, 1); assert.match(svg, /fill="#e02a1c"/); assert.ok(markSize(3, CAPITAL_RANK, far) >= 14 && markSize(3, CAPITAL_RANK, far) > 1.8 * markSize(3, 3, 2)); }
+  assert.match(markSvg(3, CAPITAL_RANK, 0), /<rect/); assert.match(markSvg(3, CAPITAL_RANK, 0), /fill="#e02a1c"/); assert.doesNotMatch(markSvg(3, 4, 1), /#e02a1c/);
+  // every settlement is marked, with a name or without; the marks of villages left behind are taken off the page
+  const src = (await import('node:fs')).readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /if \(!m\.name && !\(m\.rank >= 1\)\) continue;/); assert.match(src, /if \(made > 700 && tick % 240 === 1\)/);
   // nothing overlaps: the greater takes the room first; a name without room is left out and its mark stays
   const got = declutter([{ x: 100, y: 100, mark: 12, name: 80, gap: 14 }, { x: 104, y: 103, mark: 10, name: 60, gap: 14 }, { x: 150, y: 104, mark: 10, name: 60, gap: 14 }, { x: 100, y: 140, mark: 10, name: 60, gap: 14 }, { x: 300, y: 100, mark: 0, name: 70, gap: 30 }, { x: 290, y: 104, mark: 0, name: 70, gap: 30 }, { x: 40, y: 142, mark: 8, name: 50, gap: 12 }]);
   assert.deepEqual(got, [2, 0, 0, 2, 2, 0, 1], 'a mark on a mark or on a name: left out; a name on a name: the mark alone');
@@ -564,7 +577,7 @@ test('settle marks under a tilted camera: a far settlement is shown as from fart
   const { heightFor, FAR, shownAt } = await import('../src/album/layers/labels.js');
   assert.equal(heightFor(100, 100), 100); assert.equal(heightFor(100, 100 * FAR), 100, 'within the picture of a camera that looks down: the height of the camera');
   assert.equal(heightFor(40, 400), 400 / FAR); assert.ok(shownAt(0, heightFor(40, 30)).mark > 0 && !(shownAt(0, heightFor(40, 400)).mark > 0), 'a village far toward the horizon is not marked');
-  assert.ok(shownAt(3, heightFor(40, 400)).mark > 0 && !(shownAt(1, heightFor(40, 400)).name > 0), 'a chief town is, without its name');
+  assert.ok(shownAt(3, heightFor(40, 600)).mark > 0 && !(shownAt(1, heightFor(40, 600)).name > 0) && !(shownAt(3, heightFor(40, 600)).name > 0), 'a chief town is, without its name');
   const g = settle.glsl;
   assert.match(g, /bool town = !village && r >= SET_STREETS_FROM/); assert.match(g, /smoothstep\(-reach, -reach \+ \.04, own\)/, 'the street is painted past the last houses');
   assert.ok(g.indexOf('float past = ') < g.indexOf('if (tm < .003) return;') && g.indexOf('if (tm < .003) return;') < g.indexOf('setWall(r, th, atan(dc.y, dc.x))'), 'before the pixel is given up as open land; the wall after');
@@ -658,7 +671,7 @@ test('settle passes: a mark of its own, shown by the height of the camera, the n
   // three ranks: the great passes are marked from the highest, the lesser only from near; a name never outlasts its mark
   assert.equal(PASS_RANKS.length, 3); assert.equal(PASS_ROAD.length, 3);
   for (let r = 0; r < 3; r++) { assert.ok(PASS_RANKS[r].name <= PASS_RANKS[r].to); if (r) assert.ok(PASS_RANKS[r].to < PASS_RANKS[r - 1].to && PASS_RANKS[r].order < PASS_RANKS[r - 1].order); }
-  assert.ok(PASS_RANKS[2].to <= RANKS[0].to, 'a lesser pass goes no later than a village'); assert.ok(PASS_RANKS[0].to <= RANKS[2].to, 'and a great pass no later than a greater town');
+  assert.ok(PASS_RANKS[2].to <= RANKS[0].to, 'a lesser pass goes no later than a village'); assert.ok(PASS_RANKS[0].to <= RANKS[3].to, 'and a great pass no later than a city');
   assert.ok(PASS_RANKS[0].order > RANKS.findIndex(r => r.id === 'town') && PASS_RANKS[2].order < 0, 'a great pass takes the room before the town of a district, a lesser one after the villages');
   assert.equal(passRank({ rank: 0 }), 0); assert.equal(passRank({ rank: 7 }), 2); assert.equal(passRank({}), 0);
   // by the height of the camera: from 20 km every pass has mark and name; from 60 km the lesser are gone; from 200 km
@@ -704,7 +717,8 @@ test('settle in the mountains: a village stands on the floor of a valley or on a
   assert.match(src, /Math\.min\(c < 0 \|\| st\.why\?\.\[c\] === 1 \? 2 : st\.can\[c\], groundCan\(at, x, y, treelineAt\(pl\.lat, pl\.lon\)\)\)/);
   // marks: a village without a name is not marked, the town of a district is — by its mark alone
   const lab = readFileSync(new URL('../src/album/layers/labels.js', import.meta.url), 'utf8');
-  assert.match(lab, /if \(!m\.name && !\(m\.rank >= 1\)\) continue;/); assert.match(lab, /const nameA = it\.name \? s\.name : 0;/);
+  // (since the owner's ladder of 15.11.2026 a village without a name is marked too, by its dot alone)
+  assert.doesNotMatch(lab, /if \(!m\.name/); assert.match(lab, /const nameA = it\.name \? s\.name : 0;/);
 });
 
 test('settle hospice: at a great pass a hall, a chapel and a tower stand in a row beside the road, at real size, on the level side', async () => {
@@ -769,4 +783,19 @@ test('settle under a tilted camera: the fields, the clearing and the ground of a
   // …and nothing of the way to the eye is worked out in it: that tipped the ground shader into its slow mode
   assert.ok(!/p\.V\b|cameraPosition|vPos/.test(g.replace(/\/\/[^\n]*/g, '')), 'the way to the eye is not asked in the shader of the settlements');
   assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /setTilt\(cam\.s\.tilt\);/);
+});
+
+test('settle and the roads: the panel of a district says how far each settlement is from a main road', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { wayTitle } = await import('../src/album/division/panel.js');
+  // the roads have not laid their net: nothing is written; no way can be laid: said so; on the road; so many km
+  assert.equal(wayTitle(undefined), ''); assert.equal(wayTitle(null), 'пути к главной дороге нет');
+  assert.equal(wayTitle({ km: 0 }), 'на главной дороге'); assert.equal(wayTitle({ km: .6 }), 'на главной дороге');
+  assert.equal(wayTitle({ km: 3.46 }), 'до главной дороги 3,5 км'); assert.equal(wayTitle({ km: 27.4 }), 'до главной дороги 27 км');
+  // the number is the roads': the layer of settlements asks album.roadNet.toMain for every settlement of the district
+  const src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+  assert.match(src, /const toMain = album\.roadNet\?\.toMain, wayOf = t => \{ if \(typeof toMain !== 'function'\) return undefined; const w = toMain\(t\.x, t\.y\); return w \? \{ km: w\.km, road: w\.road \} : null; \};/);
+  assert.match(src, /\{ \.\.\.rowOf\(t\), way: wayOf\(t\) \}/);
+  const panel = readFileSync(new URL('../src/album/division/panel.js', import.meta.url), 'utf8');
+  assert.match(panel, /const way = s\.partOf \? '' : wayTitle\(s\.way\)/);
 });

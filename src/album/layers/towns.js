@@ -459,7 +459,11 @@ export default async function init(album) {
       let made = 0, n = 0; const allow = madeAllowed(siteList, d, villSeen), dv = album.division;
       for (let s = siteList.first[d]; s < siteList.first[d + 1]; s++) if (siteList.kind[s] !== SITE.made || made++ < allow) n++;
       if (!farmPer && farmShown && dv) farmPer = farmOfDistricts(farmShown, dv.data.cells, dv.data.count);
-      const q = perDistrict.get(d), list = (q?.list || []).map(t => (t.part ? { index: t.index, name: places[t.index].name || '', partOf: t.part.name || 'соседнего города', town: true, people: 0, areaKm2: 0, cls: 0, rank: 0 } : rowOf(t)));
+      // how far each is from a main road, as a walker goes (the owner, 15.11.2026: «Деревня должна рассчитывать, сколько
+      // ей до главной дороги. Это очень важно»). The number is the roads': album.roadNet.toMain(x, y) → { km, road } or
+      // null where no way can be laid; undefined while the roads have not laid their net
+      const toMain = album.roadNet?.toMain, wayOf = t => { if (typeof toMain !== 'function') return undefined; const w = toMain(t.x, t.y); return w ? { km: w.km, road: w.road } : null; };
+      const q = perDistrict.get(d), list = (q?.list || []).map(t => (t.part ? { index: t.index, name: places[t.index].name || '', partOf: t.part.name || 'соседнего города', town: true, people: 0, areaKm2: 0, cls: 0, rank: 0 } : { ...rowOf(t), way: wayOf(t) }));
       // the town of the district first, then its villages, the most populous first
       list.sort((a, b) => (b.town ? 1 : 0) - (a.town ? 1 : 0) || (a.partOf ? 1 : 0) - (b.partOf ? 1 : 0) || b.people - a.people || a.index - b.index);
       // the passes on its border (the list is laid by the roads; none until then)
