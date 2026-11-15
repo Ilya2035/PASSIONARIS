@@ -36,7 +36,7 @@ export const MORE_AT = [VN + GN, KN], GATES_AT = [VN + 2 * GN, KN];
 export const FARM_SOFT = 4;
 export const FARM_WARP = .6;      // km: how far, at most, a point is moved by a smooth noise before its chunk is looked for (half of it each way)
 export const FARM_UNEVEN = .8;    // how much the share of ploughed land wanders from place to place inside a chunk (.4 each way)
-export const FARM_SLOPE = 1.6;    // fields keep to level ground: a slope of one in ten takes .16 off the share ploughed there — the floor of a valley is ploughed, its sides are left
+export const FARM_SLOPE = 3;      // fields keep to level ground: a slope of one in ten takes .3 off the share ploughed there, one in four all of it — the floor of a valley is ploughed, its sides are left
 export const FARM_SHARP = 2;      // fields keep together: the share of furlongs ploughed runs from none to all twice as fast as the share of the chunk
 export const FARM_PIECE = 1.7;     // km: the land is ploughed in pieces about this far across; in each the furlongs lie their own way and are of their own size
 // the ways the furlongs of a piece may lie: the cosine and sine of the turn of their rows against the compass (30°, 70°, −10°, −50°)

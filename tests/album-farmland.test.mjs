@@ -193,11 +193,14 @@ test('farmland in the album: the shader draws the fields from the chunks; the kn
   const g = settle.glsl;
   for (const d of [`#define SET_KN ${KN}`, `#define SET_K0 vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})`, `#define SET_SOFT ${FARM_SOFT.toFixed(1)}`, `#define SET_WARP ${(FARM_WARP / KKM).toFixed(3)}`, `#define SET_UNEVEN ${FARM_UNEVEN.toFixed(3)}`, `#define SET_SHARP ${FARM_SHARP.toFixed(2)}`]) assert.ok(RULES_GLSL.includes(d), d);
   assert.match(g, /float setFarm\(vec2 pk\)/); assert.match(g, /if \(o\.a < \.25 \|\| o\.a > \.75\) return o\.r;/, 'one texel where the chunks around hold the same');
-  assert.match(g, /exp\(-SET_SOFT \* dot\(v, v\)\)/); assert.match(g, /float farm = setFarmOn\(p\.pk, p\.slope\);/);
-  assert.match(g, /float setFarmOn\(vec2 pk, float slope\) \{ return setFarm\(pk\) \* \(1\. - smoothstep\(\.10, \.26, slope\)\); \}/, 'fields keep to level ground');
+  assert.match(g, /exp\(-SET_SOFT \* dot\(v, v\)\)/); assert.match(g, /float farm = setFarm\(p\.pk\);/);
+  // the share of fields on the ground as it lies, for whoever needs the fields to keep to level ground (the forest:
+  // the clearing of a village). Not called at the head of aspSettle: that one line made the ground shader a fifth slower.
+  assert.match(g, /float setFarmOn\(vec2 pk, float slope\) \{ return setFarm\(pk\) \* \(1\. - smoothstep\(\.10, \.26, slope\)\); \}/);
+  assert.doesNotMatch(g.slice(g.indexOf('void aspSettle')), /setFarmOn\(/, 'the fields of aspSettle take the slope off the share ploughed instead (SET_SLOPE)');
   // (uSetB.y: rules.js FARM_BESIDE, uSetC.y: FARM_SHARP — both less from high up; SET_SLOPE: the fields keep to level ground)
   assert.match(g, /float want = \(farm \+ uSetB\.y \* beside \+ \(\.5 - p\.n2 \* \.6 - p\.n3 \* \.4\) \* SET_UNEVEN - p\.slope \* SET_SLOPE - \.5\) \* uSetC\.y \+ \.5;/, 'the share of the chunk is the share of its furlongs');
-  assert.match(RULES_GLSL, /#define SET_SLOPE 1\.60/); assert.match(RULES_GLSL, /#define SET_PIECE 1\.70/);
+  assert.match(RULES_GLSL, /#define SET_SLOPE 3\.00/); assert.match(RULES_GLSL, /#define SET_PIECE 1\.70/);
   // the fields lie in pieces, each its own way and of its own size, with a balk between two pieces
   assert.match(g, /vec2 pc = pk \/ SET_PIECE \+ bend \* 1\.6; ivec2 blk = ivec2\(floor\(pc\)\);/); assert.match(g, /float hb = setHash\(blk, 3, 41\);/);
   assert.match(g, /fs \*= \.8 \+ \.45 \* fract\(hb \* 7\.\);/); assert.match(g, /return vec2\(col, row\) \+ vec2\(blk\) \* 37\.;/);

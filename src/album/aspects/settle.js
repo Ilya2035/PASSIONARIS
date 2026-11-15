@@ -183,8 +183,12 @@ float setFarm(vec2 pk) {
 // The same on the ground as it lies: fields keep to level ground — the floor of a valley, a terrace, the gentle foot
 // of a slope — and leave its steep sides alone. slope: rise over run at the pixel. (The owner, 15.11.2026, of the
 // fields and the clearings of the villages: «маленькие кружочки… больше по местности».) The fields are drawn by
-// this one; for the clearing of a village in a forest to run along its valley too, the forest must ask this one
-// instead of setFarm() — aspects/forest.js, the part «Земля и лес».
+// this rule (in aspSettle it is the slope taken off the share ploughed, SET_SLOPE, to the same effect); for the
+// clearing of a village in a forest to run along its valley too, the forest must ask this one instead of setFarm() —
+// aspects/forest.js, the part «Земля и лес».
+// (NOT called at the head of aspSettle: there this one line made the whole ground shader a fifth slower —
+// land-20 310 → 375 ms, land-far 189 → 235 ms, 15.11.2026 — though it is one multiplication. Whoever calls it:
+// time land-20 and land-far before and after.)
 float setFarmOn(vec2 pk, float slope) { return setFarm(pk) * (1. - smoothstep(.10, .26, slope)); }
 void aspSettle(Px p, inout Land L) {
   if (uSettle.w < .5 || p.h < .4) return;
@@ -193,7 +197,7 @@ void aspSettle(Px p, inout Land L) {
   if (c0.x < 0 || c0.y < 0 || c0.x >= SET_GN || c0.y >= SET_GN) return;
   vec4 t0 = texelFetch(tSettle, c0 + SET_COARSE, 0), tv = texelFetch(tSettle, v0 + SET_FINE, 0);
   int code = int(t0.a * 255. + .5), vcode = int(tv.a * 255. + .5);
-  float farm = setFarmOn(p.pk, p.slope);
+  float farm = setFarm(p.pk);
   bool tilled = farm > .004, search = code != 0 || vcode != 0;
   if (!search && !tilled) return;
   // the commonest case by far: the only patches near are the town and the village of these very squares, and the
