@@ -317,6 +317,28 @@ export const fogByHeight = h => 1 - ss(FOG_NEAR, FOG_FAR, h);
 // height), from which value of the field of its banks it lies, and how soft its top is (m)
 export const fogNumbers = amount => ({ thick: amount * (110 + 190 * amount), bank: mix(.62, .18, amount), soft: 14 + 30 * amount });
 
+// ---- the fog and the climate
+// Fog is not for every land. Where little rain falls in a year the air is dry, and a fog of the morning is a rare
+// thing: the Sahara has none. By the rain of the year at a place, mm — the twelve months of the open climate added:
+// no fog at FOG_RAIN[0] and less, all that the land gives from FOG_RAIN[1]; between them its banks grow fewer.
+// (The valley of the Ebro has 360 mm and more: its fog is as it was. The driest corner of Iberia, the coast from
+// Cabo de Gata to Águilas, has 250–290 mm: fewer banks of fog there. South of the Atlas there are 25–110 mm.)
+// The dryness of a place (1 − fogWet) goes into the floor beside the sea: FOG_SEA is how much the open sea lifts the
+// value of the field from which a bank of fog lies, FOG_DRY how many times more a desert lifts it than the sea does —
+// enough that no bank is left there, whatever the knob says.
+export const FOG_RAIN = [120, 320], FOG_SEA = .22, FOG_DRY = 4;
+export const fogWet = mm => ss(FOG_RAIN[0], FOG_RAIN[1], mm);
+// the value of the field from which fog lies at a place: bank — fogNumbers().bank, sea and dry — of the place, 0..1
+export const fogBankFrom = (bank, sea = 0, dry = 0) => bank + FOG_SEA * (sea + FOG_DRY * dry);
+// the rain of the year, mm, from the months of the open climate (prec of climateOf: 12 × H × W, row 0 at 90° N,
+// column 0 at 180° W); and the rain of the year at a place, read between four cells
+export function yearRain(prec, W = 720, H = 360) { const year = new Float32Array(W * H); for (let m = 0; m < 12; m++) for (let c = 0, o = m * W * H; c < W * H; c++) year[c] += prec[o + c]; return year; }
+export function yearRainAt(year, lat, lon, W = 720, H = 360) {
+  const x = (wrapLon(lon) + 180) / 360 * W - .5, y = Math.max(0, Math.min(H - 1.001, (90 - lat) / 180 * H - .5)), i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+  const at = (a, b) => year[b * W + ((a % W) + W) % W];
+  return mix(mix(at(i, j), at(i + 1, j), fx), mix(at(i, j + 1), at(i + 1, j + 1), fx), fy);
+}
+
 // The floor of the land for the fog, on a grid over the map: for every cell the lowest ground around it (smoothed),
 // m over the sea, and how willingly fog gathers there: 1 on the land .. 1.25 in a deep valley; over the sea .9 at the
 // coast, falling to nothing 40 km out (sea fog lies in banks along the shore, not over the whole sea).
@@ -330,13 +352,16 @@ export const fogNumbers = amount => ({ thick: amount * (110 + 190 * amount), ban
 // (needFog below). fogFloorJob() is the work: step(ms) does parts of it for about ms milliseconds, one part at
 // least, and tells whether the floor is whole; then it is in .result. pack: the result also holds the two pictures
 // as half floats, ready for the graphics card (hf: floor, weight, sea, mean of every cell; pk: the crests).
-export function fogFloorJob(at, cell = 4, sub = 4, box = BBOX, pack = false) {
+// rain(lat, lon): the rain of the year at a place, mm (yearRainAt) — with it the floor knows how dry every cell is
+// (dry, 0..1), and in hf the dryness is added to the sea, FOG_DRY times it; without it no land is dry.
+export function fogFloorJob(at, cell = 4, sub = 4, box = BBOX, pack = false, rain = null) {
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const la of [box.lat0, (box.lat0 + box.lat1) / 2, box.lat1]) for (const lo of [box.lon0, (box.lon0 + box.lon1) / 2, box.lon1]) {
     const [x, z] = planeOf(la, lo); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
   }
   const w = Math.ceil((x1 - x0) / cell), h = Math.ceil((z1 - z0) / cell), n = w * h;
   let low = new Float32Array(n), mean = new Float32Array(n), sea = new Float32Array(n), open = null, weight = null, round = null, hf = null, pk = null;
+  const dry = new Float32Array(n);
   // (and, on a grid twice as fine, the highest ground of every cell: the crests, for the caps of cloud they wear)
   const pw = w * 2, ph = h * 2, peak = new Float32Array(pw * ph), half = sub / 2;
   // a piece of the work in `count` parts: a call does its parts while there is time, and tells when the last is done
@@ -386,32 +411,33 @@ export function fogFloorJob(at, cell = 4, sub = 4, box = BBOX, pack = false) {
       round[j * pw + i] = s / c;
     }
   });
+  if (rain) parts(h, j => { for (let i = 0; i < w; i++) { const ll = llOfPlane(x0 + (i + .5) * cell, z0 + (j + .5) * cell); dry[j * w + i] = 1 - fogWet(rain(ll.lat, ll.lon)); } });
   if (pack) {
     parts(h, j => {
       if (!j) hf = new Uint16Array(n * 4);
-      for (let i = j * w; i < (j + 1) * w; i++) { hf[i * 4] = DataUtils.toHalfFloat(low[i]); hf[i * 4 + 1] = DataUtils.toHalfFloat(weight[i]); hf[i * 4 + 2] = DataUtils.toHalfFloat(sea[i]); hf[i * 4 + 3] = DataUtils.toHalfFloat(mean[i]); }
+      for (let i = j * w; i < (j + 1) * w; i++) { hf[i * 4] = DataUtils.toHalfFloat(low[i]); hf[i * 4 + 1] = DataUtils.toHalfFloat(weight[i]); hf[i * 4 + 2] = DataUtils.toHalfFloat(sea[i] + FOG_DRY * dry[i]); hf[i * 4 + 3] = DataUtils.toHalfFloat(mean[i]); }
     });
     parts(ph, j => { if (!j) pk = new Uint16Array(pw * ph); for (let i = j * pw; i < (j + 1) * pw; i++) pk[i] = DataUtils.toHalfFloat(round[i]); });
   }
   let turn = 0, result = null;
   return {
-    get result() { return result; }, count: h * (pack ? 3 : 2) + (h + w) * 6 + ph * (pack ? 2 : 1),   // (count: how many parts the work has)
+    get result() { return result; }, count: h * (pack ? 3 : 2) + (h + w) * 6 + ph * (pack ? 2 : 1) + (rain ? h : 0),   // (count: how many parts the work has)
     step(ms = Infinity) {
       const until = performance.now() + ms;
       while (turn < tasks.length) { if (!tasks[turn](until)) return false; turn++; if (performance.now() >= until) break; }
       if (turn < tasks.length) return false;
-      result ||= { w, h, cell, x0, z0, floor: low, weight, sea, mean, peak: round, pw, ph, hf, pk };
+      result ||= { w, h, cell, x0, z0, floor: low, weight, sea, mean, dry, peak: round, pw, ph, hf, pk };
       return true;
     },
   };
 }
 // the whole floor at once
-export function fogFloor(at, cell = 4, sub = 4, box = BBOX) { const job = fogFloorJob(at, cell, sub, box); job.step(); return job.result; }
+export function fogFloor(at, cell = 4, sub = 4, box = BBOX, rain = null) { const job = fogFloorJob(at, cell, sub, box, false, rain); job.step(); return job.result; }
 // the floor and the willingness at a place, as the shader reads them (for the tests)
 export function fogFloorAt(ff, lat, lon) {
   const [x, z] = planeOf(lat, lon), i = Math.max(0, Math.min(ff.w - 1, Math.floor((x - ff.x0) / ff.cell))), j = Math.max(0, Math.min(ff.h - 1, Math.floor((z - ff.z0) / ff.cell)));
   const pi = Math.max(0, Math.min(ff.pw - 1, Math.floor((x - ff.x0) / ff.cell * 2))), pj = Math.max(0, Math.min(ff.ph - 1, Math.floor((z - ff.z0) / ff.cell * 2)));
-  return { floor: ff.floor[j * ff.w + i], weight: ff.weight[j * ff.w + i], sea: ff.sea[j * ff.w + i], mean: ff.mean[j * ff.w + i], peak: ff.peak[pj * ff.pw + pi] };
+  return { floor: ff.floor[j * ff.w + i], weight: ff.weight[j * ff.w + i], sea: ff.sea[j * ff.w + i], mean: ff.mean[j * ff.w + i], dry: ff.dry[j * ff.w + i], peak: ff.peak[pj * ff.pw + pi] };
 }
 // ---- clouds in the mountains
 // With the fog on, the deep valleys of the mountains fill with cloud: to the layer of the fog is added HILL_FILL (at the
@@ -471,9 +497,10 @@ export function needClouds() {
 // day of the year moves into another fortnight. Until it has come — and if it does not come — the weather goes by the
 // knobs alone. fetchClimate(): a promise of { prec, tavg, elev } (climateOf).
 // lasting(lat, lon): the line of lasting snow of the world there, m (or nothing) — from the land of the whole Earth.
-const clim = { data: null, asked: false, key: -1 };
+// (The fog asks for it too: the floor of the land takes the rain of the year from it — year.)
+const clim = { data: null, year: null, asked: false, failed: false, key: -1 };
 export function needClimate(yday, fetchClimate, lasting = null) {
-  if (!clim.asked) { clim.asked = true; fetchClimate().then(d => { clim.data = d; clim.key = -1; }).catch(e => console.warn('[album] no climate for the clouds:', e.message || e)); }
+  if (!clim.asked) { clim.asked = true; fetchClimate().then(d => { clim.year = yearRain(d.prec); clim.data = d; clim.key = -1; }).catch(e => { clim.failed = true; console.warn('[album] no climate for the clouds:', e.message || e); }); }
   const key = Math.floor(yday / 15);
   if (!clim.data || key === clim.key) return;
   clim.key = key; const old = WX.tClim.value, d = clim.data;
@@ -507,9 +534,13 @@ function fogPictures(ff) {
   tp.internalFormat = 'R16F'; tp.wrapS = tp.wrapT = ClampToEdgeWrapping; tp.magFilter = tp.minFilter = LinearFilter; tp.needsUpdate = true;
   WX.tPeak.value = tp; floorWork.job = null;
 }
+// The floor takes the rain of the year from the climate (needClimate): while a climate that was asked for is still on
+// its way nothing is built, still capture or not — it comes in a moment; if it never comes, or was never asked for,
+// the floor is built without it and no land is dry.
 export function needFog(at, now = false) {
   if (WX.tFog.value) return true;
-  const job = floorWork.job || (floorWork.job = fogFloorJob(at, 4, 4, BBOX, true));
+  if (clim.asked && !clim.data && !clim.failed) return false;
+  const job = floorWork.job || (floorWork.job = fogFloorJob(at, 4, 4, BBOX, true, clim.year ? (lat, lon) => yearRainAt(clim.year, lat, lon) : null));
   if (now) { job.step(); fogPictures(job.result); return true; }
   // (a go that came only because it had waited too long has no idle time left: it says 0)
   const go = idle => {
@@ -676,12 +707,13 @@ float wxSnowAir(vec3 wpos, vec4 m, float inside) {
 }
 // the top of the fog over a point of the plane, km over the sea: the floor of the land there, and over it a layer
 // whose thickness goes by the place and by the banks the fog lies in (over the sea the banks are fewer: sea fog
-// stands off a stretch of the coast here and there, not along all of it)
+// stands off a stretch of the coast here and there, not along all of it; and fewer where the climate is dry, down
+// to none in a desert — f.b holds the sea and the dryness together: «the fog and the climate» above)
 // In the mountains the layer is thicker: it fills a part of the way from the floor of the land to its mean height,
 // so that the crests stand out of a sea of cloud.
 float wxFogTop(vec2 q) {
   vec4 f = textureLod(tFog, (q - uFogRect.xy) * uFogRect.zw, 0.);
-  float lo = uFog.z + .22 * f.b, bank = smoothstep(lo, lo + .2, textureLod(tCloud, q / ${f1(BANK_KM)} * 2.3 + .37, 1.).r), k = uExag * .001;
+  float lo = uFog.z + ${FOG_SEA.toFixed(2)} * f.b, bank = smoothstep(lo, lo + .2, textureLod(tCloud, q / ${f1(BANK_KM)} * 2.3 + .37, 1.).r), k = uExag * .001;
   return f.r * k + (uFog.y * f.g + uLow.x * max(f.a - f.r - ${f1(HILL_FROM)}, 0.) * k) * bank;
 }
 // the cap of cloud a high crest wears over a point of the plane: its bottom and its top, km over the sea (no cap

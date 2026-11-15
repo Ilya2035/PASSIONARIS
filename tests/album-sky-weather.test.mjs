@@ -8,9 +8,10 @@ import { MAP_NEAR, CLOUD_KM, GROW_KM, CELL_KM, GROW, GROW_LOD, GROW_DEV, FIELD_D
   COVER_REST, WILL_REST, skyShare, coverOfShare, rainWill, coverAt, rainMaskAt, climatePicture, climateAt, climUV, CLIM_W, CLIM_H, climateOf,
   WORLD, WORLD_LON, worldNeeded, TRADES, POLAR, BELTS, windOf, windTurn, windNorm, WIND_SPAN, WIND_LIKE, baseAt, WHIRLS, WHIRL_MORE, WHIRL_EYE, whirlsAt, whirlWarp, whirlShare,
   LAPSE, SNOW_T, SNOW_LOW, SNOW_HIGH, snowByWarmth, snowClimNumbers, freshSnowLine,
-  STORM_KM, STORM_EVERY, STORM_FLASH, STORM_STILL, flashAt, fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorJob, fogFloorAt, needFog, FOG_SLICE, FOG_WAIT, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
+  STORM_KM, STORM_EVERY, STORM_FLASH, STORM_STILL, flashAt, fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorJob, fogFloorAt, needFog, FOG_SLICE, FOG_WAIT, FOG_RAIN, FOG_SEA, FOG_DRY, fogWet, fogBankFrom, yearRain, yearRainAt, needClimate, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
   HILL_FILL, HILL_FROM, CAP_CREST, CAP_HIGH, CAP_UNDER, CAP_OVER, capBank, capAt } from '../src/album/sky/weather.js';
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { DataUtils } from 'three';
 import { cloudShader, LUMPS, BANK_STEP, SHELL_REACH, cloudShow, rainCloudShow } from '../src/album/layers/clouds.js';
 import { LIGHT } from '../src/album/light.js';
@@ -507,4 +508,59 @@ test('weather: the floor of the fog is built between the frames, and at once for
   WX.tFog.value = null; WX.tPeak.value = null;
   assert.equal(needFog(land), false); assert.equal(needFog(land, true), true); const kept = WX.tFog.value;
   await new Promise(r => setTimeout(r, 30)); assert.equal(WX.tFog.value, kept); assert.deepEqual(kept.image.data, a.data);
+});
+
+test('weather: no fog where little rain falls in a year', () => {
+  // the rule: none in a desert, all of it from FOG_RAIN[1] mm a year, fewer banks between
+  assert.equal(fogWet(FOG_RAIN[0]), 0); assert.equal(fogWet(40), 0); assert.equal(fogWet(FOG_RAIN[1]), 1); assert.equal(fogWet(700), 1);
+  assert.ok(fogWet(220) > .3 && fogWet(220) < .7 && fogWet(200) < fogWet(260)); assert.ok(FOG_RAIN[0] >= 100 && FOG_RAIN[1] <= 340, 'the Ebro, with 357 mm at the least, is well above it');
+  // The dryness lifts the value of the field from which a bank of fog lies, as the sea does and FOG_DRY times more.
+  // In a desert no bank is left at any setting of the knob: the field never reaches that value. (The field is the
+  // picture of the clouds one level of detail down.)
+  let most = 0; for (let j = 0; j < CLOUD_N; j += 2) for (let i = 0; i < CLOUD_N; i += 2) most = Math.max(most, (NOISE[j * CLOUD_N + i] + NOISE[j * CLOUD_N + i + 1] + NOISE[(j + 1) * CLOUD_N + i] + NOISE[(j + 1) * CLOUD_N + i + 1]) / 4 / 255);
+  for (const amount of [.1, .7, 1]) {
+    const bank = fogNumbers(amount).bank; assert.ok(fogBankFrom(bank, 0, 1) > most, `a desert, the knob at ${amount}: ${fogBankFrom(bank, 0, 1)} against ${most}`);
+    near(fogBankFrom(bank), bank, 1e-12); near(fogBankFrom(bank, 1, 0), bank + FOG_SEA, 1e-12); near(fogBankFrom(bank, .5, .5), bank + FOG_SEA * (.5 + FOG_DRY * .5), 1e-12);
+  }
+  // the shader counts it with the same number, from the picture of the floor: its third value is the sea and the dryness
+  assert.ok(WEATHER.includes(`float lo = uFog.z + ${FOG_SEA.toFixed(2)} * f.b, bank = smoothstep(lo, lo + .2,`));
+  // the rain of the year: the twelve months added; at a place, between four cells; around the Earth without a seam
+  { const W = 8, H = 4, prec = new Uint16Array(12 * W * H); for (let m = 0; m < 12; m++) for (let c = 0; c < W * H; c++) prec[m * W * H + c] = m + 10 * c;
+    const year = yearRain(prec, W, H); for (const c of [0, 13, W * H - 1]) assert.equal(year[c], 66 + 120 * c);
+    const la = j => 90 - (j + .5) * 180 / H, lo = i => -180 + (i + .5) * 360 / W;
+    near(yearRainAt(year, la(1), lo(2), W, H), year[W + 2], 1e-3); near(yearRainAt(year, la(1), (lo(2) + lo(3)) / 2, W, H), (year[W + 2] + year[W + 3]) / 2, 1e-3);
+    near(yearRainAt(year, (la(1) + la(2)) / 2, lo(5), W, H), (year[W + 5] + year[2 * W + 5]) / 2, 1e-3); near(yearRainAt(year, la(0), 180, W, H), (year[W - 1] + year[0]) / 2, 1e-3); near(yearRainAt(year, la(0), 180, W, H), yearRainAt(year, la(0), -180, W, H), 1e-9); }
+  // the open climate itself: the valley of the Ebro — the page «Утренний туман в долине Эбро» — keeps all its fog; the
+  // driest coast of Iberia has a little less; south of the Atlas there is none; the north has all of it
+  { const gz = gunzipSync(readFileSync(new URL('../public/assets/climate/normals-open.bin.gz', import.meta.url))), year = yearRain(climateOf(gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)).prec);
+    const wet = (la, lo) => fogWet(yearRainAt(year, la, lo));
+    for (let la = 40.9; la <= 42.41; la += .1) for (let lo = -1.9; lo <= .21; lo += .1) assert.equal(wet(la, lo), 1, `the Ebro at ${la.toFixed(1)}, ${lo.toFixed(1)}: ${yearRainAt(year, la, lo)} mm`);
+    for (const [la, lo] of [[40.42, -3.7], [41.65, -4.72], [37.39, -5.99], [38.72, -9.14], [48.86, 2.35], [51.5, -.12], [36.75, 3.06], [42.63, .66]]) assert.equal(wet(la, lo), 1, `${la}, ${lo}`);
+    const gata = wet(36.75, -2.1), aguilas = wet(37.4, -1.58); assert.ok(gata > .5 && gata < .95, `Cabo de Gata ${gata}`); assert.ok(aguilas > gata && aguilas < 1, `Aguilas ${aguilas}`);
+    for (const [la, lo] of [[30, 0], [31.62, -2.22], [32.49, 3.67], [31.95, 5.33], [30, 8]]) assert.equal(wet(la, lo), 0, `the Sahara at ${la}, ${lo}`); }
+  // the floor of the fog knows the dryness of every cell, and gives it to the shader beside the sea
+  { const land = (lat, lon) => (lon < -8 ? -100 : 300), rain = lat => (lat < 38 ? 60 : lat < 40 ? 220 : 600);
+    const ff = fogFloor(land, 16, 1, IBERIA, rain), at = (la, lo) => fogFloorAt(ff, la, lo);
+    assert.equal(at(36.5, -3).dry, 1); assert.equal(at(43, -3).dry, 0); near(at(39, -3).dry, 1 - fogWet(220), 1e-6); assert.equal(at(36.5, -9.5).sea, 1); assert.equal(at(36.5, -9.5).dry, 1, 'the sea off a desert is dry too');
+    const job = fogFloorJob(land, 16, 1, IBERIA, true, rain); job.step(); const r = job.result, plain = fogFloorJob(land, 16, 1, IBERIA, true); plain.step();
+    assert.equal(job.count, plain.count + ff.h, 'one more row of parts'); assert.deepEqual(r.dry, ff.dry); assert.deepEqual(r.floor, plain.result.floor); assert.deepEqual(r.weight, plain.result.weight);
+    for (let i = 0; i < ff.w * ff.h; i += 37) assert.equal(r.hf[i * 4 + 2], DataUtils.toHalfFloat(ff.sea[i] + FOG_DRY * ff.dry[i]));
+    // without the rain of the year no land is dry, and the picture is what it always was
+    assert.ok(plain.result.dry.every(v => v === 0)); for (let i = 0; i < ff.w * ff.h; i += 37) assert.equal(plain.result.hf[i * 4 + 2], DataUtils.toHalfFloat(plain.result.sea[i])); }
+});
+
+test('weather: the floor of the fog waits for the climate and takes the rain of the year from it', async () => {
+  // a made-up climate: 5 mm a month south of 38° N — a desert —, 50 mm a month north of it; level land everywhere
+  const W = 720, H = 360, buf = new ArrayBuffer(12441600 + H * W * 2), prec = new Uint16Array(buf, 6220800, 12 * H * W), land = () => 300;
+  for (let m = 0; m < 12; m++) for (let j = 0; j < H; j++) prec.fill(90 - (j + .5) / 2 < 38 ? 5 : 50, m * H * W + j * W, m * H * W + (j + 1) * W);
+  let give; const coming = new Promise(r => { give = r; });
+  WX.tFog.value = null; WX.tPeak.value = null;
+  needClimate(172, () => coming);
+  // asked for and still on its way: nothing is built, not even for a still capture — the floor would not know the deserts
+  assert.equal(needFog(land), false); assert.equal(needFog(land, true), false); await new Promise(r => setTimeout(r, 30)); assert.equal(WX.tFog.value, null);
+  give(climateOf(buf)); await new Promise(r => setTimeout(r, 0));
+  assert.equal(needFog(land, true), true);
+  const a = WX.tFog.value.image, rect = WX.uFogRect.value;
+  const third = (la, lo) => { const [x, z] = planeOf(la, lo); return DataUtils.fromHalfFloat(a.data[(Math.floor((z - rect.y) / 4) * a.width + Math.floor((x - rect.x) / 4)) * 4 + 2]); };
+  near(third(36.5, -3.5), FOG_DRY, 1e-3, 'a desert: no sea, all of the dryness'); near(third(42, -3.5), 0, 1e-6, 'a wet land'); assert.ok(third(37.9, -3.5) > .3 && third(37.9, -3.5) < FOG_DRY - .3, 'between them');
 });

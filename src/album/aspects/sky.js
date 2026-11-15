@@ -117,7 +117,7 @@ export default {
       }
     };
     const sync = () => { album.cam.edgePan = !!p.get('edgePan') && !album.shot; want(); };
-    // the open climate of the world, for the clouds: read once, when the clouds are first switched on
+    // the open climate of the world, for the clouds and the fog: read once, when either is first switched on
     const fetchClimate = () => fetch('assets/climate/normals-open.bin.gz').then(r => { if (!r.ok) throw new Error(`normals-open: ${r.status}`); return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }).then(climateOf);
     // the line of lasting snow of the world at a place, m — the rule of the land of the whole Earth (ground/climate.js)
     // by the warmth it keeps for every place; nothing where the album has no climate of the world
@@ -195,9 +195,11 @@ export default {
       // the frames — sky/weather.js, needFog — so they come a moment after their switch: the finishing pass draws no fog
       // until the pictures are there, and the falling snow counts the land as the sea till then. A still capture
       // builds it at once.)
+      // (The fog asks for the climate too: where little rain falls in a year there is no fog — the floor takes the
+      // rain of the year from it, and is not built until the climate has come.)
       const caps = p.get('clouds') && low > 0 ? p.get('cloudCover') : 0;
       if (fog > .02 || caps > 0) {
-        const f = fogNumbers(fog > .02 ? fog : 0), k = T.uExag.value / 1000; needFog(album.data.base.at, album.shot);
+        const f = fogNumbers(fog > .02 ? fog : 0), k = T.uExag.value / 1000; needClimate(yday, fetchClimate, lastingSnow); needFog(album.data.base.at, album.shot);
         WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); WX.uLow.value.set(fog > .02 ? HILL_FILL * Math.min(1, fog / .7) : 0, caps > 0 ? 1 : 0, capBank(caps), fog > .02 ? 1 : 0);
       } else WX.uFog.value.x = 0;
       if (cover > 0 || fog > .02) needClouds();
