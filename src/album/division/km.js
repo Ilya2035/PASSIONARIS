@@ -28,6 +28,15 @@ import { KM_PER_DEG, COS_REF } from '../geo.js';
 const CNX = CH.CNX ?? CH.CN, CNY = CH.CNY ?? CH.CN;
 export const FNX = CH.FNX ?? CH.FN, FNY = CH.FNY ?? CH.FN;
 export const KKM = 1, KN = CNX * CHUNK_KM / KKM, KNY = CNY * CHUNK_KM / KKM, KX0 = CI0 * CHUNK_KM, KY0 = CJ0 * CHUNK_KM;
+// The plane of kmOf keeps one east–west scale, that of latitude 40° (COS_REF): a square of the lattice is truly
+// cos(lat)/cos(40°) km wide — 0.78 km² in the Netherlands, 1.14 in the south of Morocco, 0.92–1.06 on the polygon of
+// today. TRUE_SCALE counts that in where it matters: the size of a district (the weight of a natural cell), the area
+// of a district, the slope of a chunk east–west. Off on the polygon of today (on, its districts and town places would
+// move a little); on with stage 3, when all is built anew. Off, the factor is 1 exactly and nothing changes.
+export const TRUE_SCALE = false;
+export const scaleAt = lat => (TRUE_SCALE ? Math.cos(lat * Math.PI / 180) / COS_REF : 1);
+export const scaleOfY = y => scaleAt(y / KM_PER_DEG);                      // y: flat km north
+export const rowScale = j => scaleOfY(KY0 + (j + .5) * KKM);               // j: a row of the lattice
 export const JITTER = .3;                           // km: how far a seed may stand from the middle of its square, each way
 const LAND = 0;
 
@@ -110,10 +119,10 @@ export function chunkFacts(div, heightAt = null) {
   const land = c => { const d = cells[c]; return d >= 0 && kinds[d] === LAND; };
   const classOf = (h, s) => (h >= HIGH_M ? 5 : s < CLASS_SLOPE[0] ? 1 : s < CLASS_SLOPE[1] ? 2 : s < CLASS_SLOPE[2] ? 3 : s < CLASS_SLOPE[3] ? 4 : 5);
   if (!heightAt) {
-    for (let j = 0, c = 0; j < KNY; j++) for (let i = 0; i < KN; i++, c++) {
+    for (let j = 0, c = 0; j < KNY; j++) for (let i = 0, sx = rowScale(j); i < KN; i++, c++) {
       if (!land(c)) continue;
       const h = hgt[c]; let m = 0;
-      if (i > 0 && land(c - 1)) m = Math.max(m, Math.abs(hgt[c - 1] - h)); if (i < KN - 1 && land(c + 1)) m = Math.max(m, Math.abs(hgt[c + 1] - h));
+      if (i > 0 && land(c - 1)) m = Math.max(m, Math.abs(hgt[c - 1] - h) / sx); if (i < KN - 1 && land(c + 1)) m = Math.max(m, Math.abs(hgt[c + 1] - h) / sx);
       if (j > 0 && land(c - KN)) m = Math.max(m, Math.abs(hgt[c - KN] - h)); if (j < KNY - 1 && land(c + KN)) m = Math.max(m, Math.abs(hgt[c + KN] - h));
       slope[c] = steep[c] = m / (KKM * 1000); num[cls[c] = classOf(h, slope[c])]++;
     }
@@ -133,12 +142,12 @@ export function chunkFacts(div, heightAt = null) {
   row(0, r0);
   const q = [0, 0, 0, 0], RUN = HALF * 2000;        // twice the side of a quarter, metres
   for (let j = 0, c = 0; j < KNY; j++) {
-    row(2 * j + 1, r1); row(2 * j + 2, r2);
+    row(2 * j + 1, r1); row(2 * j + 2, r2); const sx = rowScale(j);   // (a quarter is truly sx · 500 m wide)
     for (let i = 0; i < KN; i++, c++) {
       if (!land(c)) continue;
       for (let b = 0; b < 2; b++) for (let a = 0; a < 2; a++) {
         const lo = b ? r1 : r0, hi = b ? r2 : r1, x = 2 * i + a, h00 = lo[x], h10 = lo[x + 1], h01 = hi[x], h11 = hi[x + 1];
-        q[b * 2 + a] = Math.hypot(h10 + h11 - h00 - h01, h01 + h11 - h00 - h10) / RUN;
+        q[b * 2 + a] = Math.hypot((h10 + h11 - h00 - h01) / sx, h01 + h11 - h00 - h10) / RUN;
       }
       q.sort((u, v) => u - v);
       slope[c] = q[0]; steep[c] = q[3];

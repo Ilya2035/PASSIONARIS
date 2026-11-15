@@ -12,7 +12,7 @@ import { BBOX } from '../geo.js';
 import { makeGraph, partition, tidy } from './graph.js';
 import { districtCells } from './cells.js';
 import { borderGeometry } from './border.js';
-import { KKM, KX0, KY0, FNX, FNY, kmData, kmFacts, cellsOfDistrict, cellsOfChunks, chunksOfDistrict, livingOf } from './km.js';
+import { KKM, KX0, KY0, FNX, FNY, scaleOfY, TRUE_SCALE, rowScale, KN, kmData, kmFacts, cellsOfDistrict, cellsOfChunks, chunksOfDistrict, livingOf } from './km.js';
 
 export const LAND = 0, SEA = 1, LAKE = 2;
 export const KIND_ID = ['land', 'sea', 'lake'];
@@ -290,7 +290,8 @@ export function buildDivision(ch, { lands, admin, heightAt = null, lakes = [], s
 
   // the chunk graph: on land the crossing costs, on water only the distance; the node size is the chunk's weight
   const X = Float64Array.from(ch.cx), Y = Float64Array.from(ch.cy), W = new Float64Array(n), edges = [];
-  for (let k = 0; k < n; k++) W[k] = kind[k] === LAND ? weight(ch, kind, k) : ch.area[k];
+  // (the weight of a cell is its true area: TRUE_SCALE of km.js)
+  for (let k = 0; k < n; k++) W[k] = (kind[k] === LAND ? weight(ch, kind, k) : ch.area[k]) * scaleOfY(ch.cy[k]);
   for (let a = 0; a < n; a++) for (const l of ch.links[a]) {
     const b = l.k; if (b < a) continue;
     edges.push(a, b, Math.hypot(X[a] - X[b], Y[a] - Y[b]) + (kind[a] === LAND && kind[b] === LAND ? crossKm(rel, a, b, l) : 0));
@@ -486,7 +487,7 @@ export function districtNames(ch, div, places = []) {
 //   living:  how many chunks nobody can live on, people barely can, people can freely
 export function districtSummary(div, d, ch) {
   const land = div.kinds[d] === LAND, parts = cellsOfDistrict(div, ch, d), per = cellsOfChunks(ch).count, chunks = kmData(div).box.num[d];
-  const area = chunks * KKM * KKM, landA = land ? area : 0, share = { forest: 0, swamp: 0, built: 0, fields: 0 };
+  const area = (TRUE_SCALE ? chunksOfDistrict(div, d).reduce((s, c) => s + rowScale(Math.floor(c / KN)), 0) : chunks) * KKM * KKM, landA = land ? area : 0, share = { forest: 0, swamp: 0, built: 0, fields: 0 };
   let w = 0;
   for (const [k, n] of parts) { w += n; if (land) for (const name of Object.keys(share)) share[name] += ch.get(name, k) * n; }
   for (const name of Object.keys(share)) share[name] = land && w > 0 ? share[name] / w : 0;
