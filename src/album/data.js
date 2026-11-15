@@ -4,7 +4,7 @@
 import { DataTexture, RedFormat, RGBAFormat, HalfFloatType, FloatType, UnsignedByteType, NoColorSpace, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, RepeatWrapping, DataUtils, TextureLoader } from 'three';
 import { mercX, mercY, distKm } from './geo.js';
 import { decodeTile, windowFor, windowRect, joinWindow, tilesOf, FINE_Z, WIN } from './ground/fine.js';
-import { despike, mendPockets } from './ground/despike.js';
+import { despike } from './ground/despike.js';
 import { loadCourses, mainRivers } from './water/courses.js';
 import { fillHollows } from './water/hollows.js';
 import { decodeClimate, useClimate, decodeWorldClimate, ICE_STEP } from './ground/climate.js';
@@ -95,7 +95,6 @@ export async function loadData(onProgress = () => {}) {
   onProgress('высоты региона');
   const raw = await gunzipU16(BASE + meta.base.file);
   despike(raw, meta.base.w, meta.base.h);                           // needles and wells of broken points on the coast (ground/despike.js)
-  mendPockets(raw, meta.base.w, meta.base.h);                       // pits of deep water in the middle of shallow lagoons (the same file)
   fillHollows(raw, meta.base.w, meta.base.h);                       // dips below zero that the sea cannot reach are land, not ponds of sea
   const base = { ...meta.base, raw, rect: rectOf(meta.base), tex: heightTexture(raw, meta.base.w, meta.base.h) };
   // bilinear height in metres on the CPU (roads, towns, rivers, picking): inside the polygon; base.at itself, set

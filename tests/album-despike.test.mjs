@@ -73,8 +73,10 @@ test('pockets: a pit of deep water in a shallow lagoon takes the depth of the la
   assert.ok(POCKET < POCKET_FLOOR && POCKET_FLOOR < 0);
 });
 
-test('pockets: the album mends them after the spikes and before the hollows of the water', () => {
-  const data = fs.readFileSync(new URL('../src/album/data.js', import.meta.url), 'utf8');
-  const a = data.indexOf('despike(raw, meta.base.w, meta.base.h)'), b = data.indexOf('mendPockets(raw, meta.base.w, meta.base.h)'), c = data.indexOf('fillHollows(raw');
-  assert.ok(a > 0 && a < b && b < c);
+test('pockets: the page does not mend them yet — the division must take the same step first', () => {
+  // The baked cells of the division are stamped with the heights (division/cells.js, cellsStamp), and its Node loader
+  // (division/nodedata.js) must make the heights by the steps of data.js: tests/album-division-bake.test.mjs. So
+  // mendPockets() goes into data.js and nodedata.js in one change, with the cells baked anew.
+  const data = fs.readFileSync(new URL('../src/album/data.js', import.meta.url), 'utf8'), node = fs.readFileSync(new URL('../src/album/division/nodedata.js', import.meta.url), 'utf8');
+  assert.equal(data.includes('mendPockets('), node.includes('mendPockets('), 'both loaders or neither');
 });
