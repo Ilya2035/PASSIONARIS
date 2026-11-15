@@ -145,3 +145,10 @@ test('forest on steep ground: the wood opens up into single trees instead of end
   assert.ok(src.includes('return fStand.x * forestKeep(fFarm, fPat, p.px, p.cC.rg, p.wet) * forestSteep(p.n);'), 'the cover the ground shader is told');
   assert.equal(src.split('forestSteep(p.n)').length - 1, 1, 'asked once: the share of the cover that is left (part) carries it to the stand a step away');
 });
+
+test('forest canopy on a slope: its top is seen nearer to its foot where the ground rises toward the eye', () => {
+  const src = readFileSync(new URL("../src/album/aspects/forest.js", import.meta.url), "utf8");
+  assert.ok(src.includes('vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) * .7, .34) * (.08 * vol *'), 'the slope of the ground toward the eye is in the shift; the canopy is 80 m high as drawn');
+  assert.ok(!src.replace(/\/\/[^\n]*/g, '').includes('(max(p.n.z, .05) * uShade)'), 'the exact form of that line threw the ground shader off its edge of speed (165 → 238 ms)');
+  assert.ok(src.includes('(.84 + .58 * tuft + 1.08 * litc * p.day)'), 'a touch more light and shade on every crown');
+});

@@ -206,3 +206,19 @@ test('mountains: the fine heights of a showcase place are in the grid of the gro
   assert.ok(terrain.includes('this.fine = Math.max(0, Math.min(3, -Math.log2(c0 / .234)));') && terrain.includes('if (this.detail) this.u.uDetOn.value = 1 + this.fine;'), 'uDetOn carries how fine the grid is');
   assert.ok(glsl.includes('if (uDetOn < .5) return 0.;'), 'and still says whether there are fine heights at all');
 });
+
+test('the size of a pixel does not depend on how the camera is turned: a rock wall keeps its pattern', () => {
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8'), main = terrain.slice(terrain.lastIndexOf('void main() {')).replace(/\/\/[^\n]*/g, '');
+  assert.ok(!main.includes('fwidth(vPos)'), 'fwidth() of the position is 1.41 to 2 pixels for the same ground, by the turn of the window alone');
+  assert.ok(main.includes('float pF = dot(dpx, dpx) + dot(dpy, dpy), pA = length(cross(dpx, dpy));'), 'the two sides of the patch of ground a pixel covers');
+  assert.ok(main.includes('float px = min(sqrt(pF), 2. * sqrt(max(pF - sqrt(max(pF * pF - 4. * pA * pA, 0.)), 0.)));'), 'the whole patch, but no more than twice its short side');
+  // the numbers of that line: looking straight down both sides are s — the old value, s·√2; seen at 10° the long side is s / sin 10°
+  const px = (a, b) => { const F = a * a + b * b, A = a * b; return Math.min(Math.sqrt(F), 2 * Math.sqrt(Math.max(F - Math.sqrt(Math.max(F * F - 4 * A * A, 0)), 0))); };
+  assert.ok(Math.abs(px(1, 1) - Math.SQRT2) < 1e-9);
+  assert.ok(Math.abs(px(1 / Math.sin(10 * Math.PI / 180), 1) - 2 * Math.SQRT2) < 1e-6, 'edge-on: capped at twice the value seen from above');
+  assert.ok(Math.abs(px(1 / Math.sin(30 * Math.PI / 180), 1) - Math.sqrt(5)) < 1e-9, 'at 30° not yet capped');
+  // the grain nearly leaves a wall, and a steep face is rock, not pale scree with the grass of the ledges showing through
+  assert.ok(terrain.includes('uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope))'));
+  assert.ok(terrain.includes('steep = smoothstep(.55 + .15 * humid, 1.0 + .12 * humid, slopeD)') && terrain.includes('rockW *= 1. - .18 * humid *'));
+  assert.ok(terrain.includes('rockCol *= mix(1.10, .88 + .22 * (.5 + .5 * sin(hl / 38. + rk * 5.))'), 'scree a tenth lighter than the rock, not a third');
+});

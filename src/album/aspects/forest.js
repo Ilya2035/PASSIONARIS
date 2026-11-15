@@ -299,8 +299,10 @@ void aspForest(Px p, inout Land L) {
     // (The ground under a wood is seldom level. On a slope that faces the eye the top of the canopy is seen much
     // nearer to its foot than over a plain: the ray meets the canopy sooner, because the ground rises to meet it.
     // Counted as over a plain, the top of a wood on a mountainside lay far too high up the slope, and its upper edge
-    // crept up and down as the view swung round. The slope of the ground toward the eye is taken from the normal.)
-    vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) / (max(p.n.z, .05) * uShade), .34) * (.08 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
+    // crept up and down as the view swung round. The slope of the ground toward the eye is taken from the normal:
+    // n.xy × .7 is close to it for any slope a wood stands on. Written exactly — divided by n.z and by the strength
+    // of the shading — the same line pushed the whole ground shader off its edge of speed: 165 → 238 ms a frame.)
+    vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) * .7, .34) * (.08 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
     if (edgy > 0. && dot(vs, vs) > px * px * .25) {
       float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
       flank = clamp(dens - top, 0., 1.); dens = top;

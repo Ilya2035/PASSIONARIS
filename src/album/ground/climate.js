@@ -49,6 +49,45 @@ export function decodeClimate(buf) {
   return { n, x0: dv.getFloat32(8, true), y0: dv.getFloat32(12, true), km: dv.getFloat32(16, true), data: u.subarray(HEAD, HEAD + n * n * 4) };
 }
 
+// ---- the climate of the whole Earth (scripts/album/bake-world-climate.mjs → public/assets/album/ground/world.bin.gz):
+// the same four numbers by the same rule, on a plain grid of latitude and longitude — WORLD_W × WORLD_H cells of
+// 0.18°, rows from the north pole, the first cell of a row at 180° W. The ground shader reads it beyond the polygon.
+// The file, after gunzip:
+//   bytes 0..3   'PGW1'
+//   Uint16 × 2   cells in a row (w), rows (h)
+//   4 × w × h bytes: the year, wet, warm and summer of every cell (the scales of the polygon: YEAR, 0..1, WARM, 0..1),
+//                    one number after another, each row written as the differences along it (modulo 256) — smooth
+//                    fields pack several times smaller that way
+export const WORLD_MAGIC = 'PGW1', WORLD_W = 2048, WORLD_H = 1024;
+const WHEAD = 8;
+export function encodeWorldClimate({ w, h, year, wet, warm, summer }) {
+  const n = w * h, out = new Uint8Array(WHEAD + n * 4), dv = new DataView(out.buffer);
+  for (let i = 0; i < 4; i++) out[i] = WORLD_MAGIC.charCodeAt(i);
+  dv.setUint16(4, w, true); dv.setUint16(6, h, true);
+  const byte = (v, lo, hi) => Math.max(0, Math.min(255, Math.round((v - lo) / (hi - lo) * 255)));
+  [[year, ...YEAR], [wet, 0, 1], [warm, ...WARM], [summer, 0, 1]].forEach(([a, lo, hi], p) => {
+    for (let j = 0, o = WHEAD + p * n; j < h; j++) for (let i = 0, prev = 0; i < w; i++, o++) { const b = byte(a[j * w + i], lo, hi); out[o] = (b - prev) & 255; prev = b; }
+  });
+  return out;
+}
+// the gunzipped file → { w, h, data: bytes w × h × 4 — year, wet, warm, summer of every cell, as a texture takes them }
+export function decodeWorldClimate(buf) {
+  const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (u.length < WHEAD || String.fromCharCode(u[0], u[1], u[2], u[3]) !== WORLD_MAGIC) return null;
+  const dv = new DataView(u.buffer, u.byteOffset, u.byteLength), w = dv.getUint16(4, true), h = dv.getUint16(6, true), n = w * h;
+  if (u.length < WHEAD + n * 4) return null;
+  const data = new Uint8Array(n * 4);
+  for (let p = 0; p < 4; p++) for (let j = 0, o = WHEAD + p * n; j < h; j++) for (let i = 0, prev = 0; i < w; i++, o++) { prev = (prev + u[o]) & 255; data[(j * w + i) * 4 + p] = prev; }
+  return { w, h, data };
+}
+// The line of lasting snow by the climate, m: where the warmest month is no warmer than SNOW_WARM °C — and the year
+// no warmer than SNOW_YEAR °C. The first is the rule of the lands with a winter (snow falls in winter and must outlast
+// the summer); the second is the rule of the tropics, where there is no winter and snow lies only where it freezes
+// all year. Alps about 2350 m, Norway 1400, Iceland 1150, Tibet 5150, Kilimanjaro 4500; all of Svalbard, Greenland
+// and the Antarctic lie above it. (The polygon keeps its own line by latitude, which the owner approved.)
+export const SNOW_WARM = 8, SNOW_YEAR = -3;
+export const snowlineOf = (warm, year) => Math.max((warm - SNOW_WARM) / LAPSE, (year - SNOW_YEAR) / LAPSE);
+
 // ---- the climate in use: one for the page (the album sets it once the file is read; tests set their own)
 let CLIM = null;
 export function useClimate(c) { CLIM = c || null; }
