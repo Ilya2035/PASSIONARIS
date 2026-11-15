@@ -149,7 +149,17 @@ ${ASPECT_GLSL}
 
 void main() {
   vec2 ll = vLL; float lat = ll.x, lon = ll.y, cl = cos(radians(lat));
-  float px = length(fwidth(vPos));                                  // km per pixel
+  // The size of a pixel on the ground, km. Every pattern fades by it once its features are smaller than a pixel, so
+  // it must be the same for the same ground however the camera is turned — or the patterns come and go as the view
+  // swings round, and a rock wall and the edge of a wood seem to swim (the owner, 15.11.2026).
+  // A pixel covers a small parallelogram of ground; its long side grows without limit as the ground is seen edge-on,
+  // its short side is the distance to the eye times the angle of a pixel and nothing else. px is the size of the
+  // parallelogram as a whole (the root of the sum of the squares of its sides — unlike fwidth(), the same whichever
+  // way the window is turned), but no more than twice the short side: a slope keeps its patterns until it is seen
+  // at less than 22°, where it is a sliver of the picture anyway.
+  vec3 dpx = dFdx(vPos), dpy = dFdy(vPos);
+  float pF = dot(dpx, dpx) + dot(dpy, dpy), pA = length(cross(dpx, dpy));
+  float px = min(sqrt(pF), 2. * sqrt(max(pF - sqrt(max(pF * pF - 4. * pA * pA, 0.)), 0.)));   // km per pixel
   // (The step is never finer than the height data — 0.23 km a cell, 0.03 km around the showcase places. Inside one
   // cell the slope is that of the cell's own facet, and steep ground turned to rock by whole square cells.)
   vec2 bu = merc(ll);
@@ -250,28 +260,31 @@ void main() {
     float hollow = clamp(conc, 0., 1.), north = -g.y / (slope + .12);
     float wet = albumWetOf(clim, hl, n1) + north * .05 + hollow * .07 - ridge * .05;
     // (in a wet land grass and scrub hold on a slope that would be bare rock in a dry one)
-    float humid = smoothstep(.45, .8, wet), treeline = albumTreeline(n1), steep = smoothstep(.55 + .22 * humid, 1.0 + .25 * humid, slopeD);
+    float humid = smoothstep(.45, .8, wet), treeline = albumTreeline(n1), steep = smoothstep(.55 + .15 * humid, 1.0 + .12 * humid, slopeD);
     p.n1 = n1; p.n2 = n2; p.n3 = n3; p.wet = wet;
     Land L; L.gloss = 0.;
     L.cover = forestCover(p);
 
     // bare ground: soil and low growth by the climate (aspects/ground.js), rock on steep slopes and summits, sand at the shore
     float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + (ridge * .15 + max(crest, 0.) * 1.8) * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
-    rockW *= 1. - .3 * humid * (1. - smoothstep(treeline - 300., treeline + 100., hl));   // (in wet country grass and bushes hold on the ledges of a wall below the tree line)
+    rockW *= 1. - .18 * humid * (1. - smoothstep(treeline - 300., treeline + 100., hl));   // (in wet country grass and bushes hold on the ledges of a wall below the tree line)
     float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
     vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk);
     if (rockW > .004) {
       float rk = vnoise(pk / 2.3 + 3.), rk2 = vnoise(pk / 9. + 17.);
       vec3 rockCol = mix(vec3(.47, .45, .43), vec3(.66, .64, .61), n2);                                              // grey limestone and granite
-      rockCol = mix(rockCol, vec3(.62, .52, .38), smoothstep(.55, .8, rk2) * .4);                                   // ochre limestone
+      rockCol = mix(rockCol, vec3(.62, .52, .38), smoothstep(.55, .8, rk2) * (.4 - .28 * humid));                   // ochre limestone (in the wet mountains the limestone is grey)
       rockCol = mix(rockCol, vec3(.52, .34, .27), smoothstep(.62, .9, rk) * smoothstep(.3, .6, rk2) * .5);           // red sandstone
       rockCol = mix(rockCol, vec3(.29, .30, .33), smoothstep(.35, .1, rk2) * .45);                                  // dark slate
       // Solid rock stands in walls and on crests, and lies in beds. Below the walls and down the gullies lies what
       // fell from them — scree: paler, even, at the slope it comes to rest at. (The streaks down a wall are the ribs
       // and gullies of the relief above, lit by the sun; they used to be painted on, all alike.)
+      // (The two differ a little, not a lot. Scree much paler than the rock, with moss in it and the grass of the
+      // ledges showing through, was a pale yellow face with a brown line down every rib: the owner took the lines
+      // for veins of something, 15.11.2026. A steep face is grey rock; its relief is shown by the light.)
       float solid = smoothstep(.55, 1.05, slopeD + crest);
-      rockCol *= mix(1.17, .84 + .24 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px), solid) * (1. - crest * .5);
-      rockCol = mix(rockCol, vec3(.38, .43, .25), smoothstep(.5, .75, n3) * .34 * smoothstep(.3, .6, wet));          // lichen and moss
+      rockCol *= mix(1.10, .88 + .22 * (.5 + .5 * sin(hl / 38. + rk * 5.)) * smoothstep(.3, .06, px), solid) * (1. - crest * .35);
+      rockCol = mix(rockCol, vec3(.36, .41, .29), smoothstep(.5, .75, n3) * .2 * smoothstep(.3, .6, wet));           // lichen and moss
       rockCol = mix(rockCol, vec3(.60, .51, .38) * (.9 + .2 * n2), (1. - smoothstep(.14, .40, wet)) * .65);           // the sun-bleached rock of dry country
       ground = mix(ground, rockCol, rockW);
     }
@@ -284,11 +297,12 @@ void main() {
     // square lies shifted by its own step, and in every other patch turned over its diagonal. The borders of the
     // patches wander with the noises of the ground, like the border between two tiles, and are not seen.
     // (The grain is rills, gullies and scrub: it is at full strength on slopes and weaker on level ground — a plain
-    // and the floor of a basin are smoother than the hills around them.)
+    // and the floor of a basin are smoother than the hills around them. On a wall it nearly goes: the square lies
+    // flat on the map, so down a wall every spot of it is drawn out into a streak several times its length.)
     float kind = wet + (n3 - .5) * .12, ga = floor(n2 * 7.), gb = floor(fract(n1 * 5. + n2 * 1.5) * 3.);
     vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;
     if (fract((ga + gb) * .5) > .25) { gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }
-    ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)));
+    ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope)));
     ground = aspShore(p, ground, L.cover);                           // beaches and rocks at the waterline (the water work)
     L.col = ground;
 

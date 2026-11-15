@@ -296,7 +296,11 @@ void aspForest(Px p, inout Land L) {
   float vol = uForestVol * smoothstep(.06, .025, px), flank = 0.;
   vec2 vs = vec2(0.);
   if (vol > 0.) {
-    vs = p.V.xy / max(p.V.z, .34) * (.07 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
+    // (The ground under a wood is seldom level. On a slope that faces the eye the top of the canopy is seen much
+    // nearer to its foot than over a plain: the ray meets the canopy sooner, because the ground rises to meet it.
+    // Counted as over a plain, the top of a wood on a mountainside lay far too high up the slope, and its upper edge
+    // crept up and down as the view swung round. The slope of the ground toward the eye is taken from the normal.)
+    vs = p.V.xy / max(p.V.z + dot(p.n.xy, p.V.xy) / (max(p.n.z, .05) * uShade), .34) * (.08 * vol * (.45 + .55 * smoothstep(.1, .7, p.cA.b)));
     if (edgy > 0. && dot(vs, vs) > px * px * .25) {
       float top = forestNear(pk + vs, fFarm > .004 ? setFarm(pk + vs) : 0., px, have, p.cC.rg, p.wet) * part;   // the edge of a clearing is an edge too: the fields are asked there
       flank = clamp(dens - top, 0., 1.); dens = top;
@@ -347,13 +351,14 @@ void aspForest(Px p, inout Land L) {
   // yellower wood. (The southern flank of the Pyrenees was as dark as the French one.)
   tint = mix(tint, tint * vec3(1.30, 1.16, .92) + vec3(.02, .015, 0.), max(clamp(-nh.y * smoothstep(.05, .3, p.slope), 0., 1.) * .8, 1. - smoothstep(.6, 1., gSummer)) * .7);
   float ta = mix(.2, .46, ya) * (1. + .25 * oa);                     // how much one crown differs from the next
-  vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.86 + .5 * tuft + .9 * litc * p.day);
+  // (a little more light and shade on every crown than at first — the owner, 15.11.2026: a touch more volume)
+  vec3 canopy = tint * (1.03 - .5 * ta + ta * tone) * (.84 + .58 * tuft + 1.08 * litc * p.day);
   // rim and shade grow with the height of the stand; the ground between the crowns of an open stand is mostly in the sun
   float tall = .3 + .7 * ya, rim = clamp(mask - coverS, 0., 1.) * tall, castS = clamp(coverS - mask, 0., 1.) * coverS * tall;
   // every crown of an open stand throws its own shade on the grass, a crown's height away from the sun: the nearest
   // crown is known already (w1), its shade is the same round shape moved off
   if (vol > 0. && f1 > 0. && dens > .01 && dens < .985) {
-    vec4 ws = vec4(w1.xy, length(w1.xy + (vs - p.sd * (.06 * vol)) / .045), w1.w);
+    vec4 ws = vec4(w1.xy, length(w1.xy + (vs - p.sd * (.07 * vol)) / .045), w1.w);
     castS = max(castS, crownMask(ws, dens) * (1. - mask) * f1 * .8);
   }
   vec3 under = L.col * (1. - .5 * castS * p.day);

@@ -127,7 +127,7 @@ test('ground shader: the grain lies on the land at fixed sizes, nothing is switc
   for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk)', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
   // the square of the grain is laid as a patchwork — shifted from patch to patch, turned over in every other one —
   // so that its own shapes do not stand in rows; and it is weaker on level ground than on slopes
-  for (const need of ['vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;', '{ gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }', 'gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)));']) assert.ok(src.includes(need), need);
+  for (const need of ['vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;', '{ gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }', 'gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope)));']) assert.ok(src.includes(need), need);
   for (const need of ['uniform sampler2D tClimate', 'vec4 albumClimate(vec2 ll)', 'float albumWet(vec2 ll, float hl, float n1)', 'float albumTreelineOf(vec4 clim)']) assert.ok(COMMON.includes(need), need);
   // the grain of the ground: every tile is there, 1024 px, and its mean is the middle grey that changes nothing
   assert.deepEqual(GROUND_TILES, ['heath', 'steppe', 'stone', 'dunes']);
