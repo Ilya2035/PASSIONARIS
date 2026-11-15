@@ -1,7 +1,7 @@
 // Names of the lands over the map: regions in the regions mode, provinces in the other modes of the division, the
 // name of the state of history when one is shown. Map content, not interface (like layers/labels.js): a name is
 // written only while its land is large enough on the screen, bigger lands first, never one name over another.
-import { toWorld } from '../geo.js';
+import { toWorld, R as EARTH } from '../geo.js';
 
 const INK = { dark: ['#2a1d12', '0 0 2px #f6eedd, 0 0 5px #f6eedd, 0 0 9px rgba(246,238,221,.8)'], light: ['#fff8e6', '0 0 3px #000, 0 0 7px rgba(0,0,0,.9), 0 1px 0 #000'] };
 
@@ -36,9 +36,12 @@ export function createLabels(album) {
     for (const it of items) {
       let show = Math.sqrt(it.area) / kmPerPx > it.w * (it.level === 'province' ? .9 : .5);
       if (show) {
-        toWorld(it.lat, it.lon, Math.max(0, album.data.base.at(it.lat, it.lon)) * cam.exag / 1000, v).project(cam.cam);
+        toWorld(it.lat, it.lon, Math.max(0, album.data.base.at(it.lat, it.lon)) * cam.exag / 1000, v);
+        // beyond the horizon (the camera flies over the whole Earth): the ground there faces away from the eye
+        const eye = cam.cam.position, back = v.x * (eye.x - v.x) + (v.y + EARTH) * (eye.y - v.y) + v.z * (eye.z - v.z) <= 0;
+        v.project(cam.cam);
         const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * hh;
-        show = v.z < 1 && x > it.w / 2 && x < w - it.w / 2 && y > 14 && y < hh - 14
+        show = !back && v.z < 1 && x > it.w / 2 && x < w - it.w / 2 && y > 14 && y < hh - 14
           && !used.some(u => Math.abs(u[0] - x) < (u[2] + it.w) / 2 && Math.abs(u[1] - y) < 24);
         if (show) {
           used.push([x, y, it.w]);

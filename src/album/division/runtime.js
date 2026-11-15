@@ -12,6 +12,7 @@ import { createLabels } from './labels.js';
 import { createLines } from './lines.js';
 import { createPlaces } from './places.js';
 import { wallsOf } from './walls.js';
+import { chunkEdges } from './edges.js';
 import { nameDistricts } from './names.js';
 import { districtByLines } from './border.js';
 import { pickGround } from '../pick.js';
@@ -41,7 +42,7 @@ export async function startDivision(album, U) {
   const active = () => p.get('division') > 0 || !!p.get('divPick');
   // the bogs for chunkSettle: the share of the natural cell under bog, and the named wetlands (aspects/swamp.js)
   const settleOpts = () => { const cell = cellsOfChunks(ch).cell; return { swampOf: c => (cell[c] < ch.count ? ch.getNatural('swamp', cell[c]) : 0), wetlands: album.swamp?.wetlands || [] }; };
-  let settleShown = false;
+  let settleShown = false, edgesShown = null;
   // ---- the chunk of 1 km² under the cursor, while the chunks are shown (knob «Чанки 1 км²»)
   const kmInfo = document.createElement('div'); kmInfo.className = 'S km-info';
   kmInfo.style.cssText = 'position:fixed;left:50%;bottom:104px;transform:translateX(-50%);padding:6px 14px;background:rgba(12,16,24,.88);color:#fff;border-radius:3px;pointer-events:none;white-space:nowrap;display:none;z-index:5';
@@ -93,7 +94,10 @@ export async function startDivision(album, U) {
     const towns = album.layers.towns, farm = p.get('km') === 4 ? towns?.farm?.() : null; farmShown = farm ? towns.farmVersion() : -1;
     // where nobody can settle, while that is shown
     settleShown = !!p.get('noSettle');
-    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null, settleShown ? cur.div.settle.why : null); cur.state = id;
+    // what runs along every chunk — a settlement, fields, a border (edges.js) — while the borders by chunks are shown
+    edgesShown = p.get('kmEdges') ? { town: towns?.version?.() ?? -1, farm: towns?.farmVersion?.() ?? -1 } : null;
+    const edges = edgesShown ? chunkEdges(cur.div, towns?.townOfChunk ? c => towns.townOfChunk(c)?.index : null, towns?.farm?.()?.km || null) : null;
+    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null, settleShown ? cur.div.settle.why : null, edges); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
     const rows = cur.tex.userData.rows; U.uDivGeo.value.set(cur.div.geo ? rows.L0 : 0, cur.div.geo ? rows.S0 : 0);
     if (cur.lines !== id) { cur.lines = id; lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers); lines.mark(hover, sel); }
@@ -162,6 +166,7 @@ export async function startDivision(album, U) {
     if (key == null || key === 'divState') paintState(false);
     if ((key == null || key === 'km') && ((p.get('km') > 1 && !cur.facts) || (p.get('km') === 4) !== (farmShown >= 0))) paintState(true);
     if ((key == null || key === 'noSettle') && !!p.get('noSettle') !== settleShown) paintState(true);
+    if ((key == null || key === 'kmEdges') && !!p.get('kmEdges') !== !!edgesShown) paintState(true);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
     syncLabels();
@@ -263,7 +268,8 @@ export async function startDivision(album, U) {
     const h = active() && last && !p.get('brush') && !down ? atScreen(last.clientX, last.clientY) : active() ? pinned : -1;
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; lines?.mark(hover, sel); }
     if (p.get('km') === 4 && tick % 15 === 1 && (album.layers.towns?.farmVersion?.() ?? -1) !== farmShown) paintState(true);   // the fields have changed
-    const text = (p.get('km') > 0 || p.get('noSettle')) && last ? chunkUnder(last) : null;
+    { const tw = album.layers.towns; if (edgesShown && tick % 15 === 1 && tw && ((tw.version?.() ?? -1) !== edgesShown.town || (tw.farmVersion?.() ?? -1) !== edgesShown.farm)) paintState(true); }   // the settlements or their fields have
+    const text = (p.get('km') > 0 || p.get('noSettle') || p.get('kmEdges')) && last ? chunkUnder(last) : null;
     kmInfo.textContent = text || ''; kmInfo.style.display = text && !album.shot ? 'block' : 'none';
     if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(summaryOf(sel)); shownVersion = ch.version; }
   } };

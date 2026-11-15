@@ -19,7 +19,7 @@ import { NEAR_KM, MAX_FOURS, PIECE_KM, TIE_KM } from '../division/border.js';
 import { startDivision } from '../division/runtime.js';
 
 const GLSL = /* glsl */`
-uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm, uDivSettle;
+uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm, uDivSettle, uDivEdges;
 uniform ivec2 uDivGeo;                          // the first rows of the lists of border pieces and of the pieces in tDiv (division/gpu.js); 0 none
 uniform vec3 uDivSize;                          // district, province, region size, km
 uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
@@ -33,10 +33,12 @@ uvec4 divOf(float d) { int i = int(d + .5); return texelFetch(tDiv, ivec2(i % ${
 float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).r); }
 ${KM_GLSL}
 // The chunk of 1 km² a point of district d lies in (twin of chunkAt() in division/km.js): among the nine squares
-// around the point, those of the district; the nearest seed wins. xy = the square of the chunk, z = km to the nearest
-// side it shares with another chunk of the district (1e4 when it has none near).
-vec3 kmChunk(vec2 pk, int d) {
-  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t), v1 = vec2(0.); ivec2 c = ivec2(floor(t)), best = c; float d1 = 1e9;
+// around the point, those of the district; the nearest seed wins → km to the nearest side it shares with another
+// chunk of the district (1e4 when it has none near); best: the square of the chunk, across: the chunk on the other
+// side of that side (−1 none)
+float kmSide(vec2 pk, int d, out ivec2 best, out ivec2 across) {
+  vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t), v1 = vec2(0.); ivec2 c = ivec2(floor(t)); float d1 = 1e9;
+  best = c; across = ivec2(-1);
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
     ivec2 q = c + ivec2(i, j); if (int(divTexel(q) + .5) != d) continue;
     vec2 v = vec2(float(i), float(j)) + kmSeed(q) - f; float dd = dot(v, v);
@@ -46,10 +48,13 @@ vec3 kmChunk(vec2 pk, int d) {
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
     ivec2 q = c + ivec2(i, j); if (q == best || int(divTexel(q) + .5) != d) continue;
     vec2 v = vec2(float(i), float(j)) + kmSeed(q) - f, w = v - v1;
-    e = min(e, dot(.5 * (v1 + v), w) / max(length(w), 1e-4));
+    float s = dot(.5 * (v1 + v), w) / max(length(w), 1e-4);
+    if (s < e) { e = s; across = q; }
   }
-  return vec3(vec2(best), e * ${FKM.toFixed(4)});
+  return e * ${FKM.toFixed(4)};
 }
+// the same: xy = the square of the chunk, z = km to its nearest side
+vec3 kmChunk(vec2 pk, int d) { ivec2 b, o; float e = kmSide(pk, d, b, o); return vec3(vec2(b), e); }
 // what a chunk is like (division/gpu.js): the class of its ground 1..5 (0 water, or not worked out), who can live there
 // where people cannot settle and why (km.js chunkSettle: 0 they can, 1 water, 2 mountain, 3 high mountain, 4 bog,
 // 5 steep slope — a hamlet at most, 6 wet hollow — a hamlet at most), while it is shown
@@ -211,6 +216,39 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
     vec3 ink = uStyle == 0 ? vec3(1., .98, .9) : vec3(.12, .10, .12);
     col = mix(col, ink, (1. - smoothstep(w - .5, w + .6, e)) * (wet ? .3 : uDivKm == 1 ? .55 : .2) * seen * smoothstep(.2, .09, px));
   }
+  // borders by chunks (knob «Границы по чанкам», division/edges.js): on the map as it is, thin lines along the sides of
+  // the chunks something runs along — the settlements (their outline bolder, the sides between their own chunks
+  // thinner), the fields, the row of chunks on either side of a border — and the borders themselves, the higher the
+  // level the bolder (in the modes of the division the lines of lines.js draw those). Not the chunks everywhere. On the
+  // water the borders only: no settlements or fields there (and the water copy of this function stays small)
+  if (uDivEdges > 0) {
+    vec3 ink = uStyle == 0 ? vec3(1., .97, .88) : vec3(.12, .09, .10);
+    if (uDivision == 0) {
+      float sD = uDivSize.x / px, sP = uDivSize.y / px;
+      vec3 hw = vec3(.6, 1.1, 1.7) * zoom * (wet ? .7 : 1.), al = vec3(.75 * smoothstep(9., 24., sD), .9 * smoothstep(9., 24., sP), 1.) * (wet ? .5 : 1.);
+      float lD = 1. - smoothstep(hw.x - .6, hw.x + .6, a.eD / px), lP = 1. - smoothstep(hw.y - .6, hw.y + .6, a.eP / px), lR = 1. - smoothstep(hw.z - .6, hw.z + .6, a.eR / px);
+      col = mix(col, ink, max(max(lD * al.x, lP * al.y), lR * al.z));
+    }
+    if (px < .3 && !water) {
+      ivec2 q1, q2; float e = kmSide(pk, a.d, q1, q2), seen = 1. - smoothstep(.16, .3, px);
+      uint g1 = texelFetch(tDiv, clamp(q1, ivec2(0), ivec2(${FN - 1})), 0).g, t1 = g1 >> 20u;
+      vec3 town = uStyle == 0 ? vec3(1., .40, .16) : vec3(.66, .10, .06), farm = uStyle == 0 ? vec3(1., .88, .22) : vec3(.60, .44, .02);
+      if (t1 > 0u) col = mix(col, town * (.75 + .3 * lum), .2 * seen);                                                    // a chunk a settlement stands on: a light tint
+      // nearer the edge of the district than any side it shares: that side is the border, drawn above
+      if (q2.x >= 0 && e < a.eD) {
+        uint g2 = texelFetch(tDiv, clamp(q2, ivec2(0), ivec2(${FN - 1})), 0).g, t2 = g2 >> 20u;
+        bool f1 = (g1 & 0x80000u) != 0u, f2 = (g2 & 0x80000u) != 0u, b1 = (g1 & 32u) != 0u, b2 = (g2 & 32u) != 0u;
+        // the line: its half width in pixels, its colour and how strong it is
+        float w = 0., s = 0.; vec3 lc = ink;
+        if (t1 != t2) { w = 1.2; s = 1.; lc = town; }                                   // the outline of a settlement
+        else if (t1 > 0u) { w = .6; s = .85; lc = town; }                               // between the chunks of one settlement
+        else if (f1 != f2) { w = .8; s = .95; lc = farm; }                              // the edge of the fields
+        else if (f1) { w = .5; s = .75; lc = farm; }                                    // between chunks under fields
+        else if (b1 || b2) { w = .45; s = .6; }                                         // the chunks along a border
+        col = mix(col, lc, (1. - smoothstep(w * zoom - .5, w * zoom + .6, e / px)) * s * seen * step(.01, w));
+      }
+    }
+  }
   // where people cannot settle (knob «Где нельзя селиться»): every chunk by its reason — red mountains, violet high
   // mountains, sea-green bogs; amber where a hamlet at most may stand. The chunk outlines up close, the squares far off.
   if (uDivSettle > 0 && !wet) {
@@ -243,7 +281,7 @@ vec3 districtAt(vec2 pk) {
 }
 
 void aspDivision(Px p, inout vec3 col, float landA) {
-  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0 && uDivSettle == 0)) return;
+  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0 && uDivSettle == 0 && uDivEdges == 0)) return;
   float inR = inRegion(p.ll);                     // nothing is divided beyond the album's region
   if (inR < .002) return;
   vec3 cl = landA > .02 ? divLook(col, p.pk, p.px, false) : col;
@@ -260,7 +298,7 @@ export const STATES = [['', 'нет'], ['aragon', 'Королевство Ара
 export default {
   id: 'division', title: 'Деление', glsl: GLSL,
   uniforms: {
-    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 }, uDivSettle: { value: 0 },
+    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 }, uDivSettle: { value: 0 }, uDivEdges: { value: 0 },
     uDivSize: { value: new Vector3(20, 100, 900) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() }, uDivGeo: { value: new Vector2(0, 0) },
   },
   params: [
@@ -271,6 +309,7 @@ export default {
     { key: 'divPick', label: 'Район под курсором', group: 'modes', type: 'toggle', value: 0 },
     // (map: the switch on the panel of the map, mapview.js)
     { key: 'divPlaces', label: 'Деление: места городов районов', group: 'modes', type: 'toggle', value: 0, map: 'Места городов районов' },
+    { key: 'kmEdges', label: 'Границы по чанкам', group: 'modes', type: 'toggle', value: 0, uniform: 'uDivEdges', map: 'Границы по чанкам' },
     { key: 'noSettle', label: 'Где нельзя селиться', group: 'modes', type: 'toggle', value: 0, uniform: 'uDivSettle', map: 'Где нельзя селиться' },
     { key: 'km', label: 'Чанки 1 км² (проверка)', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'очертания'], [2, 'класс земли'], [3, 'жилые и нежилые'], [4, 'угодья']], value: 0, uniform: 'uDivKm' },
   ],
@@ -293,6 +332,8 @@ export default {
     { id: 'km-living', group: 'Режимы карты', title: 'Чанки: жилые, едва жилые и нежилые', note: 'Зелёный — жить можно (классы 1–3), жёлтый — едва: на крутых склонах встанет разве что хутор (класс 4), красный — нежилой чанк (класс 5: горы и всё выше 2 400 м). В горах жилые чанки идут цепочками по долинам. Здесь Пиренеи от Андорры до Сердани.', p: { ...PAPER, division: 1, km: 3, divLabels: 0 }, cam: { lat: 42.5, lon: 1.7, h: 130, tilt: 0, heading: 0 } },
     { id: 'km-farm', group: 'Режимы карты', title: 'Чанки: угодья', note: 'Проверочный вид: у каждого чанка одно число — какая его доля под полями. Чем гуще цвет, тем больше распахано: тёмно-рыжий — чанк угодий целиком, светло-жёлтый — несколько наделов. Поселение распахивает чанки вокруг себя, сколько нужно его жителям; ровную землю раньше холмов. Рисунок полей на обычной карте берётся только из этого числа. Здесь «Рост городов» на 1,6.', p: { ...PAPER, division: 1, km: 4, divLabels: 0, growth: 1.6 }, cam: { lat: 41.66, lon: -0.9, h: 60, tilt: 0, heading: 0 } },
     { id: 'km-farm-natural', group: 'Режимы карты', title: 'Чанки: угодья на натуральной карте', note: 'Те же числа поверх обычной картины: видно, что поля нарисованы там, где чанки распаханы, а край полей идёт по наделам и не повторяет прямые стороны чанков.', p: { ...NATURAL, division: 1, km: 4, divLabels: 0, growth: 1.6, forest3d: 0 }, cam: { lat: 41.74, lon: -1.08, h: 24, tilt: 20, heading: 0 } },
+    { id: 'km-edges', group: 'Режимы карты', title: 'Границы по чанкам: Сарагоса', note: 'Обычная карта, поверх — очертания чанков по 1 км² там, где по ним что-то проходит, а не всех чанков. Рыжие — чанки, на которых стоит поселение: толще — край поселения, тоньше — стороны между его чанками. Жёлтые — чанки под полями. Светлые тонкие — ряд чанков по обе стороны границы района, провинции или региона: граница — их внешняя сторона. Сами границы светлее и толще, чем выше уровень. Переключатель «Границы по чанкам» на панели карты.', p: { ...NATURAL, kmEdges: 1 }, cam: { lat: 41.66, lon: -0.88, h: 30, tilt: 25, heading: 0 } },
+    { id: 'km-edges-pyrenees', group: 'Режимы карты', title: 'Границы по чанкам: Хака и долина Арагона', note: 'В горах: город в долине стоит на своих чанках, поля — вдоль реки, граница района идёт по гребню, и видно, какими чанками она проходит.', p: { ...NATURAL, kmEdges: 1 }, cam: { lat: 42.57, lon: -0.55, h: 40, tilt: 35, heading: 0 } },
     { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек около 100 км²: по ним пока считаются лес, лёд и болота. Тёмные — границы районов. Район состоит из чанков по 1 км², а не из этих ячеек, поэтому линии совпадают не везде. Числа района суммируются по его чанкам; число ячейки делится между районами по тому, сколько её чанков в каждом.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
     { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, число чанков по 1 км², доля леса, болот, застройки и полей, сколько чанков какого класса земли и сколько жилых, суммы ресурсов. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
     { id: 'division-sea', group: 'Режимы карты', title: 'Деление: море и острова', note: 'Моря названы: Бискайский залив, Атлантика, Кадисский залив, море Альборан, Балеарское море, Лионский залив. Прибрежное море поделено на куски напротив прибрежных районов, чтобы высадиться можно было везде.', p: { ...PAPER, division: 3 }, cam: { lat: 39.6, lon: 0.6, h: 900, tilt: 0, heading: 0 } },
