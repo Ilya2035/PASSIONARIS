@@ -372,10 +372,23 @@ vec3 aspWater(Px p) {
     // narrow band at the waterline. On a flat floor that the height data fills with noise (the shoals of a delta)
     // the sea stays calm and clean.
     // (the coarse heights of the region alone: three plain look-ups half a km apart, in Mercator both steps are equal)
-    float lod = log2(max(w.px, .234) / .234) + 1.6, e = .5;
-    vec2 m = merc(p.ll), ub = (m - uBaseRect.xy) * uBaseRect.zw, du = e / (KM * cos(radians(p.ll.x)) * 360.) * uBaseRect.zw;
-    float hC = textureLod(uBase, ub, lod).r, hE = textureLod(uBase, ub + vec2(du.x, 0.), lod).r, hN = textureLod(uBase, ub - vec2(0., du.y), lod).r;
-    float gs = length(vec2(hE - hC, hN - hC)) / (e * 1000.);          // rise over run of the smoothed bottom
+    // Beyond the mapped region (the whole Earth is drawn since v0.6.114) those heights are not there to read — a
+    // look-up past the edge of the picture gave the bays of the world a speckle of surf. There the bottom is read
+    // from the heights of the world (heightLod(): a point every five km), smoothed the same way: three look-ups
+    // six km apart. A wide level bank — the Bahamas, the Wadden Sea — has no surf on it, only along its shores.
+    float rg = smoothstep(0., .05, regionEdge(p.ll));                  // 1 inside the region, 0 from its edge outward
+    float lod = log2(max(w.px, .234) / .234) + 1.6, e = .5, gs = 0., hC = -w.depth;
+    vec2 m = merc(p.ll);
+    if (rg < 1.) {
+      float eW = 6., lw = 5.5, hW = heightLod(p.ll, lw);
+      gs = length(vec2(heightLod(p.ll + vec2(0., eW / (KM * cos(radians(p.ll.x)))), lw) - hW, heightLod(p.ll + vec2(eW / KM, 0.), lw) - hW)) / (eW * 1000.);
+      hC = min(hW, -w.depth * .5);                                     // (the smoothed bottom never rises over the water of the pixel by more than half its depth: a shore five km off must not dry the bay)
+    }
+    if (rg > 0.) {
+      vec2 ub = (m - uBaseRect.xy) * uBaseRect.zw, du = e / (KM * cos(radians(p.ll.x)) * 360.) * uBaseRect.zw;
+      float hR = textureLod(uBase, ub, lod).r, hE = textureLod(uBase, ub + vec2(du.x, 0.), lod).r, hN = textureLod(uBase, ub - vec2(0., du.y), lod).r;
+      gs = mix(gs, length(vec2(hE - hR, hN - hR)) / (e * 1000.), rg); hC = mix(hC, hR, rg);          // rise over run of the smoothed bottom
+    }
     w.surf = w.depth / (1000. * max(gs, 1e-4)) + 4. * (1. - smoothstep(.0012, .004, gs));
     // the sea charts step from one depth to the next along jagged lines; the smoothed bottom rounds those steps off
     // (where there are fine heights, their smoothed bottom: the same rule as heightLod() — the fine heights are 2048

@@ -36,6 +36,6 @@ const end = r.stdout.indexOf('\n', at), got = JSON.parse(r.stdout.slice(at + 5, 
 const out = join(ROOT, 'public', 'assets', 'album', 'roads', 'roads.bin.gz'); mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, gzipSync(Buffer.from(got.b64, 'base64'), { level: 9 }));
 const s = got.stats;
-console.log(`laid on ${got.tiles} fine tiles: ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${s.capitals} towns of provinces, ${got.fords} river crossings, ${s.unreached} districts without a road, ${s.shaped} legs shaped, ${got.banks.km} km on the banks of rivers, ${s.passes.join(' + ')} passes`);
+console.log(`laid on ${got.tiles} fine tiles (those under the roads): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${s.capitals} towns of provinces, ${got.fords} river crossings, ${s.unreached} districts without a road, ${s.shaped} legs shaped, ${got.banks.km} km on the banks of rivers, ${s.passes.join(' + ')} passes`);
 console.log(`signature ${got.sig} → ${out} (${statSync(out).size} bytes)`);
 

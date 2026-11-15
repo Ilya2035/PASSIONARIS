@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { OUT_DIR } from './osm-extract.mjs';
 import { encodeCourses, BBOX_M } from '../../src/album/water/courses.js';
+import { KM_PER_DEG, COS_REF } from '../../src/album/geo.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 // Russian names of the rivers the album speaks of; OpenStreetMap has name:ru only here and there
@@ -24,7 +25,7 @@ const RU = { Ebro: 'Эбро', Tajo: 'Тахо', Tejo: 'Тежу', Duero: 'Ду�
   Vouga: 'Вога', Mira: 'Мира', Orb: 'Орб', Têt: 'Тет', Gers: 'Жер', Aveyron: 'Аверон', Moulouya: 'Мулуя', Chélif: 'Шелифф', Cheliff: 'Шелифф', Arga: 'Арга', Ega: 'Эга', Huerva: 'Уэрва', Guadalope: 'Гвадалопе', Mijares: 'Михарес',
   Cabriel: 'Кабриэль', Guadalimar: 'Гвадалимар', Guadiato: 'Гвадиато', Bidasoa: 'Бидасоа', Nervión: 'Нервьон', Ebre: 'Эбро', Tage: 'Тахо' };
 const bare = n => n.replace(/^(r[íi]o|riu|rivi[èe]re|fleuve|oued|wadi|la|le|el|l')\s+/i, '').replace(/^(d[e']|du|des|de la)\s*/i, '').trim();
-const KX = 111.195 * Math.cos(40 * Math.PI / 180) / 1e6, KY = 111.195 / 1e6;      // microdegrees → flat km
+const KX = KM_PER_DEG * COS_REF / 1e6, KY = KM_PER_DEG / 1e6;      // microdegrees → flat km
 const rd = (name, what) => JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, `${name}.${what}.json.gz`))));
 const names = readdirSync(OUT_DIR).filter(f => f.endsWith('.rivers.json.gz')).map(f => f.slice(0, -'.rivers.json.gz'.length));
 const key = (lon, lat) => lat * 33554432 + lon + 12e6;

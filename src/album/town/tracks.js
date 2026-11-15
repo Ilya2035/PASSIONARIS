@@ -14,7 +14,8 @@
 // Where a way passes the chunk of another place, it passes through that place: a track leads from village to village.
 // Plain JavaScript without the GPU.
 import { KN, KKM, KX0, KY0, kmData, kmHash } from '../division/km.js';
-import { stepCost } from '../roads/routes.js';
+import { stepCost, walkCost } from '../roads/routes.js';
+import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { Heap } from '../division/graph.js';
 
 const LAND = 0;
@@ -52,6 +53,9 @@ export function districtTracks(div, G, list, d, onRoad) {
   const local = t => (Math.floor(t / KN) - by0) * w + t % KN - bx0, chunkOf = l => (Math.floor(l / w) + by0) * KN + l % w + bx0;
   const held = new Uint8Array(w * h);                               // the chunks a place of the district stands in
   for (let p = 1; p < places; p++) { const t = Math.floor((list.y[s0 + p] - KY0) / KKM) * KN + Math.floor((list.x[s0 + p] - KX0) / KKM); if (cells[t] === d) held[local(t)] = 1; }
+  // (the price of a step by the ground itself where the division knows its heights — walkCost of roads/routes.js: a canyon between
+  // two chunks is not walked straight down and up, «люди так не ходят»; the part «Дороги и реки», 15.11.2026)
+  const hAt = div.raster && div.raster.heightAt, at = hAt ? (x, y) => Math.max(0, hAt(y / KM_PER_DEG, x / (KM_PER_DEG * COS_REF))) : null;
   // the ways end on the roads of the district; in a district without a road, at its centre
   const centre = cen && cen.texel[d] >= 0 && cells[cen.texel[d]] === d ? cen.texel[d] : -1;
   let roads = 0;
@@ -64,7 +68,7 @@ export function districtTracks(div, G, list, d, onRoad) {
       const u = i + NB[q], v = j + NB[q + 1]; if (u < 0 || v < 0 || u >= w || v >= h) continue;
       const m = v * w + u, tm = chunkOf(m); if (cells[tm] !== d) continue;
       // the step is taken from the far chunk toward the road; what it costs to pass the nearer chunk is that chunk's own
-      const cm = c + stepCost(G, tm, t, q >= 8) * (1 + (kmHash(t % KN, Math.floor(t / KN), 21) - .5) * TRACK_UNEVEN) * (held[l] ? TRACK_BY_PLACE : 1);
+      const cm = c + (at ? walkCost(G, tm, t, q >= 8, at) : stepCost(G, tm, t, q >= 8)) * (1 + (kmHash(t % KN, Math.floor(t / KN), 21) - .5) * TRACK_UNEVEN) * (held[l] ? TRACK_BY_PLACE : 1);
       if (cm < cost[m]) { cost[m] = cm; to[m] = l; heap.push(cm, m); }
     }
   }

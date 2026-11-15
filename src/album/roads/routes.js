@@ -25,12 +25,12 @@
 // network out at every start: it is laid once (scripts/album/bake-roads.mjs) and kept in
 // public/assets/album/roads/roads.bin.gz; netSignature() tells whether the file was laid for this very division.
 import { kmOf, llOf } from '../chunks.js';
-import { KN as FN, KKM as FKM } from '../division/km.js';
+import { KN as FN, KKM as FKM, KX0, KY0 } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { HISTORIC } from './historic.js';
 import { shapeLegs, legKey, finePoints, fineSteps, thin, cellXY, cellChunk, DIRS, FW } from './shape.js';
 
-const X0 = -880, Y0 = 3880, LAND = 0;
+const X0 = KX0, Y0 = KY0, LAND = 0;                  // where the square of the chunks begins, flat km
 export const STEEP = [28, 520];                    // a slope s (rise over run) makes a step 1 + 28 s + 520 s² times dearer
 export const HIGH = .00012;                        // … and every metre above the sea by this share
 export const CROSSING = [0, 2.5, 5, 9];            // km of way for stepping onto a river: a small one, a lesser, a great

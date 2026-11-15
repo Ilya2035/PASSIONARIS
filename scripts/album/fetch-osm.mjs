@@ -1,5 +1,5 @@
 // OpenStreetMap extracts of the album's region (© OpenStreetMap contributors, ODbL 1.0) from download.geofabrik.de,
-// the server meant for bulk downloads. About 3.4 GB go to data/album/osm/pbf/ (gitignored); files already there are
+// the server meant for bulk downloads. About 7 GB go to data/album/osm/pbf/ (gitignored); files already there are
 // kept, and a download that was cut off goes on from where it stopped. scripts/album/osm-extract.mjs reads the
 // files; the big files may be deleted afterwards.
 //   node scripts/album/fetch-osm.mjs
@@ -9,8 +9,14 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-export const PBF_DIR = join(ROOT, 'data', 'album', 'osm', 'pbf');
-export const EXTRACTS = ['europe/andorra', 'europe/portugal', 'europe/france/languedoc-roussillon', 'europe/france/aquitaine', 'europe/france/midi-pyrenees', 'africa/morocco', 'africa/algeria', 'europe/spain'];
+// (PASSIONARIS_OSM: another folder with pbf/ in it — a worktree reads the raw files of the main folder instead of copying them)
+export const OSM_DIR = process.env.PASSIONARIS_OSM || join(ROOT, 'data', 'album', 'osm');
+export const PBF_DIR = join(OSM_DIR, 'pbf');
+// Spain, Portugal, Andorra, the north of Morocco and Algeria, and all of France by its regions (Geofabrik keeps the
+// regions of before 2016). What lies outside the region of the album (geo.js, BBOX) is cut away by osm-extract.mjs.
+const FRANCE = ['alsace', 'aquitaine', 'auvergne', 'basse-normandie', 'bourgogne', 'bretagne', 'centre', 'champagne-ardenne', 'corse', 'franche-comte', 'haute-normandie', 'ile-de-france', 'languedoc-roussillon', 'limousin',
+  'lorraine', 'midi-pyrenees', 'nord-pas-de-calais', 'pays-de-la-loire', 'picardie', 'poitou-charentes', 'provence-alpes-cote-d-azur', 'rhone-alpes'];
+export const EXTRACTS = ['europe/andorra', 'europe/portugal', ...FRANCE.map(r => 'europe/france/' + r), 'africa/morocco', 'africa/algeria', 'europe/spain'];
 export const pbfFile = e => join(PBF_DIR, e.split('/').pop() + '.osm.pbf');
 const UA = { 'User-Agent': 'passionaris-album/0.1 (open-source game prototype)' };
 

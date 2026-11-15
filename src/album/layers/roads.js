@@ -195,12 +195,19 @@ export default async function init(album) {
   // every 230 m in memory): for the bake only — scripts/album/bake-roads.mjs. Every fine tile is read, a hundred
   // megabytes of heights. The gorge that the coarse heights do not have is there, and so is the true height of a
   // pass. → how many tiles were read
+  // Only the tiles under the roads are read (a larger region has thousands of them). The way of every leg chunk by
+  // chunk does not depend on the fine heights, so the network is laid once by the heights of the page, and the
+  // tiles within 2.6 km of its legs — more than the strip a fine way may use — are the ones the second laying needs.
   async function rebake() {
     const fine = album.data.meta?.fine, base = album.terrain?.heightAt || division.data.raster.heightAt;
     if (!fine?.tiles?.length) { build(base); return 0; }
-    const N = 2 ** fine.z, tiles = new Map();
+    const N = 2 ** fine.z, tiles = new Map(), have = new Set(fine.tiles.map(t => t[0] * 65536 + t[1])), want = new Set(), M = 2.6;
+    build(base);
+    const mark = (x, y) => { const g = llOf(x, y), s = Math.sin(g.lat * Math.PI / 180), k = Math.floor((g.lon + 180) / 360 * N) * 65536 + Math.floor((.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * N); if (have.has(k)) want.add(k); };
+    for (const L of net.legs) if (L.kind !== 3 && L.path) for (const t of L.path) { const x = KX0 + (t % KN + .5) * KKM, y = KY0 + (Math.floor(t / KN) + .5) * KKM; mark(x, y); mark(x - M, y - M); mark(x + M, y - M); mark(x - M, y + M); mark(x + M, y + M); }
+    const list = [...want].map(k => [Math.floor(k / 65536), k % 65536]);
     const get = async ([x, y]) => { try { const r = await fetch(`album-data/${fine.dir}${x}_${y}.u16d.gz`); if (!r.ok) return; tiles.set(x * 65536 + y, decodeTile(new Uint16Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()))); } catch { /* a tile that cannot be read: the base heights serve there */ } };
-    for (let i = 0; i < fine.tiles.length; i += 24) await Promise.all(fine.tiles.slice(i, i + 24).map(get));
+    for (let i = 0; i < list.length; i += 24) await Promise.all(list.slice(i, i + 24).map(get));
     const pt = (i, j) => { const t = tiles.get((i >> 8) * 65536 + (j >> 8)); return t ? t[(j & 255) * 256 + (i & 255)] / 4 - 8192 : null; };
     build((lat, lon) => {
       const mx = (lon + 180) / 360 * N * 256 - .5, s = Math.sin(lat * Math.PI / 180), my = (.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * N * 256 - .5;

@@ -17,7 +17,7 @@
 //     up again (the owner, 15.11.2026: «через каньон… вниз, а потом просто вверх. Но люди так не ходят») goes
 //     aslant, with bends, or round its head.
 // Plain JavaScript without the GPU: the same land always gives the same shape. The plains are not touched.
-import { KN, KKM } from '../division/km.js';
+import { KN, KKM, KX0, KY0 } from '../division/km.js';
 import { Heap } from '../division/graph.js';
 import { kmOf, llOf } from '../chunks.js';
 
@@ -36,7 +36,7 @@ export const FINE = {
   thin: .012,                        // km: a point this near the straight between its neighbours is dropped when the line is drawn
   drape: .12,                        // km: over fine ground a road as it is drawn has a corner at least this often (dense())
 };
-const X0 = -880, Y0 = 3880, F = FINE.step, K = Math.round(KKM / F);
+const X0 = KX0, Y0 = KY0, F = FINE.step, K = Math.round(KKM / F);
 export const FW = KN * K;            // the fine cells: FW × FW of them over the same ground as the chunks; cell = j · FW + i
 // sixteen ways to step, in the order of their bearing
 export const DIRS = [[1, 0], [2, 1], [1, 1], [1, 2], [0, 1], [-1, 2], [-1, 1], [-2, 1], [-1, 0], [-2, -1], [-1, -1], [-1, -2], [0, -1], [1, -2], [1, -1], [2, -1]];

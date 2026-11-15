@@ -1,5 +1,6 @@
 // Where the shore of the album's region is a beach: every natural=beach of OpenStreetMap
-// (scripts/album/osm-extract.mjs) laid on a raster of 2048 × 2048 cells of 625 m over the album's square of flat km.
+// (scripts/album/osm-extract.mjs) laid on a raster of cells of 625 m over the album's square of flat km (2048 × 2048
+// of them while the square is 1280 km across: courses.js, COAST_*).
 // A cell says how much of the shore in it is beach, 0..255. The shore itself is drawn from the heights; this raster
 // only tells the ground shader where to put sand at the waterline and where to leave rock.
 // → public/assets/album/water/coast.bin.gz (in git; © OpenStreetMap contributors, ODbL 1.0): bytes, row by row from
@@ -10,9 +11,10 @@ import { join, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { OUT_DIR } from './osm-extract.mjs';
 import { COAST_N, COAST_X0, COAST_Y0, COAST_KM } from '../../src/album/water/courses.js';
+import { KM_PER_DEG, COS_REF } from '../../src/album/geo.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-const KX = 111.195 * Math.cos(40 * Math.PI / 180) / 1e6, KY = 111.195 / 1e6, N = COAST_N, C = COAST_KM / N;
+const KX = KM_PER_DEG * COS_REF / 1e6, KY = KM_PER_DEG / 1e6, N = COAST_N, C = COAST_KM / N;
 const len = new Float32Array(N * N); let count = 0, km = 0;
 for (const f of readdirSync(OUT_DIR).filter(f => f.endsWith('.beaches.json.gz'))) for (const b of JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, f))))) {
   const p = b.pts; let per = 0, hit = false;

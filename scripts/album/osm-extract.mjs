@@ -11,9 +11,11 @@ import { openSync, readSync, closeSync, writeFileSync, mkdirSync, existsSync, st
 import { join } from 'node:path';
 import { inflateSync, gzipSync } from 'node:zlib';
 import { PBF_DIR, EXTRACTS, pbfFile } from './fetch-osm.mjs';
+import { BBOX } from '../../src/album/geo.js';
 
-export const OUT_DIR = join(PBF_DIR, '..', 'extract');
-const BOX = { lat0: 34.9, lat1: 45.1, lon0: -10.4, lon1: 4.9 };       // the album's region with a margin, degrees
+// (PASSIONARIS_OSM_EXTRACT: another folder for what is kept — a worktree that reads the raw files of the main folder writes its own)
+export const OUT_DIR = process.env.PASSIONARIS_OSM_EXTRACT || join(PBF_DIR, '..', 'extract');
+const BOX = { lat0: BBOX.lat0 - .3, lat1: BBOX.lat1 + .3, lon0: BBOX.lon0 - .4, lon1: BBOX.lon1 + .4 };       // the album's region with a margin, degrees
 const PLACE = new Set(['city', 'town', 'village', 'hamlet']);
 const WANT = ['waterway', 'natural', 'water', 'name', 'name:ru', 'name:es', 'intermittent', 'place', 'population', 'boundary', 'admin_level', 'type', 'tunnel'];
 

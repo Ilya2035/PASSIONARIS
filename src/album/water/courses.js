@@ -7,9 +7,12 @@
 //   head.names   [[name, name in Russian], …]
 //   body         river after river: i32 lon, lat of the first point in 1e-5°, i16 steps to every next point, then a
 //                byte of width for every point (widthOf)
-// This file has no imports: the page, the tests and the bake script all read it.
+// The page, the tests and the bake scripts all read this file. It imports nothing but the shape of the region: its
+// box (geo.js) and the square of the chunks (division/km.js) — no number of the region is typed in here.
+import { BBOX, KM_PER_DEG, COS_REF } from '../geo.js';
+import { KN, KKM, KX0, KY0 } from '../division/km.js';
 
-export const BBOX_M = { lon0: -1000000, lon1: 450000, lat0: 3520000, lat1: 4480000 };        // the region in 1e-5°
+export const BBOX_M = { lon0: Math.round(BBOX.lon0 * 1e5), lon1: Math.round(BBOX.lon1 * 1e5), lat0: Math.round(BBOX.lat0 * 1e5), lat1: Math.round(BBOX.lat1 * 1e5) };        // the region in 1e-5°
 // width of the water, km ↔ its byte: steps of 3 %, from 1.5 m to 4.6 km
 export const widthCode = km => Math.max(0, Math.min(255, Math.round(Math.log(Math.max(km, .0015) / .0015) / Math.log(1.032))));
 export const widthOf = code => .0015 * 1.032 ** code;
@@ -55,7 +58,7 @@ export const rankOf = wKm => (wKm >= .12 ? 5 : wKm >= .07 ? 6 : wKm >= .04 ? 7 :
 // the settlements): [{ name, rank, width (km), pts: [[lon, lat], …] }]. A river is cut into pieces of one rank; its
 // head waters, narrower than minW, are left out; points stand every stepKm or so.
 export function mainRivers(courses, minW = .012, stepKm = .6) {
-  const out = [], KX = 111.195 * Math.cos(40 * Math.PI / 180), KY = 111.195;
+  const out = [], KX = KM_PER_DEG * COS_REF, KY = KM_PER_DEG;
   for (const r of courses.rivers) {
     let piece = null, lastX = 0, lastY = 0;
     const flush = () => { if (piece && piece.pts.length > 2) out.push(piece); piece = null; };
@@ -72,5 +75,6 @@ export function mainRivers(courses, minW = .012, stepKm = .6) {
 }
 
 // The raster of beaches (public/assets/album/water/coast.bin.gz, scripts/album/bake-coast.mjs): COAST_N × COAST_N
-// bytes over the album's square of flat km, from (COAST_X0, COAST_Y0), COAST_KM across; row by row from the south.
-export const COAST_N = 2048, COAST_X0 = -880, COAST_Y0 = 3880, COAST_KM = 1280;
+// bytes over the album's square of flat km — the square of the chunks — from (COAST_X0, COAST_Y0), COAST_KM across;
+// row by row from the south. A cell is COAST_CELL km: 2048 × 2048 of them while the square is 1280 km across.
+export const COAST_CELL = .625, COAST_X0 = KX0, COAST_Y0 = KY0, COAST_KM = KN * KKM, COAST_N = Math.round(COAST_KM / COAST_CELL);

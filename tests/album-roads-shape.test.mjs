@@ -3,13 +3,13 @@
 // дном долины, на подъём — с поворотами, а не прямой чертой по склону»).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KN, KKM } from '../src/album/division/km.js';
+import { KN, KKM, KX0, KY0 } from '../src/album/division/km.js';
 import { Heap } from '../src/album/division/graph.js';
 import { llOf, kmOf } from '../src/album/chunks.js';
 import { FINE, FW, DIRS, cellOf, cellXY, fineRivers, climbs, fineWay, fineSteps, thin, dense, fineCover } from '../src/album/roads/shape.js';
 import { hugBanks, BANK } from '../src/album/roads/banks.js';
 
-const X0 = -880, Y0 = 3880, F = FINE.step, K = Math.round(KKM / F);
+const X0 = KX0, Y0 = KY0, F = FINE.step, K = Math.round(KKM / F);
 // a piece of made-up ground: chunks with the heights of `height(x, y)` (metres at a point of the flat km plane)
 function ground(height, riverChunks = []) {
   const n = KN * KN, G = { land: new Uint8Array(n).fill(1), hgt: new Float32Array(n), riv: new Uint8Array(n), g: new Float64Array(n), mark: new Int32Array(n), done: new Int32Array(n), from: new Int32Array(n), stamp: 0, heap: new Heap(1 << 12) };

@@ -8,7 +8,7 @@ import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
-import { KN as FN, KKM as FKM } from '../src/album/division/km.js';
+import { KN as FN, KKM as FKM, KX0, KY0 } from '../src/album/division/km.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
@@ -43,7 +43,7 @@ const lands = { regions: [{ id: 'r', name: 'Остров' }], provinces: [{ id: 
 const admin = { units: { W: { name: 'Запад', rings: [box(IX0 - 30, IY0 - 30, RX, IY1 + 30)] }, E: { name: 'Восток', rings: [box(RX, IY0 - 30, IX1 + 30, IY1 + 30)] } } };
 const river = [{ rank: 5, pts: Array.from({ length: 50 }, (_, i) => { const p = llOf(IX0 + 5 + i * (RX - 50 - IX0) / 49, RIVER_Y); return [p.lon, p.lat]; }) }];
 const ch = new Chunks(height, river), div = buildDivision(ch, { lands, admin, heightAt: height, lakes: [], size: 30, rivers: river });
-const texel = (x, y) => Math.floor((y - 3880) / FKM) * FN + Math.floor((x + 880) / FKM), xyOf = t => [-880 + (t % FN + .5) * FKM, 3880 + (Math.floor(t / FN) + .5) * FKM];
+const texel = (x, y) => Math.floor((y - KY0) / FKM) * FN + Math.floor((x - KX0) / FKM), xyOf = t => [KX0 + (t % FN + .5) * FKM, KY0 + (Math.floor(t / FN) + .5) * FKM];
 const towns = [{ ...llOf(IX0 + 60, IY1 - 50), pop: 9e5, name: 'Северо-запад' }, { ...llOf(IX1 - 60, IY1 - 50), pop: 8e5, name: 'Северо-восток' }, { ...llOf(IX0 + 70, IY0 + 40), pop: 7e5, name: 'Юго-запад' }, { ...llOf(IX1 - 70, IY0 + 40), pop: 6e5, name: 'Юго-восток' }];
 div.centres = districtCentres(div, towns);
 const G = roadGround(div), districtOf = t => { const [x, y] = kmOf(t.lat, t.lon); return div.cells[texel(x, y)]; };

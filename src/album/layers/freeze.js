@@ -6,6 +6,9 @@
 // state.retreat). This file sets the natural values and runs the freeze model: ice grows from the shore and from the
 // north, later over deep water, spreads from chunk to chunk, and melts back the same way.
 import { CHUNK_KM, CI0 } from '../chunks.js';
+import { KM_PER_DEG, COS_REF } from '../geo.js';
+
+const NORTH = [35.2, 44.8];              // the latitudes between which the cold comes sooner and sooner
 import { WATER_UNIFORMS, MELT_TOP, MELT_SPAN } from '../aspects/water.js';
 
 const sat = x => Math.max(0, Math.min(1, x));
@@ -34,12 +37,12 @@ export function makeFreeze(ch, heightAt) {
 
   // Chunks are natural cells, each all land or all water (ch.kind). The mean depth of a water chunk is taken from
   // nine points in and around its middle; how far it lies from the land is counted in chunks.
-  const queue = [], KX = 111.195 * Math.cos(40 * Math.PI / 180), lake = new Float32Array(n);
+  const queue = [], KX = KM_PER_DEG * COS_REF, lake = new Float32Array(n);
   for (let k = 0; k < n; k++) {
     water[k] = (ch.kind ? ch.kind[k] === 0 : ch.land[k] < .6) ? 1 : 0;
     let sum = 0, cnt = 0;
     if (heightAt && water[k]) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
-      const h = heightAt((centres[k].y + b * 2.5) / 111.195, (centres[k].x + a * 2.5) / KX);
+      const h = heightAt((centres[k].y + b * 2.5) / KM_PER_DEG, (centres[k].x + a * 2.5) / KX);
       if (h <= 0) { sum -= h; cnt++; }
     }
     depth[k] = cnt ? sum / cnt : 0;
@@ -51,12 +54,15 @@ export function makeFreeze(ch, heightAt) {
 
   // how cold it must get before a chunk starts to freeze: 0 at once .. ~.86 last of all
   for (let k = 0; k < n; k++) {
-    const c = centres[k], north = sat((c.lat - 35.2) / 9.6), jit = hash(k), land = water[k] && !lake[k] ? 0 : 1;   // still fresh water freezes like the land around it
+    // (north: 0 at 35.2° N, 1 from 44.8° N on. These are latitudes of the climate, not the box of the region: when the region
+    // grows to the north, the waters of Spain must freeze in the order they did)
+    const c = centres[k], north = sat((c.lat - NORTH[0]) / (NORTH[1] - NORTH[0])), jit = hash(k), land = water[k] && !lake[k] ? 0 : 1;   // still fresh water freezes like the land around it
     const onLand = .10 + .22 * (1 - north) - .12 * sat((lake[k] || ch.height[k]) / 1500);                      // lakes and rivers: mountain water first
     const atSea = .16 + .26 * (1 - north) + .20 * Math.sqrt(sat(depth[k] / 2000)) + .028 * Math.min(off[k] === 1e9 ? 8 : off[k], 8);   // salt, deep, far from the shore: last
     res[k] = Math.max(.02, onLand * land + atSea * (1 - land) + (jit - .5) * .03);
     // the natural state of the sea: the ocean is rougher than the inner sea, the open water rougher than the coast
-    const ocean = ss(-5.2, -6.2, c.lon) + ss(43.2, 43.6, c.lat) * ss(-1.2, -2, c.lon), far = sat((off[k] === 1e9 ? 8 : off[k]) / 8);
+    // (the ocean: west of Gibraltar; the Bay of Biscay; and every sea north of 45.5° N — the Atlantic coast of France, the Channel)
+    const ocean = Math.min(1, ss(-5.2, -6.2, c.lon) + ss(43.2, 43.6, c.lat) * ss(-1.2, -2, c.lon) + ss(45.3, 45.7, c.lat)), far = sat((off[k] === 1e9 ? 8 : off[k]) / 8);
     const patch = .5 + .5 * Math.sin(c.x * .021 + 1.3) * Math.cos(c.y * .017 + .4);
     seaNat[k] = land ? (lake[k] ? .15 : 0) : sat(.16 + .14 * Math.min(1, ocean) + .12 * far + .12 * patch);
   }
