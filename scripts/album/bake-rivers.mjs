@@ -23,7 +23,11 @@ const RU = { Ebro: 'Эбро', Tajo: 'Тахо', Tejo: 'Тежу', Duero: 'Ду�
   Aude: 'Од', Hérault: 'Эро', Mondego: 'Мондегу', Sado: 'Саду', Turia: 'Турия', Túria: 'Турия', Aragón: 'Арагон', Gállego: 'Гальего', Ariège: 'Арьеж', Sil: 'Силь', Tormes: 'Тормес', Jarama: 'Харама', Henares: 'Энарес',
   Alagón: 'Алагон', Zújar: 'Сухар', Guadalete: 'Гвадалете', Odiel: 'Одьель', Tinto: 'Тинто', Almanzora: 'Альмансора', Llobregat: 'Льобрегат', Ter: 'Тер', Nalón: 'Налон', Navia: 'Навия', Tâmega: 'Тамега', Zêzere: 'Зезере',
   Vouga: 'Вога', Mira: 'Мира', Orb: 'Орб', Têt: 'Тет', Gers: 'Жер', Aveyron: 'Аверон', Moulouya: 'Мулуя', Chélif: 'Шелифф', Cheliff: 'Шелифф', Arga: 'Арга', Ega: 'Эга', Huerva: 'Уэрва', Guadalope: 'Гвадалопе', Mijares: 'Михарес',
-  Cabriel: 'Кабриэль', Guadalimar: 'Гвадалимар', Guadiato: 'Гвадиато', Bidasoa: 'Бидасоа', Nervión: 'Нервьон', Ebre: 'Эбро', Tage: 'Тахо' };
+  Cabriel: 'Кабриэль', Guadalimar: 'Гвадалимар', Guadiato: 'Гвадиато', Bidasoa: 'Бидасоа', Nervión: 'Нервьон', Ebre: 'Эбро', Tage: 'Тахо',
+  // the rest of France (the region grows to the north: docs/album/water.md, «Подготовка к большому полигону»)
+  Seine: 'Сена', Loire: 'Луара', Saône: 'Сона', Marne: 'Марна', Oise: 'Уаза', Aisne: 'Эна', Somme: 'Сомма', Meuse: 'Мёз', Moselle: 'Мозель', Rhin: 'Рейн', Yonne: 'Йонна', Aube: 'Об', Eure: 'Эр', Orne: 'Орн',
+  Allier: 'Алье', Cher: 'Шер', Indre: 'Эндр', Vienne: 'Вьенна', Creuse: 'Крёз', Charente: 'Шаранта', Sarthe: 'Сарта', Mayenne: 'Майенна', Loir: 'Луар', Vilaine: 'Вилен', Isère: 'Изер', Durance: 'Дюранс', Doubs: 'Ду',
+  Ain: 'Эн', Drôme: 'Дром', Ardèche: 'Ардеш', Var: 'Вар', Meurthe: 'Мёрт', Escaut: 'Шельда', Corrèze: 'Коррез', Vézère: 'Везер', Isle: 'Иль', Truyère: 'Трюйер', Gard: 'Гар', Arve: 'Арв' };
 const bare = n => n.replace(/^(r[íi]o|riu|rivi[èe]re|fleuve|oued|wadi|la|le|el|l')\s+/i, '').replace(/^(d[e']|du|des|de la)\s*/i, '').trim();
 const KX = KM_PER_DEG * COS_REF / 1e6, KY = KM_PER_DEG / 1e6;      // microdegrees → flat km
 const rd = (name, what) => JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, `${name}.${what}.json.gz`))));
