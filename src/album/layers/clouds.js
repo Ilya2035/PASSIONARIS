@@ -14,6 +14,7 @@ import { Mesh, SphereGeometry, ShaderMaterial, DoubleSide, Vector2 } from 'three
 import { COMMON } from '../glsl.js';
 import { LIGHT, lightUniforms } from '../light.js';
 import { WEATHER, WX, CLOUD_KM, CLOUD_N } from '../sky/weather.js';
+import { GLOBE, GLOBE_GLSL } from '../sky/globe.js';
 import { R } from '../geo.js';
 
 const VERT = /* glsl */`
@@ -30,6 +31,7 @@ const FRAG = /* glsl */`
 ${COMMON}
 ${LIGHT}
 ${WEATHER}
+${GLOBE_GLSL}
 uniform float uShow, uShowRain, uVig; uniform vec2 uRes;
 varying vec3 vW;
 // the field of the clouds with its lumps; lod: for the larger and for the smaller lumps, by the size of the pixel
@@ -59,7 +61,8 @@ void main() {
   // a cloud that rains stands tall: deeper shade behind its lumps, whiter tops, and nothing shows through it
   float rains = uRain.x > 0. ? wxRainMask(q) : 0., tall = rains * smoothstep(thr - .02, thr + .12, n);
   vec3 col = albumSunCol() * mix((.34 + .86 * lit) * (1. - .2 * body), .24 + 1.02 * smoothstep(-.075, .05, slope), tall) + albumSkyCol() * mix(1.2, 1.05, tall) + albumMoonCol() * (.5 + .7 * lit);
-  col = albumFinish(mix(col * .93, albumHorizon(d), albumHaze(P)));
+  // (from a height a cloud is lit by the Sun of its own place: day and night on the ball, sky/globe.js)
+  col = albumFinish(mix(col * .93, albumHorizon(d), albumHaze(P)) * globeRelight(C / (RKM + uCloud.w)));
   vec2 v = gl_FragCoord.xy / uRes - .5; col *= 1. - uVig * dot(v, v) * 1.5;         // the vignette of the finishing pass, which this shell is drawn after
   // a cloud that rains is shown from nearer than the others: the rain must hang from something
   float show = mix(uShow, max(uShow, uShowRain), rains);
@@ -80,7 +83,7 @@ export default async function init(album) {
   // a cap of the sphere around the middle of the map, wide enough for the view from 2000 km
   const mesh = new Mesh(new SphereGeometry(1, 192, 72, 0, Math.PI * 2, 0, 1.05), new ShaderMaterial({
     transparent: true, depthTest: false, depthWrite: false, side: DoubleSide, vertexShader: VERT, fragmentShader: FRAG,
-    uniforms: { ...lightUniforms(T), ...WX, uExag: T.uExag, uShow: { value: 0 }, uShowRain: { value: 0 }, uVig: { value: .35 }, uRes: { value: new Vector2(1, 1) } },
+    uniforms: { ...lightUniforms(T), ...WX, ...GLOBE, uExag: T.uExag, uShow: { value: 0 }, uShowRain: { value: 0 }, uVig: { value: .35 }, uRes: { value: new Vector2(1, 1) } },
   }));
   mesh.position.set(0, -R, 0); mesh.frustumCulled = false; mesh.visible = false;
   (album.overlay || album.scene).add(mesh);

@@ -7,6 +7,7 @@
 import { Mesh, BufferGeometry, BufferAttribute, ShaderMaterial, Matrix4, Vector3, Vector4 } from 'three';
 import { COMMON } from '../glsl.js';
 import { LIGHT, lightUniforms, HAZE_KM } from '../light.js';
+import { GLOBE, GLOBE_GLSL } from './globe.js';
 
 // The air that colours the sky is this many km thick (density falls e times). The real figure is 8; the map lifts its
 // relief 1.6 times, and its air with it.
@@ -26,6 +27,7 @@ void main() {
 const FRAG = /* glsl */`
 ${COMMON}
 ${LIGHT}
+${GLOBE_GLSL}
 uniform vec3 uMoonW; uniform vec4 uSkyK;        // uSkyK: x radians in one pixel, y lit share of the Moon, z 1 with a real Sun in the sky
 varying vec3 vDir;
 #define AIR_KM ${AIR_KM.toFixed(2)}
@@ -66,7 +68,8 @@ void main() {
     float b = dot(C, rd), t = -b - sqrt(max(b * b - (rC * rC - RKM * RKM), 0.));
     vec3 sea = uStyle == 3 ? vec3(.62, .66, .68) : (uStyle == 6 ? vec3(.02, .03, .05)
       : pow(vec3(.07, .19, .40), vec3(2.2)) * (albumSkyCol() * 1.5 + albumSunCol() * max(uSun.z, 0.) * .75));
-    col = albumAir(sea, cameraPosition + rd * t);
+    // (from a height the sea is lit by the Sun of its own place: day and night on the ball, globe.js)
+    col = albumAir(sea, cameraPosition + rd * t) * globeRelight(normalize(C + rd * t));
   } else {
     float day = albumDay(), px = uSkyK.x;
     float mAir = airAlong(RKM / AIR_KM, alt / AIR_KM, mu), mHaze = airAlong(RKM / HAZE_KM, alt / HAZE_KM, mu);
@@ -75,6 +78,9 @@ void main() {
     float off = mu < 0. ? low : alt;
     vec3 space = uStyle == 3 ? vec3(.60, .64, .68) : (uStyle == 6 ? vec3(.012, .016, .03) : (uStyle == 2 ? vec3(.10, .16, .30)
       : vec3(.0065, .013, .034) * mix(.45, 1.5, smoothstep(30., 1700., alt)) * (1. + 1.6 * exp(-max(off, 0.) / 420.))));
+    // (the air at the edge of the ball glows by the light of the place the ray passes over: bright on the side of
+    // the day, dark on the side of the night)
+    if (uGlobe.x > 0.) hor *= globeRelight(mu < 0. ? normalize(C - rd * (rC * mu)) : C / rC);
     col = hor * (1. - T) + space * T;
     if (uStyle == 0) {
       float clear = dot(T, vec3(.3333));
@@ -86,7 +92,10 @@ void main() {
       float sd = sqrt(max(2. - 2. * dot(rd, uSunW), 0.));
       if (sd < 1.5) {
         vec3 sunC = vec3(1.25, 1.12, .95) * T;
-        col += sunC * (22. * (1. - smoothstep(SUN_R - px, SUN_R + px, sd)) + 1.1 * exp(-sd / .026) + .22 * exp(-sd / .12) + .42 * exp(-sd / .5) * uSkyK.z);
+        // (the wide light is the air lit by the Sun: there is as much of it as there is air along the ray, and
+        // none in space)
+        col += sunC * (22. * (1. - smoothstep(SUN_R - px, SUN_R + px, sd)) + 1.1 * exp(-sd / .026) + .22 * exp(-sd / .12))
+          + vec3(1.25, 1.12, .95) * (.42 * exp(-sd / .5) * uSkyK.z * (1. - clear) * smoothstep(1.5, 1.1, sd));
       }
       // the Moon: a ball lit by the same Sun, so its phase is simply where the Sun stands
       float md = sqrt(max(2. - 2. * dot(rd, uMoonW), 0.));
@@ -112,7 +121,7 @@ export class SkyDome {
   constructor(album) {
     const T = album.terrain.u, geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3));
-    this.u = { ...lightUniforms(T), uInvProj: { value: new Matrix4() }, uCamWorld: { value: new Matrix4() }, uMoonW: { value: new Vector3(0, 1, 0) }, uSkyK: { value: new Vector4(.001, 1, 0, 0) } };
+    this.u = { ...lightUniforms(T), ...GLOBE, uInvProj: { value: new Matrix4() }, uCamWorld: { value: new Matrix4() }, uMoonW: { value: new Vector3(0, 1, 0) }, uSkyK: { value: new Vector4(.001, 1, 0, 0) } };
     // It lies at the very back of the depth range and is drawn after the land and everything solid on it, so its
     // shader runs only for the pixels nothing has covered: looking straight down, the sky costs nothing.
     this.mesh = new Mesh(geo, new ShaderMaterial({ uniforms: this.u, vertexShader: VERT, fragmentShader: FRAG, depthTest: true, depthWrite: false }));

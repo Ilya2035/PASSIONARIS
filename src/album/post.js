@@ -12,8 +12,9 @@ import { WebGLRenderTarget, DepthTexture, UnsignedIntType, LinearFilter, Nearest
 import { COMMON } from './glsl.js';
 import { LIGHT, lightUniforms } from './light.js';
 import { WEATHER, WX, HILL_FROM } from './sky/weather.js';
+import { GLOBE, GLOBE_GLSL } from './sky/globe.js';
 
-const CLOUDS = 1, RAIN = 2, FOG = 4;
+const CLOUDS = 1, RAIN = 2, FOG = 4, BALL = 8;
 // (this pass is drawn with its own flat camera: the eye of the map comes as uEye, under the name LIGHT knows)
 const HEAD = `#define cameraPosition uEye\n${COMMON}\n${LIGHT}\n${WEATHER}`;
 // the lines of rain are this many times longer than the cell they fall in is wide
@@ -200,8 +201,12 @@ const RAINY = /* glsl */`
               }
             }
           }`;
+// Day and night on the ball (sky/globe.js): from a height the frame is drawn with the highest Sun in view, and here
+// every pixel of the land is dimmed to the light of its own place.
+const RELIT = /* glsl */`
+          if (ground) c = globeDimmed(c, globeRelight(normalize(wpos + vec3(0., RKM, 0.))));`;
 const frag = f => /* glsl */`uniform vec3 uEye;
-        ${f ? HEAD : ''}${f & RAIN ? RAIN_FN : ''}
+        ${f ? HEAD : ''}${f & BALL ? GLOBE_GLSL : ''}${f & RAIN ? RAIN_FN : ''}
         uniform sampler2D tCol, tDepth; uniform vec2 uPx; uniform float uNear, uFar, uProj, uRad, uAO, uSharp, uVig; uniform mat4 uInvProj, uCamWorld; varying vec2 vUv;
         uniform float uRpp;                           // radians in one pixel (a little more on a large picture)
         float vz(vec2 uv) { float z = texture(tDepth, uv).r * 2. - 1.; return 2. * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
@@ -231,13 +236,13 @@ const frag = f => /* glsl */`uniform vec3 uEye;
           }
           c *= 1. - uAO * ao * .8;
           vec3 n4 = (texture(tCol, vUv + vec2(uPx.x, 0.)).rgb + texture(tCol, vUv - vec2(uPx.x, 0.)).rgb + texture(tCol, vUv + vec2(0., uPx.y)).rgb + texture(tCol, vUv - vec2(0., uPx.y)).rgb) * .25;
-          c = clamp(c + (c - n4) * uSharp, 0., 1.);${f ? RAY : ''}${f & RAIN ? WET : ''}${f & FOG ? FOGGY : ''}${f & CLOUDS ? UNDER + SHADE : ''}${f & RAIN ? RAINY : ''}
+          c = clamp(c + (c - n4) * uSharp, 0., 1.);${f ? RAY : ''}${f & RAIN ? WET : ''}${f & FOG ? FOGGY : ''}${f & CLOUDS ? UNDER + SHADE : ''}${f & RAIN ? RAINY : ''}${f & BALL ? RELIT : ''}
           vec2 q = vUv - .5; c *= 1. - uVig * dot(q, q) * 1.5;
           gl_FragColor = vec4(c, 1.);
         }`;
 
 // (for the tests: the text of the pass for a set of weather)
-export const postShader = frag, POST_CLOUDS = CLOUDS, POST_RAIN = RAIN, POST_FOG = FOG;
+export const postShader = frag, POST_CLOUDS = CLOUDS, POST_RAIN = RAIN, POST_FOG = FOG, POST_BALL = BALL;
 
 export class Post {
   // T: the uniforms of the ground (album.terrain.u), for the light the weather is counted with
@@ -245,7 +250,7 @@ export class Post {
     this.renderer = renderer; this.T = T;
     this.rt = new WebGLRenderTarget(4, 4, { samples: 4, minFilter: LinearFilter, magFilter: LinearFilter });
     this.rt.depthTexture = new DepthTexture(4, 4, UnsignedIntType); this.rt.depthTexture.minFilter = this.rt.depthTexture.magFilter = NearestFilter;
-    this.uniforms = { ...(T ? lightUniforms(T) : {}), ...WX, uExag: T?.uExag || { value: 1.6 }, tCol: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture }, uPx: { value: new Vector2() }, uNear: { value: 1 }, uFar: { value: 1000 }, uProj: { value: 1000 },
+    this.uniforms = { ...(T ? lightUniforms(T) : {}), ...WX, ...GLOBE, uExag: T?.uExag || { value: 1.6 }, tCol: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture }, uPx: { value: new Vector2() }, uNear: { value: 1 }, uFar: { value: 1000 }, uProj: { value: 1000 },
       uRad: { value: .1 }, uAO: { value: .8 }, uSharp: { value: .3 }, uVig: { value: .35 }, uRpp: { value: .0005 }, uEye: { value: new Vector3() }, uInvProj: { value: new Matrix4() }, uCamWorld: { value: new Matrix4() } };
     // One shader of the pass for every set of weather that is on, all with the same uniforms, each made when it is
     // first needed. With no weather the plain one is used.
@@ -259,9 +264,11 @@ export class Post {
   }
   // which weather is on now (the sky layer sets it every frame: aspects/sky.js)
   weather() {
-    if (!this.T || !WX.tCloud.value) return 0;
+    if (!this.T) return 0;
+    const ball = GLOBE.uGlobe.value.x > 0 ? BALL : 0;
+    if (!WX.tCloud.value) return ball;
     const clouds = this.T.uCloud?.value.x > 0;
-    return (clouds ? CLOUDS : 0) | (clouds && WX.uRain.value.x > 0 ? RAIN : 0) | (WX.uFog.value.x > 0 && WX.tFog.value ? FOG : 0);
+    return ball | (clouds ? CLOUDS : 0) | (clouds && WX.uRain.value.x > 0 ? RAIN : 0) | (WX.uFog.value.x > 0 && WX.tFog.value ? FOG : 0);
   }
   // fewer samples when the machine is struggling (the album has already halved its picture scale)
   setSamples(n) { if (this.rt.samples !== n) { this.rt.samples = n; this.rt.dispose(); } }

@@ -11,6 +11,7 @@ import { Vector3, Vector4, BackSide } from 'three';
 import { frame } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, lightHour } from '../sky/astro.js';
+import { GLOBE, globeAmount, globeDim, frameSunUp, raiseSun } from '../sky/globe.js';
 import { WX, needClouds, needFog, cloudOffset, rainCover, rainMask, fogByHour, fogNumbers, snowNumbers, HILL_FILL, capBank } from '../sky/weather.js';
 
 const MAP_LIGHT = sunAt(0);
@@ -56,6 +57,10 @@ export default {
     { id: 'sky-sun-day', group: 'Небо и свет', title: 'Где Солнце: день', note: 'Днём Солнце стоит выше окна, но видно, где оно: небо и дымка в его стороне светлее и теплее. Камера смотрит на запад, к Солнцу.', p: { light: 'day' }, cam: cam(P.zar, 30, 86, 268) },
     { id: 'sky-sun-evening', group: 'Небо и свет', title: 'Где Солнце: вечер', note: 'Вечером Солнце видно над горизонтом: диск, сияние вокруг него и тёплая дымка в его стороне. Камера смотрит на закат.', p: { light: 'evening' }, cam: cam(P.zar, 30, 86, 291) },
     { id: 'sky-night', group: 'Небо и свет', title: 'Ночь с Луной', note: 'Без четверти девять вечера, 21 июня: солнце уже глубоко под горизонтом, полная Луна только взошла на юго-востоке. Земля в слабом лунном свете, склоны к Луне светлее. Фазу меняет ручка «Фаза Луны».', p: { hour: 20.75, moon: .5 }, cam: cam(P.pyr, 40, 87, 136) },
+    { id: 'sky-earth-day', group: 'Небо и свет', title: 'Вся Земля: день', note: 'Шар целиком с 20 000 км, кнопка «День». Под камерой день, к краю шара свет слабеет, за краем дня — ночь. Клавиша 6 — эта высота.', p: { light: 'day' }, cam: cam(P.all, 20000, 0, 0) },
+    { id: 'sky-earth-evening', group: 'Небо и свет', title: 'Вся Земля: вечер', note: 'Кнопка «Вечер»: под камерой Солнце садится. На западе ещё день, на востоке уже ночь, между ними полоса тёплого низкого света.', p: { light: 'evening' }, cam: cam(P.all, 20000, 0, 0) },
+    { id: 'sky-earth-night', group: 'Небо и свет', title: 'Вся Земля: ночь', note: 'Кнопка «Ночь»: под камерой полночь, шар тёмный, у края виден серп дня.', p: { light: 'night' }, cam: cam(P.all, 20000, 0, 0) },
+    { id: 'sky-terminator', group: 'Небо и свет', title: 'Край дня с 3000 км', note: 'Вечер над Испанией с 3000 км: на западе, над океаном, ещё светло, на востоке уже темнеет. Свет считается для каждого места своего.', p: { light: 'evening' }, cam: cam(P.all, 3000, 30, 0) },
     { id: 'sky-clouds', group: 'Небо и свет', title: 'Облака и их тени', note: 'Вид с 700 км: облака и тени от них на земле. Сколько облаков — ручка «Облачность». Вблизи облака тают, тени остаются.', p: { clouds: 1 }, cam: cam(P.all, 700, 35, 0) },
     { id: 'sky-rain', group: 'Небо и свет', title: 'Дождь с высоты', note: 'Взгляд от Валенсии на север: над горами идёт дождь. Туча тяжёлая и серая, под её ближним краем висит серая завеса дождя с полосами, земля под ней тёмная, мокрая. Туча уходит на восток и оставляет за собой мокрый след. Переключатель «Дождь», ручка «Сила дождя».', p: { rain: 1 }, cam: cam(P.rain, 220, 74, 0) },
     { id: 'sky-rain-200', group: 'Небо и свет', title: 'Дождь с игровой высоты', note: 'Тот же дождь с 200 км: дождевая туча как на снимке со спутника — белая, плотная, с буграми, светлыми со стороны Солнца. Обычные облака вокруг неё полупрозрачные. Ближе 120 км туча тает, чтобы карта под дождём читалась.', p: { rain: 1 }, cam: cam([40.0, -0.9], 200, 40, 0) },
@@ -87,8 +92,14 @@ export default {
       let hour = p.get('light') ? lightHour(p.get('light'), yday, s.lat) : p.get('hour');
       if (p.get('dayRun') && !album.shot) { clock = ((clock ?? (hour || 9)) + dt * p.get('play') * .27) % 24; hour = clock || .001; } else clock = null;
       layer.hour = hour;
-      if (hour) T.uSun.value.set(...sunDir(hour, yday, s.lat)); else T.uSun.value.copy(MAP_LIGHT);   // hour 0: the cartographer's light
-      const sun = T.uSun.value; world(sun.x, sun.y, sun.z, f, sunW);
+      const here = hour ? sunDir(hour, yday, s.lat) : null;
+      if (here) T.uSun.value.set(...here); else T.uSun.value.copy(MAP_LIGHT);   // hour 0: the cartographer's light
+      const sun = T.uSun.value; world(sun.x, sun.y, sun.z, f, sunW);          // (the real Sun, as a direction of the world)
+      // Day and night on the ball (sky/globe.js): from a height the frame is drawn with the highest Sun in view, and
+      // every pixel is then dimmed to the light of its own place. Only with a real Sun and in the natural look.
+      const eye = c.alt ?? s.h, ball = here && T.uStyle.value === 0 ? globeDim(eye) : 0;
+      if (ball > 0) sun.set(...raiseSun(here, frameSunUp(here[2], eye, globeAmount(eye))));
+      GLOBE.uGlobe.value.set(ball, .5 + .34 * .8 * moonLit(phase), 0, 0); layer.ball = ball;
       if (hour) {
         const m = moonDir(hour, yday, s.lat, phase);
         moon.set(m[0], m[1], m[2], moonStrength(sun.z, m[2], phase)); world(m[0], m[1], m[2], f, moonW); dome.u.uSkyK.value.y = moonLit(phase);
