@@ -28,7 +28,7 @@ async function start() {
   step('чанки'); const tChunks = performance.now();
   // the lakes of the water aspect are cut out of the land as chunks of their own (the shoals in the list are not lakes)
   const lakes = await fetch('assets/album/water/lakes.json').then(r => r.json()).then(j => (j.lakes || []).filter(l => !l.shoal && l.ring)).catch(() => []);
-  const chunks = album.chunks = new Chunks(data.base.at, data.vectors.rivers, lakes); album.chunkMs = Math.round(performance.now() - tChunks);
+  const chunks = album.chunks = new Chunks(data.base.at, data.vectors.rivers, lakes, data.worked); album.chunkMs = Math.round(performance.now() - tChunks);
   const terrain = album.terrain = new Terrain(data, scene, chunks);
   // (the up and down arrows turn the pages in the album and move the map when the map is shown on its own)
   const cam = album.cam = new AlbumCamera(canvas, data.base.at, { shot: SHOT, upDown: () => q.get('ui') === '0' || document.body.classList.contains('mapview') });
