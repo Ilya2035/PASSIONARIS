@@ -330,7 +330,7 @@ export default {
 | Поселения | `aspects/settle.js`, `town/*`, `layers/towns.js`, `layers/labels.js`, `division/panel.js`, `save/*` | `docs/album/settle.md`, `docs/album/map-rework.md`, `docs/SAVE-LAND.md` |
 | Небо, свет и камера | `aspects/sky.js`, `light.js`, `camera.js`, `post.js`, `main.js`, `layers/clouds.js`, `layers/hazards.js`, новая папка `sky/` | `docs/album/sky.md` |
 | Земля и лес | `aspects/ground.js`, `terrain.js`, `glsl.js`, `data.js`, `aspects/forest.js`, `aspects/swamp.js`, папка `ground/` | `docs/album/ground.md`, `docs/album/forest.md`, `docs/album/swamp.md` |
-| Ведущая сессия | `chunks.js`, `chunktool.js`, `params.js`, `pages.js`, `layers.js`, `mapview.js`, `ui.js`, `ui.css`, `pick.js`, `geo.js`, `feedback.js`, `aspects/index.js`, `aspects/resources.js`; `scripts/harness.sh`, `scripts/release.mjs`, `scripts/worktree-setup.mjs`; `CLAUDE.md`, `docs/BACKLOG.md`, `docs/ALBUM.md`, этот файл | — |
+| Ведущая сессия | `chunks.js`, `chunktool.js`, `params.js`, `pages.js`, `layers.js`, `mapview.js`, `ui.js`, `ui.css`, `pick.js`, `geo.js`, `worked.js`, `feedback.js`, `aspects/index.js`, `aspects/resources.js`; `scripts/album/bake-worked.mjs`, `scripts/harness.sh`, `scripts/release.mjs`, `scripts/worktree-setup.mjs`; `CLAUDE.md`, `docs/BACKLOG.md`, `docs/ALBUM.md`, этот файл | — |
 
 Правила третьей волны, сверх раздела «Как работать параллельно»:
 
