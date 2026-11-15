@@ -13,7 +13,7 @@
 // here, and now and then a yard stands on the rough pasture beside a field instead of on the field.
 import { FKM, FN } from '../chunks.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
-import { GK, GN, GX0, GY0, CELL, CULTURES, FARM_SHARP, FARM_BESIDE, FARM_PIECE, FARM_TURNS, lobesToward, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
+import { GK, GN, GNY, GX0, GY0, CELL, CULTURES, FARM_SHARP, FARM_BESIDE, FARM_PIECE, FARM_TURNS, lobesToward, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
 import { KIND } from './shapes.js';
 import { FLAG_ATL } from './plan.js';
 
@@ -36,7 +36,7 @@ export function patchIndex(list) {
   const at = new Map();
   for (const L of list) {
     if (!(L.r > 0)) continue;
-    const gx = Math.floor((L.x - GX0) / GK), gy = Math.floor((L.y - GY0) / GK); if (gx < 0 || gy < 0 || gx >= GN || gy >= GN) continue;
+    const gx = Math.floor((L.x - GX0) / GK), gy = Math.floor((L.y - GY0) / GK); if (gx < 0 || gy < 0 || gx >= GN || gy >= GNY) continue;
     const key = gy * GN + gx; (at.get(key) || at.set(key, []).get(key)).push(L);
   }
   return at;
@@ -46,7 +46,7 @@ const hit = { L: null, m: 0 };
 function nearest(patches, x, y) {
   const gx = Math.floor((x - GX0) / GK), gy = Math.floor((y - GY0) / GK); hit.L = null; hit.m = -1e3;
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-    const xx = gx + dx, yy = gy + dy; if (xx < 0 || yy < 0 || xx >= GN || yy >= GN) continue;
+    const xx = gx + dx, yy = gy + dy; if (xx < 0 || yy < 0 || xx >= GN || yy >= GNY) continue;
     // (the houses lie around the middle of the patch; a town reaches out one way more than another: rules.js lobesAt)
     for (const L of patches.get(yy * GN + xx) || []) { const d = L.r - Math.hypot(x - (L.cx ?? L.x), y - (L.cy ?? L.y)) + (L.k != null ? lobesToward(L, x, y) : 0); if (d > hit.m) { hit.m = d; hit.L = L; } }
   }

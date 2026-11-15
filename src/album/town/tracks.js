@@ -13,7 +13,7 @@
 // way down the tree, as far as the track of another village that is drawn already.
 // Where a way passes the chunk of another place, it passes through that place: a track leads from village to village.
 // Plain JavaScript without the GPU.
-import { KN, KKM, KX0, KY0, kmData, kmHash } from '../division/km.js';
+import { KN, KNY, KKM, KX0, KY0, kmData, kmHash } from '../division/km.js';
 import { stepCost, walkCost } from '../roads/routes.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { Heap } from '../division/graph.js';
@@ -32,7 +32,7 @@ const NB = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
 
 // which chunks carry a road: every chunk of every leg that was laid (roadNetwork().legs; kind 3 is a leg that is no road)
 export function roadChunks(legs) {
-  const on = new Uint8Array(KN * KN);
+  const on = new Uint8Array(KN * KNY);
   for (const L of legs) if (L.kind !== 3) for (const t of L.path) on[t] = 1;
   return on;
 }

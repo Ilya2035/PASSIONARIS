@@ -8,13 +8,13 @@ import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
-import { KN, KKM, KX0, KY0, JITTER, squareOf, seedOf, kmHash, kmFacts, kmData, chunkAt, cellsOfChunks } from '../src/album/division/km.js';
+import { KN, KNY, KKM, KX0, KY0, JITTER, squareOf, seedOf, kmHash, kmFacts, kmData, chunkAt, cellsOfChunks } from '../src/album/division/km.js';
 import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { packDivision } from '../src/album/division/gpu.js';
 import { decodeSites } from '../src/album/town/sites.js';
-import { GN, VN, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, FARM_WARP, FARM_UNEVEN, FARM_SHARP, RULES_GLSL } from '../src/album/town/rules.js';
+import { GN, GNY, VN, VNY, GK, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, FARM_WARP, FARM_UNEVEN, FARM_SHARP, RULES_GLSL } from '../src/album/town/rules.js';
 import { farmGround, farmRun, farmWithCells, farmOfDistricts, HA_PER_PERSON, FARM_CAP, FARM_HIGH, FARM_WET, FARM_REACH, FARM_LEAST, FARM_PATCH, FARM_LOBES, FARM_CLIMB, FARM_FADE, farmPatch, farmWay, farmBand, farmShare } from '../src/album/town/farmland.js';
 import { growTowns, centrePlaces, reachOf, FIELD_FLOOR, FELL_FROM, FELL } from '../src/album/town/grow.js';
 import { districtSites, villagePlaces, GOOD } from '../src/album/town/villages.js';
@@ -194,10 +194,19 @@ test('farmland in the album: the shader draws the fields from the chunks; the kn
   for (const d of [`#define SET_KN ${KN}`, `#define SET_K0 vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})`, `#define SET_SOFT ${FARM_SOFT.toFixed(1)}`, `#define SET_WARP ${(FARM_WARP / KKM).toFixed(3)}`, `#define SET_UNEVEN ${FARM_UNEVEN.toFixed(3)}`, `#define SET_SHARP ${FARM_SHARP.toFixed(2)}`]) assert.ok(RULES_GLSL.includes(d), d);
   assert.match(g, /float setFarm\(vec2 pk\)/); assert.match(g, /if \(o\.a < \.25 \|\| o\.a > \.75\) return o\.r;/, 'one texel where the chunks around hold the same');
   assert.match(g, /exp\(-SET_SOFT \* dot\(v, v\)\)/); assert.match(g, /float farm = setFarm\(p\.pk\);/);
-  // the share of fields on the ground as it lies, for whoever needs the fields to keep to level ground (the forest:
-  // the clearing of a village). Not called at the head of aspSettle: that one line made the ground shader a fifth slower.
-  assert.match(g, /float setFarmOn\(vec2 pk, float slope\) \{ return setFarm\(pk\) \* \(1\. - smoothstep\(\.10, \.26, slope\)\); \}/);
-  assert.doesNotMatch(g.slice(g.indexOf('void aspSettle')), /setFarmOn\(/, 'the fields of aspSettle take the slope off the share ploughed instead (SET_SLOPE)');
+  // (the fields keep to level ground by the slope taken off the share ploughed, SET_SLOPE. A lookup of the share
+  // «on the ground as it lies» at the head of aspSettle made the whole ground shader a fifth slower, and is gone.)
+  assert.doesNotMatch(g, /setFarmOn/);
+  // the grids have a width and a height — a square today, a rectangle when the polygon grows: no bound assumes a square
+  assert.match(g, /ivec2 n = fine \? ivec2\(SET_VN, SET_VNY\) : ivec2\(SET_GN, SET_GNY\);/); assert.match(g, /c\.x >= SET_KN \|\| c\.y >= SET_KNY\) return 0\.;/);
+  assert.match(g, /ivec2\(SET_KN - 1, SET_KNY - 1\)/); assert.match(g, /c0\.x >= SET_GN \|\| c0\.y >= SET_GNY\) return;/);
+  { assert.equal(TEX_W, KN); assert.equal(TEX_H, KNY + VNY); assert.deepEqual(FINE_AT, [0, KNY]); assert.deepEqual(COARSE_AT, [VN, KNY]);
+    assert.ok(VN + 3 * GN <= TEX_W && GNY <= VNY, 'the grids of the settlements fit below the chunks, side by side');
+    assert.equal(VNY, GNY * GK / VK); assert.equal(KNY, GNY * GK / KKM);
+    for (const d of [`#define SET_GNY ${GNY}`, `#define SET_VNY ${VNY}`, `#define SET_KNY ${KNY}`]) assert.ok(RULES_GLSL.includes(d), d);
+    const src = readFileSync(join(ROOT, 'src/album/town/farmland.js'), 'utf8');
+    assert.match(src, /const PACK = 2 \*\* Math\.ceil\(Math\.log2\(KN \* KNY\)\);/); assert.doesNotMatch(src, /2097152/, 'the packing of a chunk with its way grows with the polygon');
+    assert.match(readFileSync(join(ROOT, 'scripts/album/bake-sites.mjs'), 'utf8'), /const BOX = BBOX, KIND/, 'the baker of the places takes the rectangle of the region from geo.js'); }
   // (uSetB.y: rules.js FARM_BESIDE, uSetC.y: FARM_SHARP — both less from high up; SET_SLOPE: the fields keep to level ground)
   assert.match(g, /float want = \(farm \+ uSetB\.y \* beside \+ \(\.5 - p\.n2 \* \.6 - p\.n3 \* \.4\) \* SET_UNEVEN - p\.slope \* SET_SLOPE - \.5\) \* uSetC\.y \+ \.5;/, 'the share of the chunk is the share of its furlongs');
   assert.match(RULES_GLSL, /#define SET_SLOPE 3\.00/); assert.match(RULES_GLSL, /#define SET_PIECE 1\.70/);

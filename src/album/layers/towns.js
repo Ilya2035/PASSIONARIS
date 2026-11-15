@@ -28,7 +28,7 @@ import { growTowns, centrePlaces, townsOfDistricts, placesAllowed, builtChunks, 
 import { treelineAt } from '../ground/climate.js';
 import { planLobe, planShowcase, planHospice, hospiceYard, ROW } from '../town/plan.js';
 import { planYards, patchIndex, YARD_KINDS, YARD_TILE, YARD_STEP } from '../town/yards.js';
-import { KN, KKM, KX0, KY0, squareOf } from '../division/km.js';
+import { KN, KNY, KKM, KX0, KY0, squareOf } from '../division/km.js';
 import { roadChunks, districtTracks, trackLines, trackIndex, TRACK_SNAP } from '../town/tracks.js';
 
 const MAX_BLOCKS = 40000, MAX_YARDS = 24000;
@@ -377,7 +377,7 @@ export default async function init(album) {
   // km from a point to the track of a village (only tracks nearer than 200 m are found): for the yards
   const trackAt = (x, y) => {
     if (!trackBase) return 1e9;
-    const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); if (i < 0 || j < 0 || i >= KN || j >= KN) return 1e9;
+    const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); if (i < 0 || j < 0 || i >= KN || j >= KNY) return 1e9;
     const d = album.division.data.cells[j * KN + i]; return d >= 0 && siteList.first[d + 1] > siteList.first[d] ? tracksOf(d).near(x, y) : 1e9;
   };
   function layTracks(tx, ty, D, all) {
@@ -390,10 +390,10 @@ export default async function init(album) {
     if (old) { album.scene.remove(old.mesh); old.mesh.geometry.dispose(); old.mesh.material.dispose(); }
   }
   const yctx = { cell: ch.cell, land: c => ch.kind[c] === 1, farm: (x, y) => farmAt(x, y), farmList: null, culture: c => Math.round(ch.get('culture', c) * 255),
-    farmSquare: (kx, ky) => (farmShown && kx >= 0 && ky >= 0 && kx < KN && ky < KN ? farmShown.km[ky * KN + kx] / 255 : 0),
+    farmSquare: (kx, ky) => (farmShown && kx >= 0 && ky >= 0 && kx < KN && ky < KNY ? farmShown.km[ky * KN + kx] / 255 : 0),
     patches: new Map(), env: { ...env, road: (x, y) => Math.min(roadAt(x, y), trackAt(x, y)) }, density: 1, S: CELL,
     // a yard stands at one of the sixteen places of a chunk of 1 km² of land (once the land is divided)
-    landSquare: (kx, ky) => { const dv = album.division?.data; if (!dv?.cells) return true; const d = kx >= 0 && ky >= 0 && kx < KN && ky < KN ? dv.cells[ky * KN + kx] : -1; return d >= 0 && dv.kinds[d] === 0; } };
+    landSquare: (kx, ky) => { const dv = album.division?.data; if (!dv?.cells) return true; const d = kx >= 0 && ky >= 0 && kx < KN && ky < KNY ? dv.cells[ky * KN + kx] : -1; return d >= 0 && dv.kinds[d] === 0; } };
   let yKey = '', yCacheKey = ''; const yCache = new Map(), TKM = YARD_TILE * YARD_STEP;
   function rebuildYards(tx, ty, D, ck) {
     if (ck !== yCacheKey) { yCache.clear(); yCacheKey = ck; }

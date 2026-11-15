@@ -65,6 +65,9 @@ test('settle rules: real sizes, one hash and one rule for the plan and for the s
   assert.ok(Math.abs(L.x + 205) < .04 && Math.abs(L.y - 4405) < .04 && Math.abs(L.r - .85) < .02 && L.k === gridOf(-205, 4405));
   assert.deepEqual(STAGES.map(s => stageOf(s.r + .01)), [0, 1, 2, 3, 4]); assert.ok(fieldsBeyond(.07) < 1 && fieldsBeyond(.85) > 2);
   assert.equal(cultureAt(43.25, -2.93), CULTURES.atl); assert.equal(cultureAt(41.65, -.89), CULTURES.med);
+  // beyond the present polygon: the north of France, the Low Countries and the Rhine build the Atlantic way, Provence and the Maghreb the Mediterranean
+  assert.equal(cultureAt(48.85, 2.35), CULTURES.atl); assert.equal(cultureAt(52.37, 4.9), CULTURES.atl); assert.equal(cultureAt(50.94, 6.96), CULTURES.atl);
+  assert.equal(cultureAt(43.3, 5.37), CULTURES.med); assert.equal(cultureAt(36.8, 10.18), CULTURES.med); assert.equal(cultureAt(31.63, -8), CULTURES.med); assert.equal(cultureAt(44.8, 4.4), CULTURES.med, 'nothing changes within the present polygon');
   // the lattice is bent, and the bend can be undone
   for (const [x, y] of [[0, 0], [3.5, -2], [-7, 9.25]]) { const [u, v] = unbend(L, x, y), [bx, by] = bend(L, u, v); assert.ok(Math.abs(bx - x) < 1e-3 && Math.abs(by - y) < 1e-3); }
 });

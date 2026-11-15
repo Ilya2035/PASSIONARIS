@@ -15,8 +15,8 @@
 // the sites) are the one exception: they lie in the coarse grid.
 // Plain JavaScript without the GPU.
 import { kmOf, llOf } from '../chunks.js';
-import { KN, KKM, KX0, KY0, seedOf, kmHash, kmData } from '../division/km.js';
-import { VK, VN, GX0, GY0 } from './rules.js';
+import { KN, KNY, KKM, KX0, KY0, seedOf, kmHash, kmData } from '../division/km.js';
+import { VK, VN, VNY, GX0, GY0 } from './rules.js';
 
 const LAND = 0;
 export const SITE = { centre: 0, real: 1, made: 2 };
@@ -42,10 +42,10 @@ export const WORSE = { cls: [0, 0, .3, 1, 2.6], perM: 1 / 400, onRiver: .6, byRi
 //     of good ground), real: Uint16Array (count: real places besides the centre) }
 export const SWAMP = .1;                        // the share of swamp by nature from which no place is made
 export function districtSites(div, facts, sites = [], { base = 0, at = null, swamp = null } = {}) {
-  const count = div.count, cells = div.cells, kinds = div.kinds, cen = div.centres, { hgt, riv } = div.raster, n = KN * KN;
+  const count = div.count, cells = div.cells, kinds = div.kinds, cen = div.centres, { hgt, riv } = div.raster, n = KN * KNY;
   const landAt = c => { const d = cells[c]; return d >= 0 && kinds[d] === LAND; };
   const X = [], Y = [], per = Array.from({ length: count }, () => []), held = new Map();
-  const fine = (x, y) => { const i = Math.floor((x - GX0) / VK), j = Math.floor((y - GY0) / VK); return i < 0 || j < 0 || i >= VN || j >= VN ? -1 : j * VN + i; };
+  const fine = (x, y) => { const i = Math.floor((x - GX0) / VK), j = Math.floor((y - GY0) / VK); return i < 0 || j < 0 || i >= VN || j >= VNY ? -1 : j * VN + i; };
   const nearer = (x, y, gap) => {                                  // does a place stand nearer than gap?
     const i0 = Math.floor((x - GX0) / VK), j0 = Math.floor((y - GY0) / VK), R = Math.ceil(gap / VK);
     for (let j = j0 - R; j <= j0 + R; j++) for (let i = i0 - R; i <= i0 + R; i++) for (const s of held.get(j * VN + i) || []) if (Math.hypot(X[s] - x, Y[s] - y) < gap) return true;
@@ -56,7 +56,7 @@ export function districtSites(div, facts, sites = [], { base = 0, at = null, swa
     (held.get(v) || held.set(v, []).get(v)).push(s);
     per[d].push({ x, y, kind, src, chunk, size });
   };
-  const square = (x, y) => { const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); return i < 0 || j < 0 || i >= KN || j >= KN ? -1 : j * KN + i; };
+  const square = (x, y) => { const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); return i < 0 || j < 0 || i >= KN || j >= KNY ? -1 : j * KN + i; };
   // ---- the centres, then the real places
   if (cen) for (let d = 0; d < count; d++) if (kinds[d] === LAND && cen.texel[d] >= 0) add(d, cen.x[d], cen.y[d], SITE.centre, cen.site[d], square(cen.x[d], cen.y[d]));
   const real = new Uint16Array(count);
@@ -90,7 +90,7 @@ export function districtSites(div, facts, sites = [], { base = 0, at = null, swa
       if (cells[c] !== d) continue;
       const cls = facts.cls[c]; if (cls < 1 || cls > 4 || hgt[c] > TOO_HIGH) continue;
       let river = false, brook = false, water = false;
-      for (let q = 0; q < 16; q += 2) { const u = i + NB[q], v = j + NB[q + 1]; if (u < 0 || v < 0 || u >= KN || v >= KN) { water = true; continue; } const t = v * KN + u; if (!landAt(t)) water = true; else if (riv[t] > 1) river = true; else if (riv[t] === 1) brook = true; }
+      for (let q = 0; q < 16; q += 2) { const u = i + NB[q], v = j + NB[q + 1]; if (u < 0 || v < 0 || u >= KN || v >= KNY) { water = true; continue; } const t = v * KN + u; if (!landAt(t)) water = true; else if (riv[t] > 1) river = true; else if (riv[t] === 1) brook = true; }
       key[c] = W.cls[cls] + (hgt[c] - low[d]) * W.perM + (riv[c] > 1 ? W.onRiver : river ? W.byRiver : riv[c] === 1 ? W.onBrook : brook ? W.byBrook : 0) + (water ? W.byWater : 0) + (kmHash(i, j, 11) - .5) * W.chance;
       list.push(c);
     }

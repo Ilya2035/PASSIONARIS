@@ -20,8 +20,8 @@
 // two towns whose houses have grown together are one town with one centre, the greater of the two; and every chunk of
 // 1 km² a settlement is built on knows that settlement (builtChunks()): the area of a town is the number of its chunks.
 import { kmOf, llOf } from '../chunks.js';
-import { GX0, GY0, GK, VK, VN, VILLAGE_RMAX, FINE_RMAX, SHIFT_MAX, SHIFT_SHARE, SHIFT_FROM, SHORE_AT, shiftByte, shiftOf, stageOf, peopleOf, classOf } from './rules.js';
-import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { GX0, GY0, GK, VK, VN, VNY, VILLAGE_RMAX, FINE_RMAX, SHIFT_MAX, SHIFT_SHARE, SHIFT_FROM, SHORE_AT, shiftByte, shiftOf, stageOf, peopleOf, classOf } from './rules.js';
+import { KN, KNY, KKM, KX0, KY0 } from '../division/km.js';
 import { farmGround, farmRun, HA_PER_PERSON, FARM_REACH } from './farmland.js';
 
 export const RCAP = 2.2;                                            // km: the largest settlement the album founds
@@ -193,7 +193,7 @@ export function growTowns(ch, places, growth, at, river = () => 1e9, farm = {}) 
       else { taken.add(home); coarse.add(gj * 4096 + gi); }
     }
     if (vil) {                                                      // one village a square of the fine grid, and none where a town stands
-      const vi = Math.floor((x - GX0) / VK), vj = Math.floor((y - GY0) / VK); if (vi < 0 || vj < 0 || vi >= VN || vj >= VN) continue;
+      const vi = Math.floor((x - GX0) / VK), vj = Math.floor((y - GY0) / VK); if (vi < 0 || vj < 0 || vi >= VN || vj >= VNY) continue;
       fine = vj * VN + vi; if (takenFine.has(fine)) continue;
       let inTown = false;
       for (let dj = -1; dj <= 1 && !inTown; dj++) for (let di = -1; di <= 1; di++) for (const T of byGrid.get((gj + dj) * 4096 + gi + di) || []) if (Math.hypot(T.x + T.sx - x, T.y + T.sy - y) < T.R + R + KEEP_OFF) inTown = true;
@@ -237,7 +237,7 @@ export function builtChunks(towns, land = null) {
     const t = towns[n], mx = t.x + (t.sx || 0), my = t.y + (t.sy || 0);   // the houses lie around the middle of the settlement
     const i0 = Math.floor((mx - t.R - KX0) / KKM), i1 = Math.floor((mx + t.R - KX0) / KKM), j0 = Math.floor((my - t.R - KY0) / KKM), j1 = Math.floor((my + t.R - KY0) / KKM);
     const si = Math.floor((t.x - KX0) / KKM), sj = Math.floor((t.y - KY0) / KKM);
-    for (let j = Math.max(0, j0); j <= Math.min(KN - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(KN - 1, i1); i++) {
+    for (let j = Math.max(0, j0); j <= Math.min(KNY - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(KN - 1, i1); i++) {
       let hit = 0;
       for (let b = 0; b < 4; b++) for (let a = 0; a < 4; a++) if (Math.hypot(KX0 + (i + (a + .5) / 4) * KKM - mx, KY0 + (j + (b + .5) / 4) * KKM - my) < t.R) hit++;
       if (hit >= 2) take(j * KN + i, n, hit / 16);

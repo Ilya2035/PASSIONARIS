@@ -10,14 +10,18 @@
 //
 // The patches live in a grid of the settlement work's own (state.js): squares of 10 km, one patch at most in each.
 // It is only a way to find the patches near a point; chunks have natural outlines and are not these squares.
-import { CHUNK_KM, CN, CI0, CJ0 } from '../chunks.js';
-import { KN, KKM, KX0, KY0 } from '../division/km.js';
+import { CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+import * as CH from '../chunks.js';
+import { KN, KNY, KKM, KX0, KY0 } from '../division/km.js';
 
-export const GK = CHUNK_KM, GN = CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;   // the grid of patches: GN × GN squares of GK km from (GX0, GY0)
+// (The grids lie over the rectangle of the natural cells of chunks.js and grow with the polygon: nothing here knows
+// its size. The cells may be a square, CN × CN, or a rectangle, CNX × CNY — as in division/km.js. In every grid the
+// first name is its WIDTH and the step from a row to the next — GN, VN, KN; the second its height — GNY, VNY, KNY.)
+export const GK = CHUNK_KM, GN = CH.CNX ?? CH.CN, GNY = CH.CNY ?? CH.CN, GX0 = CI0 * CHUNK_KM, GY0 = CJ0 * CHUNK_KM;   // the grid of patches: GN × GNY squares of GK km from (GX0, GY0)
 // The villages between the centres of districts (villages.js) lie in a finer grid of their own, laid from the same
 // corner: VN × VN squares of VK km, one village at most in each. A village and its fields never reach farther than
 // one square, so a point of the ground looks at the 3 × 3 squares around it, as in the coarse grid.
-export const VK = 2.5, VN = GN * GK / VK;
+export const VK = 2.5, VN = GN * GK / VK, VNY = GNY * GK / VK;
 // km: the largest radius of a village. A village is a village by its people too — under a thousand (TOWN_R below is
 // .2523 km): the owner, 13.11.2026: «в районе один город, деревень может быть много». The town of a district that has
 // to lie in the fine grid (grow.js: a second town in one natural cell) may be as large as FINE_RMAX.
@@ -25,11 +29,11 @@ export const VILLAGE_RMAX = .25, FINE_RMAX = .39;
 // The one texture of the settlement work (state.js) holds three things. Its first KN rows are the chunks of 1 km²
 // (division/km.js), a texel a chunk: what the chunk holds — its fields. Below them lie the fine grid of villages and,
 // beside it, the coarse grid of towns.
-export const TEX_W = KN, TEX_H = KN + VN;
-export const FINE_AT = [0, KN], COARSE_AT = [VN, KN];              // the corner of each grid in the texture: column, row
+export const TEX_W = KN, TEX_H = KNY + VNY;
+export const FINE_AT = [0, KNY], COARSE_AT = [VN, KNY];              // the corner of each grid in the texture: column, row
 // Two more blocks of the coarse grid lie beside it, a texel a square each: MORE — how far the middle of the patch lies
 // from its site (two bytes); GATES — where the main streets of the town leave it (four bytes, a direction each).
-export const MORE_AT = [VN + GN, KN], GATES_AT = [VN + 2 * GN, KN];
+export const MORE_AT = [VN + GN, KNY], GATES_AT = [VN + 2 * GN, KNY];
 // How soft the step from the fields of one chunk to the next is: the weight of a chunk falls as exp(−FARM_SOFT · d²)
 // with the distance d to its seed, km. At 4 the fields of a chunk thin out over some five hundred metres around its
 // side — two or three furlongs, so the edge of the fields is an edge of furlongs and no straight line.
@@ -169,7 +173,7 @@ export const radiusOf = b => (b / 255) ** 2 * RMAX;
 // the radius of the patch of a chunk from its `built` share and its area
 export const radiusOfShare = (built, areaKm2) => Math.min(RMAX, Math.sqrt(Math.max(0, built) * areaKm2 / Math.PI));
 // the square of the grid a point lies in, and where in it, as two bytes
-export const gridOf = (x, y) => { const gx = Math.floor((x - GX0) / GK), gy = Math.floor((y - GY0) / GK); return gx >= 0 && gy >= 0 && gx < GN && gy < GN ? gy * GN + gx : -1; };
+export const gridOf = (x, y) => { const gx = Math.floor((x - GX0) / GK), gy = Math.floor((y - GY0) / GK); return gx >= 0 && gy >= 0 && gx < GN && gy < GNY ? gy * GN + gx : -1; };
 export function siteBytes(x, y) {
   const fx = (x - GX0) / GK - Math.floor((x - GX0) / GK), fy = (y - GY0) / GK - Math.floor((y - GY0) / GK);
   return [Math.min(255, Math.floor(fx * 256)), Math.min(255, Math.floor(fy * 256))];
@@ -185,7 +189,7 @@ export function lobeOf(g, bx, by, rb, cul, sbx = 128, sby = 128) {
 export const midOf = L => [L.cx ?? L.x, L.cy ?? L.y];
 // the same for a village: the square v of the fine grid it lies in, and the patch of that square. Its number k goes
 // on from the numbers of the coarse grid, so no two patches share one.
-export const fineOf = (x, y) => { const vx = Math.floor((x - GX0) / VK), vy = Math.floor((y - GY0) / VK); return vx >= 0 && vy >= 0 && vx < VN && vy < VN ? vy * VN + vx : -1; };
+export const fineOf = (x, y) => { const vx = Math.floor((x - GX0) / VK), vy = Math.floor((y - GY0) / VK); return vx >= 0 && vy >= 0 && vx < VN && vy < VNY ? vy * VN + vx : -1; };
 export function fineBytes(x, y) {
   const fx = (x - GX0) / VK - Math.floor((x - GX0) / VK), fy = (y - GY0) / VK - Math.floor((y - GY0) / VK);
   return [Math.min(255, Math.floor(fx * 256)), Math.min(255, Math.floor(fy * 256))];
@@ -193,7 +197,7 @@ export function fineBytes(x, y) {
 export function villageLobe(v, bx, by, rb, cul) {
   const vx = v % VN, vy = (v / VN) | 0, r = radiusOf(rb);
   const x = GX0 + (vx + (bx + .5) / 256) * VK, y = GY0 + (vy + (by + .5) / 256) * VK;
-  return { k: GN * GN + v, fine: v, vx, vy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
+  return { k: GN * GNY + v, fine: v, vx, vy, bx, by, rb, cul, r, re: r, amp: Math.min(.25, .3 * r), th: ((bx * 37 + by * 91) % 256) / 256 * Math.PI / 2,
     x, y, sx: 0, sy: 0, cx: x, cy: y, gates: [], rivals: [] };
 }
 // ---- A town is no circle. The owner, 15.11.2026: «города плохо сделаны… все они строятся вокруг точечки одной… все
@@ -265,8 +269,11 @@ export function cellRule(i, j, L, S) {
 
 // which manner of building a land has before anyone decides otherwise: the wet Atlantic north and west build loose
 // stone farmsteads under dark roofs, the rest dense tiled blocks around courts
+// (North of 45.2° — the Massif Central, the north of France, the Low Countries, the Rhine — it is the same loose
+// building under dark roofs: slate, thatch, timber. The south of France and the Maghreb build the Mediterranean way.
+// The present polygon ends at 44.8°: there this line changes nothing.)
 export function cultureAt(lat, lon) {
-  const atl = (lat > 41.9 && lon < -1.4) || (lat > 43.0 && lon < .2) || (lat > 40.6 && lon < -7.6);
+  const atl = (lat > 41.9 && lon < -1.4) || (lat > 43.0 && lon < .2) || (lat > 40.6 && lon < -7.6) || lat > 45.2;
   return atl ? CULTURES.atl : CULTURES.med;
 }
 
@@ -274,9 +281,11 @@ export function cultureAt(lat, lon) {
 export const RULES_GLSL = /* glsl */`
 #define SET_RMAX ${RMAX.toFixed(4)}
 #define SET_GN ${GN}
+#define SET_GNY ${GNY}
 #define SET_GK ${GK.toFixed(1)}
 #define SET_G0 vec2(${GX0.toFixed(1)}, ${GY0.toFixed(1)})
 #define SET_VN ${VN}
+#define SET_VNY ${VNY}
 #define SET_VK ${VK.toFixed(2)}
 #define SET_FINE ivec2(${FINE_AT[0]}, ${FINE_AT[1]})
 #define SET_COARSE ivec2(${COARSE_AT[0]}, ${COARSE_AT[1]})
@@ -290,6 +299,7 @@ export const RULES_GLSL = /* glsl */`
 #define SET_STREET_W ${STREET_W.toFixed(4)}
 #define SET_GATE_W ${GATE_W.toFixed(4)}
 #define SET_KN ${KN}
+#define SET_KNY ${KNY}
 #define SET_KKM ${KKM.toFixed(1)}
 #define SET_K0 vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})
 #define SET_SOFT ${FARM_SOFT.toFixed(1)}

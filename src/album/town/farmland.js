@@ -14,7 +14,7 @@
 // the next, and the fields of the next reach farther to make up for it. The greater settlement chooses first.
 // A great river stops the plough (the natural cells the caller says can be reached).
 // Plain JavaScript without the GPU: the same land and the same people always give the same fields.
-import { KN, KKM, KX0, KY0, JITTER, kmHash, CLASS_SLOPE, HIGH_M, ORDER_WEIGHT, cellsOfChunks } from '../division/km.js';
+import { KN, KNY, KKM, KX0, KY0, JITTER, kmHash, CLASS_SLOPE, HIGH_M, ORDER_WEIGHT, cellsOfChunks } from '../division/km.js';
 
 export const HA_PER_PERSON = 1;                // hectares of fields a person lives from (this work's estimate; knob «Угодья на жителя»)
 // how much of a chunk can be ploughed, by the class of its ground (km.js: 1 level .. 5 mountain, 0 water)
@@ -40,6 +40,10 @@ export const FARM_PATCH = 3.2, FARM_LOBES = 1.9, FARM_CLIMB = 90, FARM_FADE = .6
 // the least a chunk can count as lying nearer than it does (good land, the luck of the chunk): how far beyond the
 // edge of the fields the land must be looked at
 const NEARER = (1 - FARM_ROUGH / 2) / FARM_LOBES;
+// a chunk and how far it counts as lying are kept in one number, the way times PACK plus the chunk: PACK is the
+// least power of two that holds the number of every chunk — it grows with the polygon. (The way in metres is under
+// a million, so the number stays whole: under 2^53 up to 2^33 chunks.)
+const PACK = 2 ** Math.ceil(Math.log2(KN * KNY));
 // how good the land of chunk (i, j) is for the plough beside its neighbours, 0 poor .. 1 good: a smooth noise
 export function farmPatch(i, j) {
   const x = i * KKM / FARM_PATCH + 11.3, y = j * KKM / FARM_PATCH + 4.7, x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
@@ -71,7 +75,7 @@ function roughClass(at, i, j) {
 //            relief as the chunk is asked for
 //   swamp(k) the share of swamp of natural cell k by nature, 0..1 (may be left out)
 export function farmGround(ch, at, land = null, swamp = null) {
-  const n = KN * KN, room = new Float32Array(n).fill(-1), cls = land ? land.cls : new Uint8Array(n), cellOf = cellsOfChunks(ch);
+  const n = KN * KNY, room = new Float32Array(n).fill(-1), cls = land ? land.cls : new Uint8Array(n), cellOf = cellsOfChunks(ch);
   // (the swamps are kept by the natural cells of 100 km²: a cell that is a third swamp leaves two thirds of each of
   // its chunks to the plough. Where exactly the wet ground lies the ground shader knows, and paints no field there.)
   const dry = new Float32Array(ch.count).fill(1); if (swamp) for (let k = 0; k < ch.count; k++) { const w = swamp(k); dry[k] = w >= FARM_WET ? 0 : 1 - w; }
@@ -92,7 +96,7 @@ export function farmGround(ch, at, land = null, swamp = null) {
 //   ground   farmGround()
 // → { claim(x, y, need, reach, ok) → km² taken; done() → the state of the chunks }
 export function farmRun(ground) {
-  const n = KN * KN, used = new Float32Array(n), felled = new Float32Array(ground.count.length), touched = [], patch = new Float32Array(n).fill(-1);
+  const n = KN * KNY, used = new Float32Array(n), felled = new Float32Array(ground.count.length), touched = [], patch = new Float32Array(n).fill(-1);
   let keys = new Float64Array(256), cost = new Float32Array(256), room = new Float32Array(256), left = new Float32Array(256);
   return {
     // A settlement at (x, y) ploughs `need` km² of the good ground around it, no farther than `reach` km.
@@ -102,13 +106,13 @@ export function farmRun(ground) {
       if (!(need > 0)) return 0;
       let rho = Math.min(reach, 1.5 + 3 * Math.sqrt(need / Math.PI)), m = 0, far = 0;
       // (the height the settlement stands at: that of its own chunk, where the land is divided)
-      const hgt = ground.hgt, ci = Math.floor((x - KX0) / KKM), cj = Math.floor((y - KY0) / KKM), h0 = hgt && ci >= 0 && cj >= 0 && ci < KN && cj < KN ? hgt[cj * KN + ci] : 0;
+      const hgt = ground.hgt, ci = Math.floor((x - KX0) / KKM), cj = Math.floor((y - KY0) / KKM), h0 = hgt && ci >= 0 && cj >= 0 && ci < KN && cj < KNY ? hgt[cj * KN + ci] : 0;
       // How much the settlement ploughs when its fields reach `far` km: a chunk that lies nearer than that by half the
       // band is ploughed as far as it can be, one that lies farther by as much not at all, those between in part
       // (farmShare). (The chunks are sorted by how far they count as lying.)
       const sum = far => { let t = 0; const band = farmBand(far); for (let q = 0; q < m; q++) { const sh = (far - cost[q]) / band + .5; if (sh <= 0) break; t += Math.min(left[q], room[q] * Math.min(1, sh)); } return t; };
       for (;;) {
-        const i0 = Math.max(0, Math.floor((x - rho - KX0) / KKM)), i1 = Math.min(KN - 1, Math.floor((x + rho - KX0) / KKM)), j0 = Math.max(0, Math.floor((y - rho - KY0) / KKM)), j1 = Math.min(KN - 1, Math.floor((y + rho - KY0) / KKM));
+        const i0 = Math.max(0, Math.floor((x - rho - KX0) / KKM)), i1 = Math.min(KN - 1, Math.floor((x + rho - KX0) / KKM)), j0 = Math.max(0, Math.floor((y - rho - KY0) / KKM)), j1 = Math.min(KNY - 1, Math.floor((y + rho - KY0) / KKM));
         const most = Math.max(0, (i1 - i0 + 1) * (j1 - j0 + 1));
         if (most > keys.length) { const size = 2 ** Math.ceil(Math.log2(most)); keys = new Float64Array(size); cost = new Float32Array(size); room = new Float32Array(size); left = new Float32Array(size); }
         m = 0;
@@ -119,10 +123,10 @@ export function farmRun(ground) {
           // how far the chunk counts as lying: broken ground lies farther, poor land and ground above the houses
           // too (farmWay), and no two chunks quite alike
           if (patch[c] < 0) patch[c] = farmPatch(i, j);
-          keys[m++] = Math.round(d * ORDER_WEIGHT[ground.cls[c]] * farmWay(i, j, hgt ? hgt[c] - h0 : 0, patch[c]) * (1 + (kmHash(i, j, 12) - .5) * FARM_ROUGH) * 1000) * 2097152 + c;
+          keys[m++] = Math.round(d * ORDER_WEIGHT[ground.cls[c]] * farmWay(i, j, hgt ? hgt[c] - h0 : 0, patch[c]) * (1 + (kmHash(i, j, 12) - .5) * FARM_ROUGH) * 1000) * PACK + c;
         }
         const part = keys.subarray(0, m).sort();
-        for (let q = 0; q < m; q++) { const c = part[q] % 2097152; cost[q] = Math.floor(part[q] / 2097152) / 1000; room[q] = ground.room(c); left[q] = room[q] - used[c]; }
+        for (let q = 0; q < m; q++) { const c = part[q] % PACK; cost[q] = Math.floor(part[q] / PACK) / 1000; room[q] = ground.room(c); left[q] = room[q] - used[c]; }
         // (every chunk that counts as lying within far + half the band has been looked at: none of them lies farther
         // than rho from the houses)
         far = Math.min(NEARER * rho - .5 * KKM, NEARER * rho / (1 + .5 * FARM_FADE));
@@ -135,14 +139,14 @@ export function farmRun(ground) {
       for (let q = 0; q < m; q++) {
         const sh = (far - cost[q]) / band + .5; if (sh <= 0) break;
         const take = Math.min(left[q], room[q] * Math.min(1, sh), need - got); if (take < FARM_LEAST) continue;
-        const c = keys[q] % 2097152;
+        const c = keys[q] % PACK;
         if (used[c] === 0) touched.push(c);
         used[c] += take; got += take;
         if (fell > 0) { const k = ground.cell[c]; if (k < felled.length) felled[k] += take * fell; }
       }
       return got;
     },
-    // → { km: Uint8Array (KN · KN: the share of every chunk under fields, a byte), list: Int32Array (the chunks that
+    // → { km: Uint8Array (KN · KNY: the share of every chunk under fields, a byte), list: Int32Array (the chunks that
     //     have fields, in rising order), area: km² under fields, cellArea: Float32Array (km² of fields in the chunks of
     //     every natural cell), cellFelled: Float32Array (km² felled there besides) }
     done() {

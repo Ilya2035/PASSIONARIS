@@ -123,8 +123,8 @@ vec3 setFields(Px p, vec3 ground, float atl, vec2 cid, vec2 f, float border, flo
 // far, it wins. fine: the grid of villages, else the grid of towns (where each lies in the texture: town/rules.js).
 // (sh: how far the middle of the winning patch lies from its site — a town grows toward the water)
 void setTry(ivec2 c, bool fine, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec3 bc, inout vec2 sh) {
-  int n = fine ? SET_VN : SET_GN;
-  if (c.x < 0 || c.y < 0 || c.x >= n || c.y >= n) return;
+  ivec2 n = fine ? ivec2(SET_VN, SET_VNY) : ivec2(SET_GN, SET_GNY);    // (a grid is so many squares wide and so many high: no square is assumed)
+  if (c.x < 0 || c.y < 0 || c.x >= n.x || c.y >= n.y) return;
   vec4 t = texelFetch(tSettle, c + (fine ? SET_FINE : SET_COARSE), 0);
   if (t.b <= 0.) return;
   vec2 s = fine ? vec2(0.) : (floor(texelFetch(tSettle, c + SET_MORE, 0).rg * 255. + .5) - 128.) * (SET_SHIFT / 127.);
@@ -167,34 +167,24 @@ float setCleared(float farm, float pat) { return smoothstep(.04, uSetC.x, farm *
 // furlongs and the chunks themselves are never seen. Twin of farmAt() in town/state.js.
 float setFarm(vec2 pk) {
   vec2 t = (pk - SET_K0) / SET_KKM; ivec2 c = ivec2(floor(t));
-  if (c.x < 0 || c.y < 0 || c.x >= SET_KN || c.y >= SET_KN) return 0.;
+  if (c.x < 0 || c.y < 0 || c.x >= SET_KN || c.y >= SET_KNY) return 0.;
   vec4 o = texelFetch(tSettle, c, 0);
   if (o.a < .25 || o.a > .75) return o.r;                              // no fields anywhere near, or the nine chunks around hold the same: by far the commonest
   // (the side of a chunk is a straight piece half-way between two seeds; the fields do not end on a straight line,
   // so the point is moved by a few hundred metres, this way and that, before its chunk is looked for)
   vec2 f = t - vec2(c) + (vec2(vnoise(pk * 1.9 + 3.1), vnoise(pk * 1.9 + 57.9)) - .5) * SET_WARP; float sum = 0., all = 0.;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    vec4 q = texelFetch(tSettle, clamp(c + ivec2(i, j), ivec2(0), ivec2(SET_KN - 1)), 0);
+    vec4 q = texelFetch(tSettle, clamp(c + ivec2(i, j), ivec2(0), ivec2(SET_KN - 1, SET_KNY - 1)), 0);
     vec2 v = vec2(float(i), float(j)) + q.gb - f; float w = exp(-SET_SOFT * dot(v, v));
     sum += w * q.r; all += w;
   }
   return sum / all;
 }
-// The same on the ground as it lies: fields keep to level ground — the floor of a valley, a terrace, the gentle foot
-// of a slope — and leave its steep sides alone. slope: rise over run at the pixel. (The owner, 15.11.2026, of the
-// fields and the clearings of the villages: «маленькие кружочки… больше по местности».) The fields are drawn by
-// this rule (in aspSettle it is the slope taken off the share ploughed, SET_SLOPE, to the same effect); for the
-// clearing of a village in a forest to run along its valley too, the forest must ask this one instead of setFarm() —
-// aspects/forest.js, the part «Земля и лес».
-// (NOT called at the head of aspSettle: there this one line made the whole ground shader a fifth slower —
-// land-20 310 → 375 ms, land-far 189 → 235 ms, 15.11.2026 — though it is one multiplication. Whoever calls it:
-// time land-20 and land-far before and after.)
-float setFarmOn(vec2 pk, float slope) { return setFarm(pk) * (1. - smoothstep(.10, .26, slope)); }
 void aspSettle(Px p, inout Land L) {
   if (uSettle.w < .5 || p.h < .4) return;
   vec2 gp = p.pk - SET_G0;
   ivec2 c0 = ivec2(floor(gp / SET_GK)), v0 = ivec2(floor(gp / SET_VK));
-  if (c0.x < 0 || c0.y < 0 || c0.x >= SET_GN || c0.y >= SET_GN) return;
+  if (c0.x < 0 || c0.y < 0 || c0.x >= SET_GN || c0.y >= SET_GNY) return;
   vec4 t0 = texelFetch(tSettle, c0 + SET_COARSE, 0), tv = texelFetch(tSettle, v0 + SET_FINE, 0);
   int code = int(t0.a * 255. + .5), vcode = int(tv.a * 255. + .5);
   float farm = setFarm(p.pk);
@@ -222,7 +212,7 @@ void aspSettle(Px p, inout Land L) {
     vec2 b = floor(best.rg * 255. + .5); float ca = floor(best.a * 255. + .5);
     r = best.b * best.b * SET_RMAX; site = SET_G0 + (vec2(bc.xy) + (b + .5) / 256.) * (village ? SET_VK : SET_GK);
     th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.;
-    ck = village ? SET_GN * SET_GN + bc.y * SET_VN + bc.x : bc.y * SET_GN + bc.x;
+    ck = village ? SET_GN * SET_GNY + bc.y * SET_VN + bc.x : bc.y * SET_GN + bc.x;
   }
   float px = p.px, S = uSettle.x, W = .5 + 2.5 * r, m = r > 0. ? own : -1e3;        // W: how far the fields reach beyond the houses
   bool close = m > -W - .3;                                                         // near a patch: its houses, its lanes

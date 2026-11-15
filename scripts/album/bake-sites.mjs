@@ -11,9 +11,11 @@ import { join, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { OUT_DIR } from './osm-extract.mjs';
 import { russifySites } from '../../src/album/town/translit.js';
+import { BBOX } from '../../src/album/geo.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-const BOX = { lat0: 35.2, lat1: 44.8, lon0: -10, lon1: 4.5 }, KIND = { city: 0, town: 1, village: 2 }, GUESS = [60000, 6000, 0];
+// (the rectangle of the album's region is the one of src/album/geo.js: it grows with the polygon, nothing is written here)
+const BOX = BBOX, KIND = { city: 0, town: 1, village: 2 }, GUESS = [60000, 6000, 0];
 const seen = new Set(), sites = [];
 for (const f of readdirSync(OUT_DIR).filter(f => f.endsWith('.places.json.gz'))) for (const p of JSON.parse(gunzipSync(readFileSync(join(OUT_DIR, f))))) {
   const kind = KIND[p.t]; if (kind === undefined) continue;
