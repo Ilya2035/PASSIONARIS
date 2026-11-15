@@ -84,7 +84,7 @@ export function initUI(album) {
   const back = button('back', 'В лаунчер'); back.onclick = () => window.passionaris?.exitToLauncher?.(); root.append(back);
   // the strip stays one line (the scale bar of the map stands right above it); the whole list of the keys is its tooltip
   const keys = el('div', 'hint S', 'Колесо — высота · левая кнопка, край экрана, W A S D — двигать · правая кнопка, Q E R F — вращать и наклонять · двойной щелчок — лететь · H — скрыть панели');
-  keys.title = 'Колесо — ближе и дальше, к точке под курсором · курсор у края экрана, W A S D или стрелки — двигать (с Shift быстрее) · левая кнопка — тащить карту · средняя или правая — вращать и наклонять · Q и E — поворот · R и F — наклон · двойной щелчок — лететь · N — север вверху · 1–4 — высоты · H — скрыть панели';
+  keys.title = 'Колесо — ближе и дальше, к точке под курсором · курсор у края экрана, W A S D или стрелки — двигать (с Shift быстрее) · левая кнопка — тащить карту · средняя или правая — вращать и наклонять · Q и E — поворот · R и F — наклон · двойной щелчок — лететь · N — север вверху · 1–6 — высоты: 20, 50, 200, 500, 2000 км и весь шар · H — скрыть панели';
   root.append(keys);
 
   function paint() {

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { toWorld, fromWorld, frame, distKm, mercX, mercY, BBOX, CENTRE, R, worldLL, wrapLon, inPolygon, LAT_MAX } from '../src/album/geo.js';
+import { H_MIN, H_MAX } from '../src/album/camera.js';
 import { PAGES } from '../src/album/pages.js';
 import { DEFS, LOOKS, sunAt } from '../src/album/params.js';
 import { feedbackText } from '../src/album/feedback.js';
@@ -51,7 +52,8 @@ test('album pages: unique ids, a title, a note and a camera inside the region; o
       if (k === 'look') assert.ok(LOOKS[v], `${pg.id}: unknown look ${v}`);
     }
     const c = pg.cam;
-    assert.ok(c.lat >= BBOX.lat0 && c.lat <= BBOX.lat1 && c.lon >= BBOX.lon0 && c.lon <= BBOX.lon1 && c.h >= 20 && c.h <= 2000, `${pg.id}: camera`);
+    // (a page may look at any place of the Earth and from as high as the whole ball: the map is the sphere, 15.11.2026)
+    assert.ok(Math.abs(c.lat) <= LAT_MAX && c.lon >= -180 && c.lon <= 180 && c.h >= H_MIN && c.h <= H_MAX, `${pg.id}: camera`);
   }
 });
 test('album params: the sun is a unit vector, up by day and under the horizon late at night', () => {
