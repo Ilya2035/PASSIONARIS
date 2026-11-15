@@ -74,8 +74,12 @@ export function passSvg(rank = 2, far = false) {
   const d = `M${n(-w)},${n(-s)} Q${n(-w * .08)},0 ${n(-w)},${n(s)} M${n(w)},${n(-s)} Q${n(w * .08)},0 ${n(w)},${n(s)}`;
   return `<svg width="20" height="20" viewBox="-10 -10 20 20" style="flex:none;overflow:visible;transition:opacity .3s"><g fill="none" stroke-linecap="round"><path d="${d}" stroke="${INK}" stroke-width="${rank === 0 ? 5 : 4.4}"/><path d="${d}" stroke="${FILL}" stroke-width="${rank === 0 ? 2.2 : 1.8}"/></g></svg>`;
 }
-// how present a thing still is at camera height h when it goes at height `to`: 1 well below, 0 from `to` on
-const fade = (h, to) => Math.max(0, Math.min(1, (to - h) / (to * .08)));
+// How present a thing still is at camera height h when it is seen «from `to` km»: all of it at that height and below;
+// above it, it goes over the next FADE of that height (the capital, seen from 2000 km, is gone at 2160). The owner
+// names the heights a thing is seen FROM: at the very height he names it stands whole. (It used to be gone at that
+// height and whole only from 8 % lower.)
+export const FADE = .08;
+const fade = (h, to) => Math.max(0, Math.min(1, (to * (1 + FADE) - h) / (to * FADE)));
 const rise = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // What is shown at camera height h of a settlement of this rank, before anything is known of the screen:
 // { mark: 0..1, name: 0..1, far: 0 a shape · 1 a dot · 2 a small dot }. farNames: the names of the chief towns stay with their marks.

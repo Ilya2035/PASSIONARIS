@@ -427,8 +427,16 @@ test('settle marks: the ladder of the owner by the height of the camera — the 
   assert.deepEqual([{ cls: 0 }, { town: true, cls: 0 }, { town: true, cls: 1 }, { town: true, cls: 2 }, { town: true, cls: 0, capital: 'province' }, { town: true, cls: 1, capital: 'land' }, { town: true, cls: 2, capital: 'region' }, { cls: 1 }].map(rankOf),
     [0, 1, 2, 3, 3, 4, 5, 0], 'a village first, the town of a district, a greater town, the greatest cities with the chief towns of provinces, of lands, of regions');
   const marked = h => RANKS.map((_, r) => shownAt(r, h).mark > 0), named = h => RANKS.map((_, r) => shownAt(r, h).name > .5);
-  assert.deepEqual(marked(2100), [false, false, false, false, false, false], 'higher than 2000 km: nothing');
+  // at the very height the owner names a mark stands whole; above it, it goes over the next 8 % of that height
+  const { FADE } = await import('../src/album/layers/labels.js'); assert.equal(FADE, .08);
+  for (const [rank, from] of [[5, 2000], [4, 1000], [3, 1000], [2, 200], [1, 150], [0, 100]]) {
+    assert.equal(shownAt(rank, from).mark, 1, `rank ${rank}: whole from ${from} km`); assert.equal(shownAt(rank, from * .7).mark, 1);
+    assert.ok(Math.abs(shownAt(rank, from * 1.04).mark - .5) < 1e-9, 'half gone 4 % higher'); assert.equal(shownAt(rank, from * 1.08).mark, 0, 'gone 8 % higher'); assert.equal(shownAt(rank, from * 1.5).mark, 0);
+  }
+  assert.equal(shownAt(5, 2160).mark, 0, 'the capital, seen from 2000 km, is gone at 2160');
+  assert.deepEqual(marked(2200), [false, false, false, false, false, false], 'higher than 2000 km: nothing');
   assert.deepEqual(marked(1500), [false, false, false, false, false, true], 'from 2000 km down: the capital alone');
+  assert.deepEqual(marked(1100), [false, false, false, false, false, true]); assert.deepEqual(marked(1000), [false, false, false, true, true, true]);
   assert.deepEqual(marked(900), [false, false, false, true, true, true], 'from 1000 km: the cities');
   assert.deepEqual(marked(185), [false, false, true, true, true, true], 'from 200 km: small towns');
   assert.deepEqual(marked(135), [false, true, true, true, true, true], '…and the towns of the districts a little lower');
