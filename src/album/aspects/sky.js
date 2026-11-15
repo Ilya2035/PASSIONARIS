@@ -10,7 +10,7 @@
 import { Vector3, Vector4, BackSide } from 'three';
 import { frame } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
-import { sunDir, moonDir, moonLit, moonStrength, sunTimes } from '../sky/astro.js';
+import { sunDir, moonDir, moonLit, moonStrength, sunTimes, lightHour } from '../sky/astro.js';
 import { WX, needClouds, needFog, cloudOffset, rainCover, rainMask, fogByHour, fogNumbers, snowNumbers, HILL_FILL, capBank } from '../sky/weather.js';
 
 const MAP_LIGHT = sunAt(0);
@@ -26,6 +26,10 @@ export default {
   glsl: '',
   uniforms: U,
   params: [
+    // the light by its name: the hour is then counted from the Sun of the place under the camera (sky/astro.js,
+    // lightHour); '' leaves the hour to the knob «Время суток». The buttons of it stand on the panel of the map
+    // (sky/lightswitch.js); the game opens with «День» (main.js), the pages of the album with the light of the map.
+    { key: 'light', label: 'Освещение', group: 'light', type: 'select', value: '', options: [['', 'по ручке «Время суток»'], ['morning', 'Утро'], ['day', 'День'], ['evening', 'Вечер'], ['night', 'Ночь']] },
     { key: 'yday', label: 'День года (172 — 21 июня)', group: 'light', min: 1, max: 365, step: 1, value: 172 },
     { key: 'moon', label: 'Фаза Луны (0,5 — полнолуние)', group: 'light', min: 0, max: 1, step: .05, value: .5 },
     { key: 'dayRun', label: 'Ход суток', group: 'light', type: 'toggle', value: 0, map: 'Ход суток' },
@@ -45,6 +49,12 @@ export default {
     { id: 'sky-dawn', group: 'Небо и свет', title: 'Восход над Пиренеями', note: 'Пять часов утра, 21 июня: солнце только встало на северо-востоке, тени гор длинные.', p: { hour: 5 }, cam: cam(P.pyr, 90, 62, 250) },
     { id: 'sky-noon', group: 'Небо и свет', title: 'Полдень над Пиренеями', note: 'Солнце на юге, высоко: тени короткие.', p: { hour: 12 }, cam: cam(P.pyr, 90, 62, 250) },
     { id: 'sky-dusk', group: 'Небо и свет', title: 'Закат над Пиренеями', note: 'Четверть восьмого вечера, 21 июня: солнце у самого горизонта на северо-западе, небо вокруг него оранжевое, свет тёплый, тени длинные. Камера смотрит на закат.', p: { hour: 19.25 }, cam: cam(P.pyr, 60, 84, 300) },
+    { id: 'sky-light-morning', group: 'Небо и свет', title: 'Свет: утро', note: 'Кнопка «Утро» на панели карты. Солнце невысоко на востоке, тени гор длинные и лежат к западу, свет тёплый. Час считается по Солнцу места: утро остаётся утром в любой день года и на любой широте.', p: { light: 'morning' }, cam: cam([42.7, .3], 60, 50, 0) },
+    { id: 'sky-light-day', group: 'Небо и свет', title: 'Свет: день', note: 'Кнопка «День»: настоящее Солнце после полудня. Оно стоит высоко на западе, поэтому тени короткие и лежат к востоку. С этим светом открывается игра.', p: { light: 'day' }, cam: cam([42.7, .3], 60, 50, 0) },
+    { id: 'sky-light-evening', group: 'Небо и свет', title: 'Свет: вечер', note: 'Кнопка «Вечер»: Солнце низко на западе, свет оранжевый, тени длинные и лежат к востоку.', p: { light: 'evening' }, cam: cam([42.7, .3], 60, 50, 0) },
+    { id: 'sky-light-night', group: 'Небо и свет', title: 'Свет: ночь', note: 'Кнопка «Ночь»: полночь, Солнце глубоко под горизонтом, полная Луна стоит на юге. Земля в слабом лунном свете.', p: { light: 'night' }, cam: cam([42.7, .3], 60, 50, 0) },
+    { id: 'sky-sun-day', group: 'Небо и свет', title: 'Где Солнце: день', note: 'Днём Солнце стоит выше окна, но видно, где оно: небо и дымка в его стороне светлее и теплее. Камера смотрит на запад, к Солнцу.', p: { light: 'day' }, cam: cam(P.zar, 30, 86, 268) },
+    { id: 'sky-sun-evening', group: 'Небо и свет', title: 'Где Солнце: вечер', note: 'Вечером Солнце видно над горизонтом: диск, сияние вокруг него и тёплая дымка в его стороне. Камера смотрит на закат.', p: { light: 'evening' }, cam: cam(P.zar, 30, 86, 291) },
     { id: 'sky-night', group: 'Небо и свет', title: 'Ночь с Луной', note: 'Без четверти девять вечера, 21 июня: солнце уже глубоко под горизонтом, полная Луна только взошла на юго-востоке. Земля в слабом лунном свете, склоны к Луне светлее. Фазу меняет ручка «Фаза Луны».', p: { hour: 20.75, moon: .5 }, cam: cam(P.pyr, 40, 87, 136) },
     { id: 'sky-clouds', group: 'Небо и свет', title: 'Облака и их тени', note: 'Вид с 700 км: облака и тени от них на земле. Сколько облаков — ручка «Облачность». Вблизи облака тают, тени остаются.', p: { clouds: 1 }, cam: cam(P.all, 700, 35, 0) },
     { id: 'sky-rain', group: 'Небо и свет', title: 'Дождь с высоты', note: 'Взгляд от Валенсии на север: над горами идёт дождь. Туча тяжёлая и серая, под её ближним краем висит серая завеса дождя с полосами, земля под ней тёмная, мокрая. Туча уходит на восток и оставляет за собой мокрый след. Переключатель «Дождь», ручка «Сила дождя».', p: { rain: 1 }, cam: cam(P.rain, 220, 74, 0) },
@@ -74,7 +84,7 @@ export default {
     const layer = { id: 'sky', dome, hour: 0, update(dt, _t, c) {
       const s = c.s, yday = p.get('yday'), phase = p.get('moon'), f = frame(s.lat, s.lon);
       // the hour: the knob, or the running clock (a day in a minute and a half; «Ход времени» speeds it up)
-      let hour = p.get('hour');
+      let hour = p.get('light') ? lightHour(p.get('light'), yday, s.lat) : p.get('hour');
       if (p.get('dayRun') && !album.shot) { clock = ((clock ?? (hour || 9)) + dt * p.get('play') * .27) % 24; hour = clock || .001; } else clock = null;
       layer.hour = hour;
       if (hour) T.uSun.value.set(...sunDir(hour, yday, s.lat)); else T.uSun.value.copy(MAP_LIGHT);   // hour 0: the cartographer's light
@@ -83,8 +93,10 @@ export default {
         const m = moonDir(hour, yday, s.lat, phase);
         moon.set(m[0], m[1], m[2], moonStrength(sun.z, m[2], phase)); world(m[0], m[1], m[2], f, moonW); dome.u.uSkyK.value.y = moonLit(phase);
       } else { moon.set(0, 0, 1, 0); moonW.copy(sunW).negate(); dome.u.uSkyK.value.y = 0; }
+      dome.u.uSkyK.value.z = hour ? 1 : 0;
       // the light of this frame for every shader: colours of the Sun, the sky and the haze, the day, the thin air
-      lightFrame({ sun, moon: moon.w, style: T.uStyle.value, warm: T.uWarm.value, haze: T.uHaze.value, alt: c.alt ?? s.h });
+      // (a real Sun has a glow in the air around it; the light of the map — hour 0 — has no Sun in its sky)
+      lightFrame({ sun, moon: moon.w, style: T.uStyle.value, warm: T.uWarm.value, haze: T.uHaze.value, alt: c.alt ?? s.h, aureole: hour ? 1 : 0 });
       // clouds: how much of the sky, how far the wind (toward the east-north-east) has carried them
       // (The weather is there in the natural look only. Rain brings its own clouds if there are too few.)
       const natural = T.uStyle.value === 0, force = p.get('rainForce'), rain = !!p.get('rain') && natural;

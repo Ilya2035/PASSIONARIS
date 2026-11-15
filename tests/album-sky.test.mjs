@@ -3,7 +3,8 @@
 // (harness acap … "page=sky-near"), and whether its shaders compile by `harness acheck`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sunDir, moonDir, moonLit, moonStrength, sunTimes, sunLongitude, equatorial } from '../src/album/sky/astro.js';
+import { sunDir, moonDir, moonLit, moonStrength, sunTimes, sunLongitude, equatorial, lightHour, LIGHT_NAMES } from '../src/album/sky/astro.js';
+import { LIGHTS, lightShown, lightSet } from '../src/album/sky/lightswitch.js';
 import { LIGHT, lightUniforms, lightNumbers, lightFrame, FRAME, sunAt, HAZE_KM } from '../src/album/light.js';
 import { AlbumCamera, edgePush, keyPush, panStep, zoomAbout, tiltCap, nearLon, H_MIN, H_MAX, H_TILT, PAN_H, TILT_MAX, EDGE_PX, PAN_RATE } from '../src/album/camera.js';
 import { KM_PER_DEG, BBOX, R, LAT_MAX, fromWorld, distKm } from '../src/album/geo.js';
@@ -123,15 +124,52 @@ test('sky: knobs and pages of the part', () => {
   for (const k of ['clouds', 'dayRun', 'edgePan', 'rain', 'fog']) { assert.equal(def(k).type, 'toggle', k); assert.ok(def(k).map.length > 3, k); }
   assert.equal(def('edgePan').value, 1);
   const ids = sky.pages.map(p => p.id); assert.equal(new Set(ids).size, ids.length);
-  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-overcast', 'sky-snow', 'sky-snow-near', 'sky-snow-200', 'sky-fog', 'sky-fog-late', 'sky-valley-clouds', 'sky-caps', 'sky-fog-far']) {
+  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-light-morning', 'sky-light-day', 'sky-light-evening', 'sky-light-night', 'sky-sun-day', 'sky-sun-evening', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-overcast', 'sky-snow', 'sky-snow-near', 'sky-snow-200', 'sky-fog', 'sky-fog-late', 'sky-valley-clouds', 'sky-caps', 'sky-fog-far']) {
     const pg = PAGES.find(p => p.id === id); assert.ok(pg, id); assert.ok(pg.title.length > 5 && pg.note.length > 20);
     assert.ok(pg.cam.h >= H_MIN && pg.cam.h <= H_MAX && pg.cam.tilt <= TILT_MAX && pg.cam.lat > BBOX.lat0 && pg.cam.lat < BBOX.lat1, id);
     for (const k of Object.keys(pg.p)) assert.ok(def(k), `${id}: no knob ${k}`);
     if (pg.p.hour) assert.ok(pg.p.hour >= def('hour').min && pg.p.hour <= def('hour').max, id);
+    if (pg.p.light) assert.ok(LIGHT_NAMES.includes(pg.p.light) && !pg.p.hour, id);
   }
   // sunrise, noon, sunset and night are what their hours say on 21 June over the Pyrenees
   const up = id => { const pg = PAGES.find(p => p.id === id); return elev(sunDir(pg.p.hour, 172, pg.cam.lat)); };
   assert.ok(up('sky-dawn') > 1 && up('sky-dawn') < 9); assert.ok(up('sky-noon') > 65); assert.ok(up('sky-dusk') > 1 && up('sky-dusk') < 9); assert.ok(up('sky-night') < -8);
+});
+
+test('sky: the switch of light — morning, day, evening and night by the Sun of the place', () => {
+  // the knob: a named light, or '' — the hour knob rules; nothing is on in the pages of the album until asked for
+  const def = k => DEFS.find(d => d.key === k), opts = def('light').options.map(o => o[0]);
+  assert.equal(def('light').value, ''); assert.equal(def('light').type, 'select'); assert.deepEqual(opts, ['', ...LIGHT_NAMES]);
+  // the buttons on the panel of the map: the old light first, then the four named ones, each with a word and a hint
+  assert.deepEqual(LIGHTS.map(l => l[0]), ['', ...LIGHT_NAMES]); for (const l of LIGHTS) assert.ok(l[1].length > 2 && l[1].length < 9 && l[2].length > 20, l[0]);
+  // pressing a button: a named light stops the running day; the old light is hour 0
+  assert.deepEqual(lightSet('evening'), { light: 'evening', dayRun: 0 }); assert.deepEqual(lightSet(''), { light: '', hour: 0, dayRun: 0 });
+  const shown = o => lightShown(k => o[k]);
+  assert.equal(shown({ light: 'day', hour: 0, dayRun: 0 }), 'day'); assert.equal(shown({ light: '', hour: 0, dayRun: 0 }), '');
+  assert.equal(shown({ light: '', hour: 9, dayRun: 0 }), null, 'an hour set by hand lights no button'); assert.equal(shown({ light: 'day', hour: 0, dayRun: 1 }), null);
+  // the hours, anywhere and on any day where the Sun rises and sets: a low Sun in the east, a high one past the
+  // meridian, a low one in the west, and the dark
+  for (const [lat, yday] of [[40, 172], [40, 355], [40, 80], [-35, 172], [-35, 355], [0, 172], [20, 265], [60, 172], [55, 355]]) {
+    const at = n => sunDir(lightHour(n, yday, lat), yday, lat), [m, d, e, n] = LIGHT_NAMES.map(at), t = sunTimes(yday, lat), tag = `${lat}°, day ${yday}`;
+    assert.ok(lightHour('morning', yday, lat) > t.rise && lightHour('morning', yday, lat) < 12 && lightHour('day', yday, lat) > 12, tag);
+    assert.ok(lightHour('evening', yday, lat) > lightHour('day', yday, lat) && lightHour('evening', yday, lat) < t.set, tag);
+    assert.ok(elev(m) > 3 && elev(m) < 30 && m[0] > .3, `${tag}: morning ${elev(m)}°`);
+    assert.ok(elev(e) > 3 && elev(e) < 30 && e[0] < -.3, `${tag}: evening ${elev(e)}°`);
+    assert.ok(elev(d) > elev(m) && elev(d) > elev(e) && d[0] < -.2, `${tag}: day ${elev(d)}°, to the west of the meridian`);
+    assert.ok(elev(n) < elev(e) - 8 && elev(n) < 0 || lat >= 60, `${tag}: night ${elev(n)}°`);
+  }
+  // 21 June over Spain: the day is the afternoon Sun, high in the west — the light the game opens with
+  const day = sunDir(lightHour('day', 172, 40), 172, 40); near(elev(day), 43, 2); near(azim(day), 266, 4); near(elev(sunDir(lightHour('night', 172, 40), 172, 40)), -26.6, 1);
+  // a day when the Sun neither rises nor sets: the hours of an equinox day, still in order
+  assert.equal(sunTimes(172, 80), null); assert.ok(lightHour('morning', 172, 80) < lightHour('day', 172, 80) && lightHour('day', 172, 80) < lightHour('evening', 172, 80));
+  assert.equal(lightHour('', 172, 40), 0); assert.equal(lightHour('noon', 172, 40), 0);
+  // a real Sun that stands high has a pale warm glow in the air on its side; the light of the map has none, and a
+  // low Sun keeps its orange one
+  const hi = { sun: sunAt(15.5, 172, 40) }, plain = lightNumbers(hi), lit = lightNumbers({ ...hi, aureole: 1 });
+  assert.equal(plain.C[3], 0); assert.ok(lit.C[3] > .6 && lit.C[3] <= 1, `${lit.C[3]}`); assert.ok(lit.E[2] > .7 && lit.E[0] / lit.E[2] < 1.4, 'pale, not orange');
+  assert.deepEqual([lit.A, lit.B, lit.D, lit.C.slice(0, 3)], [plain.A, plain.B, plain.D, plain.C.slice(0, 3)], 'the light itself is the same');
+  const lo = { sun: sunAt(19.2, 172, 40) }; assert.deepEqual(lightNumbers({ ...lo, aureole: 1 }), lightNumbers(lo)); assert.ok(lightNumbers(lo).E[0] / lightNumbers(lo).E[2] > 2.5);
+  assert.equal(lightNumbers({ ...hi, aureole: 1, style: 3 }).C[3], 0, 'the paper look has no glow');
 });
 
 test('camera: the cursor at an edge of the window pushes the map', () => {

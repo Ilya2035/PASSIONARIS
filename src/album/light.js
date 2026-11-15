@@ -76,7 +76,7 @@ const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
 // (0..1, uMoon.w); style — the look (0 natural, 2 atlas, 3 paper, 6 night slate); warm — the warmth of the look
 // (0..1); haze — the knob «Дымка воздуха»; alt — the height of the eye over the sea, km. Returns plain arrays, so the
 // tests can read them.
-export function lightNumbers({ sun, moon = 0, style = 0, warm = 0, haze = .09, alt = 500 }) {
+export function lightNumbers({ sun, moon = 0, style = 0, warm = 0, haze = .09, alt = 500, aureole = 0 }) {
   const z = sun.z, day = ss(-.08, .12, z), high = ss(.05, .45, z);
   // sunlight: orange when the Sun is low, nearly white when it is high, nothing at night; a warm look reddens it
   const sr = mix(1.25, 1.22, high) * day, sg = mix(.62, 1.15, high) * day, sb = mix(.30, 1.02, high) * day;
@@ -86,11 +86,20 @@ export function lightNumbers({ sun, moon = 0, style = 0, warm = 0, haze = .09, a
   let hz;
   if (style === 6) hz = [.05, .07, .11];
   else if (style === 3) hz = [.84, .86, .86];
-  else { const low = (1 - ss(.05, .5, z)) * ss(-.3, -.04, z) * .42, f = .12 + .05 * moon + .88 * day; hz = [mix(.55, .92, low) * f, mix(.70, .76, low) * f, mix(.92, .66, low) * f]; }
+  else {
+    const low = (1 - ss(.05, .5, z)) * ss(-.3, -.04, z) * .42, f = .12 + .05 * moon + .88 * day; hz = [mix(.55, .92, low) * f, mix(.70, .76, low) * f, mix(.92, .66, low) * f];
+    // With the eye almost on the ground the look runs along the whole of the low haze, and the horizon came out
+    // white — «засвечен» (the owner, 15.11.2026). There the haze is a quieter, bluer grey; from 12 km up it is as it was.
+    const near = 1 - ss(1.5, 12, alt); hz = [hz[0] * (1 - .30 * near), hz[1] * (1 - .26 * near), hz[2] * (1 - .20 * near)];
+  }
   // the glow of sunrise and sunset, in the natural look only: strongest with the Sun at the horizon
-  const glow = style === 0 && z < .4 ? (1 - ss(.04, .4, z)) * ss(-.26, -.01, z) : 0, gb = .25 + .75 * ss(-.2, .06, z);
+  const low = style === 0 && z < .4 ? (1 - ss(.04, .4, z)) * ss(-.26, -.01, z) : 0, gb = .25 + .75 * ss(-.2, .06, z);
+  // A real Sun that stands high has its glow too (aureole 0..1, the sky layer: aspects/sky.js): the air toward it is
+  // lighter and a little warm — pale, not orange. So a look toward the horizon shows at once where the Sun is, even
+  // when the Sun itself is above the window. The light of the map (hour 0) has no Sun in its sky and no such glow.
+  const up = style === 0 ? aureole * ss(.1, .45, z) : 0, glow = Math.max(low, .85 * up);
   return { A: [mix(sr, sr * 1.06, warm), sg, mix(sb, sb * .9, warm), day], B: [...sky, haze / (alt * 2.2 + 25)], C: [...hz, glow],
-    D: [.085 * moon, .115 * moon, .185 * moon], E: [1.10 * gb, .64 * gb, .34 * gb] };
+    D: [.085 * moon, .115 * moon, .185 * moon], E: [mix(1.10 * gb, 1.04, up), mix(.64 * gb, .98, up), mix(.34 * gb, .86, up)] };
 }
 // the uniforms themselves: one set for the whole album (the ground gets them with the uniforms of the sky aspect,
 // everything else through lightUniforms)

@@ -12,7 +12,7 @@ import { LIGHT, lightUniforms, HAZE_KM } from '../light.js';
 // relief 1.6 times, and its air with it.
 export const AIR_KM = 12;
 // how many times larger than life the discs of the Sun and the Moon are drawn (real: half a degree across)
-export const SUN_SCALE = 1.6, MOON_SCALE = 2.2;
+export const SUN_SCALE = 2.2, MOON_SCALE = 2.2;
 
 const VERT = /* glsl */`
 uniform mat4 uInvProj, uCamWorld;
@@ -26,7 +26,7 @@ void main() {
 const FRAG = /* glsl */`
 ${COMMON}
 ${LIGHT}
-uniform vec3 uMoonW; uniform vec4 uSkyK;        // uSkyK: x radians in one pixel, y lit share of the Moon
+uniform vec3 uMoonW; uniform vec4 uSkyK;        // uSkyK: x radians in one pixel, y lit share of the Moon, z 1 with a real Sun in the sky
 varying vec3 vDir;
 #define AIR_KM ${AIR_KM.toFixed(2)}
 #define HAZE_KM ${HAZE_KM.toFixed(3)}
@@ -81,11 +81,12 @@ void main() {
       // the stars come out as the day fades; from space they show a little by day too
       float dark = 1. - day * mix(1., .78, smoothstep(150., 1200., alt));
       if (dark > .01) col += vec3(.80, .86, 1.) * stars(rd, px) * dark * clear * .9;
-      // the Sun: a disc reddened by the air it shines through, and the glare around it
+      // the Sun: a disc reddened by the air it shines through, the glare around it, and a wide soft light in the
+      // sky on its side — so the Sun is found at a glance, and is felt even while it stands above the window
       float sd = sqrt(max(2. - 2. * dot(rd, uSunW), 0.));
-      if (sd < .6) {
+      if (sd < 1.5) {
         vec3 sunC = vec3(1.25, 1.12, .95) * T;
-        col += sunC * (22. * (1. - smoothstep(SUN_R - px, SUN_R + px, sd)) + .9 * exp(-sd / .022) + .16 * exp(-sd / .11));
+        col += sunC * (22. * (1. - smoothstep(SUN_R - px, SUN_R + px, sd)) + 1.1 * exp(-sd / .026) + .22 * exp(-sd / .12) + .42 * exp(-sd / .5) * uSkyK.z);
       }
       // the Moon: a ball lit by the same Sun, so its phase is simply where the Sun stands
       float md = sqrt(max(2. - 2. * dot(rd, uMoonW), 0.));

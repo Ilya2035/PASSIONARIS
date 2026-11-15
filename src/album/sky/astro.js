@@ -41,3 +41,23 @@ export function sunTimes(yday = 172, latDeg = 40) {
   const h = Math.acos(x) / D / 15;
   return { rise: 12 - h, set: 12 + h };
 }
+// how many hours before and after noon the Sun stands at a height (degrees) on a day at a latitude; null when it
+// does not reach that height that day, or never sinks to it
+export function hoursFromNoon(elDeg, yday = 172, latDeg = 40) {
+  const dec = equatorial(sunLongitude(yday)).dec, f = latDeg * D, x = (Math.sin(elDeg * D) - Math.sin(f) * Math.sin(dec)) / (Math.cos(f) * Math.cos(dec));
+  return x >= 1 || x <= -1 ? null : Math.acos(x) / D / 15;
+}
+// The hour of a named light on a day at a latitude — the switch of light on the panel of the map. The hours go by
+// the Sun of the place, so «morning» is a morning in June and in December, in Spain and in Australia alike:
+//   morning   the Sun 13° up in the east: long shadows, warm light
+//   day       the afternoon, nearly halfway from noon to sunset: the Sun well up and clearly off to one side
+//   evening   the Sun 9° up in the west — inside the window when the camera looks along the ground — the sky orange
+//   night     midnight: the Sun at its lowest (in a polar summer it does not set at all), a full Moon highest
+// (In a short winter day the morning and evening Sun stand at half of the noon height at most. Where the Sun does
+// not rise or set that day, the hours of an equinox day are taken.)
+export const LIGHT_NAMES = ['morning', 'day', 'evening', 'night'];
+export function lightHour(name, yday = 172, latDeg = 40) {
+  const t = sunTimes(yday, latDeg) || { rise: 6, set: 18 }, half = (t.set - t.rise) / 2;
+  const top = 90 - Math.abs(latDeg - equatorial(sunLongitude(yday)).dec / D), low = el => hoursFromNoon(Math.min(el, top * .5), yday, latDeg) ?? half * .85;
+  return name === 'morning' ? 12 - low(13) : name === 'day' ? 12 + half * .47 : name === 'evening' ? 12 + low(9) : name === 'night' ? 23.99 : 0;
+}

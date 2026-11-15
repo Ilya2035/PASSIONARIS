@@ -51,12 +51,17 @@ async function start() {
   if (q.get('ui') !== '0') { const { initUI } = await import('./ui.js'); initUI(album); }
   // the map on its own — the view the album opens in (mapview.js): the modes of the map without the pages and knobs
   if (q.get('ui') !== '0') { const { initMapView } = await import('./mapview.js'); album.mapView = initMapView(album, q); }
+  // the switch of light on that panel: «Прежний · Утро · День · Вечер · Ночь» (sky/lightswitch.js)
+  if (q.get('ui') !== '0') { const { mountLightSwitch } = await import('./sky/lightswitch.js'); mountLightSwitch(album); }
 
   // camera from the URL wins over the page's own camera
   const num = k => (q.has(k) ? +q.get(k) : undefined), c = { lat: num('lat'), lon: num('lon'), h: num('h'), tilt: num('tilt'), heading: num('heading') };
   for (const k of Object.keys(c)) if (c[k] === undefined || Number.isNaN(c[k])) delete c[k];
   if (Object.keys(c).length) cam.set(c, true);
   if (q.get('place')) { const p = data.places.find(x => x.id === q.get('place')); if (p) cam.set({ lat: p.lat, lon: p.lon }, true); }
+  // The game opens by day, under a real Sun (the owner, 15.11.2026: «солнце нормально, чтобы работало»). A page of
+  // the album keeps the light it was drawn with, and a light given in the URL wins (p.hour=0 is the old light of the map).
+  if (q.get('view') === 'game' && !q.has('page') && !q.has('p.hour') && !q.has('p.light')) params.set('light', 'day');
   for (const [k, v] of q) if (k.startsWith('p.')) params.set(k.slice(2), Number.isNaN(+v) ? v : +v);
 
   const post = album.post = new Post(renderer, terrain.u);
