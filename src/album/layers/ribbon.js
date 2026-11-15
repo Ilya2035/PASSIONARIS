@@ -12,8 +12,8 @@
 //     нет 3D-эффекта, как будто это просто текстура»; «более 3D-объектом, который взаимодействует с окружением»; «от
 //     100 до 50 километров»). Its bed is level from edge to edge and takes the sun as a level thing does. Where the
 //     ground beside the bed stands over it, a bank is cut into the slope; where it falls away, a bank is built up
-//     under the road: on a hillside the road is a shelf, over a hollow an embankment, through a spur a cutting, and
-//     on level ground a low causeway (a track: a worn hollow way). Each bank is lit by its own slope: the one that
+//     under the road: on a hillside the road is a shelf, and on level ground a low causeway (a track: a worn hollow
+//     way). Each bank is lit by its own slope: the one that
 //     faces the sun is light, the other lies in its shade. Over a bog the road is a causeway of logs between two
 //     dark ditches. All of it comes in between 100 and 50 km of height (uVol); from higher up the road is the line
 //     it was.
@@ -174,8 +174,9 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         vec3 gn; vec2 gs = groundShade(vLL, px, gn);
         vec2 slope = -gn.xy / max(gn.z, .05) / max(uExag * uShade, .05), run = vec2(vAcross.y, -vAcross.x), grade = run * dot(slope, run);   // the rise of the ground, east and north; the same along the road only
         float sg = vX < 0. ? -1. : 1.;
-        // metres the ground at the edge of the bed stands over the bed: the slope across the road; a spur cut through or a hollow filled; the bed itself, raised a little (over a bog: more)
-        float dz = dot(slope, vAcross) * sg * vRoad * 1000. + (h0 - heightLod(vLL, 2.5)) * .5 - mix(uRaise, max(uRaise, 1.1), bog);
+        // metres the ground at the edge of the bed stands over the bed: the slope across the road, less the height of the bed itself
+        // (over a bog: more). On level ground both banks are built up; on a hillside the upper one is cut into the slope.
+        float dz = dot(slope, vAcross) * sg * vRoad * 1000. - mix(uRaise, max(uRaise, 1.1), bog);
         float cut = step(0., dz);                                                                                  // 1 a cutting: the bank rises from the road · 0 it is built up and falls away
         float bw = min(max(abs(dz) * .0026, 1.8 * pk), vRoad * 2.2) * smoothstep(.15, .6, abs(dz));              // the bank, km across: twice life, never under a pixel or two
         float off = abs(vX) - vRoad, bank = vol * min(1., uNear * 3.) * clamp(off / pk + .5, 0., 1.) * clamp((bw - off) / pk + .5, 0., 1.) * step(1e-6, bw);   // (the banks go with the cleared strip: beyond the room the ribbon keeps beside the road there is nothing to draw them on)
