@@ -21,7 +21,7 @@ test('worked land: Iberia, Western Europe up to the Rhine, the Maghreb down to t
     ['Paris', 48.85, 2.35], ['Brest', 48.4, -4.45], ['Strasbourg', 48.58, 7.7], ['Jersey', 49.21, -2.13],
     ['Brussels', 50.85, 4.35], ['Amsterdam', 52.37, 4.9], ['Groningen', 53.2, 6.57], ['Luxembourg', 49.6, 6.13],
     ['Trier', 49.75, 6.64], ['Kaiserslautern', 49.44, 7.77], ['Alzey', 49.75, 8.12], ['Aachen', 50.78, 6.08], ['Kleve', 51.75, 6.1],
-    ['Rabat', 34.0, -6.8], ['Marrakesh', 31.63, -8.0], ['Agadir plain', 30.4, -9.4], ['Algiers hills', 36.7, 3.0], ['Biskra', 34.85, 5.73],
+    ['Rabat', 34.0, -6.8], ['Marrakesh', 31.63, -8.0], ['Agadir plain', 30.4, -9.4], ['Sidi Ifni', 29.38, -10.17], ['Algiers hills', 36.7, 3.0], ['Biskra', 34.85, 5.73],
     ['Tunis', 36.8, 10.1], ['Tataouine', 32.93, 10.45]]);
 });
 test('worked land: the neighbours are the world until their turn — and so is Corsica', () => {

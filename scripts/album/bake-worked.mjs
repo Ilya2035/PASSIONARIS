@@ -31,7 +31,7 @@ const KX = KM_PER_DEG * COS_REF, KY = KM_PER_DEG;
 const gx = lon => lon * KX - GRID.x0, gy = lat => lat * KY - GRID.y0;
 
 // the southern edge of the Maghreb, west to east: [lat, lon]; worked land lies north of it (division session, 15.11.2026)
-export const SAHARA_EDGE = [[29.38, -10.25], [29.45, -9.6], [29.65, -7.97], [30.05, -6.87], [30.25, -5.84], [30.95, -4.0], [31.9, -3.0], [32.05, -1.23],
+export const SAHARA_EDGE = [[29.25, -10.3], [29.45, -9.6], [29.65, -7.97], [30.05, -6.87], [30.25, -5.84], [30.95, -4.0], [31.9, -3.0], [32.05, -1.23],
   [32.6, -0.6], [33.05, 1.25], [33.7, 2.9], [34.0, 3.5], [34.35, 5.05], [34.6, 5.9], [34.5, 6.6], [34.4, 7.45], [33.75, 7.6], [33.2, 8.4], [33.2, 9.2],
   [32.7, 10.4], [32.6, 11.0], [32.9, 11.6]];
 const WHOLE = new Set(['Portugal', 'Andorra', 'Gibraltar', 'Monaco', 'Jersey', 'Guernsey', 'Belgium', 'Netherlands', 'Luxembourg']);
