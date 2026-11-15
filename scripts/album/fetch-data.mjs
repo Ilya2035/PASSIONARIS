@@ -15,12 +15,13 @@
 // the loaders of the page and of Node skip those steps.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import { STAGE, BBOXES } from '../../src/album/geo.js';
 import { despike, mendPockets } from '../../src/album/ground/despike.js';
 import { fillHollows } from '../../src/album/water/hollows.js';
+import { decodeWorked, WORKED } from '../../src/album/worked.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const MAIN = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).split('\n')[0].slice(9).trim();
@@ -72,6 +73,29 @@ async function pool(items, n, fn) { let i = 0, done = 0; await Promise.all(Array
 // (a tile already fetched may lie in the cache of this folder or of the main one; a new one goes to the main folder,
 // where the leading session keeps the raw material)
 const tileFile = (z, x, y) => { const here = join(CACHE, 'terrarium', String(z), String(x), `${y}.png`); return existsSync(here) ? here : join(MAIN, 'data', 'album', 'terrarium', String(z), String(x), `${y}.png`); };
+// The polders of the Low Countries lie below the sea, and the dikes and dunes that keep it out are thinner than a
+// point of the base: by the heights alone Holland is sea and Lelystad stands in a lake (found by the division
+// session on the first data of stage 3). Where the mask of the worked land says LAND — the outline of the country
+// without its lakes, Natural Earth — the ground at or below the sea is lifted to POLDER_M: flat land just above the
+// water. Only inside POLDERS: everywhere else land below the sea is a lagoon or a shore, and there the heights know
+// better than a coarse outline. The IJsselmeer and the Wadden Sea are not land in the mask and stay water.
+export const POLDERS = { lon0: 1.5, lon1: 7.3, lat0: 50.7, lat1: 53.7 }, POLDER_M = 1;
+function liftPolders(out, z, x0, y0, W, H) {
+  const f = join(ROOT, 'public', 'assets', 'album', 'worked.bin.gz'); if (!existsSync(f)) return 0;
+  const mz = gunzipSync(readFileSync(f)), mask = decodeWorked(mz.buffer.slice(mz.byteOffset, mz.byteOffset + mz.length));
+  const n = 2 ** z * 256, low = (POLDER_M + 8192) * 4;
+  const i0 = Math.max(0, Math.floor(tx(POLDERS.lon0, z) * 256 - x0 * 256)), i1 = Math.min(W - 1, Math.ceil(tx(POLDERS.lon1, z) * 256 - x0 * 256));
+  const j0 = Math.max(0, Math.floor(ty(POLDERS.lat1, z) * 256 - y0 * 256)), j1 = Math.min(H - 1, Math.ceil(ty(POLDERS.lat0, z) * 256 - y0 * 256));
+  let lifted = 0;
+  for (let j = j0; j <= j1; j++) {
+    const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y0 * 256 + j + .5) / n))) * 180 / Math.PI;
+    for (let i = i0; i <= i1; i++) {
+      if (out[j * W + i] >= low) continue;
+      if (mask.at(lat, (x0 * 256 + i + .5) / n * 360 - 180) === WORKED) { out[j * W + i] = low; lifted++; }
+    }
+  }
+  return lifted;
+}
 async function mosaic(z, x0, x1, y0, y1, outName, mend = false) {
   const tiles = []; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) tiles.push([x, y]);
   await pool(tiles, 12, ([x, y]) => get(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`, tileFile(z, x, y)));
@@ -87,6 +111,7 @@ async function mosaic(z, x0, x1, y0, y1, outName, mend = false) {
     }
   }
   if (missing) console.log(`  ${missing} tiles of ${tiles.length} are missing — run again`);
+  if (mend) { const lifted = liftPolders(out, z, x0, y0, W, H); if (lifted) console.log(`  polders of the Low Countries: ${lifted} points lifted above the sea`); }
   if (mend) { despike(out, W, H); mendPockets(out, W, H); fillHollows(out, W, H); }   // the page and Node then take the base as it is
   let lo = 1e9, hi = -1e9;
   for (let i = 0; i < out.length; i++) { const h = out[i] / 4 - 8192; if (h < lo) lo = h; if (h > hi) hi = h; }
