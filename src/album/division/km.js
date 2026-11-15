@@ -3,24 +3,31 @@
 // квадраты»; «некоторые чанки надо отмечать как нежилые»; «в них должны быть цифры, которые заранее тип генерации
 // выстраивают»).
 //
-// The land and the water lie under a lattice of squares of 1 km: KN × KN of them from (KX0, KY0) of the flat km
+// The land and the water lie under a lattice of squares of 1 km: KN × KNY of them (KN across, KNY from south to
+// north) from (KX0, KY0) of the flat km
 // plane. Every square is the home of one chunk. The seed of the chunk stands in its square, a little off the middle,
 // and the chunk is the ground OF ITS DISTRICT that lies nearer to its seed than to any other seed of the district. So:
 //   • a district is made of whole chunks — as many as it has squares, that is square kilometres;
 //   • a chunk is not a square: inside the district its sides are straight pieces half-way between seeds, at the edge
 //     of the district its outline is the edge of the district — a river, a crest, the shore;
 //   • land and water never share a chunk, because they never share a district.
-// A chunk has the number of its square: c = j · KN + i. Anything kept for chunks is an array KN · KN long.
+// A chunk has the number of its square: c = j · KN + i. Anything kept for chunks is an array KN · KNY long.
 // What a chunk is like is worked out once, from the relief (chunkFacts): how level its ground is, in five classes,
 // and whether people can live on it. The order in which a district takes up its chunks is districtOrder().
 //
 // The natural cells of about 100 km² (../chunks.js) are no longer the chunks of the division. The forest, the ice and
 // the swamps are still worked out cell by cell; a chunk reads that state from the cell its middle lies in
 // (cellsOfChunks). Plain JavaScript without the GPU: the same land always gives the same chunks.
-import { FN, FKM } from '../chunks.js';
+import { FKM, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+import * as CH from '../chunks.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 
-export const KKM = 1, KN = 1280, KX0 = -880, KY0 = 3880;
+// (the lattice lies over the same rectangle of the Earth as the natural cells of chunks.js: its size and its corner
+// come from there, and grow with the polygon. The cells may be a square, CN × CN, or a rectangle, CNX × CNY; so may
+// their raster of outlines, FN × FN or FNX × FNY. KN is the width of the lattice and the step from a row to the next.)
+const CNX = CH.CNX ?? CH.CN, CNY = CH.CNY ?? CH.CN;
+export const FNX = CH.FNX ?? CH.FN, FNY = CH.FNY ?? CH.FN;
+export const KKM = 1, KN = CNX * CHUNK_KM / KKM, KNY = CNY * CHUNK_KM / KKM, KX0 = CI0 * CHUNK_KM, KY0 = CJ0 * CHUNK_KM;
 export const JITTER = .3;                           // km: how far a seed may stand from the middle of its square, each way
 const LAND = 0;
 
@@ -44,7 +51,7 @@ vec2 kmSeed(ivec2 c) { return .5 + (vec2(kmHash(c, 1), kmHash(c, 2)) - .5) * KM_
 // the seed of the chunk of square (i, j), flat km
 export const seedOf = (i, j) => [KX0 + (i + .5 + (kmHash(i, j, 1) - .5) * 2 * JITTER) * KKM, KY0 + (j + .5 + (kmHash(i, j, 2) - .5) * 2 * JITTER) * KKM];
 // the square a point lies in (−1 outside the lattice) and the middle of a square
-export const squareOf = (x, y) => { const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); return i < 0 || j < 0 || i >= KN || j >= KN ? -1 : j * KN + i; };
+export const squareOf = (x, y) => { const i = Math.floor((x - KX0) / KKM), j = Math.floor((y - KY0) / KKM); return i < 0 || j < 0 || i >= KN || j >= KNY ? -1 : j * KN + i; };
 export const middleOf = c => [KX0 + (c % KN + .5) * KKM, KY0 + (Math.floor(c / KN) + .5) * KKM];
 
 // The chunk a point lies in. cells: the district of every chunk (division/cells.js); d: the district of the point,
@@ -52,13 +59,13 @@ export const middleOf = c => [KX0 + (c % KN + .5) * KKM, KY0 + (Math.floor(c / K
 // district of the square the point is in. −1 outside the lattice.
 export function chunkAt(cells, x, y, d = undefined) {
   const fx = (x - KX0) / KKM, fy = (y - KY0) / KKM, i0 = Math.floor(fx), j0 = Math.floor(fy);
-  if (i0 < 0 || j0 < 0 || i0 >= KN || j0 >= KN) return -1;
+  if (i0 < 0 || j0 < 0 || i0 >= KN || j0 >= KNY) return -1;
   if (d === undefined) d = cells[j0 * KN + i0];
   let best = -1, bd = Infinity;
   // (the squares around; two squares out when none near is of the district: a border line may run a little off the
   // squares, border.js)
   for (let r = 1; r <= 2 && best < 0; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
-    const i = i0 + di, j = j0 + dj; if (i < 0 || j < 0 || i >= KN || j >= KN) continue;
+    const i = i0 + di, j = j0 + dj; if (i < 0 || j < 0 || i >= KN || j >= KNY) continue;
     const c = j * KN + i; if (cells[c] !== d) continue;
     const sx = i + .5 + (kmHash(i, j, 1) - .5) * 2 * JITTER - fx, sy = j + .5 + (kmHash(i, j, 2) - .5) * 2 * JITTER - fy, dd = sx * sx + sy * sy;
     if (dd < bd) { bd = dd; best = c; }
@@ -71,10 +78,11 @@ export function chunkAt(cells, x, y, d = undefined) {
 const CELLS = new WeakMap();
 export function cellsOfChunks(ch) {
   let r = CELLS.get(ch); if (r) return r;
-  const cell = new Uint16Array(KN * KN), count = new Uint32Array(ch.count);
-  for (let j = 0, c = 0; j < KN; j++) {
-    const row = Math.min(FN - 1, Math.floor((j + .5) * KKM / FKM)) * FN;
-    for (let i = 0; i < KN; i++, c++) { const k = ch.cell[row + Math.min(FN - 1, Math.floor((i + .5) * KKM / FKM))]; cell[c] = k; if (k < ch.count) count[k]++; }
+  // (the same kind of numbers as the cells of chunks.js: 16 bits hold 65 535 cells, a lattice of 255 × 255 of 10 km)
+  const cell = new ch.cell.constructor(KN * KNY), count = new Uint32Array(ch.count);
+  for (let j = 0, c = 0; j < KNY; j++) {
+    const row = Math.min(FNY - 1, Math.floor((j + .5) * KKM / FKM)) * FNX;
+    for (let i = 0; i < KN; i++, c++) { const k = ch.cell[row + Math.min(FNX - 1, Math.floor((i + .5) * KKM / FKM))]; cell[c] = k; if (k < ch.count) count[k]++; }
   }
   CELLS.set(ch, r = { cell, count });
   return r;
@@ -98,15 +106,15 @@ export const livingOf = cls => (cls >= 1 && cls <= 3 ? 2 : cls === 4 ? 1 : 0);
 // → { cls: Uint8Array (0 water, 1..5), slope: Float32Array (of the most level quarter), steep: Float32Array (of the
 //     steepest quarter), num: how many land chunks of each class }
 export function chunkFacts(div, heightAt = null) {
-  const n = KN * KN, cells = div.cells, kinds = div.kinds, hgt = div.raster.hgt, cls = new Uint8Array(n), slope = new Float32Array(n), steep = new Float32Array(n), num = new Uint32Array(6);
+  const n = KN * KNY, cells = div.cells, kinds = div.kinds, hgt = div.raster.hgt, cls = new Uint8Array(n), slope = new Float32Array(n), steep = new Float32Array(n), num = new Uint32Array(6);
   const land = c => { const d = cells[c]; return d >= 0 && kinds[d] === LAND; };
   const classOf = (h, s) => (h >= HIGH_M ? 5 : s < CLASS_SLOPE[0] ? 1 : s < CLASS_SLOPE[1] ? 2 : s < CLASS_SLOPE[2] ? 3 : s < CLASS_SLOPE[3] ? 4 : 5);
   if (!heightAt) {
-    for (let j = 0, c = 0; j < KN; j++) for (let i = 0; i < KN; i++, c++) {
+    for (let j = 0, c = 0; j < KNY; j++) for (let i = 0; i < KN; i++, c++) {
       if (!land(c)) continue;
       const h = hgt[c]; let m = 0;
       if (i > 0 && land(c - 1)) m = Math.max(m, Math.abs(hgt[c - 1] - h)); if (i < KN - 1 && land(c + 1)) m = Math.max(m, Math.abs(hgt[c + 1] - h));
-      if (j > 0 && land(c - KN)) m = Math.max(m, Math.abs(hgt[c - KN] - h)); if (j < KN - 1 && land(c + KN)) m = Math.max(m, Math.abs(hgt[c + KN] - h));
+      if (j > 0 && land(c - KN)) m = Math.max(m, Math.abs(hgt[c - KN] - h)); if (j < KNY - 1 && land(c + KN)) m = Math.max(m, Math.abs(hgt[c + KN] - h));
       slope[c] = steep[c] = m / (KKM * 1000); num[cls[c] = classOf(h, slope[c])]++;
     }
     return { cls, slope, steep, num };
@@ -115,7 +123,7 @@ export function chunkFacts(div, heightAt = null) {
   // of it are kept at a time. A point no land chunk touches is not asked for.
   const W = 2 * KN + 1, HALF = KKM / 2, KX = KM_PER_DEG * COS_REF;
   const row = (jj, out) => {
-    const lat = (KY0 + jj * HALF) / KM_PER_DEG, ja = Math.min(KN - 1, jj >> 1) * KN, jb = Math.max(0, (jj - 1) >> 1) * KN;
+    const lat = (KY0 + jj * HALF) / KM_PER_DEG, ja = Math.min(KNY - 1, jj >> 1) * KN, jb = Math.max(0, (jj - 1) >> 1) * KN;
     for (let ii = 0; ii < W; ii++) {
       const ia = Math.min(KN - 1, ii >> 1), ib = Math.max(0, (ii - 1) >> 1);
       out[ii] = land(ja + ia) || land(ja + ib) || land(jb + ia) || land(jb + ib) ? Math.max(0, heightAt(lat, (KX0 + ii * HALF) / KX)) : 0;
@@ -124,7 +132,7 @@ export function chunkFacts(div, heightAt = null) {
   let r0 = new Float32Array(W), r1 = new Float32Array(W), r2 = new Float32Array(W);
   row(0, r0);
   const q = [0, 0, 0, 0], RUN = HALF * 2000;        // twice the side of a quarter, metres
-  for (let j = 0, c = 0; j < KN; j++) {
+  for (let j = 0, c = 0; j < KNY; j++) {
     row(2 * j + 1, r1); row(2 * j + 2, r2);
     for (let i = 0; i < KN; i++, c++) {
       if (!land(c)) continue;
@@ -156,12 +164,12 @@ export const SETTLE_CAN = [2, 0, 0, 0, 0, 1, 1];
 // null; wetlands: [{ lat, lon, km2 }] (the swamp work's list) — a disc of that area around its point
 // → { can: Uint8Array, why: Uint8Array } a chunk each (water: can 0, why 1)
 export function chunkSettle(div, facts, { swampOf = null, wetlands = [] } = {}) {
-  const n = KN * KN, cells = div.cells, can = new Uint8Array(n), why = new Uint8Array(n), hgt = div.raster.hgt;
+  const n = KN * KNY, cells = div.cells, can = new Uint8Array(n), why = new Uint8Array(n), hgt = div.raster.hgt;
   const bog = new Uint8Array(n);
   for (const w of wetlands) {
     if (!(w.km2 > 0)) continue;
     const x = w.lon * KM_PER_DEG * COS_REF, y = w.lat * KM_PER_DEG, r = Math.sqrt(w.km2 / Math.PI);
-    for (let j = Math.max(0, Math.floor((y - r - KY0) / KKM)); j <= Math.min(KN - 1, Math.floor((y + r - KY0) / KKM)); j++)
+    for (let j = Math.max(0, Math.floor((y - r - KY0) / KKM)); j <= Math.min(KNY - 1, Math.floor((y + r - KY0) / KKM)); j++)
       for (let i = Math.max(0, Math.floor((x - r - KX0) / KKM)); i <= Math.min(KN - 1, Math.floor((x + r - KX0) / KKM)); i++)
         if (Math.hypot(KX0 + (i + .5) * KKM - x, KY0 + (j + .5) * KKM - y) <= r) bog[j * KN + i] = 1;
   }
@@ -184,8 +192,8 @@ export function chunkSettle(div, facts, { swampOf = null, wetlands = [] } = {}) 
 
 // How many chunks every district has and the box of squares they lie in.
 export function districtBoxes(div) {
-  const count = div.count, cells = div.cells, num = new Uint32Array(count), x0 = new Uint16Array(count).fill(KN), x1 = new Uint16Array(count), y0 = new Uint16Array(count).fill(KN), y1 = new Uint16Array(count);
-  for (let j = 0, c = 0; j < KN; j++) for (let i = 0; i < KN; i++, c++) {
+  const count = div.count, cells = div.cells, num = new Uint32Array(count), x0 = new Uint16Array(count).fill(KN), x1 = new Uint16Array(count), y0 = new Uint16Array(count).fill(KNY), y1 = new Uint16Array(count);
+  for (let j = 0, c = 0; j < KNY; j++) for (let i = 0; i < KN; i++, c++) {
     const d = cells[c]; if (d < 0) continue;
     num[d]++; if (i < x0[d]) x0[d] = i; if (i > x1[d]) x1[d] = i; if (j < y0[d]) y0[d] = j; if (j > y1[d]) y1[d] = j;
   }
@@ -212,11 +220,11 @@ export const ORDER_WEIGHT = [0, 1, 1.15, 1.5, 2.4, 6];   // how much farther a c
 //     first: Uint32Array (count + 1: where the chunks of a district begin in list), rank: Int32Array (the place of a
 //     chunk in its district, −1 for water) }
 export function districtOrder(div, facts) {
-  const count = div.count, n = KN * KN, cells = div.cells, cen = div.centres, first = new Uint32Array(count + 1), key = new Float32Array(n), rank = new Int32Array(n).fill(-1);
+  const count = div.count, n = KN * KNY, cells = div.cells, cen = div.centres, first = new Uint32Array(count + 1), key = new Float32Array(n), rank = new Int32Array(n).fill(-1);
   for (let c = 0; c < n; c++) { const d = cells[c]; if (d >= 0 && div.kinds[d] === LAND) first[d + 1]++; }
   for (let d = 0; d < count; d++) first[d + 1] += first[d];
   const list = new Uint32Array(first[count]), at = Uint32Array.from(first.subarray(0, count));
-  for (let j = 0, c = 0; j < KN; j++) for (let i = 0; i < KN; i++, c++) {
+  for (let j = 0, c = 0; j < KNY; j++) for (let i = 0; i < KN; i++, c++) {
     const d = cells[c]; if (d < 0 || div.kinds[d] !== LAND) continue;
     const cx = cen && cen.texel[d] >= 0 ? cen.x[d] : div.cx[d], cy = cen && cen.texel[d] >= 0 ? cen.y[d] : div.cy[d];
     key[c] = Math.hypot(KX0 + (i + .5) * KKM - cx, KY0 + (j + .5) * KKM - cy) * ORDER_WEIGHT[facts.cls[c] || 5];

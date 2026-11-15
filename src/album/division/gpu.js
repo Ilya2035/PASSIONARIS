@@ -1,7 +1,7 @@
 // The division for the ground shader: one integer texture (the ground shader may read only 16 textures; the base
-// takes nine, every aspect gets one, so everything of the division lives in this one). It is FN texels wide and holds
+// takes nine, every aspect gets one, so everything of the division lives in this one). It is FN texels wide (the width of the lattice of chunks, km.js KN) and holds
 // two things:
-//   rows 0 .. FN − 1   a texel for every chunk of 1 km² (division/km.js): r = its district (division/cells.js: the
+//   rows 0 .. FNY − 1  a texel for every chunk of 1 km² (division/km.js): r = its district (division/cells.js: the
 //                      outlines of districts run chunk by chunk, along rivers and crests);
 //                      g = what the chunk is like, once that is worked out (km.js chunkFacts): the class of its
 //                      ground 1..5 (0 water or not known) | who can live there (0 nobody, 1 barely, 2 freely) << 3
@@ -12,7 +12,7 @@
 //                      b = the list of pieces of border lines near the square (border.js): its first four | how many
 //                      fours << 24 (0 none);
 //                      a = the district of the middle of the square, by the lines
-//   rows FN ..         a texel for every district, district d at (d % FN, FN + floor(d / FN)):
+//   rows FNY ..        a texel for every district, district d at (d % FN, FNY + floor(d / FN)):
 //     r  district | province << 16
 //     g  region | look << 16; look = colour of the district (3 bits) | of the province << 3 | of the region << 6 | kind << 9
 //     b  the middle of the district, tenths of km: (x + 1000) | (y − 3000) << 16
@@ -24,7 +24,7 @@
 //                      end as two 16-bit numbers (fixOf), the district on its left | on its right << 16
 // L0 and S0 go to the shader as the uniform uDivGeo (texture.userData.rows).
 import { DataTexture, RGBAIntegerFormat, UnsignedIntType, NearestFilter, ClampToEdgeWrapping } from 'three';
-import { KN as FN, cellsOfChunks, livingOf } from './km.js';
+import { KN as FN, KNY as FNY, cellsOfChunks, livingOf } from './km.js';
 import { PIECE_KM } from './border.js';
 
 function utex(data, w, h) {
@@ -55,24 +55,24 @@ export const fixOf = v => Math.max(0, Math.min(65535, Math.round((v / (2 * PIECE
 // the chunks is shown (g, bits 6..7)
 export function packDivision(ch, div, state = null, facts = null, farm = null, rows = {}, why = null, edges = null, infra = null) {
   const geo = div.geo, rd = Math.ceil(div.count / FN), rl = geo ? Math.ceil(geo.list.length / 4 / FN) : 0, rs = geo ? Math.ceil(geo.count / FN) : 0;
-  const a = new Uint32Array(FN * (FN + rd + rl + rs) * 4), c = div.colour;
-  rows.L0 = FN + rd; rows.S0 = FN + rd + rl;
-  for (let t = 0; t < FN * FN; t++) a[t * 4] = districtOfTexel(ch, div, t);
+  const a = new Uint32Array(FN * (FNY + rd + rl + rs) * 4), c = div.colour;
+  rows.L0 = FNY + rd; rows.S0 = FNY + rd + rl;
+  for (let t = 0; t < FN * FNY; t++) a[t * 4] = districtOfTexel(ch, div, t);
   if (geo) {
-    for (let t = 0; t < FN * FN; t++) { if (geo.num[t]) a[t * 4 + 2] = (geo.first[t] | geo.num[t] << 24) >>> 0; a[t * 4 + 3] = Math.max(0, geo.centre[t]); }
+    for (let t = 0; t < FN * FNY; t++) { if (geo.num[t]) a[t * 4 + 2] = (geo.first[t] | geo.num[t] << 24) >>> 0; a[t * 4 + 3] = Math.max(0, geo.centre[t]); }
     a.set(geo.list, rows.L0 * FN * 4);
     for (let s = 0, o = rows.S0 * FN * 4; s < geo.count; s++, o += 4) {
       const ax = Math.fround(geo.seg[s * 4]), ay = Math.fround(geo.seg[s * 4 + 1]);
       a[o] = bitsOf(ax); a[o + 1] = bitsOf(ay); a[o + 2] = (fixOf(geo.seg[s * 4 + 2] - ax) | fixOf(geo.seg[s * 4 + 3] - ay) << 16) >>> 0; a[o + 3] = geo.lab[s];
     }
   }
-  if (facts) for (let t = 0; t < FN * FN; t++) { const k = facts.cls[t]; a[t * 4 + 1] = k | livingOf(k) << 3; }
-  if (farm) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= farm[t] << 8;
-  if (why) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= why[t] << 16;
-  if (edges) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] = (a[t * 4 + 1] | edges[t]) >>> 0;
-  if (infra) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= (infra[t] & 3) << 6;
+  if (facts) for (let t = 0; t < FN * FNY; t++) { const k = facts.cls[t]; a[t * 4 + 1] = k | livingOf(k) << 3; }
+  if (farm) for (let t = 0; t < FN * FNY; t++) a[t * 4 + 1] |= farm[t] << 8;
+  if (why) for (let t = 0; t < FN * FNY; t++) a[t * 4 + 1] |= why[t] << 16;
+  if (edges) for (let t = 0; t < FN * FNY; t++) a[t * 4 + 1] = (a[t * 4 + 1] | edges[t]) >>> 0;
+  if (infra) for (let t = 0; t < FN * FNY; t++) a[t * 4 + 1] |= (infra[t] & 3) << 6;
   for (let d = 0; d < div.count; d++) {
-    const p = div.province[d], r = div.region[p], o = (FN * FN + d) * 4, first = div.chunks[d][0];
+    const p = div.province[d], r = div.region[p], o = (FN * FNY + d) * 4, first = div.chunks[d][0];
     const look = c.district[d] | c.province[p] << 3 | c.region[r] << 6 | div.kinds[d] << 9;
     a[o] = (d | p << 16) >>> 0; a[o + 1] = (r | look << 16) >>> 0;
     a[o + 2] = (Math.round((div.cx[d] + 1000) * 10) | Math.round((div.cy[d] - 3000) * 10) << 16) >>> 0;

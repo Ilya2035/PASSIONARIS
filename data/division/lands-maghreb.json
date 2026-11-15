@@ -1,0 +1,121 @@
+{
+  "about": "Исторические земли и провинции всего Магриба — Марокко, север Алжира, Тунис — от Атлантики до залива Габес, к югу до края Сахары (владелец, 15.11.2026: «Магриб сделал уже полностью хорошо, а не так обрезано»). Заготовка к третьему этапу третьей волны; вид — как в lands.json. admin — единицы Natural Earth admin-1 (области Марокко 2003 года, вилайеты Алжира, вилайеты Туниса), iso — их коды ISO 3166-2, для человека. Области Марокко велики: их делят несколько провинций по опорным точкам at (shared), граница ложится по гребням Атласа и Рифа. Провинции полосы, что уже в альбоме (Танжер, Тетуан, Риф, Оран, Мостаганем, Шелифф, Алжир, Митиджа, Медеа, Кабилия), на целых вилайетах стали бы слишком большими: provinceChanges отдаёт часть их единиц новым провинциям. town — главный город, для справки. Где кончается проработанная земля на юге — решает маска ведущей.",
+  "region": "maghreb",
+  "regionAbout": { "maghreb": "Марокко, север Алжира и Тунис — от Атлантики до залива Габес, к югу до края Сахары (Анти-Атлас, Сахарский Атлас, Джерид)" },
+  "lands": [
+    { "id": "atlanticmorocco", "name": "Атлантическое Марокко", "region": "maghreb" },
+    { "id": "fesmeknes", "name": "Фес и Мекнес", "region": "maghreb" },
+    { "id": "eastmorocco", "name": "Восточное Марокко и Тафилалт", "region": "maghreb" },
+    { "id": "marrakesh", "name": "Марракеш и Высокий Атлас", "region": "maghreb" },
+    { "id": "sousdraa", "name": "Сус и Драа", "region": "maghreb" },
+    { "id": "highplateaus", "name": "Высокие плато", "region": "maghreb" },
+    { "id": "constantine", "name": "Константина", "region": "maghreb" },
+    { "id": "ziban", "name": "Сахарский Атлас и Зибан", "region": "maghreb" },
+    { "id": "tunisnorth", "name": "Тунис и Телль", "region": "maghreb" },
+    { "id": "sahel", "name": "Сахель и Сфакс", "region": "maghreb" },
+    { "id": "tunissouth", "name": "Юг Туниса", "region": "maghreb" }
+  ],
+  "provinces": [
+    { "id": "gharb", "name": "Гарб", "region": "maghreb", "land": "atlanticmorocco", "iso": ["MA-02"], "admin": ["MAR-1448"], "town": "Кенитра", "at": [[34.5, -6.1]] },
+    { "id": "rabat", "name": "Рабат и Сале", "region": "maghreb", "land": "atlanticmorocco", "iso": ["MA-07"], "admin": ["MAR-1451"], "town": "Рабат", "at": [[33.85, -6.4]] },
+    { "id": "chaouia", "name": "Шавия и Касабланка", "region": "maghreb", "land": "atlanticmorocco", "iso": ["MA-09", "MA-08"], "admin": ["MAR-1449", "MAR-1450"], "town": "Касабланка", "at": [[33, -7.6]] },
+    { "id": "ouardigha", "name": "Уардига", "region": "maghreb", "land": "atlanticmorocco", "iso": ["MA-09"], "admin": ["MAR-1449"], "town": "Хурибга", "at": [[32.85, -6.9]] },
+    { "id": "doukkala", "name": "Дуккала", "region": "maghreb", "land": "atlanticmorocco", "iso": ["MA-10"], "admin": ["MAR-1457"], "town": "Эль-Джадида", "at": [[32.9, -8.3]] },
+    { "id": "abda", "name": "Абда", "region": "maghreb", "land": "atlanticmorocco", "iso": ["MA-10"], "admin": ["MAR-1457"], "town": "Сафи", "at": [[32.3, -9]] },
+
+    { "id": "fes", "name": "Фес", "region": "maghreb", "land": "fesmeknes", "iso": ["MA-05", "MA-03"], "admin": ["MAR-1446", "MAR-1447"], "town": "Фес", "at": [[34.05, -5], [34.5, -4.65]] },
+    { "id": "meknes", "name": "Мекнес", "region": "maghreb", "land": "fesmeknes", "iso": ["MA-06"], "admin": ["MAR-1452"], "town": "Мекнес", "at": [[33.9, -5.55]] },
+    { "id": "taza", "name": "Таза", "region": "maghreb", "land": "fesmeknes", "iso": ["MA-03"], "admin": ["MAR-1447"], "town": "Таза", "at": [[34.2, -4]] },
+    { "id": "middleatlas", "name": "Заян", "region": "maghreb", "land": "fesmeknes", "iso": ["MA-06"], "admin": ["MAR-1452"], "town": "Хенифра", "at": [[32.9, -5.65]] },
+    { "id": "ifrane", "name": "Ифран и Азру", "region": "maghreb", "land": "fesmeknes", "iso": ["MA-06"], "admin": ["MAR-1452"], "town": "Азру", "at": [[33.45, -5.15]] },
+    { "id": "moulouya", "name": "Верхняя Мулуя", "region": "maghreb", "land": "fesmeknes", "iso": ["MA-06", "MA-05"], "admin": ["MAR-1452", "MAR-1446"], "town": "Мидельт", "at": [[32.7, -4.75], [33.3, -4.35]] },
+
+    { "id": "oujda", "name": "Уджда", "region": "maghreb", "land": "eastmorocco", "iso": ["MA-04"], "admin": ["MAR-1454"], "town": "Уджда", "at": [[34.65, -1.95]] },
+    { "id": "dahra", "name": "Дахра", "region": "maghreb", "land": "eastmorocco", "iso": ["MA-04"], "admin": ["MAR-1454"], "town": "Айн-Бени-Матхар", "at": [[33.6, -2.1]] },
+    { "id": "figuig", "name": "Фигиг и Бу-Арфа", "region": "maghreb", "land": "eastmorocco", "iso": ["MA-04"], "admin": ["MAR-1454"], "town": "Фигиг", "at": [[32.3, -1.7]] },
+    { "id": "tafilalt", "name": "Тафилалт", "region": "maghreb", "land": "eastmorocco", "iso": ["MA-06"], "admin": ["MAR-1452"], "town": "Сиджильмаса (Риссани)", "at": [[31.25, -4.2]] },
+    { "id": "ziz", "name": "Зиз", "region": "maghreb", "land": "eastmorocco", "iso": ["MA-06"], "admin": ["MAR-1452"], "town": "Эр-Рашидия", "at": [[32, -4.4]] },
+
+    { "id": "tadla", "name": "Тадла", "region": "maghreb", "land": "marrakesh", "iso": ["MA-12"], "admin": ["MAR-1453"], "town": "Бени-Меллаль", "at": [[32.35, -6.4]] },
+    { "id": "azilal", "name": "Азилаль", "region": "maghreb", "land": "marrakesh", "iso": ["MA-12"], "admin": ["MAR-1453"], "town": "Азилаль", "at": [[31.9, -6.55]] },
+    { "id": "haouz", "name": "Марракеш и Хауз", "region": "maghreb", "land": "marrakesh", "iso": ["MA-11"], "admin": ["MAR-1456"], "town": "Марракеш", "at": [[31.6, -8]] },
+    { "id": "srarhna", "name": "Сраргна и Рехамна", "region": "maghreb", "land": "marrakesh", "iso": ["MA-11"], "admin": ["MAR-1456"], "town": "Эль-Келаа-дес-Срарна", "at": [[32.1, -7.6]] },
+    { "id": "haha", "name": "Хаха и Шиадма", "region": "maghreb", "land": "marrakesh", "iso": ["MA-11"], "admin": ["MAR-1456"], "town": "Эс-Сувейра", "at": [[31.5, -9.6]] },
+
+    { "id": "sous", "name": "Сус", "region": "maghreb", "land": "sousdraa", "iso": ["MA-13"], "admin": ["MAR-1455"], "town": "Тарудант", "at": [[30.45, -9]] },
+    { "id": "ouarzazate", "name": "Уарзазат и Дадес", "region": "maghreb", "land": "sousdraa", "iso": ["MA-13"], "admin": ["MAR-1455"], "town": "Уарзазат", "at": [[31, -6.6]] },
+    { "id": "draa", "name": "Долина Драа", "region": "maghreb", "land": "sousdraa", "iso": ["MA-13"], "admin": ["MAR-1455"], "town": "Загора", "at": [[30.45, -5.95]] },
+    { "id": "antiatlas", "name": "Анти-Атлас и Тизнит", "region": "maghreb", "land": "sousdraa", "iso": ["MA-13", "MA-14"], "admin": ["MAR-1455", "MAR-3457"], "town": "Тизнит", "at": [[29.7, -9.4], [29.72, -8.97]] },
+    { "id": "tata", "name": "Тата и Бани", "region": "maghreb", "land": "sousdraa", "iso": ["MA-14"], "admin": ["MAR-3457"], "town": "Тата", "at": [[29.75, -7.95]] },
+
+    { "id": "tlemcen", "name": "Тлемсен", "region": "maghreb", "land": "oran", "iso": ["DZ-13"], "admin": ["DZA-2147"], "town": "Тлемсен", "at": [[34.9, -1.35]] },
+    { "id": "sidibelabbes", "name": "Сиди-Бель-Аббес", "region": "maghreb", "land": "oran", "iso": ["DZ-22"], "admin": ["DZA-2146"], "town": "Сиди-Бель-Аббес", "at": [[34.85, -0.35]] },
+    { "id": "saida", "name": "Саида", "region": "maghreb", "land": "oran", "iso": ["DZ-20"], "admin": ["DZA-2204"], "town": "Саида", "at": [[34.8, 0.15]] },
+    { "id": "mascara", "name": "Маскара", "region": "maghreb", "land": "oran", "iso": ["DZ-29"], "admin": ["DZA-2201"], "town": "Маскара", "at": [[35.3, 0.15]] },
+
+    { "id": "bejaia", "name": "Беджая и Малая Кабилия", "region": "maghreb", "land": "algiers", "iso": ["DZ-06"], "admin": ["DZA-2208"], "town": "Беджая", "at": [[36.6, 4.9]] },
+
+    { "id": "tiaret", "name": "Тиарет", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-14"], "admin": ["DZA-2205"], "town": "Тиарет", "at": [[35.37, 1.32]] },
+    { "id": "sersou", "name": "Серсу", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-14"], "admin": ["DZA-2205"], "town": "Ксар-Шеллала", "at": [[35, 2.3]] },
+    { "id": "djelfa", "name": "Джельфа", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-17"], "admin": ["DZA-2212"], "town": "Джельфа", "at": [[34.67, 3.25]] },
+    { "id": "ainoussera", "name": "Айн-Уссера", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-17"], "admin": ["DZA-2212"], "town": "Айн-Уссера", "at": [[35.45, 2.9]] },
+    { "id": "ouladnail", "name": "Улед-Наиль", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-17"], "admin": ["DZA-2212"], "town": "Мессаад", "at": [[34.1, 3.6]] },
+    { "id": "hodna", "name": "Ходна", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-28"], "admin": ["DZA-2214"], "town": "Мсила", "at": [[35.7, 4.5]] },
+    { "id": "bousaada", "name": "Бу-Саада", "region": "maghreb", "land": "highplateaus", "iso": ["DZ-28"], "admin": ["DZA-2214"], "town": "Бу-Саада", "at": [[35.2, 4.15]] },
+
+    { "id": "setif", "name": "Сетиф и Меджана", "region": "maghreb", "land": "constantine", "iso": ["DZ-19", "DZ-34"], "admin": ["DZA-2215", "DZA-2207"], "town": "Сетиф", "at": [[36.1, 5.15]] },
+    { "id": "constantineprov", "name": "Константина и Мила", "region": "maghreb", "land": "constantine", "iso": ["DZ-25", "DZ-43"], "admin": ["DZA-2217", "DZA-2220"], "town": "Константина", "at": [[36.35, 6.45]] },
+    { "id": "jijel", "name": "Джиджель и Скикда", "region": "maghreb", "land": "constantine", "iso": ["DZ-18", "DZ-21"], "admin": ["DZA-2165", "DZA-2166"], "town": "Скикда", "at": [[36.75, 6.4]] },
+    { "id": "annaba", "name": "Бона и Эль-Кала", "region": "maghreb", "land": "constantine", "iso": ["DZ-23", "DZ-36"], "admin": ["DZA-2163", "DZA-2164"], "town": "Аннаба", "at": [[36.8, 7.85]] },
+    { "id": "guelma", "name": "Гельма и Сук-Ахрас", "region": "maghreb", "land": "constantine", "iso": ["DZ-24", "DZ-41"], "admin": ["DZA-2218", "DZA-2222"], "town": "Гельма", "at": [[36.3, 7.6]] },
+    { "id": "harakta", "name": "Характа", "region": "maghreb", "land": "constantine", "iso": ["DZ-04"], "admin": ["DZA-2221"], "town": "Ум-эль-Буахи", "at": [[35.85, 7.1]] },
+    { "id": "aures", "name": "Аурес", "region": "maghreb", "land": "constantine", "iso": ["DZ-05"], "admin": ["DZA-2216"], "town": "Батна", "at": [[35.3, 6.3]] },
+    { "id": "khenchela", "name": "Хеншела", "region": "maghreb", "land": "constantine", "iso": ["DZ-40"], "admin": ["DZA-2219"], "town": "Хеншела", "at": [[35.3, 7.15]] },
+    { "id": "tebessa", "name": "Тебесса и Немемча", "region": "maghreb", "land": "constantine", "iso": ["DZ-12"], "admin": ["DZA-2223"], "town": "Тебесса", "at": [[35.2, 7.95]] },
+
+    { "id": "biskra", "name": "Зибан", "region": "maghreb", "land": "ziban", "iso": ["DZ-07"], "admin": ["DZA-2211"], "town": "Бискра", "at": [[34.85, 5.75]] },
+    { "id": "ouledjellal", "name": "Западный Зибан", "region": "maghreb", "land": "ziban", "iso": ["DZ-07"], "admin": ["DZA-2211"], "town": "Улед-Джеллаль", "at": [[34.45, 5]] },
+    { "id": "laghouat", "name": "Лагуат и Джебель-Амур", "region": "maghreb", "land": "ziban", "iso": ["DZ-03"], "admin": ["DZA-2193"], "town": "Лагуат", "at": [[33.85, 2.85]] },
+    { "id": "elbayadh", "name": "Эль-Баяд", "region": "maghreb", "land": "ziban", "iso": ["DZ-32"], "admin": ["DZA-2190"], "town": "Эль-Баяд", "at": [[33.6, 1]] },
+    { "id": "naama", "name": "Наама и Горы Ксуров", "region": "maghreb", "land": "ziban", "iso": ["DZ-45"], "admin": ["DZA-2149"], "town": "Наама", "at": [[33.3, -0.6]] },
+
+    { "id": "tunis", "name": "Тунис и Загуан", "region": "maghreb", "land": "tunisnorth", "iso": ["TN-11", "TN-13", "TN-14", "TN-22"], "admin": ["TUN-108", "TUN-104", "TUN-102", "TUN-120"], "town": "Тунис", "at": [[36.65, 10.1]] },
+    { "id": "bizerte", "name": "Бизерта", "region": "maghreb", "land": "tunisnorth", "iso": ["TN-23"], "admin": ["TUN-105"], "town": "Бизерта", "at": [[37.1, 9.65]] },
+    { "id": "capbon", "name": "Кап-Бон", "region": "maghreb", "land": "tunisnorth", "iso": ["TN-21"], "admin": ["TUN-107"], "town": "Набуль", "at": [[36.75, 10.75]] },
+    { "id": "beja", "name": "Беджа и Меджерда", "region": "maghreb", "land": "tunisnorth", "iso": ["TN-31", "TN-32"], "admin": ["TUN-103", "TUN-106"], "town": "Беджа", "at": [[36.65, 9]] },
+    { "id": "kef", "name": "Эль-Кеф и Сильяна", "region": "maghreb", "land": "tunisnorth", "iso": ["TN-33", "TN-34"], "admin": ["TUN-109", "TUN-115"], "town": "Эль-Кеф", "at": [[36, 9]] },
+
+    { "id": "kairouan", "name": "Кайруан", "region": "maghreb", "land": "sahel", "iso": ["TN-41"], "admin": ["TUN-118"], "town": "Кайруан", "at": [[35.6, 9.9]] },
+    { "id": "sahelprov", "name": "Сахель", "region": "maghreb", "land": "sahel", "iso": ["TN-51", "TN-52", "TN-53"], "admin": ["TUN-119", "TUN-117", "TUN-116"], "town": "Сус", "at": [[35.6, 10.6]] },
+    { "id": "sfax", "name": "Сфакс", "region": "maghreb", "land": "sahel", "iso": ["TN-61"], "admin": ["TUN-114"], "town": "Сфакс", "at": [[34.75, 10.4]] },
+    { "id": "kasserine", "name": "Касерин", "region": "maghreb", "land": "sahel", "iso": ["TN-42"], "admin": ["TUN-110"], "town": "Касерин", "at": [[35.1, 9]] },
+    { "id": "sidibouzid", "name": "Сиди-Бу-Зид", "region": "maghreb", "land": "sahel", "iso": ["TN-43"], "admin": ["TUN-113"], "town": "Сиди-Бу-Зид", "at": [[34.9, 9.5]] },
+
+    { "id": "gafsa", "name": "Гафса", "region": "maghreb", "land": "tunissouth", "iso": ["TN-71"], "admin": ["TUN-112"], "town": "Гафса", "at": [[34.4, 8.8]] },
+    { "id": "jerid", "name": "Джерид", "region": "maghreb", "land": "tunissouth", "iso": ["TN-72"], "admin": ["TUN-101"], "town": "Таузар", "at": [[33.9, 8.4]] },
+    { "id": "nefzaoua", "name": "Нефзауа", "region": "maghreb", "land": "tunissouth", "iso": ["TN-73"], "admin": ["TUN-97"], "town": "Кебили", "at": [[33.6, 9]] },
+    { "id": "gabes", "name": "Габес", "region": "maghreb", "land": "tunissouth", "iso": ["TN-81"], "admin": ["TUN-111"], "town": "Габес", "at": [[33.85, 9.9]] },
+    { "id": "djerba", "name": "Джерба и Меденин", "region": "maghreb", "land": "tunissouth", "iso": ["TN-82"], "admin": ["TUN-96"], "town": "Меденин", "at": [[33.5, 10.8]] },
+    { "id": "tataouine", "name": "Татавин и Дахар", "region": "maghreb", "land": "tunissouth", "iso": ["TN-83"], "admin": ["TUN-98"], "town": "Татавин", "at": [[32.9, 10.4]] }
+  ],
+  "provinceChanges": {
+    "oran": { "admin": ["DZA-2145", "DZA-2144"] },
+    "mostaganem": { "admin": ["DZA-2202", "DZA-2203"] },
+    "chelif": { "admin": ["DZA-2200", "DZA-2206"] },
+    "medea": { "admin": ["DZA-2213", "DZA-2199"] },
+    "kabylie": { "admin": ["DZA-2197", "DZA-2210"] }
+  },
+  "shared": ["MAR-1445", "MAR-1446", "MAR-1447", "MAR-1452", "MAR-1454", "MAR-1455", "MAR-1456", "MAR-1457", "MAR-1449", "MAR-1453", "MAR-3457", "DZA-2214", "DZA-2205", "DZA-2212", "DZA-2211"],
+  "seas": [
+    { "id": "moroccoatl", "name": "Атлантический океан у Марокко", "about": "от мыса Спартель на юг вдоль берега Марокко", "at": [[32.5, -9.8]], "outline": [[-13, 35.79], [-5.92, 35.79], [-6.2, 33.5], [-6.2, 27.5], [-13, 27.5]] },
+    { "id": "sicily", "name": "Сицилийский пролив", "about": "между Тунисом, Сардинией и Сицилией, к западу от линии мыс Бон — мыс Лилибей; с Тунисским заливом", "at": [[37.4, 10.4]], "outline": [[9.55, 38.9], [12.43, 37.8], [11.04, 37.08], [9.55, 36.5]] },
+    { "id": "syrtis", "name": "Залив Хаммамет и Малый Сирт", "about": "восточный берег Туниса: от мыса Бон до Джербы и залива Габес", "at": [[34.6, 11.2]], "outline": [[11.04, 37.08], [12.43, 37.8], [15, 37.8], [15, 31.5], [9.5, 31.5], [9.5, 36.5]] }
+  ],
+  "notes": [
+    "Южная граница Магриба — край Сахары: Анти-Атлас, южная подошва Сахарского Атласа, шотты Джерида. Вилайеты глубже в пустыне — Бешар, Гардая, Уаргла, Эль-Уэд, Адрар, Тиндуф — это уже Сахара, отдельный регион, когда полигон дойдёт до неё. Единицы края (Лагуат, Джельфа, Эль-Баяд, Наама, Татавин, Гулимим) тянутся в пустыню: где кончается проработанная земля, решает маска; что за ней, деление не берёт.",
+    "Провинции края Сахары и самые большие провинции Телля разделены по историческим землям (пробная сборка на широком прямоугольнике дала им 13–36 тыс. км², во Франции самая большая — около 10): Дуккала и Абда, Шавия и Уардига, Заян, Ифран и Верхняя Мулуя, Зиз и Тафилалт, Дахра и Фигиг, Тадла и Азилаль, Хауз и Сраргна, Уарзазат и Долина Драа, Анти-Атлас и Тата; Сиди-Бель-Аббес и Саида, Ходна и Бу-Саада, Тиарет и Серсу, Джельфа, Айн-Уссера и Улед-Наиль, Аурес и Хеншела, Эль-Баяд и Наама, Зибан и Западный Зибан; Джерид и Нефзауа, Джерба и Татавин, Касерин и Сиди-Бу-Зид.",
+    "Провинции полосы, которые уже в альбоме, на целых вилайетах выросли бы до 13–15 тыс. км²: Оран отдаёт Тлемсен и Сиди-Бель-Аббес, Мостаганем — Маскару, Шелифф — Тиарет, Медеа — Джельфу и Мсилу, Кабилия — Беджаю и Бордж-Бу-Арреридж (provinceChanges). В нынешнем полигоне от этих вилайетов лишь северные края, поэтому применяется только вместе с новым полигоном.",
+    "Области Марокко 2003 года (Natural Earth) крупнее исторических земель: Мекнес-Тафилалет делят Мекнес, Средний Атлас и Тафилалт; Восточную область — Риф (Надор), Уджда, Дахра и Фигиг; Сус-Масса-Драа — Сус, Драа, Анти-Атлас; Марракеш-Тенсифт-Эль-Хауз — Марракеш и Хаха; Таза-Эль-Хосейма-Таунат — Риф, Таза и Фес (Таунат).",
+    "Прямоугольник подробных высот для всего Магриба: на юг примерно до 29,3° с. ш. (Анти-Атлас, Тизнит), на восток до 11,7° в. д. (восточный берег Туниса и Джерба)."
+  ]
+}

@@ -10,7 +10,7 @@
 //   bit 5          the chunk touches a border (a chunk of another district of its own kind among the eight around it)
 //   bit 19         some of it is under fields
 //   bits 20 .. 31  the settlement built on it: 1 + its number modulo 4095 (0 none), enough to tell neighbours apart
-import { KN as FN } from './km.js';
+import { KN as FN, KNY as FNY } from './km.js';
 
 export const EDGE = { border: 1 << 5, fields: 1 << 19, town: 20 };
 const MOD = 4095;
@@ -18,12 +18,12 @@ const MOD = 4095;
 // div: the division (cells, kinds); ownerOf(c) → the number of the settlement chunk c is built on, or undefined; farm:
 // the share of every chunk under fields, a byte (or null) → Uint32Array, the bits of every chunk
 export function chunkEdges(div, ownerOf = null, farm = null) {
-  const n = FN * FN, out = new Uint32Array(n), cells = div.cells, kinds = div.kinds;
-  for (let j = 0; j < FN; j++) for (let i = 0; i < FN; i++) {
+  const n = FN * FNY, out = new Uint32Array(n), cells = div.cells, kinds = div.kinds;
+  for (let j = 0; j < FNY; j++) for (let i = 0; i < FN; i++) {
     const t = j * FN + i, d = cells[t]; if (d < 0) continue;
     const wet = kinds[d] !== 0; let b = 0;
     for (let dj = -1; dj <= 1 && !b; dj++) for (let di = -1; di <= 1; di++) {
-      const u = i + di, v = j + dj; if (u < 0 || v < 0 || u >= FN || v >= FN || (!di && !dj)) continue;
+      const u = i + di, v = j + dj; if (u < 0 || v < 0 || u >= FN || v >= FNY || (!di && !dj)) continue;
       const e = cells[v * FN + u]; if (e >= 0 && e !== d && (kinds[e] !== 0) === wet) { b = EDGE.border; break; }
     }
     out[t] = b;

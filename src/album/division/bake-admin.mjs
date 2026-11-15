@@ -7,12 +7,14 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BBOX } from '../geo.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const main = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).split('\n')[0].slice(9).trim();
+// (data/raw lies in the main checkout; outside git — a copy of the code — only in ROOT)
+let main = ROOT; try { main = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\n')[0].slice(9).trim(); } catch { /* not a checkout */ }
 const SRC = process.argv[2] || [join(ROOT, 'data/raw/ne_10m_admin_1_states_provinces.geojson'), join(main, 'data/raw/ne_10m_admin_1_states_provinces.geojson')].find(existsSync);
 if (!SRC) { console.error('no Natural Earth admin-1 file (scripts/regions/download.mjs)'); process.exit(1); }
-const B = { lon0: -10.4, lon1: 4.9, lat0: 34.9, lat1: 45.1 };      // the album region and a little more
+const B = { lon0: BBOX.lon0 - .4, lon1: BBOX.lon1 + .4, lat0: BBOX.lat0 - .3, lat1: BBOX.lat1 + .3 };   // the polygon (geo.js) and a little more
 const TOL = .006;                                                   // simplification, degrees (≈ 0.6 km)
 
 // Douglas–Peucker on a closed ring

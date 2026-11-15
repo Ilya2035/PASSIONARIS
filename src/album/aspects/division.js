@@ -13,7 +13,10 @@
 // The chunks themselves are never seen on the map (the owner: «чанки не видим сами по себе… только в dev-режиме»):
 // the knob «Чанки 1 км²» draws their outlines and what each is like, for checking.
 import { Vector2, Vector3 } from 'three';
-import { KKM as FKM, KN as FN, KM_GLSL } from '../division/km.js';
+import { KKM as FKM, KN as FN, KNY as FNY, KM_GLSL } from '../division/km.js';
+// the last texel of the lattice of chunks; written as one number while the lattice is a square (the shader the same,
+// letter for letter, as before the lattice could be a rectangle: the GPU compiler is touchy)
+const LAST = FN === FNY ? `${FN - 1}` : `${FN - 1}, ${FNY - 1}`;
 import { emptyTexture } from '../division/gpu.js';
 import { NEAR_KM, MAX_FOURS, PIECE_KM, TIE_KM } from '../division/border.js';
 import { startDivision } from '../division/runtime.js';
@@ -28,9 +31,9 @@ uniform highp usampler2D tDiv;                  // the district of every texel o
 const vec3 DIV_LAND[8] = vec3[8](vec3(.93, .80, .62), vec3(.72, .86, .62), vec3(.92, .88, .56), vec3(.80, .72, .88), vec3(.62, .82, .86), vec3(.94, .70, .64), vec3(.78, .82, .52), vec3(.86, .86, .82));
 const vec3 DIV_WATER[8] = vec3[8](vec3(.55, .70, .90), vec3(.45, .62, .86), vec3(.62, .78, .92), vec3(.50, .74, .86), vec3(.42, .56, .82), vec3(.58, .66, .90), vec3(.66, .80, .94), vec3(.48, .68, .80));
 
-uvec4 divOf(float d) { int i = int(d + .5); return texelFetch(tDiv, ivec2(i % ${FN}, ${FN} + i / ${FN}), 0); }
+uvec4 divOf(float d) { int i = int(d + .5); return texelFetch(tDiv, ivec2(i % ${FN}, ${FNY} + i / ${FN}), 0); }
 // the district of a chunk of 1 km² (the outline of a district runs chunk by chunk: division/cells.js)
-float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${FN - 1})), 0).r); }
+float divTexel(ivec2 i) { return float(texelFetch(tDiv, clamp(i, ivec2(0), ivec2(${LAST})), 0).r); }
 ${KM_GLSL}
 // The chunk of 1 km² a point of district d lies in (twin of chunkAt() in division/km.js): among the nine squares
 // around the point, those of the district; the nearest seed wins → km to the nearest side it shares with another
@@ -58,8 +61,8 @@ vec3 kmChunk(vec2 pk, int d) { ivec2 b, o; float e = kmSide(pk, d, b, o); return
 // what a chunk is like (division/gpu.js): the class of its ground 1..5 (0 water, or not worked out), who can live there
 // where people cannot settle and why (km.js chunkSettle: 0 they can, 1 water, 2 mountain, 3 high mountain, 4 bog,
 // 5 steep slope — a hamlet at most, 6 wet hollow — a hamlet at most), while it is shown
-int kmWhy(ivec2 q) { return int((texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g >> 16u) & 7u); }
-ivec3 kmFacts(ivec2 q) { uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; return ivec3(int(g & 7u), int((g >> 3u) & 3u), int((g >> 8u) & 255u)); }   // z: its share under fields, a byte
+int kmWhy(ivec2 q) { return int((texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${LAST})), 0).g >> 16u) & 7u); }
+ivec3 kmFacts(ivec2 q) { uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${LAST})), 0).g; return ivec3(int(g & 7u), int((g >> 3u) & 3u), int((g >> 8u) & 255u)); }   // z: its share under fields, a byte
 // the five classes of ground, as seen on screen: level, rolling, hilly, steep, mountain
 const vec3 KM_CLASS[6] = vec3[6](vec3(.55, .66, .82), vec3(.30, .62, .30), vec3(.62, .78, .36), vec3(.96, .85, .36), vec3(.93, .56, .22), vec3(.62, .24, .22));
 // A vote among the chunks around a point, the way chunkCell() of glsl.js weighs them: the nine cells of the chunk
@@ -130,7 +133,7 @@ DivAt divAt(vec2 pk, float px, bool water) {
   vec2 t = (pk - uChunkRect.xy) / ${FKM.toFixed(4)}, f = fract(t); ivec2 c = ivec2(floor(t));
   // the square is of this layer's kind: the lines say it all
   if (uDivGeo.x > 0) {
-    uvec4 sq = texelFetch(tDiv, clamp(c, ivec2(0), ivec2(${FN - 1})), 0);
+    uvec4 sq = texelFetch(tDiv, clamp(c, ivec2(0), ivec2(${LAST})), 0);
     int own = int(sq.r & 65535u); uvec4 uo = divOf(float(own)); int kind = int((uo.y >> 25u) & 3u);
     if (water ? kind != 0 : kind == 0) {
       ivec2 dd; vec3 e = vec3(1e4); bool lone = false;
@@ -231,12 +234,12 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
     }
     if (px < .3 && !water) {
       ivec2 q1, q2; float e = kmSide(pk, a.d, q1, q2), seen = 1. - smoothstep(.16, .3, px);
-      uint g1 = texelFetch(tDiv, clamp(q1, ivec2(0), ivec2(${FN - 1})), 0).g, t1 = g1 >> 20u;
+      uint g1 = texelFetch(tDiv, clamp(q1, ivec2(0), ivec2(${LAST})), 0).g, t1 = g1 >> 20u;
       vec3 town = uStyle == 0 ? vec3(1., .40, .16) : vec3(.66, .10, .06), farm = uStyle == 0 ? vec3(1., .88, .22) : vec3(.60, .44, .02);
       if (t1 > 0u) col = mix(col, town * (.75 + .3 * lum), .2 * seen);                                                    // a chunk a settlement stands on: a light tint
       // nearer the edge of the district than any side it shares: that side is the border, drawn above
       if (q2.x >= 0 && e < a.eD) {
-        uint g2 = texelFetch(tDiv, clamp(q2, ivec2(0), ivec2(${FN - 1})), 0).g, t2 = g2 >> 20u;
+        uint g2 = texelFetch(tDiv, clamp(q2, ivec2(0), ivec2(${LAST})), 0).g, t2 = g2 >> 20u;
         bool f1 = (g1 & 0x80000u) != 0u, f2 = (g2 & 0x80000u) != 0u, b1 = (g1 & 32u) != 0u, b2 = (g2 & 32u) != 0u;
         // the line: its half width in pixels, its colour and how strong it is
         float w = 0., s = 0.; vec3 lc = ink;
@@ -264,7 +267,7 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
   if (uDivInfra > 0 && !water) {
     ivec2 q = ivec2(floor((pk - uChunkRect.xy) / ${FKM.toFixed(4)}));
     if (px < .2) { vec3 kc = kmChunk(pk, a.d); q = ivec2(kc.xy); }
-    uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; int lv = int((g >> 6u) & 3u);
+    uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${LAST})), 0).g; int lv = int((g >> 6u) & 3u);
     if (!wet) {
       vec3 ic = lv == 3 ? vec3(.30, .66, .34) : lv == 2 ? vec3(.74, .84, .30) : lv == 1 ? vec3(.97, .66, .20) : vec3(.80, .22, .20);
       col = mix(col, ic * (.72 + .34 * lum), lv == 3 ? .4 : .66);

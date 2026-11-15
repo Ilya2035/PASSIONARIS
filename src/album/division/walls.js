@@ -10,7 +10,7 @@
 // строительстве дорог». Troops will cross mountains, only few of them; whether a land can be passed is worked out
 // later and is not this. The rule that some districts cannot be joined by a main road stays («это крутая будет механика»).
 import { LAND } from './build.js';
-import { KN as FN } from './km.js';
+import { KN as FN, KNY as FNY } from './km.js';
 
 const key = (a, b) => (a < b ? a * 65536 + b : b * 65536 + a);
 
@@ -19,7 +19,7 @@ const key = (a, b) => (a < b ? a * 65536 + b : b * 65536 + a);
 // that touch (by two sides of chunks or more, as the roads count them), have no leg between them and no road across
 export function impassablePairs(div, centres, legs, crossed = null) {
   const touch = new Map(), cells = div.cells;
-  for (let ty = 0; ty < FN - 1; ty++) for (let tx = 0; tx < FN - 1; tx++) {
+  for (let ty = 0; ty < FNY - 1; ty++) for (let tx = 0; tx < FN - 1; tx++) {
     const t = ty * FN + tx, d = cells[t]; if (d < 0 || div.kinds[d] !== LAND) continue;
     for (const u of [t + 1, t + FN]) { const e = cells[u]; if (e < 0 || e === d || div.kinds[e] !== LAND) continue; const k = key(d, e); touch.set(k, (touch.get(k) || 0) + 1); }
   }

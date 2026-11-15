@@ -8,11 +8,11 @@
 // and evens the sizes. A district never leaves its province. Water keeps the districts of its chunks.
 // The borders of the provinces are straightened first (provinceCells), and the districts are laid inside them.
 // Plain JavaScript without the GPU: the same chunks, heights and rivers always give the same outlines.
-import { KN as FN, KKM as FKM, cellsOfChunks } from './km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0 as X0, KY0 as Y0, cellsOfChunks } from './km.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 import { Heap } from './graph.js';
 
-const X0 = -880, Y0 = 3880, LAND = 0, NONE = 0xFFFF;
+const LAND = 0, NONE = 0xFFFF;
 export const RIVER_TOLL = [0, 14, 26, 40];          // km of way paid on entering and again on leaving a river: a brook-sized one, a lesser, a great
 export const CREST_TOLL = [0, 2.5, 11];               // … on entering and on leaving a crest: a lesser one, a great one
 export const CLIMB = .008;                          // km of way for every metre of height gained or lost: steep ground is slow both ways
@@ -28,10 +28,10 @@ const GAIN = 5, ROUNDS = 5;                         // km a district twice the m
 
 // rivers: [{ pts: [[lon, lat], …], rank }] → a byte a texel: 0 none, 1 a small river, 2 a lesser, 3 a great one
 export function riverRaster(rivers = []) {
-  const riv = new Uint8Array(FN * FN);
+  const riv = new Uint8Array(FN * FNY);
   for (const rv of rivers) {
     const r = rv.rank <= 6 ? 3 : rv.rank <= 8 ? 2 : 1;
-    const mark = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FN && ty < FN && r > riv[ty * FN + tx]) riv[ty * FN + tx] = r; };
+    const mark = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FN && ty < FNY && r > riv[ty * FN + tx]) riv[ty * FN + tx] = r; };
     for (let i = 1; i < rv.pts.length; i++) {
       // texels the stretch passes through, stepping one side at a time: the line of texels has no diagonal gaps
       let x = (rv.pts[i - 1][0] * KM_PER_DEG * COS_REF - X0) / FKM, y = (rv.pts[i - 1][1] * KM_PER_DEG - Y0) / FKM;
@@ -59,18 +59,18 @@ const stepCost = (q, t, u, hgt, riv, crest) => (q < 8 ? FKM : FKM * 1.4142) * (r
 // run km; every texel belongs to the stretch its water first reaches.
 // → { of: Int32Array (unit of every land texel, −1 none), down: Int32Array (the texel water runs to, −1 out), count }
 export function catchmentUnits(hgt, land, { area = MOUNTAIN.area, run = MOUNTAIN.run } = {}) {
-  const n = FN * FN, down = new Int32Array(n).fill(-1), order = new Int32Array(n), lvl = new Float32Array(n), seen = new Uint8Array(n), heap = new Heap(1 << 16);
+  const n = FN * FNY, down = new Int32Array(n).fill(-1), order = new Int32Array(n), lvl = new Float32Array(n), seen = new Uint8Array(n), heap = new Heap(1 << 16);
   let m = 0;
-  for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+  for (let ty = 0; ty < FNY; ty++) for (let tx = 0; tx < FN; tx++) {
     const t = ty * FN + tx; if (land[t] < 0) continue;
-    let out = tx === 0 || ty === 0 || tx === FN - 1 || ty === FN - 1;
+    let out = tx === 0 || ty === 0 || tx === FN - 1 || ty === FNY - 1;
     for (let q = 0; q < 16 && !out; q += 2) if (land[(ty + NB[q + 1]) * FN + tx + NB[q]] < 0) out = true;
     if (out) { seen[t] = 1; lvl[t] = hgt[t]; heap.push(hgt[t], t); }
   }
   while (heap.n) {
     const t = heap.pop(); order[m++] = t; const tx = t % FN, ty = (t - tx) / FN;
     for (let q = 0; q < 16; q += 2) {
-      const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue;
+      const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FNY) continue;
       const u = uy * FN + ux; if (land[u] < 0 || seen[u]) continue;
       seen[u] = 1; lvl[u] = Math.max(hgt[u], lvl[t] + .01); down[u] = t; heap.push(lvl[u], u);
     }
@@ -91,13 +91,13 @@ export function catchmentUnits(hgt, land, { area = MOUNTAIN.area, run = MOUNTAIN
 // How much of a mountain a texel is, 0 … 1: the rise and fall of the land within MOUNTAIN.r km of it (land only, a
 // square window: the highest texel minus the lowest)
 export function mountainRaster(hgt, land) {
-  const n = FN * FN, R = Math.round(MOUNTAIN.r / FKM), hi = new Float32Array(n), lo = new Float32Array(n), a = new Float32Array(n), b = new Float32Array(n);
+  const n = FN * FNY, R = Math.round(MOUNTAIN.r / FKM), hi = new Float32Array(n), lo = new Float32Array(n), a = new Float32Array(n), b = new Float32Array(n);
   for (let t = 0; t < n; t++) { const on = land[t] >= 0; hi[t] = on ? hgt[t] : -1e9; lo[t] = on ? hgt[t] : 1e9; }
   // the window, one way and then the other
   const pass = (src, dst, step, max) => {
-    for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+    for (let ty = 0; ty < FNY; ty++) for (let tx = 0; tx < FN; tx++) {
       const t = ty * FN + tx, c = step === 1 ? tx : ty; let v = src[t];
-      for (let k = -R; k <= R; k++) { const e = c + k; if (e < 0 || e >= FN || !k) continue; const w = src[t + k * step]; if (max ? w > v : w < v) v = w; }
+      for (let k = -R; k <= R; k++) { const e = c + k; if (e < 0 || e >= (step === 1 ? FN : FNY) || !k) continue; const w = src[t + k * step]; if (max ? w > v : w < v) v = w; }
       dst[t] = v;
     }
   };
@@ -111,8 +111,8 @@ export function mountainRaster(hgt, land) {
 // (a lesser crest, which costs little) or by 320 m (a great one). A crest is paid for like a river, so a border settles on it. Paying
 // only for the climb would not do: whoever reached the top first would run down the far side for nothing.
 export function crestRaster(hgt, land) {
-  const n = FN * FN, out = new Uint8Array(n), R = Math.round(3.75 / FKM), D = [1, 0, 0, 1, 1, 1, 1, -1];
-  for (let ty = R; ty < FN - R; ty++) for (let tx = R; tx < FN - R; tx++) {
+  const n = FN * FNY, out = new Uint8Array(n), R = Math.round(3.75 / FKM), D = [1, 0, 0, 1, 1, 1, 1, -1];
+  for (let ty = R; ty < FNY - R; ty++) for (let tx = R; tx < FN - R; tx++) {
     const t = ty * FN + tx; if (land[t] < 0) continue;
     let best = 0;
     for (let q = 0; q < 8; q += 2) {
@@ -131,20 +131,20 @@ export function crestRaster(hgt, land) {
 // and a crest are dear to cross): where a river or a crest lies in the belt the border settles on it, elsewhere it
 // runs midway between the cores, which is the old border with its wiggles ironed out. The shore never moves. A
 // province that would fall apart (a neck narrower than the belt) or lose much of its land keeps its old outline.
-// prov0: Int32Array FN × FN, the province of every land texel by its chunk (−1 water) → the same, straightened
+// prov0: Int32Array FN × FNY, the province of every land texel by its chunk (−1 water) → the same, straightened
 export const SMOOTH_KM = 6.5;
 export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
-  const n = FN * FN, R = SMOOTH_KM / FKM, INF = 1e9, d = new Float32Array(n).fill(INF);
+  const n = FN * FNY, R = SMOOTH_KM / FKM, INF = 1e9, d = new Float32Array(n).fill(INF);
   // how far every land texel is from another province, in texels, over land (two sweeps)
-  for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+  for (let ty = 0; ty < FNY; ty++) for (let tx = 0; tx < FN; tx++) {
     const t = ty * FN + tx, p = prov0[t]; if (p < 0) continue;
-    for (let q = 0; q < 16; q += 2) { const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue; const o = prov0[uy * FN + ux]; if (o >= 0 && o !== p) { d[t] = .5; break; } }
+    for (let q = 0; q < 16; q += 2) { const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FNY) continue; const o = prov0[uy * FN + ux]; if (o >= 0 && o !== p) { d[t] = .5; break; } }
   }
   const relax = (t, u, w) => { if (prov0[u] >= 0 && d[u] + w < d[t]) d[t] = d[u] + w; };
-  for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) { const t = ty * FN + tx; if (prov0[t] < 0) continue;
+  for (let ty = 0; ty < FNY; ty++) for (let tx = 0; tx < FN; tx++) { const t = ty * FN + tx; if (prov0[t] < 0) continue;
     if (tx > 0) relax(t, t - 1, 1); if (ty > 0) { relax(t, t - FN, 1); if (tx > 0) relax(t, t - FN - 1, 1.4142); if (tx < FN - 1) relax(t, t - FN + 1, 1.4142); } }
-  for (let ty = FN - 1; ty >= 0; ty--) for (let tx = FN - 1; tx >= 0; tx--) { const t = ty * FN + tx; if (prov0[t] < 0) continue;
-    if (tx < FN - 1) relax(t, t + 1, 1); if (ty < FN - 1) { relax(t, t + FN, 1); if (tx < FN - 1) relax(t, t + FN + 1, 1.4142); if (tx > 0) relax(t, t + FN - 1, 1.4142); } }
+  for (let ty = FNY - 1; ty >= 0; ty--) for (let tx = FN - 1; tx >= 0; tx--) { const t = ty * FN + tx; if (prov0[t] < 0) continue;
+    if (tx < FN - 1) relax(t, t + 1, 1); if (ty < FNY - 1) { relax(t, t + FN, 1); if (tx < FN - 1) relax(t, t + FN + 1, 1.4142); if (tx > 0) relax(t, t + FN - 1, 1.4142); } }
   // a small province keeps a core too: the belt is never more than six tenths of its half-width
   const deep = new Float32Array(provinceCount);
   for (let t = 0; t < n; t++) { const p = prov0[t]; if (p >= 0 && d[t] < INF && d[t] > deep[p]) deep[p] = d[t]; }
@@ -170,13 +170,13 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
     for (let t = 0; t < n; t++) { const p = prov0[t]; if (p >= 0 && (keep[p] || d[t] > belt(p))) { label[t] = p; dist[t] = 0; } }
     for (let t = 0; t < n; t++) if (label[t] >= 0 && dist[t] === 0) {                 // the rim of a core
       const tx = t % FN, ty = (t - tx) / FN;
-      for (let q = 0; q < 8; q += 2) { const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue; const u = uy * FN + ux; if (prov0[u] >= 0 && label[u] < 0) { heap.push(0, t); break; } }
+      for (let q = 0; q < 8; q += 2) { const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FNY) continue; const u = uy * FN + ux; if (prov0[u] >= 0 && label[u] < 0) { heap.push(0, t); break; } }
     }
     while (heap.n) {
       const t = heap.pop(), dt = heap.key; if (dt > dist[t]) continue;
       const tx = t % FN, ty = (t - tx) / FN;
       for (let q = 0; q < 16; q += 2) {
-        const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue;
+        const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FNY) continue;
         const u = uy * FN + ux; if (prov0[u] < 0) continue;
         const c = dt + stepCost(q, t, u, hgt, riv, crest);
         if (c < dist[u]) { dist[u] = c; label[u] = label[t]; heap.push(c, u); }
@@ -193,12 +193,12 @@ export function provinceCells(prov0, hgt, riv, crest, provinceCount) {
 
 // ch: the chunks; div: the division of the chunk graph (district per chunk, kinds, province, cx, cy);
 // heightAt(lat, lon) → metres; rivers as for riverRaster
-// → { cells: Int32Array FN × FN, the district of every texel (−1 none); prov: the province of every land texel;
+// → { cells: Int32Array FN × FNY, the district of every texel (−1 none); prov: the province of every land texel;
 //     hgt, riv: the heights and the rivers of the texels, for those who lay centres and roads over the same land;
 //     mtn: how much of a mountain every texel is (mountainRaster) }
 export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
-  const n = FN * FN, cell = cellsOfChunks(ch).cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
-  for (let ty = 0, t = 0; ty < FN; ty++) {
+  const n = FN * FNY, cell = cellsOfChunks(ch).cell, out = new Int32Array(n).fill(-1), prov0 = new Int32Array(n).fill(-1), hgt = new Float32Array(n);
+  for (let ty = 0, t = 0; ty < FNY; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG;
     for (let tx = 0; tx < FN; tx++, t++) {
       const k = cell[t]; if (k === NONE || k >= ch.count) continue;
@@ -243,7 +243,7 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
       const t = heap.pop(), dt = heap.key; if (dt > dist[t]) continue;
       const tx = t % FN, ty = (t - tx) / FN, p = prov[t];
       for (let q = 0; q < 16; q += 2) {
-        const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FN) continue;
+        const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < 0 || uy < 0 || ux >= FN || uy >= FNY) continue;
         const u = uy * FN + ux; if (prov[u] !== p || heart[u]) continue;       // a heart is never taken by a neighbour, however late its district starts
         const c = dt + stepCost(q, t, u, hgt, riv, crest);
         if (c < dist[u]) { dist[u] = c; label[u] = label[t]; heap.push(c, u); }
@@ -279,7 +279,7 @@ export function districtCells(ch, div, { heightAt = null, rivers = [] } = {}) {
 // Every mountain catchment, within each province it spans, goes whole to the district that holds the most of it, or to
 // the district whose heart lies in it; a part with the hearts of two districts stays as it was.
 function valleyVote(cells, prov, seed, mtn, unit, div) {
-  const n = FN * FN, sum = new Float64Array(unit.count), num = new Int32Array(unit.count);
+  const n = FN * FNY, sum = new Float64Array(unit.count), num = new Int32Array(unit.count);
   for (let t = 0; t < n; t++) { const u = unit.of[t]; if (u >= 0) { sum[u] += mtn[t]; num[u]++; } }
   const partOf = t => { const u = unit.of[t], d = cells[t]; return u < 0 || d < 0 || div.kinds[d] !== LAND || prov[t] < 0 || sum[u] < MOUNTAIN.share * num[u] ? -1 : u * 65536 + prov[t]; };
   const parts = new Map();
@@ -303,7 +303,7 @@ function valleyVote(cells, prov, seed, mtn, unit, div) {
 // the most sides with.
 export const TIDY = 60;
 function tidyPieces(cells, prov, seed, div) {
-  const n = FN * FN, piece = new Int32Array(n).fill(-1), stack = [], size = [], owner = [], first = [];
+  const n = FN * FNY, piece = new Int32Array(n).fill(-1), stack = [], size = [], owner = [], first = [];
   for (let s0 = 0; s0 < n; s0++) {
     const d = cells[s0]; if (d < 0 || piece[s0] >= 0 || prov[s0] < 0 || div.kinds[d] !== LAND) continue;
     const id = size.length; let k = 0; piece[s0] = id; stack.push(s0);
@@ -339,10 +339,10 @@ function tidyPieces(cells, prov, seed, div) {
 // with other districts and how many of those lie on a river
 export function cellStats(div, cells, riv) {
   const count = div.count, area = new Float64Array(count), edge = new Float64Array(count); let border = 0, onRiver = 0;
-  for (let ty = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++) {
+  for (let ty = 0; ty < FNY; ty++) for (let tx = 0; tx < FN; tx++) {
     const t = ty * FN + tx, d = cells[t]; if (d < 0 || div.kinds[d] !== LAND) continue;
     area[d]++;
-    for (const u of [tx + 1 < FN ? t + 1 : -1, ty + 1 < FN ? t + FN : -1]) {
+    for (const u of [tx + 1 < FN ? t + 1 : -1, ty + 1 < FNY ? t + FN : -1]) {
       if (u < 0) continue; const e = cells[u]; if (e === d) continue;
       edge[d]++; if (e >= 0) edge[e]++;
       if (e >= 0 && div.kinds[e] === LAND) { border++; if (riv && (riv[t] || riv[u])) onRiver++; }

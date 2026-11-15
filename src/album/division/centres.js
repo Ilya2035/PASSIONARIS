@@ -27,7 +27,7 @@
 // people; where there is none, the best place) holds its seat — «у региона всегда есть свой самый большой город».
 // Plain JavaScript without the GPU.
 import { kmOf } from '../chunks.js';
-import { KN as FN, KKM as FKM, KX0 as X0, KY0 as Y0, seedOf, kmFacts, kmSettle } from './km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0 as X0, KY0 as Y0, seedOf, kmFacts, kmSettle } from './km.js';
 
 const LAND = 0;
 export const SEAT = { province: 1, land: 2, region: 4 };
@@ -40,13 +40,13 @@ export const MERGE_KM = 5;                             // a real town this near 
 
 // sums over boxes of squares: v(t) summed over the (2r+1)² box around each square, and how many squares counted
 function boxSum(val, use, r) {
-  const W = FN + 1, S = new Float64Array(W * W), C = new Float64Array(W * W), out = new Float32Array(FN * FN), num = new Float32Array(FN * FN);
-  for (let j = 0; j < FN; j++) for (let i = 0; i < FN; i++) {
+  const W = FN + 1, S = new Float64Array(W * (FNY + 1)), C = new Float64Array(W * (FNY + 1)), out = new Float32Array(FN * FNY), num = new Float32Array(FN * FNY);
+  for (let j = 0; j < FNY; j++) for (let i = 0; i < FN; i++) {
     const t = j * FN + i, u = use(t), a = (j + 1) * W + i + 1;
     S[a] = (u ? val(t) : 0) + S[a - 1] + S[a - W] - S[a - W - 1]; C[a] = (u ? 1 : 0) + C[a - 1] + C[a - W] - C[a - W - 1];
   }
-  for (let j = 0; j < FN; j++) for (let i = 0; i < FN; i++) {
-    const i0 = Math.max(0, i - r), i1 = Math.min(FN, i + r + 1), j0 = Math.max(0, j - r), j1 = Math.min(FN, j + r + 1);
+  for (let j = 0; j < FNY; j++) for (let i = 0; i < FN; i++) {
+    const i0 = Math.max(0, i - r), i1 = Math.min(FN, i + r + 1), j0 = Math.max(0, j - r), j1 = Math.min(FNY, j + r + 1);
     const q = (A, x0, y0, x1, y1) => A[y1 * W + x1] - A[y0 * W + x1] - A[y1 * W + x0] + A[y0 * W + x0];
     out[j * FN + i] = q(S, i0, j0, i1, j1); num[j * FN + i] = q(C, i0, j0, i1, j1);
   }
@@ -60,7 +60,7 @@ function boxSum(val, use, r) {
 //     (the chunk the place is on), why: Uint8Array (PLACE_WHY), pop: Float64Array (people of the real place, 0 none),
 //     seat: Uint8Array (SEAT bits), seats: { province: [district], land: Map(name → district), region: [district] } }
 export function districtCentres(div, sites = [], opts = {}) {
-  const count = div.count, cells = div.cells, { hgt, riv, mtn } = div.raster, n = FN * FN;
+  const count = div.count, cells = div.cells, { hgt, riv, mtn } = div.raster, n = FN * FNY;
   const facts = opts.facts || kmFacts(div, div.raster.heightAt), settle = opts.settle || kmSettle(div, div.raster.heightAt);
   const land = t => { const d = cells[t]; return d >= 0 && div.kinds[d] === LAND; };
   const x = new Float64Array(count).fill(NaN), y = new Float64Array(count).fill(NaN), site = new Int32Array(count).fill(-1), texel = new Int32Array(count).fill(-1);
@@ -69,7 +69,7 @@ export function districtCentres(div, sites = [], opts = {}) {
   const placeAt = new Map();
   sites.forEach((s, i) => {
     const [sx, sy] = s.x !== undefined ? [s.x, s.y] : kmOf(s.lat, s.lon), ti = Math.floor((sx - X0) / FKM), tj = Math.floor((sy - Y0) / FKM);
-    if (ti < 0 || tj < 0 || ti >= FN || tj >= FN) return;
+    if (ti < 0 || tj < 0 || ti >= FN || tj >= FNY) return;
     const t = tj * FN + ti; if (!land(t)) return;
     const was = placeAt.get(t); if (!was || (s.pop || 0) > (sites[was].pop || 0)) placeAt.set(t, i);
   });
@@ -81,7 +81,7 @@ export function districtCentres(div, sites = [], opts = {}) {
   // where two rivers meet: around a river square the ring of its eight neighbours enters a river three times or more
   const RING = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
   const confluence = t => {
-    const i = t % FN, j = Math.floor(t / FN); if (!riv[t] || i < 1 || j < 1 || i >= FN - 1 || j >= FN - 1) return false;
+    const i = t % FN, j = Math.floor(t / FN); if (!riv[t] || i < 1 || j < 1 || i >= FN - 1 || j >= FNY - 1) return false;
     let runs = 0; for (let k = 0; k < 8; k++) { const a = riv[(j + RING[k][1]) * FN + i + RING[k][0]] > 0, b = riv[(j + RING[(k + 7) % 8][1]) * FN + i + RING[(k + 7) % 8][0]] > 0; if (a && !b) runs++; }
     return runs >= 3;
   };

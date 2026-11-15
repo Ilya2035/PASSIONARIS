@@ -19,7 +19,7 @@
 // square keeps the list of pieces that come that near to any point of it. A point farther than that from every line is
 // in the district of the middle of its square (worked out once, below).
 // Plain JavaScript without the GPU; the same division always gives the same lines.
-import { KN as FN, KKM as FKM, KX0 as X0, KY0 as Y0, seedOf } from './km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0 as X0, KY0 as Y0, seedOf } from './km.js';
 import { KM_PER_DEG, COS_REF } from '../geo.js';
 
 const LAND = 0, V = FN + 1, NONE = 0xFFFFFFFF;
@@ -190,10 +190,10 @@ function split(L) {
 export function borderLines(cells, kinds, province, region, rivers = null) {
   const snap = riverSnapper(rivers), groups = new Map();
   const wetOf = d => (kinds[d] === LAND ? 0 : 1);
-  for (let y = 0; y < FN; y++) for (let x = 0; x < FN; x++) {
+  for (let y = 0; y < FNY; y++) for (let x = 0; x < FN; x++) {
     const t = y * FN + x, d0 = cells[t]; if (d0 < 0) continue;
     for (let s = 0; s < 2; s++) {
-      if (s ? y >= FN - 1 : x >= FN - 1) continue;
+      if (s ? y >= FNY - 1 : x >= FN - 1) continue;
       const d1 = cells[s ? t + FN : t + 1]; if (d1 < 0 || d1 === d0) continue;
       const w = wetOf(d0); if (w !== wetOf(d1)) continue;                                   // the shore is not a border
       const level = region[province[d0]] !== region[province[d1]] ? 2 : province[d0] !== province[d1] ? 1 : 0, key = level * 2 + w;
@@ -239,13 +239,13 @@ export function borderLines(cells, kinds, province, region, rivers = null) {
 //   Uint32Array (piece | key << 24; NONE pads)
 export const MAX_FOURS = 24;
 function squareLists(geo) {
-  const n = FN * FN, R = NEAR_KM + HALF_DIAG, R2 = R * R, { seg, count } = geo;
+  const n = FN * FNY, R = NEAR_KM + HALF_DIAG, R2 = R * R, { seg, count } = geo;
   const num = new Uint16Array(n);
   const visit = fn => {
     for (let s = 0; s < count; s++) {
       const ax = seg[s * 4], ay = seg[s * 4 + 1], bx = seg[s * 4 + 2], by = seg[s * 4 + 3], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1e-12;
       const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - R - X0) / FKM)), i1 = Math.min(FN - 1, Math.floor((Math.max(ax, bx) + R - X0) / FKM));
-      const j0 = Math.max(0, Math.floor((Math.min(ay, by) - R - Y0) / FKM)), j1 = Math.min(FN - 1, Math.floor((Math.max(ay, by) + R - Y0) / FKM));
+      const j0 = Math.max(0, Math.floor((Math.min(ay, by) - R - Y0) / FKM)), j1 = Math.min(FNY - 1, Math.floor((Math.max(ay, by) + R - Y0) / FKM));
       for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
         const cx = X0 + (i + .5) * FKM, cy = Y0 + (j + .5) * FKM, t = Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / L2));
         if ((cx - ax - dx * t) ** 2 + (cy - ay - dy * t) ** 2 <= R2) fn(j * FN + i, s);
@@ -265,7 +265,7 @@ function squareLists(geo) {
 // → { d: the district on the point's side, d2: the one across, dist, e: [km to a border of a district, a province, a
 // region] } or null when there is no piece in the list of its square
 export function nearestPiece(geo, x, y, wet) {
-  const i = Math.floor((x - X0) / FKM), j = Math.floor((y - Y0) / FKM); if (i < 0 || j < 0 || i >= FN || j >= FN) return null;
+  const i = Math.floor((x - X0) / FKM), j = Math.floor((y - Y0) / FKM); if (i < 0 || j < 0 || i >= FN || j >= FNY) return null;
   const t = j * FN + i, nf = geo.num[t]; if (!nf) return null;
   const { seg, list } = geo, e = [1e4, 1e4, 1e4];
   let best = 1e9, ang0 = 9, lr = 0, left = false, ext = false, ends = 0;
@@ -306,7 +306,7 @@ export function nearestPiece(geo, x, y, wet) {
 export function borderGeometry(div, rivers = null) {
   const geo = borderLines(div.cells, div.kinds, div.province, div.region, rivers);
   Object.assign(geo, squareLists(geo));
-  const n = FN * FN, cells = div.cells, kinds = div.kinds, centre = new Int32Array(n).fill(-1), wetOf = d => (kinds[d] === LAND ? 0 : 1);
+  const n = FN * FNY, cells = div.cells, kinds = div.kinds, centre = new Int32Array(n).fill(-1), wetOf = d => (kinds[d] === LAND ? 0 : 1);
   // the middle of every square: by the nearest line, if one is near; else by the squares about it that no line comes
   // near — they hang together inside one district, and most of them already lie in it
   for (let t = 0; t < n; t++) {
@@ -347,7 +347,7 @@ export function borderGeometry(div, rivers = null) {
 // The district at a point as it is drawn: by the nearest line within NEAR_KM, else by the middle of its square.
 // wet: the layer (0 land, 1 water). −1 when the square is of the other kind (at the shore: the caller looks about).
 export function districtByLines(geo, cells, kinds, x, y, wet) {
-  const i = Math.floor((x - X0) / FKM), j = Math.floor((y - Y0) / FKM); if (i < 0 || j < 0 || i >= FN || j >= FN) return -1;
+  const i = Math.floor((x - X0) / FKM), j = Math.floor((y - Y0) / FKM); if (i < 0 || j < 0 || i >= FN || j >= FNY) return -1;
   const t = j * FN + i, d = cells[t]; if (d < 0 || (kinds[d] === LAND ? 0 : 1) !== wet) return -1;
   if (!geo.num[t]) return d;
   const r = nearestPiece(geo, x, y, wet);

@@ -6,7 +6,7 @@
 // the rule the owner liked («через некоторые районы невозможно проложить главную дорогу… это крутая будет механика»):
 // a main road can be laid through a district when a band of its chunks of the main level joins two of its neighbours.
 import { LEVEL, infraLevels } from '../roads/infra.js';
-import { KN as FN, KKM } from './km.js';
+import { KN as FN, KNY as FNY, KKM } from './km.js';
 import { LAND } from './build.js';
 
 export { LEVEL };
@@ -16,18 +16,19 @@ export const ROAD_KIND = ['', 'тропа', 'малая дорога', 'глав
 
 // 1 where a chunk is land
 export function landOf(div) {
-  const land = new Uint8Array(FN * FN);
+  const land = new Uint8Array(FN * FNY);
   for (let t = 0; t < land.length; t++) { const d = div.cells[t]; land[t] = d >= 0 && div.kinds[d] === LAND ? 1 : 0; }
   return land;
 }
 // the levels as the roads work them out, without the roads that are laid (before the network is there, and in Node)
-export const chunkLevels = (div, roads = null) => infraLevels(div.raster.hgt, landOf(div), FN, KKM, roads);
+// (the sixth argument: how many rows the raster has, for when it is not a square — roads/infra.js takes it up)
+export const chunkLevels = (div, roads = null) => infraLevels(div.raster.hgt, landOf(div), FN, KKM, roads, FNY);
 
 // div: the division; levels: a level a chunk → Uint8Array a district: 1 when a main road can be laid through it — its
 // chunks of the main level (4-neighbours, inside the district) hold one band that touches chunks of the main level of
 // two different neighbouring land districts; 0 otherwise (and for water, and for a district with one land neighbour)
 export function mainThrough(div, levels) {
-  const n = FN * FN, cells = div.cells, seen = new Uint8Array(n), out = new Uint8Array(div.count), stack = [];
+  const n = FN * FNY, cells = div.cells, seen = new Uint8Array(n), out = new Uint8Array(div.count), stack = [];
   for (let t = 0; t < n; t++) {
     if (levels[t] !== LEVEL.main || seen[t]) continue;
     const d = cells[t]; if (d < 0 || div.kinds[d] !== LAND || out[d]) { seen[t] = 1; continue; }
@@ -35,7 +36,7 @@ export function mainThrough(div, levels) {
     while (stack.length) {
       const u = stack.pop(), ux = u % FN, uy = (u - ux) / FN;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const x = ux + dx, y = uy + dy; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
+        const x = ux + dx, y = uy + dy; if (x < 0 || y < 0 || x >= FN || y >= FNY) continue;
         const v = y * FN + x, e = cells[v]; if (levels[v] !== LEVEL.main) continue;
         if (e === d) { if (!seen[v]) { seen[v] = 1; stack.push(v); } } else if (e >= 0 && div.kinds[e] === LAND) touch.add(e);
       }

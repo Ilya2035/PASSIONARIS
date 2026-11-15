@@ -18,7 +18,7 @@ import { nameDistricts } from './names.js';
 import { districtByLines } from './border.js';
 import { pickGround } from '../pick.js';
 import { kmOf } from '../chunks.js';
-import { KN as FN, KKM as FKM, kmFacts, kmOrder, kmData, kmSettle, chunkAt, seedOf, cellsOfChunks, CLASS_TITLE, SETTLE_WHY, livingOf } from './km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0, KY0, kmFacts, kmOrder, kmData, kmSettle, chunkAt, seedOf, cellsOfChunks, CLASS_TITLE, SETTLE_WHY, livingOf } from './km.js';
 import { PLACE_WHY, SEAT } from './centres.js';
 import { BBOX } from '../geo.js';
 
@@ -127,10 +127,10 @@ export async function startDivision(album, U) {
     const land = data.base.at(lat, lon) > 0, dv = cur.div, of = t => districtOfTexel(ch, dv, t);
     const [x, y] = kmOf(lat, lon);
     if (dv.geo) { const d = districtByLines(dv.geo, dv.cells, dv.kinds, x, y, land ? 0 : 1); if (d >= 0) return d; }
-    const tx = Math.max(0, Math.min(FN - 1, Math.floor((x + 880) / FKM))), ty = Math.max(0, Math.min(FN - 1, Math.floor((y - 3880) / FKM))), here = of(ty * FN + tx);
+    const tx = Math.max(0, Math.min(FN - 1, Math.floor((x - KX0) / FKM))), ty = Math.max(0, Math.min(FNY - 1, Math.floor((y - KY0) / FKM))), here = of(ty * FN + tx);
     if ((dv.kinds[here] === LAND) === land) return here;
     for (let r = 1; r <= 2; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-      const u = tx + dx, v = ty + dy; if (u < 0 || v < 0 || u >= FN || v >= FN) continue;
+      const u = tx + dx, v = ty + dy; if (u < 0 || v < 0 || u >= FN || v >= FNY) continue;
       const d = of(v * FN + u);
       if ((dv.kinds[d] === LAND) === land) return d;
     }

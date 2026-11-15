@@ -11,7 +11,7 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { BBOX } from '../src/album/geo.js';
 import { buildDivision, districtSummary, districtNames, stateMask, linkRelief, LAND, SEA, LAKE } from '../src/album/division/build.js';
 import { packDivision } from '../src/album/division/gpu.js';
-import { KN as RASTER, KKM, cellsOfChunks } from '../src/album/division/km.js';
+import { KN as RASTER, KKM, KX0, KY0, cellsOfChunks } from '../src/album/division/km.js';
 import { districtCells, riverRaster, cellStats, RIVER_TOLL, SMOOTH_KM } from '../src/album/division/cells.js';
 import { borderLines } from '../src/album/division/lines.js';
 import { nearestPiece, districtByLines, outlineOf, NEAR_KM, PIECE_KM } from '../src/album/division/border.js';
@@ -222,7 +222,7 @@ test('division: one shape — the fill, the cursor and the chunks follow the bor
   const div = buildDivision(ch, { ...opts, size: 30, rivers: river });
   checkOneShape(div, 1);
   // the outline of an inland district is one closed line, made of the very points of the border lines
-  const d = div.cells[Math.floor((kmOf(41, -4.5)[1] - 3880)) * RASTER + Math.floor(kmOf(41, -4.5)[0] + 880)], ol = outlineOf(div.geo, d);
+  const d = div.cells[Math.floor((kmOf(41, -4.5)[1] - KY0) / KKM) * RASTER + Math.floor((kmOf(41, -4.5)[0] - KX0) / KKM)], ol = outlineOf(div.geo, d);
   assert.ok(div.kinds[d] === LAND && ol.length === 1, 'one outline, ' + ol.length);
   const o = ol[0]; assert.ok(o.length > 20 && o[0][0] === o[o.length - 1][0] && o[0][1] === o[o.length - 1][1], 'it closes on itself');
   const pts = new Set(div.geo.lines.flatMap(L => L.pts.map(p => p.join(','))));
@@ -320,7 +320,7 @@ test('division of the album: places lie in their historical lands; mountains div
     [42.43, 1.93, 'cerdanya'], [43.60, 1.44, 'toulousain'], [43.11, 0.72, 'comminges'], [38.72, -9.14, 'lisboa'], [37.02, -7.93, 'algarve'], [37.39, -5.98, 'sevilla'],
     [42.51, 1.52, 'andorra'], [39.72, 2.91, 'mallorca'], [35.77, -5.80, 'tangier'], [36.75, 3.06, 'alger']]) {
     assert.equal(provAt(lat, lon), id, `${lat}, ${lon}`);
-    const [x, y] = kmOf(lat, lon), t = Math.floor((y - 3880) / KKM) * RASTER + Math.floor((x + 880) / KKM);      // … and as the province is drawn, chunk by chunk
+    const [x, y] = kmOf(lat, lon), t = Math.floor((y - KY0) / KKM) * RASTER + Math.floor((x - KX0) / KKM);      // … and as the province is drawn, chunk by chunk
     assert.equal(LANDS.provinces[real.div.provCells[t]]?.id, id, `${lat}, ${lon}: the straightened border keeps the place`);
   }
   // across the crests: Gavarnie (north) and Torla (south) of the Pyrenees, Covadonga and Riaño of the Cantabrian
@@ -423,7 +423,7 @@ const settleOf = real ? (() => {
   const wetlands = JSON.parse(readFileSync(join(ROOT, 'public/assets/album/swamp/wetlands.json'), 'utf8')).wetlands;
   return chunkSettle(real.div, kmFacts(real.div, data.base.at), { wetlands });
 })() : null;
-const squareAt = (div, lat, lon) => { const [x, y] = kmOf(lat, lon); return Math.floor(y - 3880) * RASTER + Math.floor(x + 880); };
+const squareAt = (div, lat, lon) => { const [x, y] = kmOf(lat, lon); return Math.floor((y - KY0) / KKM) * RASTER + Math.floor((x - KX0) / KKM); };
 
 test('division of the album: where nobody can settle — the sea, mountains, high ground, bogs; with the reason', { skip }, () => {
   const { div } = real, why = (lat, lon) => SETTLE_WHY[settleOf.why[squareAt(div, lat, lon)]];

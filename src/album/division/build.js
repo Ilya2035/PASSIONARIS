@@ -7,12 +7,12 @@
 // which chunk belongs where roughly; the relief draws the border: a mountain range is never a unit but a border, each
 // slope goes with the valley it drains into, a whole valley is never cut. Plain JavaScript without the GPU: the page
 // and the tests run the same code, and the same chunks always give the same division.
-import { FKM, FN, kmOf, llOf } from '../chunks.js';
+import { FKM, kmOf, llOf } from '../chunks.js';
 import { BBOX } from '../geo.js';
 import { makeGraph, partition, tidy } from './graph.js';
 import { districtCells } from './cells.js';
 import { borderGeometry } from './border.js';
-import { KKM, kmData, kmFacts, cellsOfDistrict, cellsOfChunks, chunksOfDistrict, livingOf } from './km.js';
+import { KKM, KX0, KY0, FNX, FNY, kmData, kmFacts, cellsOfDistrict, cellsOfChunks, chunksOfDistrict, livingOf } from './km.js';
 
 export const LAND = 0, SEA = 1, LAKE = 2;
 export const KIND_ID = ['land', 'sea', 'lake'];
@@ -21,7 +21,7 @@ export const SIZES = [20, 30, 50, 100];                 // district sizes the kn
 // nominal sizes of the levels, km: the provinces and regions are historical lands; these only say how big they are
 export const levelSizes = s => ({ district: s, province: Math.max(100, 2 * s), region: 900 });
 
-const X0 = -880, Y0 = 3880;                             // the corner of the fine raster (chunks.js)
+const X0 = KX0, Y0 = KY0;                               // the corner of the fine raster (chunks.js)
 const inside = (lat, lon) => lat > BBOX.lat0 && lat < BBOX.lat1 && lon > BBOX.lon0 && lon < BBOX.lon1;
 function pointInRing(lon, lat, ring) {
   let c = false;
@@ -51,7 +51,8 @@ export function chunkKinds(ch, lakes = []) {
   for (let k = 0; k < n; k++) kind[k] = ch.kind[k] ? LAND : SEA;
   const seen = new Uint8Array(n), queue = [];
   const edge = t => { const k = ch.cell[t]; if (!ch.kind[k] && !seen[k]) { seen[k] = 1; queue.push(k); } };
-  for (let i = 0; i < FN; i++) { edge(i); edge((FN - 1) * FN + i); edge(i * FN); edge(i * FN + FN - 1); }
+  for (let i = 0; i < FNX; i++) { edge(i); edge((FNY - 1) * FNX + i); }
+  for (let j = 0; j < FNY; j++) { edge(j * FNX); edge(j * FNX + FNX - 1); }
   for (let q = 0; q < queue.length; q++) for (const l of ch.links[queue[q]]) if (!ch.kind[l.k] && !seen[l.k]) { seen[l.k] = 1; queue.push(l.k); }
   for (let k = 0; k < n; k++) if (!ch.kind[k] && !seen[k]) kind[k] = LAKE;
   if (lakes.length) {
@@ -60,10 +61,10 @@ export function chunkKinds(ch, lakes = []) {
       const ring = lake.ring; if (!ring || ring.length < 3) continue;
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       for (const [lon, lat] of ring) { const [x, y] = kmOf(lat, lon); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-      for (let ty = Math.max(0, Math.floor((y0 - Y0) / FKM)); ty <= Math.min(FN - 1, Math.floor((y1 - Y0) / FKM)); ty++)
-        for (let tx = Math.max(0, Math.floor((x0 - X0) / FKM)); tx <= Math.min(FN - 1, Math.floor((x1 - X0) / FKM)); tx++) {
+      for (let ty = Math.max(0, Math.floor((y0 - Y0) / FKM)); ty <= Math.min(FNY - 1, Math.floor((y1 - Y0) / FKM)); ty++)
+        for (let tx = Math.max(0, Math.floor((x0 - X0) / FKM)); tx <= Math.min(FNX - 1, Math.floor((x1 - X0) / FKM)); tx++) {
           const p = llOf(X0 + (tx + .5) * FKM, Y0 + (ty + .5) * FKM);
-          if (pointInRing(p.lon, p.lat, ring)) inLake[ch.cell[ty * FN + tx]] += FKM * FKM;
+          if (pointInRing(p.lon, p.lat, ring)) inLake[ch.cell[ty * FNX + tx]] += FKM * FKM;
         }
     }
     for (let k = 0; k < n; k++) if (inLake[k] >= .5 * ch.area[k]) kind[k] = LAKE;

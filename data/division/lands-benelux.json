@@ -1,0 +1,65 @@
+{
+  "about": "Исторические земли и провинции Бенилюкса и левого берега Рейна — часть региона «Западная Европа» (владелец, 15.11.2026: «в Западной Европе Бенилюкс тоже относится… типа по Рейну… мы не по политической»). Заготовка к третьему этапу третьей волны; вид — как в lands.json и lands-france.json. admin — единицы Natural Earth admin-1 (провинции Бельгии и Нидерландов, округа Люксембурга, земли Германии), iso — их коды ISO 3166-2, для человека. Земли Германии в Natural Earth целые (Рейнланд-Пфальц, Северный Рейн-Вестфалия): их делят несколько провинций по опорным точкам at, граница ложится по гребням и рекам (shared); что за Рейном, отрежет маска проработанной земли. town — главный город, для справки.",
+  "region": "westeurope",
+  "lands": [
+    { "id": "flanders", "name": "Фландрия", "region": "westeurope" },
+    { "id": "brabant", "name": "Брабант", "region": "westeurope" },
+    { "id": "hainaut", "name": "Эно и Намюр", "region": "westeurope" },
+    { "id": "liegeland", "name": "Льеж и Лимбург", "region": "westeurope" },
+    { "id": "luxland", "name": "Люксембург и Арденны", "region": "westeurope" },
+    { "id": "holland", "name": "Голландия и Зеландия", "region": "westeurope" },
+    { "id": "gelre", "name": "Утрехт, Гелдерн и Оверэйсел", "region": "westeurope" },
+    { "id": "frisia", "name": "Фрисландия, Гронинген и Дренте", "region": "westeurope" },
+    { "id": "rhineland", "name": "Рейнская область", "region": "westeurope" },
+    { "id": "palatinate", "name": "Пфальц, Саар и Рейнхессен", "region": "westeurope" }
+  ],
+  "provinces": [
+    { "id": "westflanders", "name": "Западная Фландрия", "region": "westeurope", "land": "flanders", "iso": ["BE-VWV"], "admin": ["BEL-3479"], "town": "Брюгге", "at": [[51, 3.05]] },
+    { "id": "eastflanders", "name": "Восточная Фландрия", "region": "westeurope", "land": "flanders", "iso": ["BE-VOV"], "admin": ["BEL-3478"], "town": "Гент", "at": [[51.05, 3.75]] },
+
+    { "id": "antwerp", "name": "Антверпен и Кемпен", "region": "westeurope", "land": "brabant", "iso": ["BE-VAN"], "admin": ["BEL-3480"], "town": "Антверпен", "at": [[51.2, 4.75]] },
+    { "id": "brussels", "name": "Брюссель и Лёвен", "region": "westeurope", "land": "brabant", "iso": ["BE-BRU", "BE-VBR", "BE-WBR"], "admin": ["BEL-3474", "BEL-3475", "BEL-3482"], "town": "Брюссель", "at": [[50.83, 4.55]] },
+    { "id": "northbrabant", "name": "Северный Брабант", "region": "westeurope", "land": "brabant", "iso": ["NL-NB"], "admin": ["NLD-3483"], "town": "Хертогенбос", "at": [[51.6, 5.1]] },
+
+    { "id": "hainautprov", "name": "Эно", "region": "westeurope", "land": "hainaut", "iso": ["BE-WHT"], "admin": ["BEL-2"], "town": "Монс", "at": [[50.45, 3.95]] },
+    { "id": "namur", "name": "Намюр", "region": "westeurope", "land": "hainaut", "iso": ["BE-WNA"], "admin": ["BEL-3476"], "town": "Намюр", "at": [[50.25, 4.85]] },
+
+    { "id": "liege", "name": "Льеж", "region": "westeurope", "land": "liegeland", "iso": ["BE-WLG"], "admin": ["BEL-3481"], "town": "Льеж", "at": [[50.45, 5.75]] },
+    { "id": "loon", "name": "Лоон", "region": "westeurope", "land": "liegeland", "iso": ["BE-VLI"], "admin": ["BEL-3"], "town": "Хасселт", "at": [[51, 5.4]] },
+    { "id": "maastricht", "name": "Маастрихт и Верхний Гелдерн", "region": "westeurope", "land": "liegeland", "iso": ["NL-LI"], "admin": ["NLD-898"], "town": "Маастрихт", "at": [[51.25, 5.95]] },
+
+    { "id": "arlon", "name": "Бельгийский Люксембург", "region": "westeurope", "land": "luxland", "iso": ["BE-WLX"], "admin": ["BEL-3477"], "town": "Арлон", "at": [[49.95, 5.5]] },
+    { "id": "luxembourg", "name": "Люксембург", "region": "westeurope", "land": "luxland", "iso": ["LU-D", "LU-G", "LU-L"], "admin": ["LUX-906", "LUX-907", "LUX-908"], "town": "Люксембург", "at": [[49.75, 6.1]] },
+
+    { "id": "zeeland", "name": "Зеландия", "region": "westeurope", "land": "holland", "iso": ["NL-ZE"], "admin": ["NLD-903"], "town": "Мидделбург", "at": [[51.5, 3.85]] },
+    { "id": "southholland", "name": "Южная Голландия", "region": "westeurope", "land": "holland", "iso": ["NL-ZH"], "admin": ["NLD-3485"], "town": "Гаага", "at": [[52, 4.55]] },
+    { "id": "northholland", "name": "Северная Голландия", "region": "westeurope", "land": "holland", "iso": ["NL-NH"], "admin": ["NLD-3486"], "town": "Амстердам", "at": [[52.55, 4.85]] },
+
+    { "id": "utrecht", "name": "Утрехт", "region": "westeurope", "land": "gelre", "iso": ["NL-UT"], "admin": ["NLD-3484"], "town": "Утрехт", "at": [[52.1, 5.2]] },
+    { "id": "guelders", "name": "Гелдерн", "region": "westeurope", "land": "gelre", "iso": ["NL-GE"], "admin": ["NLD-896"], "town": "Арнем", "at": [[52.05, 5.9]] },
+    { "id": "overijssel", "name": "Оверэйсел", "region": "westeurope", "land": "gelre", "iso": ["NL-OV"], "admin": ["NLD-899"], "town": "Зволле", "at": [[52.45, 6.3]] },
+    { "id": "flevoland", "name": "Флеволанд", "region": "westeurope", "land": "gelre", "iso": ["NL-FL"], "admin": ["NLD-902"], "town": "Лелистад", "at": [[52.5, 5.55]] },
+
+    { "id": "friesland", "name": "Фрисландия", "region": "westeurope", "land": "frisia", "iso": ["NL-FR"], "admin": ["NLD-895"], "town": "Леуварден", "at": [[53.1, 5.8]] },
+    { "id": "groningen", "name": "Гронинген", "region": "westeurope", "land": "frisia", "iso": ["NL-GR"], "admin": ["NLD-897"], "town": "Гронинген", "at": [[53.25, 6.7]] },
+    { "id": "drenthe", "name": "Дренте", "region": "westeurope", "land": "frisia", "iso": ["NL-DR"], "admin": ["NLD-894"], "town": "Ассен", "at": [[52.85, 6.55]] },
+
+    { "id": "cleves", "name": "Клеве и Нижний Рейн", "region": "westeurope", "land": "rhineland", "iso": ["DE-NW"], "admin": ["DEU-1572"], "town": "Клеве", "at": [[51.55, 6.3]] },
+    { "id": "aachen", "name": "Ахен и Юлих", "region": "westeurope", "land": "rhineland", "iso": ["DE-NW"], "admin": ["DEU-1572"], "town": "Ахен", "at": [[50.8, 6.2]] },
+    { "id": "cologne", "name": "Кёльн и Бонн", "region": "westeurope", "land": "rhineland", "iso": ["DE-NW"], "admin": ["DEU-1572"], "town": "Кёльн", "at": [[50.85, 6.85], [51.15, 6.6]] },
+    { "id": "koblenz", "name": "Кобленц, Эйфель и Хунсрюк", "region": "westeurope", "land": "rhineland", "iso": ["DE-RP"], "admin": ["DEU-1580"], "town": "Кобленц", "at": [[50.25, 7.1], [49.98, 7.55]] },
+    { "id": "trier", "name": "Трир и Мозель", "region": "westeurope", "land": "rhineland", "iso": ["DE-RP"], "admin": ["DEU-1580"], "town": "Трир", "at": [[49.85, 6.7], [49.95, 7.05]] },
+
+    { "id": "saar", "name": "Саар", "region": "westeurope", "land": "palatinate", "iso": ["DE-SL"], "admin": ["DEU-1581"], "town": "Саарбрюккен", "at": [[49.35, 6.95]] },
+    { "id": "pfalz", "name": "Пфальц", "region": "westeurope", "land": "palatinate", "iso": ["DE-RP"], "admin": ["DEU-1580"], "town": "Кайзерслаутерн", "at": [[49.35, 7.75]] },
+    { "id": "rheinhessen", "name": "Рейнхессен", "region": "westeurope", "land": "palatinate", "iso": ["DE-RP"], "admin": ["DEU-1580"], "town": "Майнц", "at": [[49.8, 8.15]] }
+  ],
+  "shared": ["DEU-1572", "DEU-1580"],
+  "notes": [
+    "Граница региона — Рейн (владелец): правый берег — Рур, Вестфалия, Бергишес-Ланд, Вестервальд, Гессен, Баден — не Западная Европа. Земли Германии в Natural Earth — целые Länder: Северный Рейн-Вестфалию делят «Клеве», «Ахен и Юлих», «Кёльн и Бонн», Рейнланд-Пфальц — «Кобленц», «Трир», «Пфальц», «Рейнхессен»; правобережье отрежет маска.",
+    "Брюссель — малая единица, вместе с Фламандским и Валлонским Брабантом. Утрехт (1450 км²) — малая провинция, но древняя епархия: оставлен своей.",
+    "Флеволанд — осушенная в XX веке земля, своя малая провинция (около 1400 км²): с Оверэйселом её не соединить — польдеры отделены от него озёрами, и деление отдало бы их Гелдерну.",
+    "Лоон — графство Лоон (Лоз), нынешний Бельгийский Лимбург; Нидерландский Лимбург — Маастрихт и Верхний Гелдерн; оба в земле «Льеж и Лимбург».",
+    "Нидерланды доходят до 53,6° с. ш. (Гронинген, Фризские острова): прямоугольник подробных высот нужен до 53,7° с. ш."
+  ]
+}

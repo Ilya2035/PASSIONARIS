@@ -14,6 +14,7 @@
 // → { names: string[], kind: string[] ('history' | 'place' | 'village' | 'shore' | 'rule') }
 // Plain JavaScript; the same division always gives the same names.
 import { kmOf } from '../chunks.js';
+import { KN as FN, KNY as FNY, KKM, KX0 as X0, KY0 as Y0 } from './km.js';
 
 const LAND = 0;
 export const CITY_POP = 20000;
@@ -82,12 +83,11 @@ export function nameDistricts(div, sites, lands) {
   const count = div.count, names = new Array(count).fill(''), kind = new Array(count).fill('rule'), c = div.centres;
   // the middle of every district and of every province, by their chunks of 1 km²
   const sx = new Float64Array(count), sy = new Float64Array(count), sn = new Float64Array(count);
-  const FN = 1280, X0 = -880, Y0 = 3880;
-  for (let t = 0; t < div.cells.length; t++) { const d = div.cells[t]; if (d < 0) continue; sx[d] += X0 + (t % FN) + .5; sy[d] += Y0 + Math.floor(t / FN) + .5; sn[d]++; }
+  for (let t = 0; t < div.cells.length; t++) { const d = div.cells[t]; if (d < 0) continue; sx[d] += X0 + (t % FN + .5) * KKM; sy[d] += Y0 + (Math.floor(t / FN) + .5) * KKM; sn[d]++; }
   for (let d = 0; d < count; d++) if (sn[d]) { sx[d] /= sn[d]; sy[d] /= sn[d]; } else { sx[d] = div.cx[d]; sy[d] = div.cy[d]; }
   // 1. historical lands of their own
   for (const cm of lands.comarcas || []) {
-    const [x, y] = kmOf(cm.at[0], cm.at[1]), t = Math.floor(y - Y0) * FN + Math.floor(x - X0), d = div.cells[t];
+    const [x, y] = kmOf(cm.at[0], cm.at[1]), t = Math.floor((y - Y0) / KKM) * FN + Math.floor((x - X0) / KKM), d = div.cells[t];
     if (d < 0 || div.kinds[d] !== LAND || names[d] || (c && c.pop[d] >= CITY_POP)) continue;
     names[d] = cm.name; kind[d] = 'history';
   }
@@ -97,7 +97,7 @@ export function nameDistricts(div, sites, lands) {
   const village = new Int32Array(count).fill(-1);
   sites.forEach((st, i) => {
     if (!st.name) return;
-    const [x, y] = st.x !== undefined ? [st.x, st.y] : kmOf(st.lat, st.lon), ti = Math.floor(x - X0), tj = Math.floor(y - Y0); if (ti < 0 || tj < 0 || ti >= FN || tj >= FN) return;
+    const [x, y] = st.x !== undefined ? [st.x, st.y] : kmOf(st.lat, st.lon), ti = Math.floor((x - X0) / KKM), tj = Math.floor((y - Y0) / KKM); if (ti < 0 || tj < 0 || ti >= FN || tj >= FNY) return;
     const d = div.cells[tj * FN + ti]; if (d < 0 || div.kinds[d] !== LAND) return;
     if (village[d] < 0 || (st.pop || 0) > (sites[village[d]].pop || 0)) village[d] = i;
   });

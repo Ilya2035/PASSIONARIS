@@ -5,7 +5,7 @@
 // borders of every level, the outline of the district under the cursor and of the chosen one, and the border of a state
 // of history (along the shore too).
 import { llOf } from '../chunks.js';
-import { KN as FN, KKM as FKM, KX0 as X0, KY0 as Y0 } from './km.js';
+import { KN as FN, KNY as FNY, KKM as FKM, KX0 as X0, KY0 as Y0 } from './km.js';
 import { BBOX } from '../geo.js';
 import { makeRibbons } from '../layers/ribbon.js';
 import { LAND } from './build.js';
@@ -42,10 +42,10 @@ function stateLines(div, state, rivers) {
   for (const r of out) for (const p of [r[0], r[r.length - 1]]) ends.add(p[0].toFixed(5) + ',' + p[1].toFixed(5));
   // the shore of the state
   const cells = div.cells, wet = d => div.kinds[d] !== LAND, sides = [], pinned = new Set();
-  for (let y = 0; y < FN; y++) for (let x = 0; x < FN; x++) {
+  for (let y = 0; y < FNY; y++) for (let x = 0; x < FN; x++) {
     const t = y * FN + x, d0 = cells[t]; if (d0 < 0) continue;
     for (let s = 0; s < 2; s++) {
-      if (s ? y >= FN - 1 : x >= FN - 1) continue;
+      if (s ? y >= FNY - 1 : x >= FN - 1) continue;
       const d1 = cells[s ? t + FN : t + 1]; if (d1 < 0 || wet(d0) === wet(d1)) continue;
       const land = wet(d0) ? d1 : d0; if (!inState[land]) continue;
       if (!s) sides.push(y * V + x + 1, (y + 1) * V + x + 1, 0); else sides.push((y + 1) * V + x, (y + 1) * V + x + 1, 0);
