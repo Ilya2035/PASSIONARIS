@@ -4,14 +4,16 @@
 // Without the file the old formula fitted to Iberia by hand answers instead, so nothing breaks.
 //
 // The file, little-endian, after gunzip:
-//   bytes 0..3   'PGC1'
-//   Uint16       cells a side (n)
-//   Uint16       0
+//   bytes 0..3   'PGC1' over a square, 'PGC2' over a rectangle (the lattice of stage 3)
+//   Uint16       cells in a row (w; in 'PGC1' — cells a side)
+//   Uint16       rows (h; in 'PGC1' — 0)
 //   Float32 × 3  x0, y0 — the south-west corner in flat km (chunks.js); km — the side of a cell
 //   Uint32       0
-//   n × n × 4 bytes, rows from the south: wet, summer, warm, year (see the scales below)
+//   w × h × 4 bytes, rows from the south: wet, summer, warm, year (see the scales below)
 
-export const CLIM_N = 256, CLIM_MAGIC = 'PGC1';
+// CLIM_KM: the side of a cell. CLIM_N: the cells a side of the square of stage 2 (the grid itself is the lattice of
+// the chunks — chunks.js — cut into cells of CLIM_KM: whoever needs its size counts it from there).
+export const CLIM_KM = 5, CLIM_N = 256, CLIM_MAGIC = 'PGC1', CLIM_MAGIC_RECT = 'PGC2';
 export const LAPSE = .0064;                     // °C per metre of height
 export const WARM = [5, 45], YEAR = [-5, 35];   // °C at sea level that bytes 0 and 255 stand for
 const HEAD = 24;
@@ -29,24 +31,29 @@ export function wetOfAlpha(a) {
   return 1;
 }
 
-export function encodeClimate({ x0, y0, km, wet, summer, warm, year }) {
-  const n = Math.round(Math.sqrt(wet.length)), out = new Uint8Array(HEAD + n * n * 4), dv = new DataView(out.buffer);
-  for (let i = 0; i < 4; i++) out[i] = CLIM_MAGIC.charCodeAt(i);
-  dv.setUint16(4, n, true); dv.setFloat32(8, x0, true); dv.setFloat32(12, y0, true); dv.setFloat32(16, km, true);
+// w, h: cells in a row and rows; without them the grid is a square. A square is written as it always was ('PGC1').
+export function encodeClimate({ x0, y0, km, w, h, wet, summer, warm, year }) {
+  const W = w || Math.round(Math.sqrt(wet.length)), H = h || Math.round(wet.length / W), square = W === H, magic = square ? CLIM_MAGIC : CLIM_MAGIC_RECT;
+  if (W * H !== wet.length) throw new Error(`encodeClimate: ${W} × ${H} cells, ${wet.length} numbers`);
+  const out = new Uint8Array(HEAD + W * H * 4), dv = new DataView(out.buffer);
+  for (let i = 0; i < 4; i++) out[i] = magic.charCodeAt(i);
+  dv.setUint16(4, W, true); if (!square) dv.setUint16(6, H, true);
+  dv.setFloat32(8, x0, true); dv.setFloat32(12, y0, true); dv.setFloat32(16, km, true);
   const byte = (v, lo, hi) => Math.max(0, Math.min(255, Math.round((v - lo) / (hi - lo) * 255)));
-  for (let o = 0; o < n * n; o++) {
+  for (let o = 0; o < W * H; o++) {
     out[HEAD + o * 4] = byte(wet[o], 0, 1); out[HEAD + o * 4 + 1] = byte(summer[o], 0, 1);
     out[HEAD + o * 4 + 2] = byte(warm[o], ...WARM); out[HEAD + o * 4 + 3] = byte(year[o], ...YEAR);
   }
   return out;
 }
-// the gunzipped file → { n, x0, y0, km, data: bytes n × n × 4 (wet, summer, warm, year) }, or null if it is not one
+// the gunzipped file → { w, h, x0, y0, km, data: bytes w × h × 4 (wet, summer, warm, year) }, or null if it is not
+// one (n: the same as w — the name from when the grid could only be a square)
 export function decodeClimate(buf) {
-  const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  if (u.length < HEAD || String.fromCharCode(u[0], u[1], u[2], u[3]) !== CLIM_MAGIC) return null;
-  const dv = new DataView(u.buffer, u.byteOffset, u.byteLength), n = dv.getUint16(4, true);
-  if (u.length < HEAD + n * n * 4) return null;
-  return { n, x0: dv.getFloat32(8, true), y0: dv.getFloat32(12, true), km: dv.getFloat32(16, true), data: u.subarray(HEAD, HEAD + n * n * 4) };
+  const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf), magic = u.length < HEAD ? '' : String.fromCharCode(u[0], u[1], u[2], u[3]);
+  if (magic !== CLIM_MAGIC && magic !== CLIM_MAGIC_RECT) return null;
+  const dv = new DataView(u.buffer, u.byteOffset, u.byteLength), w = dv.getUint16(4, true), h = magic === CLIM_MAGIC ? w : dv.getUint16(6, true);
+  if (!w || !h || u.length < HEAD + w * h * 4) return null;
+  return { n: w, w, h, x0: dv.getFloat32(8, true), y0: dv.getFloat32(12, true), km: dv.getFloat32(16, true), data: u.subarray(HEAD, HEAD + w * h * 4) };
 }
 
 // ---- the whole Earth beyond the polygon (scripts/album/bake-world-climate.mjs → public/assets/album/ground/world.bin.gz):
@@ -109,8 +116,9 @@ const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180);   // flat km, as in chu
 // the four numbers at a place, joined smoothly between the cells: [wet, summer, warm °C, year °C], or null without data
 export function climateAt(lat, lon, c = CLIM) {
   if (!c) return null;
-  const x = Math.max(0, Math.min(c.n - 1, (lon * KMD * COS - c.x0) / c.km - .5)), y = Math.max(0, Math.min(c.n - 1, (lat * KMD - c.y0) / c.km - .5));
-  const i = Math.min(c.n - 2, Math.floor(x)), j = Math.min(c.n - 2, Math.floor(y)), fx = x - i, fy = y - j, d = c.data, o = (j * c.n + i) * 4, r = c.n * 4;
+  const W = c.w || c.n, H = c.h || c.n;
+  const x = Math.max(0, Math.min(W - 1, (lon * KMD * COS - c.x0) / c.km - .5)), y = Math.max(0, Math.min(H - 1, (lat * KMD - c.y0) / c.km - .5));
+  const i = Math.min(W - 2, Math.floor(x)), j = Math.min(H - 2, Math.floor(y)), fx = x - i, fy = y - j, d = c.data, o = (j * W + i) * 4, r = W * 4;
   const at = b => ((d[o + b] * (1 - fx) + d[o + 4 + b] * fx) * (1 - fy) + (d[o + r + b] * (1 - fx) + d[o + r + 4 + b] * fx) * fy) / 255;
   return [at(0), at(1), WARM[0] + at(2) * (WARM[1] - WARM[0]), YEAR[0] + at(3) * (YEAR[1] - YEAR[0])];
 }
@@ -155,21 +163,22 @@ export function treelineAt(lat, lon) { const c = climateAt(lat, lon); return c ?
 // it is green (from .7): there the line goes by warmth alone.
 export const worldTreelineOf = (warm, summer = 1) => { const t = (warm - TREE_WARM) / LAPSE; return (t < TREE_SOFT ? t : TREE_SOFT + (t - TREE_SOFT) * (TREE_SOFT_K + (1 - TREE_SOFT_K) * ss(.35, .7, summer))) - (1 - summer) * TREE_DRY; };
 
-// ---- the climate as the shaders read it: one picture of n × n texels over the square of the chunks, 4 bytes each —
-// mean height of the land around / 4096 m (counted here, from the heights of the album), wet, warm, summer
-//   heightAt(lat, lon) → m;  rect: { x0, y0, side } of the square in flat km
-export function climateTexels(heightAt, rect, c = CLIM, n = CLIM_N) {
-  const out = new Uint8Array(n * n * 4), cell = rect.side / n, land = new Float32Array(n * n), has = new Uint8Array(n * n);
+// ---- the climate as the shaders read it: one picture of nx × ny texels over the lattice of the chunks, 4 bytes each
+// — mean height of the land around / 4096 m (counted here, from the heights of the album), wet, warm, summer
+//   heightAt(lat, lon) → m;  rect: { x0, y0, w, h } of the lattice in flat km ({ x0, y0, side } for a square);
+//   nx, ny: texels in a row and rows (ny left out: a square)
+export function climateTexels(heightAt, rect, c = CLIM, nx = CLIM_N, ny = nx) {
+  const n = nx * ny, out = new Uint8Array(n * 4), cx = (rect.w ?? rect.side) / nx, cy = (rect.h ?? rect.side) / ny, land = new Float32Array(n), has = new Uint8Array(n);
   // mean height of the land of every cell, then of the three by three cells around it: the country a place stands in
-  for (let j = 0, o = 0; j < n; j++) for (let i = 0; i < n; i++, o++) {
+  for (let j = 0, o = 0; j < ny; j++) for (let i = 0; i < nx; i++, o++) {
     let sum = 0, cnt = 0;
-    for (let b = 0; b < 2; b++) for (let a = 0; a < 2; a++) { const x = rect.x0 + (i + (a + .5) / 2) * cell, y = rect.y0 + (j + (b + .5) / 2) * cell, h = heightAt(y / KMD, x / (KMD * COS)); if (h > 0) { sum += h; cnt++; } }
+    for (let b = 0; b < 2; b++) for (let a = 0; a < 2; a++) { const x = rect.x0 + (i + (a + .5) / 2) * cx, y = rect.y0 + (j + (b + .5) / 2) * cy, h = heightAt(y / KMD, x / (KMD * COS)); if (h > 0) { sum += h; cnt++; } }
     if (cnt) { land[o] = sum / cnt; has[o] = 1; }
   }
-  for (let j = 0, o = 0; j < n; j++) for (let i = 0; i < n; i++, o++) {
+  for (let j = 0, o = 0; j < ny; j++) for (let i = 0; i < nx; i++, o++) {
     let sum = 0, cnt = 0;
-    for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= n || jj >= n || !has[jj * n + ii]) continue; sum += land[jj * n + ii]; cnt++; }
-    const q = [(rect.y0 + (j + .5) * cell) / KMD, (rect.x0 + (i + .5) * cell) / (KMD * COS)], v = climateAt(q[0], q[1], c);
+    for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny || !has[jj * nx + ii]) continue; sum += land[jj * nx + ii]; cnt++; }
+    const q = [(rect.y0 + (j + .5) * cy) / KMD, (rect.x0 + (i + .5) * cx) / (KMD * COS)], v = climateAt(q[0], q[1], c);
     out[o * 4] = cnt ? Math.min(255, Math.round(sum / cnt / 4096 * 255)) : 0;
     out[o * 4 + 1] = Math.round(clamp01(v ? v[0] : wetFormula(q[0], q[1])) * 255);
     out[o * 4 + 2] = Math.round(clamp01(((v ? v[2] : 29.5 - (q[0] - 37) * .75) - WARM[0]) / (WARM[1] - WARM[0])) * 255);

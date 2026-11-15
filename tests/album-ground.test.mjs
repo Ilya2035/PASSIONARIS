@@ -4,10 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import { CLIM_N, CLIM_MAGIC, WET_OF, wetOfAlpha, encodeClimate, decodeClimate, useClimate, climateAt, wetAt, wetFormula, wetRise, summerAt, warmAt,
+import { CLIM_N, CLIM_KM, CLIM_MAGIC, CLIM_MAGIC_RECT, WET_OF, wetOfAlpha, encodeClimate, decodeClimate, useClimate, climateAt, wetAt, wetFormula, wetRise, summerAt, warmAt,
   treelineAt, treelineOf, climateTexels, WARM, TREE_SOFT } from '../src/album/ground/climate.js';
 import { COMMON } from '../src/album/glsl.js';
-import { CHUNK_KM, CN, CI0, CJ0 } from '../src/album/chunks.js';
+import { CHUNK_KM, CN, CNX, CNY, CI0, CJ0 } from '../src/album/chunks.js';
 import { GROUND_TILES } from '../src/album/data.js';
 import ground from '../src/album/aspects/ground.js';
 import { DEFS } from '../src/album/params.js';
@@ -37,10 +37,40 @@ test('ground climate: the file is written and read back the same, to a byte', ()
   assert.equal(decodeClimate(encodeClimate(src).subarray(0, 30)), null, 'a file cut short');
 });
 
+test('ground climate: over a rectangle — the lattice of stage 3 — the file, the reading and the picture of the shaders', () => {
+  const w = 6, h = 4, N = w * h, mk = f => Float32Array.from({ length: N }, (_, i) => f(i % w, (i / w) | 0));
+  const src = { x0: -880, y0: 3240, km: 5, w, h, wet: mk((i, j) => i / (w - 1)), summer: mk((i, j) => j / (h - 1)), warm: mk(() => 25), year: mk(() => 15) };
+  const bytes = encodeClimate(src), c = decodeClimate(bytes);
+  assert.equal(String.fromCharCode(...bytes.subarray(0, 4)), CLIM_MAGIC_RECT);
+  assert.equal(c.w, w); assert.equal(c.h, h); assert.equal(c.n, w); assert.equal(c.data.length, N * 4);
+  // a square is written as it always was: the file of stage 2 does not change by a byte
+  const sq = encodeClimate({ x0: 0, y0: 0, km: 5, wet: new Float32Array(16), summer: new Float32Array(16), warm: new Float32Array(16), year: new Float32Array(16) });
+  assert.equal(String.fromCharCode(...sq.subarray(0, 4)), CLIM_MAGIC); assert.equal(sq[6] + sq[7], 0); assert.equal(decodeClimate(sq).h, 4);
+  assert.throws(() => encodeClimate({ ...src, w: 5 }), 'the numbers do not fill the grid');
+  // read back at the middles of cells: wet grows to the east, summer to the north — rows are not taken for columns
+  const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), at = (i, j) => climateAt((src.y0 + (j + .5) * 5) / KMD, (src.x0 + (i + .5) * 5) / (KMD * COS), c);
+  assert.ok(near(at(5, 0)[0], 1, .01) && near(at(0, 3)[0], 0, .01) && near(at(0, 3)[1], 1, .01) && near(at(5, 0)[1], 0, .01));
+  assert.ok(near(at(2, 3)[0], 2 / 5, .01) && near(at(5, 1)[1], 1 / 3, .01));
+  // the picture of the shaders over the same rectangle, texel for cell
+  const t = climateTexels(() => 400, { x0: src.x0, y0: src.y0, w: w * 5, h: h * 5 }, c, w, h);
+  assert.equal(t.length, N * 4);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const o = (j * w + i) * 4; assert.equal(t[o + 1], c.data[o], 'wet'); assert.equal(t[o + 3], c.data[o + 1], 'summer'); assert.equal(t[o], Math.round(400 / 4096 * 255)); }
+  // and the ground shader takes the size of its texture from the lattice, not from a side
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
+  assert.ok(terrain.includes('climW = Math.round(1 / cr.z / CLIM_KM), climH = Math.round(1 / cr.w / CLIM_KM);') && terrain.includes('{ x0: cr.x, y0: cr.y, w: 1 / cr.z, h: 1 / cr.w }, data.climate, climW, climH), climW, climH,'));
+  assert.ok(!/CLIM_N/.test(terrain));
+});
+
+test('the base written already mended is not mended again by the page', () => {
+  const data = fs.readFileSync(new URL('../src/album/data.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(data.includes('  if (!(meta.mended || meta.base.mended)) {\n    despike(raw, meta.base.w, meta.base.h);') && data.includes('    fillHollows(raw, meta.base.w, meta.base.h);'));
+});
+
 test('ground climate: the baked map covers the square of the chunks and says what everyone knows of Iberia', () => {
   const c = baked();
-  assert.ok(c, CLIM_MAGIC); assert.equal(c.n, CLIM_N);
-  assert.equal(c.x0, CI0 * CHUNK_KM); assert.equal(c.y0, CJ0 * CHUNK_KM); assert.ok(near(c.km * c.n, CN * CHUNK_KM, 1e-6), 'the square of the chunks: bake again when it changes');
+  assert.ok(c, CLIM_MAGIC); assert.equal(c.km, CLIM_KM);
+  assert.equal(c.w, CNX * CHUNK_KM / CLIM_KM, 'the lattice of the chunks in cells of 5 km: bake again when it changes (node scripts/album/bake-ground.mjs)'); assert.equal(c.h, CNY * CHUNK_KM / CLIM_KM);
+  assert.equal(c.x0, CI0 * CHUNK_KM); assert.equal(c.y0, CJ0 * CHUNK_KM);
   useClimate(c);
   try {
     const wet = (la, lo) => wetAt(la, lo, 0);

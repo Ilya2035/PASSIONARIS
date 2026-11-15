@@ -24,8 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { CHUNK_KM, CN, CI0, CJ0, llOf } from '../../src/album/chunks.js';
-import { CLIM_N, CLIM_MAGIC, WET_OF, wetOfAlpha, encodeClimate } from '../../src/album/ground/climate.js';
+import { CHUNK_KM, CNX, CNY, CI0, CJ0, llOf } from '../../src/album/chunks.js';
+import { CLIM_KM, CLIM_MAGIC, CLIM_MAGIC_RECT, WET_OF, wetOfAlpha, encodeClimate } from '../../src/album/ground/climate.js';
 import { rawFolder, openClimate } from './climate-rule.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -59,27 +59,28 @@ function dryland(lat, lon) {
   return d;
 }
 
-// ---- the grid of the album: the square of the chunks, CLIM_N cells a side
-const SIDE = CN * CHUNK_KM, X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM, cell = SIDE / CLIM_N;
-const N = CLIM_N * CLIM_N, wet = new Float32Array(N), summer = new Float32Array(N), warm = new Float32Array(N), year = new Float32Array(N), alpha = new Float32Array(N);
+// ---- the grid of the album: the lattice of the chunks (a square at stage 2, 192 × 280 cells at stage 3) in cells of
+// CLIM_KM — CW in a row, CH rows
+const CW = CNX * CHUNK_KM / CLIM_KM, CH = CNY * CHUNK_KM / CLIM_KM, X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM, cell = CLIM_KM;
+const N = CW * CH, wet = new Float32Array(N), summer = new Float32Array(N), warm = new Float32Array(N), year = new Float32Array(N), alpha = new Float32Array(N);
 let missing = 0;
-for (let j = 0, o = 0; j < CLIM_N; j++) for (let i = 0; i < CLIM_N; i++, o++) {
+for (let j = 0, o = 0; j < CH; j++) for (let i = 0; i < CW; i++, o++) {
   const q = llOf(X0 + (i + .5) * cell, Y0 + (j + .5) * cell), c = climateAt(q.lat, q.lon);
   if (!c) { missing++; wet[o] = NaN; continue; }
   alpha[o] = c.alpha; wet[o] = Math.max(.02, wetOfAlpha(c.alpha) - dryland(q.lat, q.lon)); summer[o] = c.summer; warm[o] = c.warm; year[o] = c.year;
 }
 if (missing) {   // (CHELSA covers land and sea alike; a hole would be filled from its neighbours)
   for (let pass = 0; pass < 64 && missing; pass++) for (let o = 0; o < N; o++) if (Number.isNaN(wet[o])) {
-    let s = [0, 0, 0, 0, 0], n = 0; const i = o % CLIM_N, j = (o / CLIM_N) | 0;
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= CLIM_N || jj >= CLIM_N) continue; const k = jj * CLIM_N + ii; if (Number.isNaN(wet[k])) continue; s[0] += wet[k]; s[1] += summer[k]; s[2] += warm[k]; s[3] += year[k]; s[4] += alpha[k]; n++; }
+    let s = [0, 0, 0, 0, 0], n = 0; const i = o % CW, j = (o / CW) | 0;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= CW || jj >= CH) continue; const k = jj * CW + ii; if (Number.isNaN(wet[k])) continue; s[0] += wet[k]; s[1] += summer[k]; s[2] += warm[k]; s[3] += year[k]; s[4] += alpha[k]; n++; }
     if (n) { wet[o] = s[0] / n; summer[o] = s[1] / n; warm[o] = s[2] / n; year[o] = s[3] / n; alpha[o] = s[4] / n; missing--; }
   }
 }
 fs.mkdirSync(OUT, { recursive: true });
-const bytes = encodeClimate({ x0: X0, y0: Y0, km: cell, wet, summer, warm, year });
+const bytes = encodeClimate({ x0: X0, y0: Y0, km: cell, w: CW, h: CH, wet, summer, warm, year });
 const gz = zlib.gzipSync(bytes, { level: 9 });
 fs.writeFileSync(path.join(OUT, 'climate.bin.gz'), gz);
-console.log(`climate.bin.gz: ${CLIM_N} × ${CLIM_N} cells of ${cell} km from (${X0}, ${Y0}) km, ${gz.length} bytes (${CLIM_MAGIC})`);
+console.log(`climate.bin.gz: ${CW} × ${CH} cells of ${cell} km from (${X0}, ${Y0}) km, ${gz.length} bytes (${CW === CH ? CLIM_MAGIC : CLIM_MAGIC_RECT})`);
 
 // ---- what the rule says of places everyone knows
 const PLACES = { 'Сантьяго': [42.88, -8.54], 'Овьедо': [43.36, -5.85], 'Бильбао': [43.26, -2.93], 'Бургос': [42.34, -3.70], 'Леон': [42.60, -5.57], 'Вальядолид': [41.65, -4.72],
@@ -102,8 +103,8 @@ if (png) {
   const sharp = (await import('sharp')).default;
   const map = async (name, a, lo, hi) => {
     const buf = Buffer.alloc(N);
-    for (let j = 0; j < CLIM_N; j++) for (let i = 0; i < CLIM_N; i++) buf[(CLIM_N - 1 - j) * CLIM_N + i] = Math.max(0, Math.min(255, Math.round((a[j * CLIM_N + i] - lo) / (hi - lo) * 255)));
-    await sharp(buf, { raw: { width: CLIM_N, height: CLIM_N, channels: 1 } }).resize(768, 768, { kernel: 'nearest' }).png().toFile(path.join(png, `climate-${name}.png`));
+    for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) buf[(CH - 1 - j) * CW + i] = Math.max(0, Math.min(255, Math.round((a[j * CW + i] - lo) / (hi - lo) * 255)));
+    await sharp(buf, { raw: { width: CW, height: CH, channels: 1 } }).resize(768, Math.round(768 * CH / CW), { kernel: 'nearest' }).png().toFile(path.join(png, `climate-${name}.png`));
   };
   await map('wet', wet, 0, 1); await map('summer', summer, 0, 1); await map('warm', warm, 10, 35); await map('alpha', alpha, 0, 1);
   console.log('check pictures in', png);

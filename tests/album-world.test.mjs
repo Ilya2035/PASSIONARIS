@@ -237,3 +237,9 @@ test('the copies of the heights made for textures are let go once the video card
   const clim = data.slice(data.indexOf('function worldClimateTexture'), data.indexOf('function worldClimateTexture') + 500);
   assert.ok(clim.length > 100 && !clim.includes('sentOnce'), 'the climate of the world keeps its array');
 });
+
+test('stage 3: the loader hands the mask of the worked land to the chunks; at stage 2 there is none', () => {
+  const data = read('../src/album/data.js');
+  assert.ok(data.includes("import { loadWorked } from './worked.js';") && data.includes('let worked = null;') && data.includes('if (STAGE >= 3) { try { worked = (await loadWorked()).at; }'));
+  assert.ok(data.includes('return { meta, base, world, worked, vectors,'), 'data.worked: (lat, lon) → 0, 1, 2 — or null');
+});

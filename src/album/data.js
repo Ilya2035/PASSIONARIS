@@ -2,7 +2,8 @@
 // that lies in the repository, public/assets/album/ground/: the climate (scripts/album/bake-ground.mjs) and the grain
 // of the ground (scripts/album/bake-ground-tiles.mjs).
 import { DataTexture, RedFormat, RGBAFormat, HalfFloatType, FloatType, UnsignedByteType, NoColorSpace, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, RepeatWrapping, DataUtils, TextureLoader } from 'three';
-import { mercX, mercY, distKm } from './geo.js';
+import { mercX, mercY, distKm, STAGE } from './geo.js';
+import { loadWorked } from './worked.js';
 import { decodeTile, windowFor, windowRect, joinWindow, tilesOf, FINE_Z, WIN } from './ground/fine.js';
 import { despike } from './ground/despike.js';
 import { loadCourses, mainRivers } from './water/courses.js';
@@ -100,8 +101,13 @@ export async function loadData(onProgress = () => {}) {
   const meta = await (await fetch(BASE + 'meta.json')).json();
   onProgress('высоты региона');
   const raw = await gunzipU16(BASE + meta.base.file);
-  despike(raw, meta.base.w, meta.base.h);                           // needles and wells of broken points on the coast (ground/despike.js)
-  fillHollows(raw, meta.base.w, meta.base.h);                       // dips below zero that the sea cannot reach are land, not ponds of sea
+  // (The base of stage 3 is written already mended — despike, mendPockets, fillHollows, in that order, by the script
+  // that bakes it — and says so in meta.json: then nothing is mended here. Mending it again would change nothing —
+  // tests/album-despike.test.mjs — but takes a second and a half on a hundred million points.)
+  if (!(meta.mended || meta.base.mended)) {
+    despike(raw, meta.base.w, meta.base.h);                         // needles and wells of broken points on the coast (ground/despike.js)
+    fillHollows(raw, meta.base.w, meta.base.h);                     // dips below zero that the sea cannot reach are land, not ponds of sea
+  }
   const base = { ...meta.base, raw, rect: rectOf(meta.base), tex: heightTexture(raw, meta.base.w, meta.base.h) };
   // bilinear height in metres on the CPU (roads, towns, rivers, picking): inside the polygon; base.at itself, set
   // below, answers for the whole Earth
@@ -124,6 +130,11 @@ export async function loadData(onProgress = () => {}) {
   // the real courses of the rivers (the water work); those who only ask where a river runs get the greater ones as lines
   const courses = await loadCourses('assets/album/water/rivers.bin.gz');
   if (courses) { vectors.riversCoarse = vectors.rivers; vectors.rivers = mainRivers(courses); }
+  // The mask of the worked land (worked.js): (lat, lon) → 0 the world, 1 worked land, 2 its water. At stage 3 the
+  // chunks are made under it alone (chunks.js; main.js hands it to them); at stage 2 there is none — every cell of
+  // the lattice has its chunk, as it always had.
+  let worked = null;
+  if (STAGE >= 3) { try { worked = (await loadWorked()).at; } catch (e) { console.warn('[album] no mask of the worked land,', e.message); } }
   onProgress('климат и земля');
   // the climate under the ground; without the file the rules fall back on the old formula (ground/climate.js)
   let climate = null;
@@ -200,5 +211,5 @@ export async function loadData(onProgress = () => {}) {
   }
   // resolves when no window is being built (captures wait for it after a jump of the camera)
   const fineIdle = () => (busy ? new Promise(r => idle.push(r)) : Promise.resolve());
-  return { meta, base, world, vectors, courses, tex, ground, climate, detail, detailFor, fineIdle, places: meta.places };
+  return { meta, base, world, worked, vectors, courses, tex, ground, climate, detail, detailFor, fineIdle, places: meta.places };
 }

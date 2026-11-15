@@ -15,7 +15,7 @@ import { ASPECT_GLSL, ASPECT_UNIFORMS } from './aspects/index.js';
 import { R, KM_PER_DEG, COS_REF, wrapLon, LAT_MAX, BBOX } from './geo.js';
 import { FKM } from './chunks.js';
 import { GROUND_TILES } from './data.js';
-import { CLIM_N, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K } from './ground/climate.js';
+import { CLIM_KM, climateTexels, WARM, WARM_WORLD, LAPSE, SNOW_WARM, SNOW_DRY, SNOW_TROPIC, TREE_WARM, TREE_DRY, TREE_SOFT, TREE_SOFT_K } from './ground/climate.js';
 import { stepTable } from './ground/steps.js';
 import { REGION_FADE, STATE_FADE, WORLD_LOD0 } from './ground/world.js';
 
@@ -675,7 +675,8 @@ export class Terrain {
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setAttribute('grid', new BufferAttribute(grid, 2)); geo.setIndex(new BufferAttribute(idx, 1));
     // the climate of the ground as one picture over the square of the chunks (ground/climate.js)
-    const cr = chunks.uniforms.uChunkRect.value, clim = new DataTexture(climateTexels(data.base.at, { x0: cr.x, y0: cr.y, side: 1 / cr.z }, data.climate), CLIM_N, CLIM_N, RGBAFormat, UnsignedByteType);
+    const cr = chunks.uniforms.uChunkRect.value, climW = Math.round(1 / cr.z / CLIM_KM), climH = Math.round(1 / cr.w / CLIM_KM);   // (the lattice of the chunks in cells of 5 km: 256 × 256 at stage 2, 384 × 560 at stage 3)
+    const clim = new DataTexture(climateTexels(data.base.at, { x0: cr.x, y0: cr.y, w: 1 / cr.z, h: 1 / cr.w }, data.climate, climW, climH), climW, climH, RGBAFormat, UnsignedByteType);
     clim.magFilter = clim.minFilter = LinearFilter; clim.wrapS = clim.wrapT = ClampToEdgeWrapping; clim.needsUpdate = true;
     this.u = {
       uBase: { value: data.base.tex }, uBaseRect: { value: new Vector4(...data.base.rect) },
