@@ -6,7 +6,13 @@
 //   G, B  where the seed of the chunk stands in its square, so that the shader finds the chunk of a point as the
 //         division does: the nearest seed
 //   A     what the nine chunks around hold: 0 no fields at all · 255 all the same as this one · 128 a mix. The first
-//         two are by far the commonest, and then the shader reads this one texel and no more
+//         two are by far the commonest, and then the shader reads this one texel and no more. The shader tells the
+//         three by two thresholds only (a < .25 none, a > .75 the same), so the six low bits are free — and they
+//         are GIVEN AWAY: once the swamp work keeps the share of swamp of every chunk (album.swamp.km), A is
+//         a base 0 · 64 · 192 for the same three states plus that share in 64 steps (mirrorSwamp()). The ground
+//         shader of the swamps reads mod(floor(a · 255 + .5), 64) / 63 there. CONTRACT with the swamp work: these six
+//         bits hold nothing else, and the rows of chunks stay as they are — a texel a chunk, chunk (i, j) at (i, j),
+//         nearest neighbour — unless its owner is told first.
 // THE PATCHES OF SETTLEMENT (rules.js) — two grids laid from the same corner of the map, below the chunks: the FINE
 // one, squares of 2.5 km, for the villages between the centres of districts (villages.js), at FINE_AT; the COARSE one,
 // squares of 10 km, for the towns (the places of the album and the centres of districts), at COARSE_AT beside it.
@@ -57,12 +63,31 @@ function seedBytes(out) {
 // The fields of the chunks into the texture. farm: { km (a byte a chunk), list (the chunks that have fields) } of
 // farmland.js; null — no fields anywhere. Only the chunks that had fields or have them now are touched.
 let farmed = new Int32Array(0), farmedIn = null;
+// A of a chunk: its state (0 no fields around · 1 a mix · 2 all the same) and, where the swamp of the chunks is known,
+// the share of swamp in the six low bits
+export const A_PLAIN = [0, 128, 255], A_BASE = [0, 64, 192], SWAMP_BITS = 6;
+export const stateOfA = a => (a < 64 ? 0 : a < 192 ? 1 : 2);
+const swampOf = new WeakMap();                                      // the swamp of the chunks written into a block of bytes last
+const codeA = (state, q, sw) => (sw ? A_BASE[state] + (sw[q] >> (8 - SWAMP_BITS)) : A_PLAIN[state]);
+// The share of swamp of the chunks of 1 km² into the texture, beside their fields. km: a byte a chunk (0..255, the
+// lattice of chunks: KN × KNY, chunk j · KN + i) — album.swamp.km of the swamp work — or null: no such array (yet),
+// and A is the plain 0 · 128 · 255 it was. Called when the array appears or changes (album.swamp.kmVersion); the
+// fields written before and after keep their state. → { changed }
+export function mirrorSwamp(km, out = farmBytes) {
+  const had = swampOf.get(out) || null; if (!km && !had) return { changed: false };
+  if (km && km.length !== KN * KNY) throw new Error(`mirrorSwamp: ${km.length} chunks given, the lattice has ${KN * KNY}`);
+  let changed = false;
+  for (let q = 0, o = 3; q < KN * KNY; q++, o += 4) { const a = codeA(stateOfA(out[o]), q, km); if (out[o] !== a) { out[o] = a; changed = true; } }
+  if (km) swampOf.set(out, km); else swampOf.delete(out);
+  return { changed };
+}
 export function mirrorFarm(farm, out = farmBytes) {
   seedBytes(out);
   const list = farm ? farm.list : new Int32Array(0), km = farm ? farm.km : null, old = farmedIn === out ? farmed : new Int32Array(0);
   for (const c of old) out[c * 4] = 0;
   for (const c of list) out[c * 4] = km[c];
-  // what the nine chunks around every chunk touched hold
+  // what the nine chunks around every chunk touched hold (and the share of swamp of the chunk stays in its six bits)
+  const sw = swampOf.get(out) || null;
   const mark = c => {
     const i = c % KN, j = (c - i) / KN;
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
@@ -72,7 +97,7 @@ export function mirrorFarm(farm, out = farmBytes) {
         const x = u + a, y = v + b, f = x < 0 || y < 0 || x >= KN || y >= KNY ? 0 : out[(y * KN + x) * 4];
         if (f) any = true; if (f !== own) same = false;
       }
-      out[q * 4 + 3] = !any ? 0 : same ? 255 : 128;
+      out[q * 4 + 3] = codeA(!any ? 0 : same ? 2 : 1, q, sw);
     }
   };
   for (const c of old) mark(c);
@@ -84,7 +109,7 @@ export function mirrorFarm(farm, out = farmBytes) {
 // aspects/settle.js): the chunk whose seed is nearest, the step to the chunks around softened.
 export function farmAt(x, y, bytes = farmBytes) {
   const tx = (x - KX0) / KKM, ty = (y - KY0) / KKM, i = Math.floor(tx), j = Math.floor(ty); if (i < 0 || j < 0 || i >= KN || j >= KNY) return 0;
-  const o = (j * KN + i) * 4, code = bytes[o + 3]; if (code === 0 || code === 255) return bytes[o] / 255;
+  const o = (j * KN + i) * 4, state = stateOfA(bytes[o + 3]); if (state !== 1) return bytes[o] / 255;   // (by the same two thresholds as the shader: the low bits of A are the swamp's)
   const fx = tx - i, fy = ty - j; let sum = 0, all = 0;
   for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
     const q = (Math.max(0, Math.min(KNY - 1, j + b)) * KN + Math.max(0, Math.min(KN - 1, i + a))) * 4, vx = a + bytes[q + 1] / 255 - fx, vy = b + bytes[q + 2] / 255 - fy, w = Math.exp(-FARM_SOFT * (vx * vx + vy * vy));

@@ -20,7 +20,7 @@ import { kmOf, llOf } from '../chunks.js';
 import { smoothLine, makeRibbons } from './ribbon.js';
 import { roadLine } from '../roads/routes.js';
 import { cellSize, cultureAt, rankOf, midOf, wallAt, CELL, PALETTE_GLSL, GX0, GY0, WALL_FROM, passesOfDistrict, passRank, CULTURES, fineOf } from '../town/rules.js';
-import { settleTex, settleUniforms, setTilt, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, farmAt, packAtlas } from '../town/state.js';
+import { settleTex, settleUniforms, setTilt, mirrorSettle, mirrorVillages, mirrorGates, mirrorFarm, mirrorSwamp, farmAt, packAtlas } from '../town/state.js';
 import { farmGround, farmWithCells, farmOfDistricts, HA_PER_PERSON } from '../town/farmland.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE } from '../town/villages.js';
 import { loadPlaceNames, namePlaces } from '../town/sites.js';
@@ -259,7 +259,7 @@ export default async function init(album) {
   applyGrowth(true);
 
   // ---- the mirror of the chunk state for the shaders, and the patches for the plan
-  let lobes = [], seen = -1, mirrorN = 0, farmSig = '', farmSeen = -1, farmShown = null, farmV = 0, farmPer = null;
+  let lobes = [], seen = -1, mirrorN = 0, farmSig = '', farmSeen = -1, farmShown = null, farmV = 0, farmPer = null, swampSeen = 0;
   function mirror() {
     // (the yards of the hospices at the great passes go to the ground shader as patches of their own: bare ground, no forest)
     const yardsOfPasses = hospices.map(q => { const y = hospiceYard(q, q.dir, CELL, at), ll = llOf(y.x, y.y); return { x: y.x, y: y.y, R: y.r, fine: fineOf(y.x, y.y), home: ch.at(ll.lat, ll.lon) }; });
@@ -535,6 +535,10 @@ export default async function init(album) {
       if (spts.visible) { if (!sitesDrawn) drawSites(); smat.uniforms.uPx.value = Math.max(5, Math.min(13, 900 / cam.s.h)) * (album.renderer.getPixelRatio?.() || 1); }
       if ((album.roadNet || null) !== roadSeen) indexRoads();        // the roads have been laid (or laid anew): the gates of the towns follow them
       if (ch.version !== seen || farmN !== farmSeen || roadN !== roadMirrored) { seen = ch.version; farmSeen = farmN; roadMirrored = roadN; mirror(); }
+      // The share of swamp of every chunk of 1 km² rides in the six low bits of A of the rows of chunks (town/state.js
+      // mirrorSwamp). The swamp work keeps the array — album.swamp.km, a byte a chunk — and counts its changes in
+      // album.swamp.kmVersion; it appears after the division is built, so the version is watched here. No array yet: nothing is written.
+      { const sw = album.swamp, sv = sw?.km ? sw.kmVersion | 0 : 0; if (sv !== swampSeen) { swampSeen = sv; if (mirrorSwamp(sv > 0 ? sw.km : null).changed) settleTex.needsUpdate = true; } }
       const h = cam.s.h, kH = p.get('houses'), on = !!p.get('towns'), flat = ['paper', 'atlas', 'night'].includes(p.get('look')), dom = album.renderer.domElement;
       const S = cellSize(h, kH || 1), view = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360), cells = S / (view / Math.max(1, dom.height));   // a block in pixels of the picture
       // blocks stand while a block is a few pixels wide; smaller than that the ground alone shows the settlement

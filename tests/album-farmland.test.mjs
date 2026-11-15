@@ -18,7 +18,7 @@ import { GN, GNY, VN, VNY, GK, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, FARM_SOFT, 
 import { farmGround, farmRun, farmWithCells, farmOfDistricts, HA_PER_PERSON, FARM_CAP, FARM_HIGH, FARM_WET, FARM_REACH, FARM_LEAST, FARM_PATCH, FARM_LOBES, FARM_CLIMB, FARM_FADE, farmPatch, farmWay, farmBand, farmShare } from '../src/album/town/farmland.js';
 import { growTowns, centrePlaces, reachOf, FIELD_FLOOR, FELL_FROM, FELL } from '../src/album/town/grow.js';
 import { districtSites, villagePlaces, GOOD } from '../src/album/town/villages.js';
-import { mirrorFarm, farmAt, farmBytes, atlasBytes, settleTex } from '../src/album/town/state.js';
+import { mirrorFarm, mirrorSwamp, farmAt, farmBytes, atlasBytes, settleTex, A_PLAIN, A_BASE, SWAMP_BITS, stateOfA } from '../src/album/town/state.js';
 import { landOfAlbum, farmRank } from '../src/album/save/land.js';
 import settle, { FIELD_H } from '../src/album/aspects/settle.js';
 import { STAGE } from '../src/album/geo.js';
@@ -240,6 +240,42 @@ test('farmland in the album: the shader draws the fields from the chunks; the kn
   const km = DEFS.find(d => d.key === 'km'); assert.deepEqual(km.options[4], [4, 'угодья']);
   assert.match(division.glsl, /uDivKm == 4 && kf\.z > 0/); assert.match(division.glsl, /ivec3 kmFacts\(ivec2 q\)/);
   for (const id of ['km-farm', 'km-farm-natural']) { const pg = PAGES.find(p => p.id === id); assert.ok(pg && pg.p.km === 4 && pg.note.length > 60, id); }
+});
+
+test('farmland and the swamp of the chunks: the share of swamp rides in the six low bits of A — the fields, their states and the shader stay as they were', () => {
+  const n = KN * KNY, out = new Uint8Array(n * 4), m = growTowns(ch, [place(-205, 4405, 650000)], 1, at), f = m.farm, t = m.towns[0];
+  mirrorFarm(f, out); const plain = out.slice(), same = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
+  // no array of the swamp (yet): nothing is written, the bytes are the plain 0 · 128 · 255
+  assert.deepEqual(mirrorSwamp(null, out), { changed: false }); assert.ok(same(out, plain));
+  // a swamp of every share: chunk c holds (c · 7) mod 256
+  const km = new Uint8Array(n); for (let c = 0; c < n; c++) km[c] = (c * 7) % 256;
+  assert.ok(mirrorSwamp(km, out).changed);
+  let bad = 0, states = [0, 0, 0];
+  for (let c = 0; c < n; c++) {
+    const o = c * 4, a = out[o + 3], s = stateOfA(a), x = a / 255; states[s]++;
+    if (s !== A_PLAIN.indexOf(plain[o + 3]) || a !== A_BASE[s] + (km[c] >> 2) || a % 64 !== km[c] >> 2) bad++;       // the state kept, the share in the low bits: what the shader of the swamps reads
+    if (out[o] !== plain[o] || out[o + 1] !== plain[o + 1] || out[o + 2] !== plain[o + 2]) bad++;                    // the fields and the seeds untouched
+    if ((x < .25 ? 0 : x > .75 ? 2 : 1) !== s) bad++;                                                                // the two thresholds of the ground shader tell the three states as before
+  }
+  assert.equal(bad, 0); assert.ok(states[0] > 0 && states[1] > 0 && states[2] > 0, `states ${states}`);
+  assert.equal(SWAMP_BITS, 6); assert.deepEqual(A_BASE, [0, 64, 192]); assert.deepEqual(A_PLAIN, [0, 128, 255]);
+  assert.ok((A_BASE[0] + 63) / 255 < .25 && A_BASE[1] / 255 > .25 && (A_BASE[1] + 63) / 255 < .75 && A_BASE[2] / 255 > .75 && A_BASE[2] + 63 === 255, 'the three ranges lie on their sides of the thresholds');
+  assert.ok(settle.glsl.includes('if (o.a < .25 || o.a > .75) return o.r;'), 'the ground shader of the settlements reads A by its two thresholds, and no other way');
+  // the twin of the shader reads the same fields with the swamp in the bits
+  for (const [dx, dy] of [[0, 0], [40, 0], [3, 2], [-6, 4], [9, -7], [12, 12]]) assert.equal(farmAt(t.x + dx, t.y + dy, out), farmAt(t.x + dx, t.y + dy, plain));
+  // the fields change: the states follow, the swamp stays in its bits
+  const less = growTowns(ch, [place(-205, 4405, 650000)], .4, at).farm; mirrorFarm(less, out);
+  const ref = new Uint8Array(n * 4); mirrorFarm(less, ref); bad = 0;
+  for (let c = 0; c < n; c++) { const o = c * 4; if (out[o] !== ref[o] || stateOfA(out[o + 3]) !== stateOfA(ref[o + 3]) || out[o + 3] % 64 !== km[c] >> 2) bad++; }
+  assert.equal(bad, 0);
+  // the swamp changes in place (a new version of the array): written again
+  const home = sq(t.x, t.y); km[home] = 255; assert.ok(mirrorSwamp(km, out).changed); assert.equal(out[home * 4 + 3] % 64, 63); assert.deepEqual(mirrorSwamp(km, out), { changed: false });
+  // the array is gone: the plain bytes again
+  assert.ok(mirrorSwamp(null, out).changed); bad = 0; for (let c = 0; c < n; c++) if (out[c * 4 + 3] !== ref[c * 4 + 3]) bad++; assert.equal(bad, 0);
+  assert.throws(() => mirrorSwamp(new Uint8Array(5), out), /the lattice has/);
+  // the layer watches the version the swamp work counts; with no array it writes nothing
+  const src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('{ const sw = album.swamp, sv = sw?.km ? sw.kmVersion | 0 : 0; if (sv !== swampSeen) { swampSeen = sv; if (mirrorSwamp(sv > 0 ? sw.km : null).changed) settleTex.needsUpdate = true; } }'));
 });
 
 const data = loadAlbumData(ROOT), skip = !data && 'public/album-data/ is not there';
