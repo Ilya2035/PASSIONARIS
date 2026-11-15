@@ -2,7 +2,10 @@
 //   rivers   ways waterway=river — the real courses, in the direction of the flow
 //   banks    outlines of river water (natural=water + water=river, waterway=riverbank) — how wide a river really is
 //   beaches  natural=beach
-//   places   nodes place=city|town|village|hamlet with their names and people
+//   places   nodes place=city|town|village|hamlet with their names and people (fr, en, es: the French, the English
+//            and the Spanish name where the data has one that differs from the name — a name in Arabic script has no
+//            short vowels, and the settlements read it in Latin letters; they asked for it, 16.11.2026. The north of
+//            Morocco has its Latin names in Spanish only: 1048 of the 1100 places left without a French or English one)
 //   admin    administrative borders of levels 4, 6 and 7 as relations of ways
 // Each extract → data/album/osm/extract/<name>.<what>.json.gz (gitignored). Coordinates are whole microdegrees,
 // [lon, lat, lon, lat, …]. The PBF format is read by hand: no dependencies.
@@ -32,7 +35,7 @@ export function extractsFault() {
   return stale.length ? `${stale.length} extracts in ${OUT_DIR} were cut for another region (${stale.slice(0, 6).join(', ')}${stale.length > 6 ? ', …' : ''})` + again : '';
 }
 const PLACE = new Set(['city', 'town', 'village', 'hamlet']);
-const WANT = ['waterway', 'natural', 'water', 'name', 'name:ru', 'name:es', 'intermittent', 'place', 'population', 'boundary', 'admin_level', 'type', 'tunnel'];
+const WANT = ['waterway', 'natural', 'water', 'name', 'name:ru', 'name:es', 'name:fr', 'name:en', 'intermittent', 'place', 'population', 'boundary', 'admin_level', 'type', 'tunnel'];
 
 // ---- protobuf
 let B, P;
@@ -142,7 +145,9 @@ function extract(name, file) {
           if (!kv[q]) { q++; j++; continue; }
           let t = null, q0 = q; while (kv[q]) { if (kv[q] === bl.key.place) t = {}; q += 2; }
           if (t) { for (let x = q0; x < q; x += 2) for (const w of WANT) if (bl.key[w] === kv[x]) t[w] = bl.str(kv[x + 1]);
-            if (PLACE.has(t.place)) places.push({ t: t.place, name: t.name || '', ru: t['name:ru'] || '', pop: parseInt(t.population, 10) || 0, lat: Math.round(nla[j] * sc), lon: Math.round(nlo[j] * sc) }); }
+            if (PLACE.has(t.place)) { const pl = { t: t.place, name: t.name || '', ru: t['name:ru'] || '', pop: parseInt(t.population, 10) || 0, lat: Math.round(nla[j] * sc), lon: Math.round(nlo[j] * sc) };
+              for (const [k, tag] of [['fr', 'name:fr'], ['en', 'name:en'], ['es', 'name:es']]) if (t[tag] && t[tag] !== pl.name) pl[k] = t[tag];       // only where it says something the name does not
+              places.push(pl); } }
           q++; j++;
         }
       }
