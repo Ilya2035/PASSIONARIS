@@ -46,7 +46,7 @@ export const POOR = 2.1;                           // a leg that costs this many
 // to a centre passes another centre within `by` km, the leg ends there: the road goes through that town, not past it
 // (top: where a leg was shaped, a pass of history is the highest point of the fine way within this many km of its point)
 export const PASS = { rise: 120, reach: 40, keep: 1.2, by: 2, top: 1 };
-export const NET_ALGO = 6;                         // changes whenever the rules above do: a kept network of another number is laid anew
+export const NET_ALGO = 7;                         // changes whenever the rules above do: a kept network of another number is laid anew
 const NB = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
 const texelOf = (x, y) => { const tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM); return tx < 0 || ty < 0 || tx >= FN || ty >= FN ? -1 : ty * FN + tx; };
 const xyOf = t => [X0 + (t % FN + .5) * FKM, Y0 + (Math.floor(t / FN) + .5) * FKM];
@@ -60,6 +60,63 @@ export function roadGround(div) {
 export function stepCost(G, t, u, diag) {
   const d = diag ? 1.4142 : 1, s = Math.abs(G.hgt[u] - G.hgt[t]) / (d * FKM * 1000);
   return d * FKM * (1 + STEEP[0] * s + STEEP[1] * s * s) * (1 + G.hgt[u] * HIGH) + (G.riv[u] > 0 ? (G.riv[t] === 0 ? CROSSING[G.riv[u]] : ALONG) : 0);
+}
+// The price of the same step for one who looks at the ground itself (the owner, 15.11.2026, of the tracks: «может
+// быть каньон, и через каньон может идти дорога. Вниз, а потом просто вверх. Но люди так не ходят»). stepCost() sees
+// the heights at the middles of two chunks; a canyon or a gully between them it does not see. Here the ground is
+// read every WALK.probe km of the step — at(x, y) → metres on the flat km plane — and the step is dearer by
+//   • every metre climbed and come down again that the two middles do not show (WALK.climb km of way a metre);
+//   • every stretch steeper than a track takes willingly (WALK.grade): as a fine way pays for it (roads/shape.js).
+// On an even slope it is the price of stepCost(). For the ways of a walker: the tracks to the villages, the way of a
+// village to the main road. (Each call reads the ground four or six times: keep what it gives if you ask again.)
+export const WALK = { probe: .25, climb: .028, grade: .18, over: 32 };
+export function walkCost(G, t, u, diag, at) {
+  const ax = X0 + (t % FN + .5) * FKM, ay = Y0 + (Math.floor(t / FN) + .5) * FKM, bx = X0 + (u % FN + .5) * FKM, by = Y0 + (Math.floor(u / FN) + .5) * FKM;
+  const run = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(run / WALK.probe)), len = run / n; let last = at(ax, ay), first = last, walked = 0, steep = 0;
+  for (let k = 1; k <= n; k++) { const h = at(ax + (bx - ax) * k / n, ay + (by - ay) * k / n), d = Math.abs(h - last), over = d / (len * 1000 * WALK.grade) - 1; walked += d; if (over > 0) steep += len * WALK.over * over * over; last = h; }
+  return stepCost(G, t, u, diag) + WALK.climb * Math.max(0, walked - Math.abs(last - first)) + steep;
+}
+// Which chunks carry a road: for every chunk the greatest road that runs through it — 3 a main road, 2 a lesser one,
+// 1 a track, 0 none (the levels of roads/infra.js). legs: of roadNetwork(); a leg that was shaped is followed along
+// its fine way, the rest chunk by chunk.
+export function chunkKinds(legs) {
+  const out = new Uint8Array(FN * FN);
+  for (const L of legs) { if (L.kind === 3 || !L.path) continue; const v = 3 - L.kind;
+    if (L.fine) for (const c of L.fine) { const t = cellChunk(c); if (out[t] < v) out[t] = v; } else for (const t of L.path) if (out[t] < v) out[t] = v; }
+  return out;
+}
+// The way from a place to the nearest main road (the owner, 15.11.2026: «Деревня находится на высокогорье… где можно
+// поселиться, но нельзя дойти до основной дороги. Надо аккуратненько проложить до основной дороги маршрут. И деревня
+// должна рассчитывать, сколько ей до главной дороги. Это очень важно… если нельзя проложить дорогу, то хорошо, просто
+// не прокладываем»). The cheapest way over the land from chunk t0: a step over open ground costs what a walker pays
+// (walkCost when `at` is given, else stepCost); a step along a road or a track that is there costs TO_MAIN.road of
+// its length — the way goes down to the nearest road and follows the roads. It ends at the first chunk of a main
+// road. on: chunkKinds().
+// → { km (the length of the way), cost (km of level ground it is worth), road (km of it along roads that are there),
+//     path: [chunks, from the place to the main road] }, or null: no main road within TO_MAIN.reach km of way, or the
+//   way is dearer than HARD times its length — it cannot be laid
+export const TO_MAIN = { reach: 90, road: .6, box: 70 };
+export function wayToMain(G, t0, on, at = null) {
+  if (t0 < 0 || !G.land[t0]) return null;
+  if (on[t0] === 3) return { km: 0, cost: 0, road: 0, path: [t0] };
+  const ax = t0 % FN, ay = (t0 - ax) / FN, R = Math.ceil(TO_MAIN.box / FKM), x0 = Math.max(0, ax - R), x1 = Math.min(FN - 1, ax + R), y0 = Math.max(0, ay - R), y1 = Math.min(FN - 1, ay + R);
+  const stamp = ++G.stamp, heap = G.heap; heap.clear(); G.g[t0] = 0; G.mark[t0] = stamp; G.from[t0] = -1; heap.push(0, t0); let end = -1;
+  while (heap.n) {
+    const t = heap.pop(); if (G.done[t] === stamp) continue; G.done[t] = stamp; if (on[t] === 3) { end = t; break; }
+    const tx = t % FN, ty = (t - tx) / FN, gt = G.g[t]; if (gt > TO_MAIN.reach * HARD) break;
+    for (let q = 0; q < 16; q += 2) {
+      const ux = tx + NB[q], uy = ty + NB[q + 1]; if (ux < x0 || uy < y0 || ux > x1 || uy > y1) continue;
+      const u = uy * FN + ux; if (!G.land[u] || G.done[u] === stamp) continue;
+      const c = gt + (on[t] && on[u] ? (q >= 8 ? 1.4142 : 1) * FKM * TO_MAIN.road : at ? walkCost(G, t, u, q >= 8, at) : stepCost(G, t, u, q >= 8));
+      if (G.mark[u] !== stamp || c < G.g[u]) { G.g[u] = c; G.mark[u] = stamp; G.from[u] = t; heap.push(c, u); }
+    }
+  }
+  if (end < 0) return null;
+  const path = []; let km = 0, road = 0, open = 0, openKm = 0;
+  for (let t = end; t >= 0; t = G.from[t]) { path.push(t); const f = G.from[t]; if (f < 0) break; const len = (Math.abs(t - f) === 1 || Math.abs(t - f) === FN ? 1 : 1.4142) * FKM; km += len; if (on[t] && on[f]) road += len; else { open += G.g[t] - G.g[f]; openKm += len; } }
+  path.reverse();
+  if (km > TO_MAIN.reach || open > HARD * openKm + 6) return null;                 // too far, or the ground between the place and the roads is impassable
+  return { km, cost: G.g[end], road, path };
 }
 // where a path steps onto a river: the chunks of its crossings
 const crossingsOf = (G, path) => { const out = []; for (let i = 1; i < path.length; i++) if (G.riv[path[i]] > 0 && G.riv[path[i - 1]] === 0) out.push(path[i]); return out; };
@@ -287,21 +344,23 @@ export function roadNetwork(div, centres, places = [], G = roadGround(div), opts
 }
 // The passes of the network: for every leg that is a road, the highest point of its way where that stands PASS.rise
 // metres over both its ends (the leg crosses a crest between its two districts); for a leg led over a pass of
-// history, that pass. A leg that was shaped is measured along its fine way, by heightAt(lat, lon).
+// history, that pass. A leg that was shaped is measured along its fine way, by heightAt(lat, lon): the highest
+// ground on the line from each of its cells to the next (a point every 50 m — the crest is crossed between two cells).
 // → [{ x, y (flat km), h (metres), name ('' unless a pass of history), kind (of the road: 0 main,
 // 1 lesser, 2 track), a, b (the districts on both sides), rank (0 a pass of history, 1 of a main road, 2 other), leg }]
 export function passesOf(G, legs, heightAt = null) {
-  const out = [], hOf = c => { const q = cellXY(c), g = llOf(q[0], q[1]); return heightAt(g.lat, g.lon); };
+  const out = [];
   legs.forEach((L, i) => {
     if (L.kind === 3 || !L.path) return;
-    const fine = heightAt && L.fine ? L.fine : null, p = fine || L.path, n = p.length, hAt = fine ? hOf : t => G.hgt[t]; let top = -1, h = -Infinity;
+    const fine = heightAt && L.fine ? L.fine : null, p = fine || L.path, n = p.length; let top = -1, h = -Infinity;
+    const hAt = fine ? j => { const a = cellXY(p[j]), b = cellXY(p[Math.min(n - 1, j + 1)]); let m = -Infinity; for (let k = 0; k < 4; k++) { const g = llOf(a[0] + (b[0] - a[0]) * k / 4, a[1] + (b[1] - a[1]) * k / 4), v = heightAt(g.lat, g.lon); if (v > m) m = v; } return m; } : j => G.hgt[p[j]];
     if (L.pass && fine) {                                         // the top of the fine way by the point of the pass; failing that, its cell nearest to the point
       let near = -1, least = Infinity;
-      for (let j = 0; j < n; j++) { const q = cellXY(p[j]), far = Math.hypot(q[0] - L.pass.x, q[1] - L.pass.y); if (far < least) { least = far; near = j; } if (far <= PASS.top) { const v = hAt(p[j]); if (v > h) { h = v; top = j; } } }
-      if (top < 0) { top = near; h = hAt(p[top]); }
+      for (let j = 0; j < n; j++) { const q = cellXY(p[j]), far = Math.hypot(q[0] - L.pass.x, q[1] - L.pass.y); if (far < least) { least = far; near = j; } if (far <= PASS.top) { const v = hAt(j); if (v > h) { h = v; top = j; } } }
+      if (top < 0) { top = near; h = hAt(top); }
     }
-    else if (L.pass) { top = p.indexOf(L.pass.t); if (top < 0) return; h = hAt(p[top]); }
-    else { for (let j = 1; j < n - 1; j++) { const v = hAt(p[j]); if (v > h) { h = v; top = j; } } if (top < 0 || h - Math.max(hAt(p[0]), hAt(p[n - 1])) < PASS.rise) return; }
+    else if (L.pass) { top = p.indexOf(L.pass.t); if (top < 0) return; h = hAt(top); }
+    else { for (let j = 1; j < n - 1; j++) { const v = hAt(j); if (v > h) { h = v; top = j; } } if (top < 0 || h - Math.max(hAt(0), hAt(n - 1)) < PASS.rise) return; }
     const [x, y] = fine ? cellXY(p[top]) : xyOf(p[top]); out.push({ x, y, h: Math.round(h), name: L.pass ? L.pass.name : '', kind: L.kind, a: L.a, b: L.b, rank: L.pass ? 0 : L.kind === 0 ? 1 : 2, leg: i });
   });
   return out.sort((p, q) => p.rank - q.rank || q.h - p.h || p.leg - q.leg);

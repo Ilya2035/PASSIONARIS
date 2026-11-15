@@ -9,6 +9,13 @@
 //     turns back — the bends of a mountain road. Turning costs a little, so the way does not wriggle.
 //   • The rivers are the real courses here, not the chunks they run through: a road keeps a step off the water, on
 //     the floor of the valley, and crosses where it must.
+//   • A cell is as high as its lowest ground (a road through it takes its lowest line), and a cell beside a river is
+//     its BANK: it stands a few metres over the water, whatever wall of a gorge rises in it. So a road finds its way
+//     through a gorge by the river, not over the rocks beside it; it is then drawn on that bank (roads/banks.js).
+//   • Which legs are laid fine is told by the real ground along their way, not only by the heights of the chunks: a
+//     canyon between the middles of two chunks is seen, and the track that would have run straight down into it and
+//     up again (the owner, 15.11.2026: «через каньон… вниз, а потом просто вверх. Но люди так не ходят») goes
+//     aslant, with bends, or round its head.
 // Plain JavaScript without the GPU: the same land always gives the same shape. The plains are not touched.
 import { KN, KKM } from '../division/km.js';
 import { Heap } from '../division/graph.js';
@@ -18,6 +25,8 @@ export const FINE = {
   step: .2,                          // km: the step of a fine way
   wide: 1.5,                         // km: how far from the way of the leg (chunk by chunk) the fine way may go
   slope: .08, range: 300,            // a leg climbs where a step of its way rises this much (rise over run) or its top stands this many metres over its lowest point
+  steep: 1.5, probe: .25,            // … or where `probe` km of the real ground along it are this many times steeper than the willing grade of its road
+  bank: 3,                           // metres over the water: where a cell beside a river is taken to stand
   grade: [.09, .11, .18],            // the steepest grade a main road, a lesser road, a track takes willingly
   cost: [.7, .8, 32],                // a step at r times the willing grade is 1 + .7 r + .8 r² times dearer, and 32 (r − 1)² more beyond it
   turn: .01, hairpin: .25,           // km of way for turning by a sixteenth of a circle (by two: four times that); for any sharper turn — a hairpin
@@ -65,14 +74,39 @@ export function fineRivers(courses, min = .004) {
   return bits;
 }
 
-// does the way of a leg (chunk by chunk) climb — is it a leg of the mountains?
-export function climbs(G, path) {
+// does the way of a leg (chunk by chunk) climb — is it a leg of the mountains? at(x, y) → metres on the flat km
+// plane (may be left out: then only the heights of the chunks tell); kind: of its road
+export function climbs(G, path, at = null, kind = 0) {
   let lo = Infinity, hi = -Infinity;
   for (let j = 0; j < path.length; j++) {
     const h = G.hgt[path[j]]; if (h < lo) lo = h; if (h > hi) hi = h;
     if (j) { const e = Math.abs(path[j] - path[j - 1]), run = (e === 1 || e === KN ? 1 : 1.4142) * KKM * 1000; if (Math.abs(h - G.hgt[path[j - 1]]) >= FINE.slope * run) return true; }
   }
-  return hi - lo >= FINE.range;
+  if (hi - lo >= FINE.range) return true;
+  if (!at) return false;
+  // the real ground between the middles of the chunks: a gully, a canyon, the edge of a tableland
+  const most = FINE.steep * (FINE.grade[kind] ?? FINE.grade[2]) * FINE.probe * 1000; let last = 0;
+  for (let j = 1; j < path.length; j++) {
+    const a = path[j - 1], b = path[j], ax = X0 + (a % KN + .5) * KKM, ay = Y0 + (Math.floor(a / KN) + .5) * KKM, bx = X0 + (b % KN + .5) * KKM, by = Y0 + (Math.floor(b / KN) + .5) * KKM, n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / FINE.probe));
+    for (let k = j > 1 ? 1 : 0; k <= n; k++) { const h = at(ax + (bx - ax) * k / n, ay + (by - ay) * k / n); if ((j > 1 || k) && Math.abs(h - last) >= most * Math.hypot(bx - ax, by - ay) / n / FINE.probe) return true; last = h; }
+  }
+  return false;
+}
+
+// How high a fine cell stands for a road. heightAt(x, y) → metres on the flat km plane; rivers: fineRivers() or null.
+//   • its lowest ground: the middle of the cell and four points a third of a step from it — a road through a cell
+//     takes its lowest line;
+//   • a cell beside a river is its bank: FINE.bank metres over the lowest ground of the river cells it touches,
+//     whatever wall of a gorge rises in it. A road there runs by the water (and is drawn so: roads/banks.js).
+// → (i, j: the column and row of the cell) → metres
+export function cellGround(heightAt, rivers = null) {
+  const bit = (i, j) => (i < 0 || j < 0 || i >= FW || j >= FW ? 0 : (rivers[chunkOf(i, j)] >> ((j % K) * K + (i % K))) & 1);
+  const floor = (i, j) => { const x = X0 + (i + .5) * F, y = Y0 + (j + .5) * F, e = F / 3; return Math.min(heightAt(x, y), heightAt(x - e, y - e), heightAt(x + e, y - e), heightAt(x - e, y + e), heightAt(x + e, y + e)); };
+  return (i, j) => {
+    let h = floor(i, j); if (!rivers || bit(i, j)) return h;
+    let low = Infinity; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if ((di || dj) && bit(i + di, j + dj)) low = Math.min(low, floor(i + di, j + dj));
+    return low + FINE.bank < h ? low + FINE.bank : h;
+  };
 }
 
 // everything the search keeps between legs: it grows to the largest leg and is told apart by stamps, never cleared
@@ -101,10 +135,11 @@ export function fineWay(G, path, ends, kind, heightAt, rivers = null) {
       if ((i + .5 - cx) * (i + .5 - cx) + (j + .5 - cy) * (j + .5 - cy) <= R * R) S.in[j * w + i] = leg;
   }
   // what a cell is like: its height; flag 1 a river runs through it, 2 it is land, and the size of the river above that
+  const ground = cellGround(heightAt, rivers);
   const look = c => {
     if (S.seen[c] === leg) return; S.seen[c] = leg;
     const i = c % w + i0, j = (c - c % w) / w + j0, t = chunkOf(i, j), riv = rivers ? (rivers[t] >> ((j % K) * K + (i % K))) & 1 : G.riv[t] > 0 ? 1 : 0;
-    S.flag[c] = riv | (G.land[t] ? 2 : 0) | (G.riv[t] << 2); S.hgt[c] = heightAt(X0 + (i + .5) * F, Y0 + (j + .5) * F);
+    S.flag[c] = riv | (G.land[t] ? 2 : 0) | (G.riv[t] << 2); S.hgt[c] = ground(i, j);
   };
   const gmax = FINE.grade[kind] ?? FINE.grade[2], [c1, c2, c3] = FINE.cost, heap = S.heap, out = [];
   for (let e = 1; e < ends.length; e++) {
@@ -147,7 +182,7 @@ export const legKey = L => L.kind + '|' + L.path.join(',');
 export function shapeLegs(G, legs, centres, heightAt, courses = null, llOf, reuse = null) {
   const at = (x, y) => { const p = llOf(x, y); return heightAt(p.lat, p.lon); }; let n = 0, reused = 0, rivers;
   for (const L of legs) {
-    L.fine = null; if (L.kind === 3 || !L.path || !climbs(G, L.path)) continue;
+    L.fine = null; if (L.kind === 3 || !L.path || !climbs(G, L.path, at, L.kind)) continue;
     const A = [centres.x[L.a], centres.y[L.a]], B = [centres.x[L.b], centres.y[L.b]], had = reuse ? reuse.get(legKey(L)) : null;
     if (had && had[0] === cellOf(A[0], A[1]) && had[had.length - 1] === cellOf(B[0], B[1])) { L.fine = had; n++; reused++; continue; }
     if (rivers === undefined) rivers = courses ? fineRivers(courses) : null;

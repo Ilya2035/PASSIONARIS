@@ -65,9 +65,13 @@ vec3 groundLight(vec2 ll, float px) {
 // cleared strip in the woods — a ride: wider than the verge of open land, the colour of grass among the trees.
 // A road is drawn right after the ground and before the water (the rivers and lakes are laid over it, a bridge over
 // them); a mark is drawn last, over everything.
+// bank (of a line): for every point null, or [nx, ny, w, off] — the point lies on the bank of a river (roads/banks.js):
+// the way from the water (a unit vector, east and north), the width of the water km, how far the point is from the
+// middle of the river km. From high up a river is drawn wider than life; such a point then moves aside with it.
 export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash = 0, lift = .004, ground = lift <= .006, verge = 1, vergeColour = 0x6f6a42, vergeAlpha = .5, sea = true, woods = .8, rideColour = 0x58803c } = {}) {
   let n = 0; for (const l of lines) n += l.pts.length;
   const ll = new Float32Array(n * 4), dir = new Float32Array(n * 4), side = new Float32Array(n * 2), wk = new Float32Array(n * 4), fd = new Float32Array(n * 2), pos = new Float32Array(n * 6), idx = [];
+  const bk = ground && lines.some(l => l.bank) ? new Float32Array(n * 8) : null;
   let v = 0;
   for (const l of lines) {
     let dist = 0;
@@ -77,6 +81,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
       if (i) dist += Math.hypot((p[0] - l.pts[i - 1][0]) * c, p[1] - l.pts[i - 1][1]) * KM_PER_DEG;
       for (let s = 0; s < 2; s++, v++) {
         ll[v * 2] = p[1]; ll[v * 2 + 1] = p[0]; dir[v * 2] = dx; dir[v * 2 + 1] = dy; side[v] = s ? 1 : -1; wk[v * 2] = l.width; wk[v * 2 + 1] = dist; fd[v] = l.fade ? l.fade[i] : 1;
+        if (bk && l.bank && l.bank[i]) bk.set(l.bank[i], v * 4);
       }
       if (i) { const k = v - 4; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
     }
@@ -84,9 +89,11 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   const geo = new BufferGeometry();
   geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setAttribute('aLL', new BufferAttribute(ll, 2)); geo.setAttribute('aDir', new BufferAttribute(dir, 2));
   geo.setAttribute('aSide', new BufferAttribute(side, 1)); geo.setAttribute('aW', new BufferAttribute(wk, 2)); geo.setAttribute('aFade', new BufferAttribute(fd, 1)); geo.setIndex(idx);
+  if (bk) geo.setAttribute('aBank', new BufferAttribute(bk, 4));
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T),
     uPx: { value: .1 }, uK: { value: 1 }, uMinPx: { value: minPx }, uColour: { value: new Color(colour) }, uDash: { value: dash }, uLift: { value: lift }, uAlpha: { value: 1 },
+    uRiver: { value: [0, 0, 0] }, uRiverLeast: { value: [.42, 1.3] },   // the least width of a river as drawn km, how far the rule of the middle heights is in force, the «Ширина рек» knob · that rule (layers/rivers.js, MID.least)
     uMesh: { value: [40, -3, 1, .03] }, uVerge: { value: Math.max(1, verge) }, uVergeCol: { value: new Color(vergeColour) }, uVergeA: { value: vergeAlpha }, uSea: { value: sea ? 1 : 0 }, uDim: { value: .5 }, uWoods: { value: ground ? woods : 0 }, uRideCol: { value: new Color(rideColour) }, uNear: { value: 1 }, ...(ground ? album.chunks.uniforms : {}),
     // (albumWet() of glsl.js may read the baked climate: the ground shader brings these two for it, when it has them)
     ...(ground && T.tClimate ? { tClimate: T.tClimate, uClimRect: T.uClimRect } : {}) };
@@ -95,6 +102,7 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
     uniforms, transparent: false, blending: CustomBlending, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, depthWrite: false, side: DoubleSide,
     vertexShader: `${COMMON}
       attribute vec2 aLL, aDir, aW; attribute float aSide, aFade; uniform float uPx, uK, uMinPx, uLift, uVerge; uniform vec4 uMesh;   // uMesh: the point the camera looks at (lat, lon), the finest cell of the ground grid km, the least pull km
+      ${bk ? 'attribute vec4 aBank; uniform vec3 uRiver; uniform vec2 uRiverLeast;' : ''}
       varying float vX, vRoad, vDist, vFade; varying vec3 vWorld; varying vec2 vLL, vZW;
       // the cell of the grid the ground is drawn with at a point: nested squares around the camera target, each twice as coarse (terrain.js)
       float groundCell(vec2 ll) {
@@ -104,6 +112,12 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
       void main() {
         float road = max(aW.x * uK, uMinPx * uPx), full = max(road * uVerge, road + 2.5 * uPx);                  // room for the soft edge of a thin line
         vec2 off = vec2(-aDir.y, aDir.x) * aSide * full * .5;
+        ${bk ? `// on the bank of a river: clear of the water as it is drawn (the same sums as the sheet of the river, layers/rivers.js)
+        if (aBank.z > 0. && uRiver.z > 0.) {
+          float real = aBank.z * uRiver.z, s2 = clamp(real / .16, 0., 1.);
+          float water = max(real, uRiver.x * mix(mix(.42, 1., sqrt(s2)), mix(uRiverLeast.x, uRiverLeast.y, s2), uRiver.y));
+          off += aBank.xy * max(0., water * .5 + road * .5 + uPx - aBank.w);
+        }` : ''}
         vec2 ll = aLL + vec2(off.y / KM, off.x / (KM * cos(radians(aLL.x))));
         float c = groundCell(ll), h = max(heightLod(ll, max(0., log2(c / .234))), 0.) * uExag / 1000. + .0012;      // on the slope, where the ground is drawn
         vX = aSide * full * .5; vRoad = road * .5; vDist = aW.y; vFade = aFade; vLL = ll;

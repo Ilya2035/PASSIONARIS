@@ -7,6 +7,7 @@ import { KN, KKM } from '../src/album/division/km.js';
 import { Heap } from '../src/album/division/graph.js';
 import { llOf, kmOf } from '../src/album/chunks.js';
 import { FINE, FW, DIRS, cellOf, cellXY, fineRivers, climbs, fineWay, fineSteps, thin, dense, fineCover } from '../src/album/roads/shape.js';
+import { hugBanks, BANK } from '../src/album/roads/banks.js';
 
 const X0 = -880, Y0 = 3880, F = FINE.step, K = Math.round(KKM / F);
 // a piece of made-up ground: chunks with the heights of `height(x, y)` (metres at a point of the flat km plane)
@@ -143,4 +144,33 @@ test('roads, shape: over fine ground a line gets a corner every 120 m at most �
   // a line that enters the tile is made finer from its last corner outside it on
   const [x0, y0] = kmOf(42.795, -.527), row = Array.from({ length: 40 }, (_, k) => [x0 - 5 + k * .35, y0]), drawn = dense(row, cover);
   const inside = row.filter(p => cover(p[0], p[1])).length; assert.ok(inside > 10 && inside < 38 && drawn.length >= row.length + 2 * (inside - 1) && drawn.length <= row.length + 2 * (inside + 1), row.length + ' → ' + drawn.length);
+});
+
+test('roads, shape: a road along a river in a gorge lies on its bank — the same bank all the way; in a wide level valley nothing moves', () => {
+  // a river down the line y = 0 of the flat km plane, 20 m wide, a point every 50 m
+  const [lat0, lon0] = [42.7, -.5], [x0, y0] = kmOf(lat0, lon0), N = 201, ll = new Float64Array(N * 2), w = new Float32Array(N).fill(.02);
+  for (let n = 0; n < N; n++) { const g = llOf(x0 + n * .05, y0 + .03 * Math.sin(n * .05 / 1.2)); ll[n * 2] = g.lon; ll[n * 2 + 1] = g.lat; }
+  const courses = { rivers: [{ n: N, ll, w }] }, mid = x => y0 + .03 * Math.sin((x - x0) / 1.2);
+  const gorge = (x, y) => 500 + Math.abs(y - mid(x)) * 400, level = () => 500;                    // walls of 40 %; a level floor
+  const road = off => { const p = []; for (let x = x0; x <= x0 + 10 + 1e-9; x += .35) p.push([x, mid(x) + off(x - x0)]); return p; };
+  // in the gorge: the road ran 200 m up the wall, now it is on the bank, a few metres over the water
+  { const lines = [{ km: road(() => .2) }], st = hugBanks(lines, courses, gorge), P = lines[0].km;
+    assert.ok(st.stretches === 1 && st.km >= 8 && st.over === 0, JSON.stringify(st));
+    const inner = P.filter(q => q[0] > x0 + 1.2 && q[0] < x0 + 8.8); assert.ok(inner.length > 80, inner.length + ' corners');
+    for (const q of inner) { const d = q[1] - mid(q[0]); assert.ok(d > .02 && d < .045 && q.bank && q.bank[2] > .019 && Math.abs(q.bank[3] - (.01 + BANK.clear)) < 1e-6 && q.bank[1] > .9, 'on the bank it was over: ' + d.toFixed(3)); }
+    assert.ok(Math.max(...inner.map(q => gorge(q[0], q[1]) - 500)) < 20, 'a few metres over the water');
+    assert.deepEqual(P[0], [x0, mid(x0) + .2]); assert.ok(Math.abs(P[P.length - 1][1] - mid(P[P.length - 1][0]) - .2) < 1e-9, 'the ends of the road stay');
+    for (let k = 1; k < P.length; k++) assert.ok(P[k][0] > P[k - 1][0] - 1e-9 && Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]) < .4, 'the road runs on, without a jump'); }
+  // a stretch of 700 m on the other bank comes over: the road does not cross and cross back
+  { const lines = [{ km: road(s => (s > 4 && s < 4.75 ? -.2 : .2)) }], st = hugBanks(lines, courses, gorge);
+    assert.ok(st.over === 1 && lines[0].km.filter(q => q[0] > x0 + 1.2 && q[0] < x0 + 8.8).every(q => q[1] > mid(q[0])), JSON.stringify(st)); }
+  // … but a road that goes over to the other bank for good does cross, once
+  { const lines = [{ km: road(s => (s > 5 ? -.2 : .2)) }]; hugBanks(lines, courses, gorge); let flips = 0, last = 0;
+    for (const q of lines[0].km) { if (!q.bank) continue; const sd = Math.sign(q[1] - mid(q[0])); if (last && sd !== last) flips++; last = sd; } assert.equal(flips, 1); }
+  // a wide level valley: the road is on its floor already and stays where it is; so does a road that only crosses the river
+  { const lines = [{ km: road(() => .2) }], was = JSON.stringify(lines[0].km), st = hugBanks(lines, courses, level); assert.equal(st.stretches, 0); assert.equal(JSON.stringify(lines[0].km), was); }
+  { const across = []; for (let y = -3; y <= 3 + 1e-9; y += .35) across.push([x0 + 5, y0 + y]); const lines = [{ km: across }], st = hugBanks(lines, courses, gorge); assert.equal(st.stretches, 0); assert.equal(lines[0].km.length, across.length); }
+  // a road nearer to the water than its bank is moved out of it, level ground or not
+  { const lines = [{ km: road(() => .005) }], st = hugBanks(lines, courses, level); assert.ok(st.stretches === 1 && lines[0].km.filter(q => q.bank).every(q => q[1] - mid(q[0]) > .012), JSON.stringify(st)); }
+  assert.ok(BANK.reach > .28 && BANK.clear > .01 && BANK.rise[0] < BANK.rise[1] && BANK.min >= 3);
 });

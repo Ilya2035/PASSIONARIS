@@ -43,6 +43,10 @@ export const HISTORIC = [
   { name: 'Лиссабон — Бежа', way: [[38.72, -9.14], [38.37, -8.51], [38.02, -7.86]] },
   { name: 'Геркулесова дорога', way: [[36.53, -6.29], [36.13, -5.45], [36.72, -4.42]] },
   { name: 'Асторга — Сарагоса через Клунию', way: [[42.46, -6.06], [42.00, -5.68], [41.59, -4.83], [41.70, -3.93], [41.78, -3.37], [41.59, -3.07], [41.76, -2.47], [41.90, -1.72], [41.65, -.89]] },
+  // From Pamplona to the sea at Irun: over the pass of Belate and down the valley of the Bidasoa — the old royal road
+  // of Navarre to Bayonne. (The owner, 15.11.2026: between Irun and Pamplona the main road «загибается в бок… хотя там
+  // явно по ощущениям можно пройти спокойненько напрямую»: without this road the towns were joined round by Tolosa.)
+  { name: 'Памплона — Ирун', way: [[42.82, -1.64], [43.043, -1.618, 'Белате'], [43.34, -1.79]] },
   // Roads laid AFTER the towns of the provinces are joined (`after`): they add their way over a range to the main
   // roads and take nothing from the network of the plains, which the owner has approved as it is.
   { name: 'Мадрид — Бургос', after: true, way: [[40.42, -3.70], [41.135, -3.580, 'Сомосьерра'], [41.67, -3.69], [42.34, -3.70]] },

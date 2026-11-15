@@ -13,9 +13,10 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns, encodeNet, decodeNet, netHead, netSignature,
-  STEEP, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom, fineCache, crossedPairs } from '../src/album/roads/routes.js';
+  STEEP, HIGH, CROSSING, ALONG, HARD, SPAN_MAIN, SPAN_LESSER, POOR, NET_ALGO, PASS, passesOf, fanFrom, fineCache, crossedPairs, walkCost, WALK, chunkKinds, wayToMain, TO_MAIN } from '../src/album/roads/routes.js';
+import { INFRA, LEVEL, chunkEase, levelOf, infraLevels, STEEP as STEEP_INFRA, HIGH as HIGH_INFRA } from '../src/album/roads/infra.js';
 import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
-import { FINE, cellXY, cellChunk, climbs, finePoints } from '../src/album/roads/shape.js';
+import { FINE, FW, cellXY, cellChunk, cellGround, fineRivers, climbs, finePoints } from '../src/album/roads/shape.js';
 import { riverCrossings, squareBridges, crossingType, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
@@ -307,9 +308,9 @@ test('roads of the album: main roads reach the towns of the provinces, lesser ro
   real.centres = districtCentres(real, [...own, ...osm.filter(s => { const [x, y] = kmOf(s.lat, s.lon); return !own.some(o => Math.hypot(o.x - x, o.y - y) < 6); })]);
   const t0 = Date.now(), net = roadNetwork(real, real.centres, data.vectors.places, undefined, { courses: data.courses }), ms = Date.now() - t0, s = net.stats;
   assert.ok(ms < 20000, 'laid in ' + ms + ' ms');
-  // the legs of the mountains are shaped: a fifth of the roads or so, the rest are the plains as they were
+  // the legs of the mountains are shaped — and the legs with a gully or a canyon in their way: a third of the roads or so; the rest are the plains as they were
   { const roads = net.legs.filter(L => L.kind !== 3), shaped = roads.filter(L => L.fine); assert.equal(s.shaped, shaped.length);
-    assert.ok(shaped.length > 250 && shaped.length < roads.length * .35 && roads.filter(L => !L.fine && climbs({ hgt: real.raster.hgt }, L.path)).length < 5, shaped.length + ' of ' + roads.length + ' legs shaped'); }
+    assert.ok(shaped.length > 250 && shaped.length < roads.length * .45 && roads.filter(L => !L.fine && climbs({ hgt: real.raster.hgt }, L.path)).length < 5, shaped.length + ' of ' + roads.length + ' legs shaped'); }
   assert.ok(s.km[0] > 12000 && s.km[0] < 32000 && s.km[1] > s.km[0] && s.track > 100 && s.unreached < 50, JSON.stringify(s));
   const onMain = new Set(); for (const L of net.legs) if (L.kind === 0) { onMain.add(L.a); onMain.add(L.b); }
   let caps = 0, joined = 0; for (const d of net.capitals) if (d >= 0) { caps++; if (onMain.has(d)) joined++; }
@@ -325,7 +326,8 @@ test('roads of the album: main roads reach the towns of the provinces, lesser ro
   // the road of Somport keeps to its own valleys: from Jaca up the Aragón, down the Aspe — never over a crest higher than the pass
   { const L = net.legs[net.passes.find(v => v.name === 'Сомпорт').leg], top = Math.max(...L.path.map(t => real.raster.hgt[t])); assert.ok(top < hOf('Сомпорт') + 150 && L.km < 70, 'Somport: ' + Math.round(top) + ' m, ' + L.km.toFixed(0) + ' km');
     // … and its shaped way never climbs above the pass, and keeps to the grade a main road likes on nine tenths of its length
-    const pts = finePoints(L, real.centres), hs = pts.map(q => { const g = llOf(q[0], q[1]); return data.base.at(g.lat, g.lon); }); let all = 0, steep = 0;
+    // (by the ground as a road sees it: the lowest ground of a cell; beside the river, its bank — cellGround)
+    const pts = finePoints(L, real.centres), gr = cellGround((x, y) => { const g = llOf(x, y); return data.base.at(g.lat, g.lon); }, fineRivers(data.courses)), hs = Array.from(L.fine, c => gr(c % FW, Math.floor(c / FW))); let all = 0, steep = 0;
     for (let k = 1; k < pts.length; k++) { const run = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); all += run; if (Math.abs(hs[k] - hs[k - 1]) / (run * 1000) > FINE.grade[0] * 1.3) steep += run; }
     assert.ok(Math.max(...hs) < hOf('Сомпорт') + 30 && steep < all * .1, 'the shaped road of Somport: top ' + Math.round(Math.max(...hs)) + ' m, ' + (100 * steep / all).toFixed(0) + ' % of it steep'); }
   // some boundaries between districts that have no leg of their own are crossed by a road all the same (the road of a pass
@@ -379,4 +381,44 @@ test('roads: from high up — below 300 km a road is as it is near the ground; h
 test('roads: a road takes the light of the ground — the sun, the sky, and the Moon once the light of the album knows it', () => {
   assert.ok(GROUND_LIGHT.includes('albumSunCol()') && GROUND_LIGHT.includes('albumSkyCol()') && GROUND_LIGHT.includes('vec3 groundLight(vec2 ll, float px)'));
   assert.equal(GROUND_LIGHT.includes('albumMoonLit(n)'), LIGHT.includes('albumMoonLit('), 'the moonlight is added to a road exactly when the ground has it');
+});
+
+test('roads: a walker sees the canyon between two chunks; the way of a place to the nearest main road; what can be laid through a chunk', () => {
+  // ---- walkCost: the price of stepCost on an even slope, far dearer across a canyon that the middles of the chunks do not show
+  const a = texel(IX0 + 30, IY1 - 40), [ax, ay] = xyOf(a), even = (x, y) => 300 + (x - ax) * 20;
+  assert.ok(Math.abs(walkCost(G, a, a + 1, false, even) - stepCost(G, a, a + 1, false)) < 1e-9, 'an even slope: the same price');
+  const canyon = (x, y) => 300 - 150 * Math.max(0, 1 - Math.abs(x - ax - .5) / .3), over = walkCost(G, a, a + 1, false, canyon);
+  assert.ok(over > stepCost(G, a, a + 1, false) + 150 * 2 * WALK.climb * .9 && over > 10, 'down 150 m and up again in one step: ' + over.toFixed(1) + ' km of way');
+  assert.ok(walkCost(G, a, a + FN, false, canyon) < 1.3, 'along the rim nothing is paid');
+  // ---- the network of the island: which chunks carry which road
+  const net = roadNetwork(div, div.centres, towns, undefined, { historic: OLD, heightAt: null }), on = chunkKinds(net.legs);
+  { let main = 0, lesser = 0; for (const L of net.legs) { if (L.kind === 3) continue; for (const t of L.path) assert.ok(on[t] >= 3 - L.kind); if (L.kind === 0) main += L.path.length; else lesser += L.path.length; }
+    assert.ok(main > 100 && lesser > 100 && on.reduce((s, v) => s + (v === 3 ? 1 : 0), 0) <= main); }
+  // ---- the way to a main road: from a chunk off the roads — to the nearest road, then along the roads; on a main road it is no way at all
+  const mainLeg = net.legs.find(L => L.kind === 0 && L.path.every(t => G.hgt[t] < 320 && !G.riv[t])), onMain = mainLeg.path[Math.floor(mainLeg.path.length / 2)];
+  assert.deepEqual(wayToMain(G, onMain, on), { km: 0, cost: 0, road: 0, path: [onMain] });
+  let off = -1; for (let k = 4; k < 40 && off < 0; k++) for (const u of [onMain + k * FN, onMain - k * FN, onMain + k, onMain - k]) if (G.land[u] && !on[u] && !G.riv[u] && G.hgt[u] < 320 && [1, -1, FN, -FN, 2, -2, 2 * FN, -2 * FN].every(e => !on[u + e] && !G.riv[u + e])) { off = u; break; }
+  assert.ok(off >= 0, 'a chunk off the roads is there');
+  const w = wayToMain(G, off, on), end = w.path[w.path.length - 1], far = Math.hypot(xyOf(off)[0] - xyOf(end)[0], xyOf(off)[1] - xyOf(end)[1]);   // (far: straight to where the way ends — a river may lie between the place and the road it was picked by)
+  assert.ok(w && w.path[0] === off && on[w.path[w.path.length - 1]] === 3 && w.km > 1.9 && w.km >= far - 1e-6 && w.km <= far * 1.5 + 2 && w.cost > 0 && w.road <= w.km, JSON.stringify(w && { km: w.km, cost: w.cost, road: w.road }));
+  for (let k = 1; k < w.path.length; k++) { const e = Math.abs(w.path[k] - w.path[k - 1]); assert.ok(e === 1 || e === FN || e === FN + 1 || e === FN - 1, 'the way goes from chunk to chunk'); }
+  assert.deepEqual(wayToMain(G, off, on).path, w.path, 'the same place, the same way');
+  // a way that follows a lesser road is cheaper than its length over open ground would be
+  { const lesser = net.legs.find(L => L.kind === 1 && L.path.length > 12 && L.path.every(t => on[t] === 2)); if (lesser) { const v = wayToMain(G, lesser.path[Math.floor(lesser.path.length / 2)], on); assert.ok(v && v.road > 0 && v.cost < v.km, 'along a road: ' + JSON.stringify(v && { km: v.km, cost: v.cost, road: v.road })); } }
+  assert.equal(wayToMain(G, texel(IX0 - 40, IY0 - 40), on), null, 'the sea is no place');
+  assert.equal(wayToMain(G, off, new Uint8Array(FN * FN)), null, 'no main road anywhere: no way');
+  // the top of the ridge, 2200 m, a slope of 16 %: a walker who sees the ground pays for it; the way is no shorter and no cheaper than by the heights of the chunks
+  { const crest = texel(RX + 2, PASS_Y - 60), by = wayToMain(G, crest, on), seen = wayToMain(G, crest, on, (x, y) => { const g = llOf(x, y); return height(g.lat, g.lon); });
+    assert.ok(!by || !seen || seen.cost >= by.cost - 1e-6, 'the ground itself is never cheaper than the heights of the chunks'); }
+  assert.ok(TO_MAIN.road < 1 && TO_MAIN.reach > 30);
+  // ---- what can be laid through a chunk: the limits the network is laid by
+  assert.deepEqual([INFRA.lesser, INFRA.track], [POOR, HARD]); assert.deepEqual([STEEP_INFRA[0], STEEP_INFRA[1], HIGH_INFRA], [STEEP[0], STEEP[1], HIGH]);
+  { const n = 40, hgt = new Float32Array(n * n), land = new Uint8Array(n * n).fill(1), at = (i, j) => j * n + i;
+    // four bands of rough ground — the easiest step out of a chunk climbs or falls 0, 3, 6, 12 m in 141 (2 %, 4 %, 8.5 %); a strip of sea in the last columns
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const D = [0, 3, 6, 12][Math.floor(j / 10)]; hgt[at(i, j)] = 100 + D * (i % 2) + 2 * D * (j % 2); if (i >= 36) land[at(i, j)] = 0; }
+    const lv = infraLevels(hgt, land, n, .1), mid = j => lv[at(18, j)];
+    assert.deepEqual([mid(5), mid(15), mid(25), mid(35)], [LEVEL.main, LEVEL.lesser, LEVEL.track, LEVEL.none], 'level, 2 %, 4 %, 8.5 %');
+    assert.equal(lv[at(38, 5)], 0, 'water'); assert.equal(levelOf(1), 3); assert.equal(levelOf(INFRA.main + .01), 2); assert.equal(levelOf(INFRA.track + .01), 0);
+    assert.ok(chunkEase(hgt, land, n, at(18, 5), .1) < 1.02 && chunkEase(hgt, land, n, at(18, 35), .1) > INFRA.track);
+    const roads = new Uint8Array(n * n); roads[at(18, 35)] = 3; assert.equal(infraLevels(hgt, land, n, .1, roads)[at(18, 35)], 3, 'a chunk is never below the road that crosses it'); }
 });
