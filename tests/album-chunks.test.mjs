@@ -2,7 +2,7 @@
 // contract of the aspects.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Chunks, buildCells, CHANNELS, CHUNK_KM, CN, CI0, CJ0, FN, FKM, kmOf, llOf } from '../src/album/chunks.js';
+import { Chunks, buildCells, CHANNELS, CHUNK_KM, CN, CNX, CNY, CI0, CJ0, FN, FNX, FNY, SNX, SNY, FKM, kmOf, llOf } from '../src/album/chunks.js';
 import { ASPECTS, ASPECT_GLSL } from '../src/album/aspects/index.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
@@ -14,19 +14,33 @@ const river = { rank: 5, pts: Array.from({ length: 81 }, (_, i) => [-6, 36 + i *
 const world = new Chunks((lat, lon) => (lon < -2.75 ? 300 : -100), [river]);
 
 test('chunks: every texel lies in one chunk; chunks are about 100 km², rounded, and are not the lattice squares', () => {
-  assert.ok(flat.count >= CN * CN);
+  assert.ok(flat.count >= CNX * CNY);
   let max = 0; for (const v of flat.cell) if (v > max) max = v;
   assert.ok(max < flat.count, 'every texel has a chunk');
   let sum = 0, lo = 1e9, hi = 0, shape = 0;
-  for (let k = 0; k < CN * CN; k++) { const a = flat.area[k]; sum += a; lo = Math.min(lo, a); hi = Math.max(hi, a); const per = flat.links[k].reduce((s, l) => s + l.km, 0); shape += per * per / (4 * Math.PI * a); }
-  const mean = sum / (CN * CN);
+  for (let k = 0; k < CNX * CNY; k++) { const a = flat.area[k]; sum += a; lo = Math.min(lo, a); hi = Math.max(hi, a); const per = flat.links[k].reduce((s, l) => s + l.km, 0); shape += per * per / (4 * Math.PI * a); }
+  const mean = sum / (CNX * CNY);
   assert.ok(mean > 95 && mean < 105, `mean area ${mean}`);
   assert.ok(lo > 20 && hi < 300, `areas from ${lo} to ${hi}`);
-  assert.ok(shape / (CN * CN) < 2.6, `outlines are compact, ${shape / (CN * CN)}`);
+  assert.ok(shape / (CNX * CNY) < 2.6, `outlines are compact, ${shape / (CNX * CNY)}`);
   let off = 0;                    // texels that belong to a chunk other than the one seeded in their own square
   const Q = CHUNK_KM / FKM;
-  for (let ty = 0; ty < FN; ty += 3) for (let tx = 0; tx < FN; tx += 3) if (flat.cell[ty * FN + tx] !== Math.floor(ty / Q) * CN + Math.floor(tx / Q)) off++;
-  assert.ok(off / (FN * FN / 9) > .2, `a chunk is not its square: ${off / (FN * FN / 9)}`);
+  for (let ty = 0; ty < FNY; ty += 3) for (let tx = 0; tx < FNX; tx += 3) if (flat.cell[ty * FNX + tx] !== Math.floor(ty / Q) * CNX + Math.floor(tx / Q)) off++;
+  assert.ok(off / (FNX * FNY / 9) > .2, `a chunk is not its square: ${off / (FNX * FNY / 9)}`);
+});
+
+test('chunks: the lattice has a width and a height; the old names of the side are the width', () => {
+  assert.equal(CN, CNX); assert.equal(FN, FNX);
+  assert.equal(FNX, CNX * CHUNK_KM / FKM); assert.equal(FNY, CNY * CHUNK_KM / FKM); assert.equal(SNX, FNX / 2); assert.equal(SNY, FNY / 2);
+  assert.equal(flat.nx, CNX); assert.equal(flat.ny, CNY); assert.equal(flat.n, CNX, 'n is the old name of the width');
+  assert.equal(flat.cell.length, FNX * FNY); assert.equal(flat.stateCell.length, SNX * SNY);
+  assert.deepEqual([flat.tex.id.image.width, flat.tex.id.image.height], [FNX, FNY]);
+  assert.deepEqual([flat.tex.A.image.width, flat.tex.A.image.height], [SNX, SNY]);
+  const r = flat.uniforms.uChunkRect.value;
+  assert.deepEqual([r.x, r.y, r.z, r.w], [CI0 * CHUNK_KM, CJ0 * CHUNK_KM, 1 / (CNX * CHUNK_KM), 1 / (CNY * CHUNK_KM)]);
+  assert.equal(flat.k(CI0 + CNX - 1, CJ0 + CNY - 1), CNX * CNY - 1); assert.equal(flat.k(CI0 + CNX, CJ0), -1); assert.equal(flat.k(CI0, CJ0 + CNY), -1);
+  assert.deepEqual(flat.ij(CNX + 3), { i: CI0 + 3, j: CJ0 + 1 });
+  assert.ok(CNX * CNY < 0xFFFE, 'the number of a chunk fits its two bytes');
 });
 
 test('chunks: points map to chunks and back; the mapped square covers the whole region of the album', () => {
@@ -87,7 +101,7 @@ test('chunks: state is kept as 0..1, starts natural, and reset() returns to the 
 test('chunks: the rasters the shaders read hold every chunk in its own outline, with soft steps', () => {
   const ch = new Chunks(), k = 8000, c = ch.centre(k);
   ch.set('ice', k, 1); ch.flush();
-  const SN = FN / 2, [x, y] = kmOf(c.lat, c.lon), sx = Math.floor((x - CI0 * CHUNK_KM) / 2.5), sy = Math.floor((y - CJ0 * CHUNK_KM) / 2.5);
+  const SN = SNX, [x, y] = kmOf(c.lat, c.lon), sx = Math.floor((x - CI0 * CHUNK_KM) / 2.5), sy = Math.floor((y - CJ0 * CHUNK_KM) / 2.5);
   assert.ok(ch.raster.B[(sy * SN + sx) * 4] > 200, 'full in the middle of the chunk');
   assert.equal(ch.raster.B[((sy + 12) * SN + sx) * 4], 0, 'nothing 30 km away');
   let soft = 0; for (let d = -8; d <= 8; d++) { const v = ch.raster.B[(sy * SN + sx + d) * 4]; if (v > 10 && v < 245) soft++; }
@@ -122,7 +136,7 @@ test('chunks: a lake is cut out of the land as a chunk of its own, however small
   const tiny = { name: 'Малое', ring: [[-6.001, 41], [-6, 41.001], [-5.999, 41], [-6, 40.999]] };            // far smaller than a texel
   const w = new Chunks(() => 400, [], [big, tiny]);
   const k = w.at(40, -5.025), t = w.at(41, -6), beside = w.at(40, -5.3);
-  assert.equal(w.kind[k], 0); assert.equal(w.lake[k], 0); assert.equal(w.land[k], 0); assert.ok(k >= CN * CN, 'a chunk added for the lake');
+  assert.equal(w.kind[k], 0); assert.equal(w.lake[k], 0); assert.equal(w.land[k], 0); assert.ok(k >= CNX * CNY, 'a chunk added for the lake');
   assert.ok(w.area[k] > 40 && w.area[k] < 100, `the lake keeps its own size: ${w.area[k]} km²`);
   assert.ok(w.links[k].length >= 2 && w.links[k].every(l => w.kind[l.k] === 1), 'land all around it');
   assert.equal(w.lake[t], 1); assert.ok(w.area[t] > 0 && w.area[t] < 2, 'even the smallest lake has a chunk');

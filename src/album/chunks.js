@@ -12,11 +12,16 @@
 import { DataTexture, RGBAFormat, RGFormat, UnsignedByteType, LinearFilter, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
 import { KM_PER_DEG, COS_REF, BBOX } from './geo.js';
 
-// Chunks grow from seeds, one seed in every square of a 128 × 128 lattice of 10 km. The number of a chunk is the
-// number of its seed's square: k = (j − CJ0) · CN + (i − CI0); chunks added later (islands, lagoons) follow after.
-export const CHUNK_KM = 10, CN = 128, CI0 = -88, CJ0 = 388;
-export const FKM = 1.25, FN = CN * CHUNK_KM / FKM;      // the fine raster the outlines live on: 1024 × 1024 texels of 1.25 km
-const SN = FN / 2;                                      // the state raster the shaders read: 512 × 512 texels of 2.5 km
+// Chunks grow from seeds, one seed in every square of a lattice of 10 km, CNX squares wide and CNY high (now
+// 128 × 128; the lattice of stage 3 is a rectangle, 192 × 280: docs/BACKLOG.md). The number of a chunk is the number
+// of its seed's square: k = (j − CJ0) · CNX + (i − CI0); chunks added later (islands, lagoons) follow after.
+export const CHUNK_KM = 10, CNX = 128, CNY = 128, CI0 = -88, CJ0 = 388;
+// the fine raster the outlines live on: FNX × FNY texels of 1.25 km (now 1024 × 1024)
+export const FKM = 1.25, FNX = CNX * CHUNK_KM / FKM, FNY = CNY * CHUNK_KM / FKM;
+// The old names of the side, from when the lattice could only be a square. They are the WIDTH (and the step of a
+// row): whoever still reads them takes a rectangle for a square — move to CNX × CNY and FNX × FNY.
+export const CN = CNX, FN = FNX;
+export const SNX = FNX / 2, SNY = FNY / 2;              // the state rasters the shaders read: texels of 2.5 km (now 512 × 512)
 const X0 = CI0 * CHUNK_KM, Y0 = CJ0 * CHUNK_KM, Q = CHUNK_KM / FKM, NONE = 0xFFFF;
 
 // Every number a chunk carries for the picture: name → [texture, byte, Russian label]. Values are 0..1.
@@ -73,10 +78,10 @@ function line(x0, y0, x1, y1, mark) {
 //   heightAt(lat, lon) → metres (missing = all land); rivers: [{ pts: [[lon, lat], …], rank }];
 //   lakes: [{ ring: [[lon, lat], …] }]
 export function buildCells(heightAt, rivers = [], lakes = []) {
-  const n = FN * FN, land = new Uint8Array(n), hgt = new Float32Array(n), riv = new Uint8Array(n), pace = new Float32Array(n), lakeAt = new Uint16Array(n);
-  for (let ty = 0, t = 0; ty < FN; ty++) {
+  const n = FNX * FNY, land = new Uint8Array(n), hgt = new Float32Array(n), riv = new Uint8Array(n), pace = new Float32Array(n), lakeAt = new Uint16Array(n);
+  for (let ty = 0, t = 0; ty < FNY; ty++) {
     const lat = (Y0 + (ty + .5) * FKM) / KM_PER_DEG, inLat = lat > BBOX.lat0 && lat < BBOX.lat1;
-    for (let tx = 0; tx < FN; tx++, t++) {
+    for (let tx = 0; tx < FNX; tx++, t++) {
       const lon = (X0 + (tx + .5) * FKM) / (KM_PER_DEG * COS_REF);
       const h = !heightAt ? 100 : (inLat && lon > BBOX.lon0 && lon < BBOX.lon1 ? heightAt(lat, lon) : -3200);
       hgt[t] = h; land[t] = h > 0 ? 1 : 0;
@@ -90,7 +95,7 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, sx = 0, sy = 0, any = false;
     for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); sx += p[0]; sy += p[1]; }
     const inside = (x, y) => { let c = false; for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) { const p = pts[a], q = pts[b]; if ((p[1] > y) !== (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) c = !c; } return c; };
-    const put = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FN && ty < FN) { land[ty * FN + tx] = 0; lakeAt[ty * FN + tx] = i + 1; any = true; } };
+    const put = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FNX && ty < FNY) { land[ty * FNX + tx] = 0; lakeAt[ty * FNX + tx] = i + 1; any = true; } };
     for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++) for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) if (inside(tx + .5, ty + .5)) put(tx, ty);
     if (!any) put(Math.floor(sx / pts.length), Math.floor(sy / pts.length));
   });
@@ -98,37 +103,37 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
   // a hillock on a plain then does not bend a border, while a real valley and a real crest still do.
   const lie = new Float32Array(n);
   {
-    const W = FN + 1, sum = new Float64Array(W * W), R = 2;
-    for (let y = 0; y < FN; y++) { let row = 0; for (let x = 0; x < FN; x++) { row += Math.max(0, hgt[y * FN + x]); sum[(y + 1) * W + x + 1] = sum[y * W + x + 1] + row; } }
-    for (let y = 0; y < FN; y++) for (let x = 0; x < FN; x++) {
-      const x0 = Math.max(0, x - R), x1 = Math.min(FN, x + R + 1), y0 = Math.max(0, y - R), y1 = Math.min(FN, y + R + 1);
-      lie[y * FN + x] = (sum[y1 * W + x1] - sum[y0 * W + x1] - sum[y1 * W + x0] + sum[y0 * W + x0]) / ((x1 - x0) * (y1 - y0));
+    const W = FNX + 1, sum = new Float64Array(W * (FNY + 1)), R = 2;
+    for (let y = 0; y < FNY; y++) { let row = 0; for (let x = 0; x < FNX; x++) { row += Math.max(0, hgt[y * FNX + x]); sum[(y + 1) * W + x + 1] = sum[y * W + x + 1] + row; } }
+    for (let y = 0; y < FNY; y++) for (let x = 0; x < FNX; x++) {
+      const x0 = Math.max(0, x - R), x1 = Math.min(FNX, x + R + 1), y0 = Math.max(0, y - R), y1 = Math.min(FNY, y + R + 1);
+      lie[y * FNX + x] = (sum[y1 * W + x1] - sum[y0 * W + x1] - sum[y1 * W + x0] + sum[y0 * W + x0]) / ((x1 - x0) * (y1 - y0));
     }
   }
   for (const rv of rivers) {
-    const r = rv.rank <= 6 ? 2 : 1, mark = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FN && ty < FN && r > riv[ty * FN + tx]) riv[ty * FN + tx] = r; };
+    const r = rv.rank <= 6 ? 2 : 1, mark = (tx, ty) => { if (tx >= 0 && ty >= 0 && tx < FNX && ty < FNY && r > riv[ty * FNX + tx]) riv[ty * FNX + tx] = r; };
     for (let i = 1; i < rv.pts.length; i++) {
       const a = rv.pts[i - 1], b = rv.pts[i];
       line((a[0] * KM_PER_DEG * COS_REF - X0) / FKM, (a[1] * KM_PER_DEG - Y0) / FKM, (b[0] * KM_PER_DEG * COS_REF - X0) / FKM, (b[1] * KM_PER_DEG - Y0) / FKM, mark);
     }
   }
   // seeds: land where the square is at least three tenths land, otherwise water; off the rivers where possible
-  const cell = new Uint16Array(n).fill(NONE), dist = new Int32Array(n).fill(1 << 30), kind = [], seed = new Uint8Array(n), seedAt = new Int32Array(CN * CN);
+  const cell = new Uint16Array(n).fill(NONE), dist = new Int32Array(n).fill(1 << 30), kind = [], seed = new Uint8Array(n), seedAt = new Int32Array(CNX * CNY);
   const MAXC = 8192, buckets = new Array(MAXC), put = (t, c) => { const b = c < MAXC ? c : MAXC - 1; (buckets[b] || (buckets[b] = [])).push(t); };
-  for (let yj = 0; yj < CN; yj++) for (let xi = 0; xi < CN; xi++) {
+  for (let yj = 0; yj < CNY; yj++) for (let xi = 0; xi < CNX; xi++) {
     let nl = 0, low = 1e9;
-    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FN + xi * Q + a; nl += land[t]; if (land[t] && lie[t] < low) low = lie[t]; }
+    for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FNX + xi * Q + a; nl += land[t]; if (land[t] && lie[t] < low) low = lie[t]; }
     const isLand = nl >= Q * Q * .3 ? 1 : 0;
     const cx = (xi + .5) * Q + ((yj & 1) ? 2 : -2) + (hash2(xi, yj, 11) - .5) * 4.4, cy = (yj + .5) * Q + (hash2(xi, yj, 23) - .5) * 4.4;
     // On land the seed goes down into the low ground of its square: the valley floor, the plain.
     let best = -1, bd = 1e9;
     for (let b = 0; b < Q; b++) for (let a = 0; a < Q; a++) {
-      const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] !== isLand || lakeAt[t]) continue;
+      const t = (yj * Q + b) * FNX + xi * Q + a; if (land[t] !== isLand || lakeAt[t]) continue;
       const d = (xi * Q + a + .5 - cx) ** 2 + (yj * Q + b + .5 - cy) ** 2 + (riv[t] ? 40 : 0) + (isLand ? Math.min(90, (lie[t] - low) * .09) : 0);
       if (d < bd) { bd = d; best = t; }
     }
-    if (best < 0) for (let b = 0; b < Q && best < 0; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FN + xi * Q + a; if (land[t] === isLand) { best = t; break; } }   // a square that is all lake
-    kind.push(isLand); cell[best] = yj * CN + xi; seedAt[yj * CN + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(lie[best])) : 0; put(best, dist[best]);
+    if (best < 0) for (let b = 0; b < Q && best < 0; b++) for (let a = 0; a < Q; a++) { const t = (yj * Q + b) * FNX + xi * Q + a; if (land[t] === isLand) { best = t; break; } }   // a square that is all lake
+    kind.push(isLand); cell[best] = yj * CNX + xi; seedAt[yj * CNX + xi] = best; seed[best] = 1; dist[best] = isLand ? Math.max(0, Math.round(lie[best])) : 0; put(best, dist[best]);
   }
   // The flood. Every land seed is a spring: its water rises and spreads, level by level, and takes the ground it
   // reaches first. Water from the valley floor climbs both slopes and meets the water of the next valley on the crest,
@@ -141,13 +146,13 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     const bucket = buckets[c]; if (!bucket) continue;
     for (let q = 0; q < bucket.length; q++) {
       const t = bucket[q]; if (dist[t] !== c && !(c === MAXC - 1 && dist[t] >= c)) continue;
-      const tx = t % FN, ty = (t / FN) | 0, id = cell[t], lt = land[t], rt = riv[t], lvl = dist[t];
+      const tx = t % FNX, ty = (t / FNX) | 0, id = cell[t], lt = land[t], rt = riv[t], lvl = dist[t];
       for (let d = 0; d < 16; d++) {
-        const dx = DX[d], dy = DY[d], x = tx + dx, y = ty + dy; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
-        const m = y * FN + x; if (land[m] !== lt || lakeAt[m] !== lakeAt[t]) continue;
+        const dx = DX[d], dy = DY[d], x = tx + dx, y = ty + dy; if (x < 0 || y < 0 || x >= FNX || y >= FNY) continue;
+        const m = y * FNX + x; if (land[m] !== lt || lakeAt[m] !== lakeAt[t]) continue;
         let way = (d < 4 ? FKM : d < 8 ? FKM * 1.414 : FKM * 2.236) * LAM * pace[m], top = lt ? lie[m] : 0, tolls = riv[m] !== rt ? 1 : 0;
         if (d >= 8) {                     // a knight's move passes over two texels: it may not jump the coast, a crest or a river
-          const a = t + (dx === 2 || dx === -2 ? dx / 2 : dy / 2 * FN), b = a + (dx === 2 || dx === -2 ? dy * FN : dx);
+          const a = t + (dx === 2 || dx === -2 ? dx / 2 : dy / 2 * FNX), b = a + (dx === 2 || dx === -2 ? dy * FNX : dx);
           if (land[a] !== lt || land[b] !== lt || lakeAt[a] !== lakeAt[t] || lakeAt[b] !== lakeAt[t]) continue;
           if (lt) { top = Math.max(top, lie[a], lie[b]); if (!tolls && (riv[a] !== rt || riv[b] !== rt)) tolls = 2; }
         }
@@ -165,10 +170,10 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
     if (cell[s] !== NONE) continue;
     const lt = land[s], comp = [s]; let host = NONE; cell[s] = NONE - 1; stack.push(s);
     while (stack.length) {
-      const t = stack.pop(), tx = t % FN, ty = (t / FN) | 0;
+      const t = stack.pop(), tx = t % FNX, ty = (t / FNX) | 0;
       for (let d = 0; d < 4; d++) {
-        const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
-        const m = y * FN + x;
+        const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FNX || y >= FNY) continue;
+        const m = y * FNX + x;
         if (cell[m] === NONE && land[m] === lt && lakeAt[m] === lakeAt[s]) { cell[m] = NONE - 1; comp.push(m); stack.push(m); } else if (cell[m] < NONE - 1 && host === NONE) host = cell[m];
       }
     }
@@ -182,14 +187,14 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
   // around itself, and joins the chunk of its own kind that weighs most there: spurs and corners go, the outline
   // becomes a clean curve. Texels on and beside a river stay put, so that border keeps to the river.
   const BELL = [];
-  for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) BELL.push(dy * FN + dx, Math.exp(-(dx * dx + dy * dy) / 8));
+  for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) BELL.push(dy * FNX + dx, Math.exp(-(dx * dx + dy * dy) / 8));
   for (let pass = 0; pass < 2; pass++) {
     const prev = cell.slice(), ids = new Uint16Array(49), ws = new Float32Array(49);
-    for (let ty = 3; ty < FN - 3; ty++) for (let tx = 3; tx < FN - 3; tx++) {
-      const t = ty * FN + tx, id = prev[t];
-      if (seed[t] || lakeAt[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FN] || riv[t + FN]) continue;
-      if (prev[t - 3] === id && prev[t + 3] === id && prev[t - 3 * FN] === id && prev[t + 3 * FN] === id
-        && prev[t - 2 * FN - 2] === id && prev[t + 2 * FN + 2] === id && prev[t - 2 * FN + 2] === id && prev[t + 2 * FN - 2] === id) continue;   // deep inside its chunk
+    for (let ty = 3; ty < FNY - 3; ty++) for (let tx = 3; tx < FNX - 3; tx++) {
+      const t = ty * FNX + tx, id = prev[t];
+      if (seed[t] || lakeAt[t] || riv[t] || riv[t - 1] || riv[t + 1] || riv[t - FNX] || riv[t + FNX]) continue;
+      if (prev[t - 3] === id && prev[t + 3] === id && prev[t - 3 * FNX] === id && prev[t + 3 * FNX] === id
+        && prev[t - 2 * FNX - 2] === id && prev[t + 2 * FNX + 2] === id && prev[t - 2 * FNX + 2] === id && prev[t + 2 * FNX - 2] === id) continue;   // deep inside its chunk
       let nIds = 0;
       for (let b = 0; b < BELL.length; b += 2) {
         const m = t + BELL[b], v = prev[m]; if (land[m] !== land[t] || lakeAt[m] || kind[v] !== kind[id]) continue;
@@ -207,19 +212,19 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
   const size = new Uint32Array(kind.length), own = new Map();
   for (let t = 0; t < n; t++) size[cell[t]]++;
   // a seed the rounding left alone inside a neighbour's ground, while its own chunk lives on beside it, joins the neighbour
-  for (let k = 0; k < CN * CN; k++) {
-    const t = seedAt[k], tx = t % FN, ty = (t / FN) | 0; if (cell[t] !== k || size[k] < 2 || tx < 1 || ty < 1 || tx >= FN - 1 || ty >= FN - 1) continue;
+  for (let k = 0; k < CNX * CNY; k++) {
+    const t = seedAt[k], tx = t % FNX, ty = (t / FNX) | 0; if (cell[t] !== k || size[k] < 2 || tx < 1 || ty < 1 || tx >= FNX - 1 || ty >= FNY - 1) continue;
     let alone = true, to = -1;
-    for (let d = 0; d < 4; d++) { const v = cell[t + DY[d] * FN + DX[d]]; if (v === k) alone = false; else if (kind[v] === kind[k]) to = v; }
+    for (let d = 0; d < 4; d++) { const v = cell[t + DY[d] * FNX + DX[d]]; if (v === k) alone = false; else if (kind[v] === kind[k]) to = v; }
     if (alone && to >= 0) { cell[t] = to; seed[t] = 0; size[k]--; size[to]++; }
   }
   for (let t = 0; t < n; t++) { const k = cell[t]; if (size[k] < 16) { let l = own.get(k); if (!l) own.set(k, l = []); l.push(t); } }
   for (const [k, list] of own) {
     for (let q = 0; q < list.length && size[k] < 20; q++) {
-      const t = list[q], tx = t % FN, ty = (t / FN) | 0;
+      const t = list[q], tx = t % FNX, ty = (t / FNX) | 0;
       for (let d = 0; d < 4 && size[k] < 20; d++) {
-        const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FN || y >= FN) continue;
-        const m = y * FN + x, o = cell[m];
+        const x = tx + DX[d], y = ty + DY[d]; if (x < 0 || y < 0 || x >= FNX || y >= FNY) continue;
+        const m = y * FNX + x, o = cell[m];
         if (o !== k && kind[o] === kind[k] && land[m] === land[t] && lakeAt[m] === lakeAt[t] && size[o] > 26 && !seed[m]) { cell[m] = k; size[k]++; size[o]--; list.push(m); }
       }
     }
@@ -232,7 +237,7 @@ export function buildCells(heightAt, rivers = [], lakes = []) {
 export class Chunks {
   constructor(heightAt, rivers, lakes = []) {
     const g = buildCells(heightAt, rivers, lakes), n = g.count, cell = g.cell;
-    this.n = CN; this.count = n; this.cell = cell;
+    this.n = CNX; this.nx = CNX; this.ny = CNY; this.count = n; this.cell = cell;
     this.kind = g.kind;                  // 1 a chunk of land, 0 a chunk of water (sea or lake)
     this.lake = g.lakeOf;                // for a lake chunk the number of its lake in this.lakes, otherwise −1
     this.lakes = lakes;
@@ -240,14 +245,14 @@ export class Chunks {
     this.land = new Float32Array(n);     // share of the chunk that is land, 0..1 (a water chunk may hold a rock)
     this.height = new Float32Array(n);   // mean height of its land, metres
     const sx = new Float64Array(n), sy = new Float64Array(n), cnt = new Uint32Array(n), links = new Map();
-    for (let ty = 0, t = 0; ty < FN; ty++) for (let tx = 0; tx < FN; tx++, t++) {
+    for (let ty = 0, t = 0; ty < FNY; ty++) for (let tx = 0; tx < FNX; tx++, t++) {
       const k = cell[t]; cnt[k]++; sx[k] += tx + .5; sy[k] += ty + .5;
       if (g.land[t]) { this.land[k]++; this.height[k] += g.hgt[t]; }
       for (let d = 0; d < 2; d++) {       // borders: the texel to the east and the one to the north
-        if (d ? ty >= FN - 1 : tx >= FN - 1) continue;
-        const m = cell[t + (d ? FN : 1)]; if (m === k) continue;
+        if (d ? ty >= FNY - 1 : tx >= FNX - 1) continue;
+        const m = cell[t + (d ? FNX : 1)]; if (m === k) continue;
         const key = k < m ? k * 65536 + m : m * 65536 + k, l = links.get(key);
-        const river = Math.max(g.riv[t], g.riv[t + (d ? FN : 1)]);
+        const river = Math.max(g.riv[t], g.riv[t + (d ? FNX : 1)]);
         if (l) { l.km += FKM; if (river) l.river = Math.max(l.river, river); l.wet += river ? FKM : 0; } else links.set(key, { a: Math.min(k, m), b: Math.max(k, m), km: FKM, river, wet: river ? FKM : 0 });
       }
     }
@@ -256,7 +261,7 @@ export class Chunks {
       const c = Math.max(1, cnt[k]);
       this.area[k] = cnt[k] * FKM * FKM;
       if (cnt[k]) { this.cx[k] = X0 + sx[k] / c * FKM; this.cy[k] = Y0 + sy[k] / c * FKM; }
-      else { const s = g.seedAt[k]; this.cx[k] = X0 + ((s % FN) + .5) * FKM; this.cy[k] = Y0 + (((s / FN) | 0) + .5) * FKM; }   // a number without ground: where its seed stood
+      else { const s = g.seedAt[k]; this.cx[k] = X0 + ((s % FNX) + .5) * FKM; this.cy[k] = Y0 + (((s / FNX) | 0) + .5) * FKM; }   // a number without ground: where its seed stood
       this.height[k] = this.land[k] ? this.height[k] / this.land[k] : 0; this.land[k] /= c;
     }
     // neighbours: for every chunk, the chunks it borders, the length of the shared border in km and whether a river
@@ -271,18 +276,18 @@ export class Chunks {
     this.layers = new Map();             // extra numbers per chunk that the shader does not read (resources …)
     this.version = 0;                    // grows with every change of state
     this.resetters = [];
-    this.stateCell = new Uint16Array(SN * SN);
-    for (let y = 0; y < SN; y++) for (let x = 0; x < SN; x++) this.stateCell[y * SN + x] = cell[(y * 2 + 1) * FN + x * 2 + 1];
-    this.raster = { A: new Uint8Array(SN * SN * 4), B: new Uint8Array(SN * SN * 4), C: new Uint8Array(SN * SN * 4) };
-    this.scratch = [new Uint8Array(SN * SN * 4), new Uint8Array(SN * SN * 4)];
+    this.stateCell = new Uint16Array(SNX * SNY);
+    for (let y = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) this.stateCell[y * SNX + x] = cell[(y * 2 + 1) * FNX + x * 2 + 1];
+    this.raster = { A: new Uint8Array(SNX * SNY * 4), B: new Uint8Array(SNX * SNY * 4), C: new Uint8Array(SNX * SNY * 4) };
+    this.scratch = [new Uint8Array(SNX * SNY * 4), new Uint8Array(SNX * SNY * 4)];
     this.palW = Math.ceil(Math.sqrt(n)); this.pal = new Uint8Array(this.palW * this.palW * 4);
     this.bytes.D = this.pal;             // the colours of show(), four bytes per chunk (the old name of this array)
     const tex = (data, w, h, format, filter) => { const t = new DataTexture(data, w, h, format, UnsignedByteType); t.magFilter = t.minFilter = filter; t.wrapS = t.wrapT = ClampToEdgeWrapping; t.needsUpdate = true; return t; };
-    this.tex = { A: tex(this.raster.A, SN, SN, RGBAFormat, LinearFilter), B: tex(this.raster.B, SN, SN, RGBAFormat, LinearFilter), C: tex(this.raster.C, SN, SN, RGBAFormat, LinearFilter),
-      id: tex(new Uint8Array(cell.buffer), FN, FN, RGFormat, NearestFilter), pal: tex(this.pal, this.palW, this.palW, RGBAFormat, NearestFilter) };
+    this.tex = { A: tex(this.raster.A, SNX, SNY, RGBAFormat, LinearFilter), B: tex(this.raster.B, SNX, SNY, RGBAFormat, LinearFilter), C: tex(this.raster.C, SNX, SNY, RGBAFormat, LinearFilter),
+      id: tex(new Uint8Array(cell.buffer), FNX, FNY, RGFormat, NearestFilter), pal: tex(this.pal, this.palW, this.palW, RGBAFormat, NearestFilter) };
     this.uniforms = {
       tChunkA: { value: this.tex.A }, tChunkB: { value: this.tex.B }, tChunkC: { value: this.tex.C }, tChunkId: { value: this.tex.id }, tChunkPal: { value: this.tex.pal },
-      uChunkRect: { value: new Vector4(X0, Y0, 1 / (CN * CHUNK_KM), 1 / (CN * CHUNK_KM)) }, uChunkPalW: { value: this.palW },
+      uChunkRect: { value: new Vector4(X0, Y0, 1 / (CNX * CHUNK_KM), 1 / (CNY * CHUNK_KM)) }, uChunkPalW: { value: this.palW },
       uChunkShow: { value: 0 }, uChunkHoverId: { value: -1 },
     };
     for (const [name, v] of Object.entries(DEFAULTS)) for (let k = 0; k < n; k++) this.setNatural(name, k, v);
@@ -290,7 +295,7 @@ export class Chunks {
   // ---- where things are
   at(lat, lon) {                          // the chunk a point lies in, −1 outside the mapped square
     const [x, y] = kmOf(lat, lon), tx = Math.floor((x - X0) / FKM), ty = Math.floor((y - Y0) / FKM);
-    return tx >= 0 && ty >= 0 && tx < FN && ty < FN ? this.cell[ty * FN + tx] : -1;
+    return tx >= 0 && ty >= 0 && tx < FNX && ty < FNY ? this.cell[ty * FNX + tx] : -1;
   }
   centre(k) { const x = this.cx[k], y = this.cy[k]; return { ...llOf(x, y), x, y }; }   // the middle of the chunk (its centre of mass)
   neighbours(k) { return this.links[k].map(l => l.k); }
@@ -302,8 +307,8 @@ export class Chunks {
   }
   // Older code numbered chunks by lattice square. A chunk still carries the number of the square its seed stands in,
   // so these keep working, but a chunk is no longer that square: new code should use at(), centre(), links.
-  k(i, j) { const x = i - CI0, y = j - CJ0; return x >= 0 && y >= 0 && x < CN && y < CN ? y * CN + x : -1; }
-  ij(k) { return k < CN * CN ? { i: (k % CN) + CI0, j: ((k / CN) | 0) + CJ0 } : { i: Math.floor(this.cx[k] / CHUNK_KM), j: Math.floor(this.cy[k] / CHUNK_KM) }; }
+  k(i, j) { const x = i - CI0, y = j - CJ0; return x >= 0 && y >= 0 && x < CNX && y < CNY ? y * CNX + x : -1; }
+  ij(k) { return k < CNX * CNY ? { i: (k % CNX) + CI0, j: ((k / CNX) | 0) + CJ0 } : { i: Math.floor(this.cx[k] / CHUNK_KM), j: Math.floor(this.cy[k] / CHUNK_KM) }; }
   // ---- state read by the shaders
   get(name, k) { const c = CHANNELS[name]; return this.bytes[c[0]][k * 4 + c[1]] / 255; }
   set(name, k, v) {
@@ -341,9 +346,9 @@ export class Chunks {
       const src = new Uint32Array(this.bytes[t].buffer), [a, b] = this.scratch, a32 = new Uint32Array(a.buffer), sc = this.stateCell, out = this.raster[t];
       for (let s = 0; s < a32.length; s++) a32[s] = src[sc[s]];
       // soften the step between two chunks: one pass along the rows, one along the columns
-      const row = SN * 4;
-      for (let y = 0, o = 0; y < SN; y++) for (let x = 0; x < SN; x++) for (let c = 0; c < 4; c++, o++) b[o] = (a[x > 0 ? o - 4 : o] + 2 * a[o] + a[x < SN - 1 ? o + 4 : o] + 2) >> 2;
-      for (let y = 0, o = 0; y < SN; y++) for (let x = 0; x < SN; x++) for (let c = 0; c < 4; c++, o++) out[o] = (b[y > 0 ? o - row : o] + 2 * b[o] + b[y < SN - 1 ? o + row : o] + 2) >> 2;
+      const row = SNX * 4;
+      for (let y = 0, o = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) for (let c = 0; c < 4; c++, o++) b[o] = (a[x > 0 ? o - 4 : o] + 2 * a[o] + a[x < SNX - 1 ? o + 4 : o] + 2) >> 2;
+      for (let y = 0, o = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) for (let c = 0; c < 4; c++, o++) out[o] = (b[y > 0 ? o - row : o] + 2 * b[o] + b[y < SNY - 1 ? o + row : o] + 2) >> 2;
       this.tex[t].needsUpdate = true; this.dirty[t] = false;
     }
     if (this.dirty.pal) { this.tex.pal.needsUpdate = true; this.dirty.pal = false; }

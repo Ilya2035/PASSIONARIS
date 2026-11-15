@@ -11,7 +11,7 @@
 // (spreadToChunks), the deposits go to the chunk under their coordinates and ease into the neighbours, and the places
 // known only roughly are laid out over chunks by the world seed (zonesToChunks, withZones).
 import { toWorld } from '../geo.js';
-import { FN, FKM, CHUNK_KM } from '../chunks.js';
+import { FNX, FNY, FKM, CHUNK_KM } from '../chunks.js';
 import { pickGround } from '../pick.js';
 import { RESOURCES, RES_INDEX, DEPTH_NAMES, openTable, withZones, spreadToChunks, zonesToChunks, index100, fmtAmount, poolStocks } from '../../../scripts/resources/lib.mjs';
 
@@ -59,10 +59,10 @@ export default {
     const [meta, bytes] = await Promise.all([fetch(BASE + 'album.json').then(r => { if (!r.ok) throw new Error('album.json: ' + r.status); return r.json(); }), fetchGz(BASE + 'album.bin.gz')]);
     const table = openTable(meta, bytes);
     const ch = album.chunks, p = album.params, n = ch.count;
-    if (table.N !== meta.grid.W * meta.grid.H || meta.grid.W * CHUNK_KM / FKM !== FN) throw new Error('resources: the table does not fit the chunk raster');
+    if (table.N !== meta.grid.W * meta.grid.H || meta.grid.W * CHUNK_KM / FKM !== FNX || meta.grid.H * CHUNK_KM / FKM !== FNY) throw new Error('resources: the table does not fit the chunk raster');
     const info = Object.fromEntries(meta.resources.map(r => [r.id, r]));       // unit, scale, ref100 of each resource
     // the squares of the table over the natural chunks
-    const g = { count: n, kind: ch.kind, cell: ch.cell, FN, sub: CHUNK_KM / FKM, links: ch.links, at: (lat, lon) => ch.at(lat, lon) };
+    const g = { count: n, kind: ch.kind, cell: ch.cell, FN: FNX, FNY, sub: CHUNK_KM / FKM, links: ch.links, at: (lat, lon) => ch.at(lat, lon) };
     const base = spreadToChunks(table, meta, g);
     // nothing outside the album's region: the album has no heights there and draws no land (as the swamp aspect)
     const bb = meta.grid.bbox, inside = new Uint8Array(n);

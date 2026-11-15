@@ -218,7 +218,8 @@ export function withZones(table, zones, seed) {
 // The table is baked on the 10 km squares of the album grid; the album's chunks have natural outlines
 // (src/album/chunks.js, docs/ALBUM-CHUNKS.md «Форма чанков»). g describes them:
 //   { count, kind: 1 land / 0 water per chunk, cell: chunk of every texel of the fine raster (row 0 = south),
-//     FN: texels per side, sub: texels per square side, at(lat, lon) → chunk or −1 }
+//     FN: texels in a row of the raster, FNY: rows (FN when it is a square), sub: texels per square side,
+//     at(lat, lon) → chunk or −1 }
 // What a square holds besides its known deposits (fish, wood, stone, clay, salt pans) goes to the chunks of its
 // texels, split evenly among them: fish among its texels in water chunks (in land chunks when the square has no water —
 // river fish), everything else among its texels in land chunks (in water chunks when it has no land). Known deposits go
@@ -229,8 +230,8 @@ export function spreadToChunks(table, meta, g) {
   const R = table.R ?? meta.resources.length, N = table.N, SW = meta.grid.W, n = g.count;
   const area = Float32Array.from(table.amount);
   for (const d of meta.deposits) { const k = table.index[d.res] * N + d.cell; area[k] = Math.max(0, area[k] - d.amount); }
-  const nL = new Uint16Array(N), nW = new Uint16Array(N), sq = new Int32Array(g.FN * g.FN);
-  for (let ty = 0, t = 0; ty < g.FN; ty++) for (let tx = 0; tx < g.FN; tx++, t++) {
+  const rows = g.FNY ?? g.FN, nL = new Uint16Array(N), nW = new Uint16Array(N), sq = new Int32Array(g.FN * rows);
+  for (let ty = 0, t = 0; ty < rows; ty++) for (let tx = 0; tx < g.FN; tx++, t++) {
     const s = Math.floor(ty / g.sub) * SW + Math.floor(tx / g.sub);
     sq[t] = s;
     if (g.kind[g.cell[t]]) nL[s]++; else nW[s]++;
