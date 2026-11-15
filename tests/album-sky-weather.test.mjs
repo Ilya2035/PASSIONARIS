@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { MAP_NEAR, CLOUD_KM, GROW_KM, CELL_KM, GROW, GROW_LOD, GROW_DEV, FIELD_DEV, softNoise, ROUND, CLOUD_N, WIND, GROW_WIND, CELL_WIND, RAIN_LAG, RAIN_EDGE, WEATHER, WX, planeOf, llOfPlane, mapOf, llOfMap, MAP_ROUND, MAP_K, MAP_AXIS, MAP_E0, MAP_E1,
   cloudNoise, cloudAt, cellAt, cloudOffset, growOffset, cellOffset, cloudThreshold, rainCover, rainMask, rainAt,
   COVER_REST, WILL_REST, skyShare, coverOfShare, rainWill, coverAt, rainMaskAt, climatePicture, climateAt, climUV, CLIM_W, CLIM_H, precOf,
-  fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
+  STORM_KM, STORM_EVERY, STORM_FLASH, STORM_STILL, flashAt, fogByHour, fogByHeight, FOG_NEAR, FOG_FAR, fogNumbers, fogFloor, fogFloorAt, needClouds, SNOW_DROP, SNOW_BAND, snowLine, snowfallLine, snowShare, snowNumbers,
   HILL_FILL, HILL_FROM, CAP_CREST, CAP_HIGH, CAP_UNDER, CAP_OVER, capBank, capAt } from '../src/album/sky/weather.js';
 import { readFileSync } from 'node:fs';
 import { cloudShader, LUMPS, BANK_STEP, SHELL_REACH, cloudShow, rainCloudShow } from '../src/album/layers/clouds.js';
@@ -217,6 +217,27 @@ test('weather: a storm cloud from a height, a grey sky from below', () => {
   assert.ok(rainAt(NOISE, pg.cam.lat + .5, pg.cam.lon, rainCover(force), force, pg.p.cloudShift) > .9, 'it rains ahead');
 });
 
+test('weather: a thunderstorm — lightning lights the storm cloud from inside', () => {
+  // cells of the storm some tens of km across; every few seconds half of them flash, each briefly
+  assert.ok(STORM_KM > 30 && STORM_KM < 200 && STORM_EVERY >= 3 && STORM_EVERY <= 15 && STORM_FLASH > .01 && STORM_FLASH < .15 && STORM_STILL > .3 && STORM_STILL < .6);
+  // a cell flashes for a short part of the period, at its own moment; the dice of the period leave half of the cells dark
+  let lit = 0, n = 0;
+  for (let t = 0; t < STORM_EVERY; t += STORM_EVERY / 400) { n++; const f = flashAt(t, .37, .9); if (f > 0) { lit++; assert.ok(f === .5 || f === 1); } }
+  near(lit / n, STORM_FLASH, .01); assert.equal(flashAt(STORM_EVERY * (1 - .37 * 61 % 1 + .001), .37, .2), 0, 'not this period');
+  const when = h => { for (let t = 0; t < STORM_EVERY; t += .01) if (flashAt(t, h, .9) > 0) return t; return -1; };
+  assert.ok(Math.abs(when(.11) - when(.40)) > .2, 'two cells flash at different moments'); near(flashAt(1.234, .3, .8), flashAt(1.234 + 7 * STORM_EVERY, .3, .8), 1e-9, 'every period');
+  // in a still capture a flash lasts long enough for a picture to have some
+  let still = 0; for (let h = 0; h < 1; h += .01) if (flashAt(40, h, .9, STORM_STILL) > 0) still++; assert.ok(still > 30 && still < 60, `${still}`);
+  // the knob: a switch on the panel of the map, off until asked for; the uniform; the pages show it by night and at dusk
+  assert.equal(def('storm').type, 'toggle'); assert.equal(def('storm').value, 0); assert.ok(def('storm').map.length > 3); assert.equal(WX.uStorm.value.x, 0);
+  assert.ok(page('sky-storm').p.storm === 1 && page('sky-storm').p.light === 'night' && page('sky-storm-near').p.storm === 1);
+  const force = def('rainForce').value, st = page('sky-storm'); assert.ok(rainAt(NOISE, st.cam.lat, st.cam.lon, rainCover(force), force, st.p.cloudShift) > .9, 'the storm stands over the place');
+  // the shaders: the flash of a place, from the same numbers; it lights the shell of the clouds, the sky under them and the wet land
+  assert.match(WEATHER, /float wxFlash\(vec2 q\)/); assert.ok(WEATHER.includes(`/ ${STORM_KM.toFixed(1)}, id = floor(g)`) && WEATHER.includes(`uStorm.y / ${STORM_EVERY.toFixed(1)} + h * 61.`));
+  assert.match(cloudShader, /wxFlash\(q\) \* tall/); const rain = postShader(POST_CLOUDS | POST_RAIN);
+  assert.ok(/wxFlash\(mc\.xy\) \* wet/.test(rain) && /wxFlash\(q0\) \* now/.test(rain)); assert.ok(!/wxFlash\(q0\)/.test(postShader(POST_CLOUDS)) && !/wxFlash/.test(postShader(0)));
+});
+
 test('weather: the fog is of the morning', () => {
   const rise = sunTimes(172, 41.65).rise;
   assert.equal(fogByHour(0, rise), 1, 'in the light of the map the switch shows fog');
@@ -291,10 +312,10 @@ test('weather: clouds in the mountains — a sea of cloud in the valleys, caps o
 test('weather: nothing of it in the shaders of the land, and nothing at all while it is off', () => {
   // the shared light, which every shader of the land pastes, knows no weather and reads no texture
   assert.ok(!/sampler|albumCloud|wxRain|wxFog|tCloud|tFog/.test(LIGHT)); assert.equal(sky.glsl, '', 'the sky paints nothing in the ground shader');
-  for (const k of ['tCloud', 'tFog', 'tPeak', 'tClim', 'uRain', 'uGrow', 'uSunMap', 'uFog', 'uFogRect', 'uSnowF', 'uLow']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
+  for (const k of ['tCloud', 'tFog', 'tPeak', 'tClim', 'uRain', 'uGrow', 'uSunMap', 'uStorm', 'uFog', 'uFogRect', 'uSnowF', 'uLow']) assert.ok(!(k in sky.uniforms), `${k} is not among the uniforms of the ground`);
   // the GLSL of the weather: what post.js and layers/clouds.js call
   for (const sig of ['vec4 wxMap(vec3 P)', 'vec4 wxMapOf(vec3 wpos)', 'float wxPolar(float s)', 'vec2 wxClim(vec4 m)', 'vec2 wxPlane(vec3 wpos)', 'float wxCloudN(vec2 q, float lod)', 'float wxThr(float c)', 'float albumCloudField(vec3 wpos)', 'float albumCloudShade(vec3 wpos)',
-    'float wxCells(vec2 q)', 'float wxRainMask(vec2 q, float will)', 'float wxBase(vec2 q, float lod)', 'float wxGrow(vec2 q, float lod)', 'float wxRainCloud(vec2 q, float thr, float g, float lod)', 'float wxRainAt(vec4 m, float lod)', 'float wxFogTop(vec2 q)', 'vec2 wxCap(vec2 q)', 'float wxSnowLine(float s)', 'float wxSnowy(float s, float alt)',
+    'float wxCells(vec2 q)', 'float wxRainMask(vec2 q, float will)', 'float wxBase(vec2 q, float lod)', 'float wxGrow(vec2 q, float lod)', 'float wxRainCloud(vec2 q, float thr, float g, float lod)', 'float wxRainAt(vec4 m, float lod)', 'float wxFogTop(vec2 q)', 'vec2 wxCap(vec2 q)', 'float wxFlash(vec2 q)', 'float wxSnowLine(float s)', 'float wxSnowy(float s, float alt)',
     'float wxSnowAir(vec3 wpos)']) assert.ok(WEATHER.includes(sig), sig);
   assert.ok(!/vnoise|fbm|worley/.test(WEATHER), 'the weather reads its two pictures and counts no noise');
   for (const k of Object.keys(WX)) assert.match(WEATHER, new RegExp(`\\b${k}\\b`), k);

@@ -81,7 +81,8 @@ void main() {
   vec3 col = albumSunCol() * mix((.30 + .92 * lit) * (1. - .22 * body) * (1. - .30 * bank), (.02 + .13 * smoothstep(-.075, .05, slope)) * (1. - .25 * bank), tall)
     + albumSkyCol() * mix(1.2 - .12 * bank, .32, tall) + albumMoonCol() * (.5 + .7 * lit);
   // (from a height a cloud is lit by the Sun of its own place: day and night on the ball, sky/globe.js)
-  col = albumFinish(mix(col * .93, albumHorizon(d), albumHaze(P)) * globeRelight(U));
+  // Lightning lights the storm cloud from inside: a blue-white flash, whatever the hour.
+  col = albumFinish(mix(col * .93, albumHorizon(d), albumHaze(P)) * globeRelight(U) + vec3(.62, .74, 1.) * (wxFlash(q) * tall * 1.5));
   vec2 v = gl_FragCoord.xy / uRes - .5; col *= 1. - uVig * dot(v, v) * 1.5;         // the vignette of the finishing pass, which this shell is drawn after
   // a cloud that rains is shown from nearer than the others: the rain must hang from something
   float show = mix(uShow, max(uShow, uShowRain), rains);

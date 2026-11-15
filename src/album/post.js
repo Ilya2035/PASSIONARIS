@@ -13,8 +13,10 @@ import { COMMON } from './glsl.js';
 import { LIGHT, lightUniforms } from './light.js';
 import { WEATHER, WX, HILL_FROM } from './sky/weather.js';
 import { GLOBE, GLOBE_GLSL } from './sky/globe.js';
+import { PLUME, PLUME_GLSL, KINDS } from './sky/plume.js';
 
-const CLOUDS = 1, RAIN = 2, FOG = 4, BALL = 8;
+const CLOUDS = 1, RAIN = 2, FOG = 4, BALL = 8, ASH = 16;
+const v3 = a => `vec3(${a.map(x => x.toFixed(3)).join(', ')})`;
 // (this pass is drawn with its own flat camera: the eye of the map comes as uEye, under the name LIGHT knows)
 const HEAD = `#define cameraPosition uEye\n${COMMON}\n${LIGHT}\n${WEATHER}`;
 // the lines of rain are this many times longer than the cell they fall in is wide
@@ -83,6 +85,8 @@ const WET = /* glsl */`
             }
             vec3 w3 = c * (.5 + .32 * c); w3 = mix(vec3(dot(w3, vec3(.2126, .7152, .0722))), w3, 1.12);
             c = mix(c, w3, wet * .9);
+            // (lightning: for a moment the land under the storm is lit, cold and pale)
+            if (uStorm.x > 0.) c += (c * .9 + vec3(.05, .06, .09)) * (wxFlash(q0) * now);
           }`;
 // The fog of the morning. The last stretch of the ray before the ground is walked in six steps; a step that lies
 // under the top of the fog adds to it. So the fog has its own thickness: its edge runs along the slopes where the
@@ -148,6 +152,8 @@ const UNDER = /* glsl */`
               float body = smoothstep(thr + .05, thr + .32, n), wet = uRain.x > 0. ? wxRainMask(mc.xy, cc.y) * smoothstep(thr - .02, thr + .12, n) : 0.;
               vec3 uc = (albumSkyCol() * mix(1.15, .72, body) + albumSunCol() * mix(.2, .05, body) + albumMoonCol() * .3) * (1. - .42 * wet) * mix(.45, 1., albumDay());
               uc = mix(vec3(dot(uc, vec3(.2126, .7152, .0722))), uc, .45);                  // (grey, not the blue of the sky it hides)
+              // (lightning: the cloud over there lit from inside)
+              uc += vec3(.55, .66, .9) * (wxFlash(mc.xy) * wet * 1.3);
               c = mix(c, albumFinish(mix(uc, mix(albumHorizon(rdW), uc, .35), albumHaze(uEye + rdW * tc) * .65)), dens * (.55 + .45 * dens) * uRain.w);
             }
           }`;
@@ -220,8 +226,23 @@ const RAINY = /* glsl */`
 // every pixel of the land is dimmed to the light of its own place.
 const RELIT = /* glsl */`
           if (ground) c = globeDimmed(c, globeRelight(normalize(wpos + vec3(0., RKM, 0.))));`;
+// The plume of an eruption or of a sand storm (sky/plume.js) on the land: its shadow; what has fallen out of it —
+// grey ash, thickest near the volcano, or pale dust — through which the relief still reads; and, for dust, the haze of
+// the storm itself: the dust hangs from its top down to the ground, and a look gathers it along its way through it.
+const PLUMED = /* glsl */`
+          if (uPl.x > 0. && ground) {
+            vec3 G = wpos + vec3(0., RKM, 0.), up = normalize(G); float day = albumDay(), alt = length(G) - RKM; bool dust = uPlK.x > 1.5;
+            vec3 L = uSun.z > .02 ? uSunW : up, over = plumeAt(G), sh = plumeAt(G + L * max(uPlK.y - alt, 0.) / max(dot(L, up), .25));
+            c *= 1. - sh.x * (dust ? .2 : mix(.25, .6, day)) * (1. - albumHaze(wpos));          // (dust is thin: its shadow is light)
+            float fell = over.x * (dust ? .35 : mix(.8, .2, over.y)) * smoothstep(.0005, .006, alt);            // (nothing lies on the sea)
+            c = mix(c, (dust ? ${v3(KINDS.dust.ground)} : ${v3(KINDS.ash.ground)}) * (.3 + 1.4 * dot(c, vec3(.2126, .7152, .0722))), fell);
+            if (dust && over.x > .01) {
+              float way = min(max(uPlK.y - alt, 0.) / max(-dot(rdW, up), .05), tG);
+              c = mix(c, albumFinish(${v3(KINDS.dust.colour)} * (albumSunCol() * .9 + albumSkyCol() * .35 + albumMoonCol() * .4)), (1. - exp(-over.x * way * .02)) * .8);
+            }
+          }`;
 const frag = f => /* glsl */`uniform vec3 uEye;
-        ${f ? HEAD : ''}${f & BALL ? GLOBE_GLSL : ''}${f & RAIN ? RAIN_FN : ''}
+        ${f ? HEAD : ''}${f & BALL ? GLOBE_GLSL : ''}${f & ASH ? PLUME_GLSL : ''}${f & RAIN ? RAIN_FN : ''}
         uniform sampler2D tCol, tDepth; uniform vec2 uPx; uniform float uNear, uFar, uProj, uRad, uAO, uSharp, uVig; uniform mat4 uInvProj, uCamWorld; varying vec2 vUv;
         uniform float uRpp;                           // radians in one pixel (a little more on a large picture)
         float vz(vec2 uv) { float z = texture(tDepth, uv).r * 2. - 1.; return 2. * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
@@ -251,13 +272,13 @@ const frag = f => /* glsl */`uniform vec3 uEye;
           }
           c *= 1. - uAO * ao * .8;
           vec3 n4 = (texture(tCol, vUv + vec2(uPx.x, 0.)).rgb + texture(tCol, vUv - vec2(uPx.x, 0.)).rgb + texture(tCol, vUv + vec2(0., uPx.y)).rgb + texture(tCol, vUv - vec2(0., uPx.y)).rgb) * .25;
-          c = clamp(c + (c - n4) * uSharp, 0., 1.);${f ? RAY : ''}${f & RAIN ? WET : ''}${f & FOG ? FOGGY : ''}${f & CLOUDS ? UNDER + SHADE : ''}${f & RAIN ? RAINY : ''}${f & BALL ? RELIT : ''}
+          c = clamp(c + (c - n4) * uSharp, 0., 1.);${f ? RAY : ''}${f & RAIN ? WET : ''}${f & FOG ? FOGGY : ''}${f & CLOUDS ? UNDER + SHADE : ''}${f & ASH ? PLUMED : ''}${f & RAIN ? RAINY : ''}${f & BALL ? RELIT : ''}
           vec2 q = vUv - .5; c *= 1. - uVig * dot(q, q) * 1.5;
           gl_FragColor = vec4(c, 1.);
         }`;
 
 // (for the tests: the text of the pass for a set of weather)
-export const postShader = frag, POST_CLOUDS = CLOUDS, POST_RAIN = RAIN, POST_FOG = FOG, POST_BALL = BALL;
+export const postShader = frag, POST_CLOUDS = CLOUDS, POST_RAIN = RAIN, POST_FOG = FOG, POST_BALL = BALL, POST_PLUME = ASH;
 
 export class Post {
   // T: the uniforms of the ground (album.terrain.u), for the light the weather is counted with
@@ -265,7 +286,7 @@ export class Post {
     this.renderer = renderer; this.T = T;
     this.rt = new WebGLRenderTarget(4, 4, { samples: 4, minFilter: LinearFilter, magFilter: LinearFilter });
     this.rt.depthTexture = new DepthTexture(4, 4, UnsignedIntType); this.rt.depthTexture.minFilter = this.rt.depthTexture.magFilter = NearestFilter;
-    this.uniforms = { ...(T ? lightUniforms(T) : {}), ...WX, ...GLOBE, uExag: T?.uExag || { value: 1.6 }, tCol: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture }, uPx: { value: new Vector2() }, uNear: { value: 1 }, uFar: { value: 1000 }, uProj: { value: 1000 },
+    this.uniforms = { ...(T ? lightUniforms(T) : {}), ...WX, ...GLOBE, ...PLUME, uExag: T?.uExag || { value: 1.6 }, tCol: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture }, uPx: { value: new Vector2() }, uNear: { value: 1 }, uFar: { value: 1000 }, uProj: { value: 1000 },
       uRad: { value: .1 }, uAO: { value: .8 }, uSharp: { value: .3 }, uVig: { value: .35 }, uRpp: { value: .0005 }, uEye: { value: new Vector3() }, uInvProj: { value: new Matrix4() }, uCamWorld: { value: new Matrix4() } };
     // One shader of the pass for every set of weather that is on, all with the same uniforms, each made when it is
     // first needed. With no weather the plain one is used.
@@ -283,7 +304,7 @@ export class Post {
     const ball = GLOBE.uGlobe.value.x > 0 ? BALL : 0;
     if (!WX.tCloud.value) return ball;
     const clouds = this.T.uCloud?.value.x > 0;
-    return ball | (clouds ? CLOUDS : 0) | (clouds && WX.uRain.value.x > 0 ? RAIN : 0) | (WX.uFog.value.x > 0 && WX.tFog.value ? FOG : 0);
+    return ball | (PLUME.uPl.value.x > 0 ? ASH : 0) | (clouds ? CLOUDS : 0) | (clouds && WX.uRain.value.x > 0 ? RAIN : 0) | (WX.uFog.value.x > 0 && WX.tFog.value ? FOG : 0);
   }
   // fewer samples when the machine is struggling (the album has already halved its picture scale)
   setSamples(n) { if (this.rt.samples !== n) { this.rt.samples = n; this.rt.dispose(); } }

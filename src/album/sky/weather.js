@@ -177,6 +177,19 @@ export function rainAt(noise, lat, lon, cover, force, drift = 0, clim) {
   return ss(t, t + .08, cloudAt(noise, x, y, drift)) * ss(m, m + .08, cellAt(noise, x, y, drift));
 }
 
+// ---- the thunderstorm
+// Lightning lights a storm cloud from inside. The cloud is cut in cells STORM_KM across (they go with the clouds);
+// every STORM_EVERY seconds half of the cells flash, each at its own moment, for STORM_FLASH of that time: a quick
+// double flicker, brightest at the middle of the cell. In a still capture a flash lasts STORM_STILL of the time, so
+// that a picture has some to show.
+export const STORM_KM = 90, STORM_EVERY = 6, STORM_FLASH = .05, STORM_STILL = .45;
+// is the cell of a place flashing at a time, 0 or the strength of the flicker (wxFlash without the fall toward the
+// edge of the cell); hash: the hash of the cell, 0..1; pick: the dice of this period, 0..1
+export function flashAt(time, hash, pick, share = STORM_FLASH) {
+  const k = (((time / STORM_EVERY + hash * 61) % 1) + 1) % 1;
+  return k > share || pick < .5 ? 0 : .5 + .5 * (((k / share * 2.5 + hash * 3) % 1) >= .5 ? 1 : 0);
+}
+
 // ---- snowfall
 // What falls from a cloud is snow where the ground stands above the line of snowfall, and rain below it. That line
 // is the line of lasting snow of the ground shader (terrain.js: 2980 m at 37° N, 55 m lower with every degree north,
@@ -295,11 +308,12 @@ export const BANK_KM = 8192;
 // uLow:  the low clouds: x how much of the relief the cloud of a mountain valley fills (of the way from the floor of
 //        the land to its mean height), y 1 while high crests wear caps of cloud, z from which value of the field of
 //        the banks a crest has its cap, w 1 while there is fog itself. (uFog.x is 1 while there is fog or caps.)
+// uStorm: x 1 while there is a thunderstorm, y its time (s), z how much of the time between two flashes a flash lasts.
 // uSunMap: which way the Sun is on the map of the weather, at the place the camera looks at: (east, south), a unit vector.
 // tPeak: the highest ground of every 2 km, m: the crests (laid over the same rect as tFog).
 // tClim: the climate (climatePicture): until the open climate is read, one point that says «as the knobs say».
 export const WX = { tCloud: { value: null }, tFog: { value: null }, tPeak: { value: null }, tClim: { value: null }, uFogRect: { value: new Vector4(0, 0, 1, 1) }, uRain: { value: new Vector4(0, .2, 0, 1) },
-  uGrow: { value: new Vector4(2051, 977, 0, 0) }, uSunMap: { value: new Vector2(-.74, -.67) }, uFog: { value: new Vector4(0, .3, .5, .05) }, uSnowF: { value: new Vector4(9, 0, .2, 0) }, uLow: { value: new Vector4(0, 0, .5, 0) } };
+  uGrow: { value: new Vector4(2051, 977, 0, 0) }, uSunMap: { value: new Vector2(-.74, -.67) }, uStorm: { value: new Vector4(0, 0, STORM_FLASH, 0) }, uFog: { value: new Vector4(0, .3, .5, .05) }, uSnowF: { value: new Vector4(9, 0, .2, 0) }, uLow: { value: new Vector4(0, 0, .5, 0) } };
 const climTexture = (data, w, h) => {
   const t = new DataTexture(data, w, h, RGBAFormat, UnsignedByteType);
   t.wrapS = RepeatWrapping; t.wrapT = ClampToEdgeWrapping; t.magFilter = t.minFilter = LinearFilter; t.needsUpdate = true; return t;
@@ -343,7 +357,7 @@ export function needFog(at) {
 // ---- the GLSL of the weather: pasted after COMMON and LIGHT (it uses RKM, uExag, uCloud, uSun, uSunW, albumDay)
 const v3 = a => `vec3(${a.map(x => x.toFixed(6)).join(', ')})`, f1 = x => x.toFixed(1), thrA = .5 + FIELD_DEV * 2.4, thrB = FIELD_DEV * 4;
 export const WEATHER = /* glsl */`
-uniform sampler2D tCloud, tFog, tPeak, tClim; uniform vec4 uRain, uGrow, uFog, uFogRect, uSnowF, uLow; uniform vec2 uSunMap;
+uniform sampler2D tCloud, tFog, tPeak, tClim; uniform vec4 uRain, uGrow, uFog, uFogRect, uSnowF, uLow, uStorm; uniform vec2 uSunMap;
 const vec2 WX_WIND = vec2(${WIND[0].toFixed(4)}, ${WIND[1].toFixed(4)});
 #define RAIN_LAG ${f1(RAIN_LAG)}
 #define MAP_ROUND ${MAP_ROUND.toFixed(3)}
@@ -395,6 +409,14 @@ float wxRainMask(vec2 q, float will) { float t = uRain.y + (${WILL_REST.toFixed(
 float wxRainCloud(vec2 q, float thr, float g, float lod) { float t = thr + ${RAIN_EDGE.toFixed(3)}; return smoothstep(t, t + .08, wxBase(q, lod) + g); }
 // rain over a place of the map, 0..1: under a cloud that rains, nearly to its edge
 float wxRainAt(vec4 m, float lod) { vec2 c = wxClim(m); float l = lod + wxPolar(m.w); return wxRainCloud(m.xy, wxThr(c.x), wxGrow(m.xy, l), l) * wxRainMask(m.xy, c.y); }
+// lightning over a place of the map, 0..1: the cells of the storm that flash now (hashCell: glsl.js)
+float wxFlash(vec2 q) {
+  if (uStorm.x <= 0.) return 0.;
+  vec2 g = (q + uCloud.yz) / ${STORM_KM.toFixed(1)}, id = floor(g); float h = hashCell(id), ph = uStorm.y / ${STORM_EVERY.toFixed(1)} + h * 61., k = fract(ph);
+  if (k > uStorm.z || hashCell(id + floor(ph) * 3.7) < .5) return 0.;
+  // (brightest at the middle of the cell, nothing at its edge: a flash is round)
+  return (.5 + .5 * step(.5, fract(k / uStorm.z * 2.5 + h * 3.))) * (1. - smoothstep(.08, .48, length(fract(g) - .5)));
+}
 // the line of snowfall at a latitude (s: its sine), km of the world over the sea
 float wxSnowLine(float s) { return uSnowF.x - abs(degrees(asin(s))) * uSnowF.y; }
 // how much of what falls is snow, 0 rain .. 1 snow: at a height (km of the world over the sea) at that latitude

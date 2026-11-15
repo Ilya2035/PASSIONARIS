@@ -11,8 +11,9 @@ import { Vector3, Vector4, BackSide } from 'three';
 import { frame, BBOX } from '../geo.js';
 import { sunAt, lightFrame, FRAME } from '../light.js';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, lightHour } from '../sky/astro.js';
+import { PLUME, KINDS, plumeReach, plumeFrame, nearestVolcano } from '../sky/plume.js';
 import { GLOBE, globeAmount, globeDim, frameSunUp, raiseSun } from '../sky/globe.js';
-import { WX, needClouds, needFog, needClimate, precOf, climateNow, cloudOffset, growOffset, cellOffset, rainCover, rainMask, fogByHour, fogByHeight, fogNumbers, snowNumbers, HILL_FILL, capBank } from '../sky/weather.js';
+import { WX, needClouds, needFog, needClimate, precOf, climateNow, cloudOffset, growOffset, cellOffset, rainCover, rainMask, fogByHour, fogByHeight, fogNumbers, snowNumbers, HILL_FILL, capBank, STORM_FLASH, STORM_STILL } from '../sky/weather.js';
 
 const MAP_LIGHT = sunAt(0);
 
@@ -39,8 +40,13 @@ export default {
     { key: 'cloudShift', label: 'Сдвиг облаков по ветру', group: 'light', min: 0, max: 32768, step: 16, value: 0, unit: ' км' },
     { key: 'rain', label: 'Дождь', group: 'light', type: 'toggle', value: 0, map: 'Дождь' },
     { key: 'rainForce', label: 'Сила дождя', group: 'light', min: .1, max: 1, step: .05, value: .6 },
+    { key: 'storm', label: 'Гроза (дождь с молниями)', group: 'light', type: 'toggle', value: 0, map: 'Гроза' },
     { key: 'fog', label: 'Туман (утром; к полудню рассеивается)', group: 'light', type: 'toggle', value: 0, map: 'Туман' },
     { key: 'fogAmount', label: 'Сколько тумана', group: 'light', min: .1, max: 1, step: .05, value: .7 },
+    // an eruption of the volcano nearest to the place the camera looks at, and a sand storm that rises there
+    // (sky/plume.js); one at a time: the eruption comes first
+    { key: 'eruption', label: 'Извержение вулкана (ближайшего к взгляду)', group: 'light', type: 'toggle', value: 0, map: 'Извержение' },
+    { key: 'dustStorm', label: 'Песчаная буря (там, куда смотрит камера)', group: 'light', type: 'toggle', value: 0, map: 'Песчаная буря' },
     { key: 'edgePan', label: 'Сдвиг карты у края экрана', group: 'system', type: 'toggle', value: 1, map: 'Сдвиг у края' },
   ],
   pages: [
@@ -65,6 +71,8 @@ export default {
     { id: 'sky-rain', group: 'Небо и свет', title: 'Дождь с высоты', note: 'Взгляд от Валенсии на север: над горами идёт дождь. Туча тяжёлая и серая, под её ближним краем висит серая завеса дождя с полосами, земля под ней тёмная, мокрая. Туча уходит на восток и оставляет за собой мокрый след. Переключатель «Дождь», ручка «Сила дождя».', p: { rain: 1, cloudShift: 8208 }, cam: cam(P.rain, 220, 74, 0) },
     { id: 'sky-rain-200', group: 'Небо и свет', title: 'Дождь с игровой высоты', note: 'Тот же дождь с 200 км: дождевая туча как на снимке со спутника — белая, плотная, с буграми, светлыми со стороны Солнца. Обычные облака вокруг неё полупрозрачные. Ближе 120 км туча тает, чтобы карта под дождём читалась.', p: { rain: 1, cloudShift: 1216 }, cam: cam([40.0, -0.9], 200, 40, 0) },
     { id: 'sky-rain-near', group: 'Небо и свет', title: 'Дождь вблизи', note: 'Край дождя с 28 км: справа льёт — видны тонкие линии дождя, земля мокрая и тёмная; слева сухо. Вблизи облака не рисуются, остаются их тень и сам дождь.', p: { rain: 1, cloudShift: 112 }, cam: cam(P.rainEdge, 28, 66, 80) },
+    { id: 'sky-storm', group: 'Небо и свет', title: 'Гроза с высоты', note: 'Ночь, дождевая туча с 200 км: молнии освещают тучу изнутри — сине-белые вспышки то в одном её месте, то в другом. Переключатель «Гроза» на панели карты (включает и дождь).', p: { storm: 1, light: 'night', cloudShift: 1216 }, cam: cam([40.0, -0.9], 200, 40, 0) },
+    { id: 'sky-storm-near', group: 'Небо и свет', title: 'Гроза вблизи', note: 'Вечер в предгорьях Пиренеев, над хребтом гроза: небо под тучей вспыхивает, земля под ней на миг светлеет.', p: { storm: 1, light: 'evening', cloudShift: 7856 }, cam: cam([42.2, .3], 20, 84, 0) },
     { id: 'sky-overcast', group: 'Небо и свет', title: 'Пасмурное небо под тучей', note: 'Предгорья Пиренеев, взгляд на север вдоль земли. Над хребтом стоит туча, и небо над горизонтом серое, а не ясное: светлее у тонкого края тучи, темнее под её серединой и там, где льёт. Светлая полоса у самого горизонта — там туча кончается.', p: { rain: 1, cloudShift: 7856 }, cam: cam([42.2, .3], 20, 84, 0) },
     { id: 'sky-snow', group: 'Небо и свет', title: 'Снегопад в Пиренеях', note: 'Туча стоит над хребтом. Выше линии снегопада идёт снег: склоны белеют, лес под снегом серо-синий. Ниже той же линии идёт дождь: долины тёмные, мокрые. Линия снегопада на 900 м ниже вечного снега; её двигает ручка «Снеговая линия». Тучу двигает ручка «Сдвиг облаков по ветру».', p: { rain: 1, cloudShift: 7856 }, cam: cam([42.7, .3], 60, 45, 0) },
     { id: 'sky-snow-near', group: 'Небо и свет', title: 'Снегопад вблизи: Ането', note: 'С 20 км: над белыми склонами падают снежинки, в долине под ними — линии дождя. Граница снега идёт по высоте склона.', p: { rain: 1, cloudShift: 7856 }, cam: cam(P.pyr, 20, 60, 0) },
@@ -74,6 +82,11 @@ export default {
     { id: 'sky-valley-clouds', group: 'Небо и свет', title: 'Облака в горных долинах', note: 'Половина седьмого утра в Пиренеях: долины залиты облаком, гребни и вершины стоят над ним. Это тот же «Туман»: в горах он заполняет долины до половины их глубины. К полудню рассеивается.', p: { fog: 1, hour: 6.5 }, cam: cam([42.7, .3], 60, 45, 0) },
     { id: 'sky-caps', group: 'Небо и свет', title: 'Шапки облаков на гребнях', note: 'Ането с 20 км, облака включены: высокие гребни носят шапки облаков, долины под ними открыты. Сколько гребней в шапках — ручка «Облачность».', p: { clouds: 1, cloudCover: .7 }, cam: cam(P.pyr, 20, 60, 0) },
     { id: 'sky-fog-high', group: 'Небо и свет', title: 'Туман с высоты не виден', note: 'То же утро и тот же туман, вид с 300 км: тумана нет. Туман — погода вблизи: с 70 км высоты камеры он редеет, с 260 км его не видно вовсе.', p: { fog: 1, hour: 6.5 }, cam: cam(P.zar, 300, 30, 0) },
+    { id: 'sky-eruption', group: 'Небо и свет', title: 'Извержение: шлейф пепла', note: 'Извергается вулканическое поле Калатрава (ближайший вулкан к взгляду). Ветер несёт пепел на восток-северо-восток: шлейф расширяется, под ним тень, на земле лежит серый пепел — гуще всего у вулкана. Переключатель «Извержение» на панели карты.', p: { eruption: 1 }, cam: cam([39.4, -2.2], 700, 30, 0) },
+    { id: 'sky-eruption-near', group: 'Небо и свет', title: 'Извержение вблизи: столб дыма', note: 'Тот же вулкан с 40 км: из кратера поднимается столб тёмного дыма, наверху его подхватывает ветер. Ночью в молодом дыму виден отсвет огня.', p: { eruption: 1 }, cam: cam([38.87, -4.02], 40, 78, 340) },
+    { id: 'sky-eruption-space', group: 'Небо и свет', title: 'Извержение из космоса: Этна', note: 'Этна с 6000 км: шлейф пепла длиной больше тысячи километров виден из космоса.', p: { eruption: 1, light: 'day' }, cam: cam([38.5, 17], 6000, 0, 0) },
+    { id: 'sky-dust', group: 'Небо и свет', title: 'Песчаная буря с высоты', note: 'Буря поднялась на юго-востоке Испании и идёт по ветру: широкий бледно-жёлтый шлейф пыли, земля под ним в мутной дымке. Буря поднимается там, куда смотрит камера, — в игре её место выбирает игрок. Переключатель «Песчаная буря» на панели карты.', p: { dustStorm: 1 }, cam: cam([38.3, -1.8], 500, 30, 0) },
+    { id: 'sky-dust-near', group: 'Небо и свет', title: 'Песчаная буря вблизи', note: 'Та же буря с 30 км: земля тонет в жёлтой пыли, дальние холмы едва видны.', p: { dustStorm: 1 }, cam: cam([38.3, -1.8], 30, 70, 60) },
     { id: 'sky-earth-clouds', group: 'Небо и свет', title: 'Вся Земля: облака по климату', note: 'Шар с 20 000 км, облака включены. Сколько облаков над местом — по его климату в этом месяце: над Сахарой небо чистое, над северной Атлантикой и у экватора облачно. Месяц берётся из ручки «День года».', p: { light: 'day', clouds: 1 }, cam: cam([25, 5], 20000, 0, 0) },
     { id: 'sky-earth-rain', group: 'Небо и свет', title: 'Вся Земля: где идут дожди', note: 'То же с дождём: тёмные тучи стоят там, где в этом месяце дождливо, — у экватора и в умеренных широтах; над пустынями их нет.', p: { light: 'day', rain: 1 }, cam: cam([25, 5], 20000, 0, 0) },
   ],
@@ -86,7 +99,20 @@ export default {
     const world = (e, n, u, f, out) => out.set(0, 0, 0).addScaledVector(f.east, e).addScaledVector(f.north, n).addScaledVector(f.up, u).normalize();
     let clock = null, drift = 0, rainT = 40;                        // the hour while the day runs; how far the clouds have drifted, km; the time of the falling rain, s
     const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    const sync = () => { album.cam.edgePan = !!p.get('edgePan') && !album.shot; };
+    // ---- the plume of an eruption or of a sand storm: where it began, and when
+    let plume = null, volcanoes = null, asked = false, wanted = '';
+    const want = () => { const w = p.get('eruption') ? 'ash' : p.get('dustStorm') ? 'dust' : ''; if (w !== wanted) { wanted = w; plume = null; } };
+    // (called by the layer a frame after the switch: by then the camera stands where the page has put it)
+    const begin = at => {
+      if (wanted === 'dust') {
+        // it rises a little upwind of the place looked at, so that it blows across the view
+        plume = { kind: 'dust', name: '', lat: at.lat - .9, lon: at.lon - 1.6 / Math.max(.3, Math.cos(at.lat * Math.PI / 180)), elev: 0, t: 0 };
+      } else if (wanted === 'ash') {
+        if (volcanoes) { const v = nearestVolcano(volcanoes, at.lat, at.lon); if (v) plume = { kind: 'ash', ...v, t: 0 }; }
+        else if (!asked) { asked = true; fetch('assets/hazards/volcanoes.json').then(r => r.json()).then(j => { volcanoes = j; }).catch(e => console.warn('[album] no list of volcanoes:', e.message || e)); }
+      }
+    };
+    const sync = () => { album.cam.edgePan = !!p.get('edgePan') && !album.shot; want(); };
     // the open climate of the world, for the clouds: read once, when the clouds are first switched on
     const fetchPrec = () => fetch('assets/climate/normals-open.bin.gz').then(r => { if (!r.ok) throw new Error(`normals-open: ${r.status}`); return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }).then(precOf);
     // the fog and the caps of the crests lie on the album's own land: there is nothing of them to draw far from it
@@ -117,7 +143,8 @@ export default {
       lightFrame({ sun, moon: moon.w, style: T.uStyle.value, warm: T.uWarm.value, haze: T.uHaze.value, alt: c.alt ?? s.h, aureole: hour ? 1 : 0 });
       // clouds: how much of the sky, how far the wind (toward the east-north-east) has carried them
       // (The weather is there in the natural look only. Rain brings its own clouds if there are too few.)
-      const natural = T.uStyle.value === 0, force = p.get('rainForce'), rain = !!p.get('rain') && natural;
+      // (a thunderstorm is rain with lightning: it brings the rain with it)
+      const natural = T.uStyle.value === 0, force = p.get('rainForce'), storm = !!p.get('storm') && natural, rain = (!!p.get('rain') || storm) && natural;
       const cover = natural ? Math.max(p.get('clouds') ? p.get('cloudCover') : 0, rain ? rainCover(force) : 0) : 0;
       if (!album.shot) { drift += dt * p.get('play') * .9; rainT = (rainT + dt * p.get('play')) % 1000; }
       // (the clouds go with the wind; what makes them grow and melt slides the other way, the cells of rain lag behind)
@@ -127,6 +154,7 @@ export default {
       if (cover > 0) needClimate(yday, fetchPrec);
       // the lines of falling rain show near the ground only: from a height rain is a grey curtain under its cloud
       WX.uRain.value.set(rain ? force : 0, rainMask(force), rainT, 1 - ss(60, 220, s.h));
+      WX.uStorm.value.set(storm ? 1 : 0, rainT, album.shot ? STORM_STILL : STORM_FLASH, 0);
       // above the line of snowfall it snows (the line follows the snow line of the ground: the look, «Снеговая линия»)
       if (rain) { needFog(album.data.base.at); WX.uSnowF.value.set(...snowNumbers(T.uSnow.value, T.uExag.value), 1); } else WX.uSnowF.value.w = 0;
       // fog: what the hour has left of it (thickest at dawn, gone by noon)
@@ -139,9 +167,19 @@ export default {
         WX.uFog.value.set(1, f.thick * k, f.bank, f.soft * k); WX.uLow.value.set(fog > .02 ? HILL_FILL * Math.min(1, fog / .7) : 0, caps > 0 ? 1 : 0, capBank(caps), fog > .02 ? 1 : 0);
       } else WX.uFog.value.x = 0;
       if (cover > 0 || fog > .02) needClouds();
-      layer.weather = { cover, rain: rain ? force : 0, fog, caps, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
+      layer.weather = { cover, rain: rain ? force : 0, storm, fog, caps, climate: cover > 0 ? climateNow(s.lat, s.lon) : null };
+      // the plume: it grows with the time of the map (a still capture shows it full grown), its billows travel down it
+      if (wanted && !plume) begin(c.t);
+      if (plume && natural) {
+        plume.t = album.shot ? 600 : plume.t + dt * p.get('play');
+        const k = KINDS[plume.kind], fr = plumeFrame(plume.lat, plume.lon), reach = plumeReach(plume.kind, plume.t);
+        PLUME.uPlO.value.copy(fr.o); PLUME.uPlW.value.copy(fr.w); PLUME.uPlC.value.copy(fr.c);
+        PLUME.uPl.value.set(reach, k.half, k.spread, plume.t * k.speed); PLUME.uPlK.value.set(k.id, (k.top + Math.max(0, plume.elev || 0) / 1000) * T.uExag.value, k.billow, 0);
+        needClouds(); layer.plume = { kind: plume.kind, name: plume.name, lat: plume.lat, lon: plume.lon, reach };
+      } else { PLUME.uPl.value.x = 0; layer.plume = null; }
       dome.update(c.cam, album.renderer.domElement.height);
     } };
-    return layer;
+    const { default: initPlumes } = await import('../layers/plumes.js');
+    return [layer, initPlumes(album)];
   },
 };

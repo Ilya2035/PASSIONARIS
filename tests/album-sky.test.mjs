@@ -122,12 +122,12 @@ test('sky: knobs and pages of the part', () => {
   // the hour knob stays, with the light of the map as its rest; the sky adds the day, the Moon, the clouds
   assert.equal(def('hour').value, 0); assert.equal(def('yday').value, 172); assert.equal(def('moon').value, .5);
   // nothing new is on until asked for: the pictures taken before stay as they were
-  assert.equal(def('clouds').value, 0); assert.equal(def('dayRun').value, 0); assert.equal(def('rain').value, 0); assert.equal(def('fog').value, 0);
+  assert.equal(def('clouds').value, 0); assert.equal(def('dayRun').value, 0); assert.equal(def('rain').value, 0); assert.equal(def('fog').value, 0); assert.equal(def('storm').value, 0);
   // switches on the panel of the map
-  for (const k of ['clouds', 'dayRun', 'edgePan', 'rain', 'fog']) { assert.equal(def(k).type, 'toggle', k); assert.ok(def(k).map.length > 3, k); }
+  for (const k of ['clouds', 'dayRun', 'edgePan', 'rain', 'fog', 'storm', 'eruption', 'dustStorm']) { assert.equal(def(k).type, 'toggle', k); assert.ok(def(k).map.length > 3, k); }
   assert.equal(def('edgePan').value, 1);
   const ids = sky.pages.map(p => p.id); assert.equal(new Set(ids).size, ids.length);
-  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-light-morning', 'sky-light-day', 'sky-light-evening', 'sky-light-night', 'sky-sun-day', 'sky-sun-evening', 'sky-earth-day', 'sky-earth-evening', 'sky-earth-night', 'sky-terminator', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-overcast', 'sky-snow', 'sky-snow-near', 'sky-snow-200', 'sky-fog', 'sky-fog-late', 'sky-valley-clouds', 'sky-caps', 'sky-fog-high', 'sky-earth-clouds', 'sky-earth-rain']) {
+  for (const id of ['sky-near', 'sky-200', 'sky-space', 'sky-dawn', 'sky-noon', 'sky-dusk', 'sky-night', 'sky-light-morning', 'sky-light-day', 'sky-light-evening', 'sky-light-night', 'sky-sun-day', 'sky-sun-evening', 'sky-earth-day', 'sky-earth-evening', 'sky-earth-night', 'sky-terminator', 'sky-clouds', 'sky-rain', 'sky-rain-200', 'sky-rain-near', 'sky-overcast', 'sky-snow', 'sky-snow-near', 'sky-snow-200', 'sky-fog', 'sky-fog-late', 'sky-valley-clouds', 'sky-caps', 'sky-fog-high', 'sky-earth-clouds', 'sky-earth-rain', 'sky-eruption', 'sky-eruption-near', 'sky-eruption-space', 'sky-dust', 'sky-dust-near', 'sky-storm', 'sky-storm-near']) {
     const pg = PAGES.find(p => p.id === id); assert.ok(pg, id); assert.ok(pg.title.length > 5 && pg.note.length > 20);
     assert.ok(pg.cam.h >= H_MIN && pg.cam.h <= H_MAX && pg.cam.tilt <= tiltCap(pg.cam.h) && Math.abs(pg.cam.lat) <= LAT_MAX, id);
     for (const k of Object.keys(pg.p)) assert.ok(def(k), `${id}: no knob ${k}`);
@@ -214,7 +214,7 @@ test('sky: day and night on the ball — the frame takes the highest Sun in view
   const curve = x => (x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), back = t => { const a = 2.51 - 2.43 * t, b = .03 - .59 * t; return (Math.sqrt(b * b + .56 * a * t) - b) / (2 * a); };
   for (const x of [.01, .1, .5, 1.5, 4]) near(back(curve(x)), x, 1e-9);
   assert.ok(GLOBE_GLSL.includes('(sqrt(b * b + .56 * a * t) - b) / (2. * a) * k') && GLOBE_GLSL.includes('a = 2.51 - 2.43 * t, b = .03 - .59 * t') && LIGHT.includes('(col * (2.51 * col + .03)) / (col * (2.43 * col + .59) + .14)'));
-  assert.match(cloudShader, /\* globeRelight\(U\)\)/);
+  assert.match(cloudShader, /\* globeRelight\(U\) \+ /);
   // and nothing of it is in the light the ground shader carries
   assert.ok(!LIGHT.includes('uGlobe') && !LIGHT.includes('globeRelight'));
 });
