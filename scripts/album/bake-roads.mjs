@@ -29,13 +29,14 @@ if (!existsSync(join(ROOT, 'public', 'album-data', 'h11'))) { console.error('no 
 if (!process.argv.includes('--no-build')) { const b = run('build', dir); process.stdout.write(b.stdout || ''); if (b.status) { console.error(b.stderr); process.exit(1); } }
 // what the page is asked: the network as the file keeps it, and whether it had to lay it
 const ev = join(dir, 'bake-roads-eval.js').replace(/\\/g, '/');
-writeFileSync(ev, `(async () => { const tiles = await window.__album.roadNet.rebake(), n = window.__album.roadNet; return 'ROADS' + JSON.stringify({ sig: n.signature(), tiles, stats: n.stats, fords: n.fords.length, banks: n.banks, b64: n.encode() }); })()`);
-const r = run('acap', dir, 'bake-roads', 'page=map&ui=0&dpr=1', '800', '450', ev), at = (r.stdout || '').indexOf('ROADS{');
-if (at < 0) { console.error('the page gave no roads:\n' + (r.stdout || '').slice(-1500) + (r.stderr || '')); process.exit(1); }
+writeFileSync(ev, `(async () => { const t0 = performance.now(), tiles = await window.__album.roadNet.rebake(), n = window.__album.roadNet; return 'ROADS' + JSON.stringify({ sig: n.signature(), tiles, ms: Math.round(performance.now() - t0), since: Math.round(performance.now()), stats: n.stats, fords: n.fords.length, banks: n.banks, b64: n.encode() }); })()`);
+const t0 = Date.now(), r = run('acap', dir, 'bake-roads', 'page=map&ui=0&dpr=1&bakeroads=1', '800', '450', ev), at = (r.stdout || '').indexOf('ROADS{');
+// (the window of the harness lives 240 s: a bake that needs longer is cut off there and gives nothing)
+if (at < 0) { console.error('the page gave no roads' + (Date.now() - t0 > 235e3 ? ' — the window of the harness was closed after 240 s (scripts/harness.sh, acap: timeout 240); the bake needs longer' : '') + ':\n' + (r.stdout || '').slice(-1500) + (r.stderr || '')); process.exit(1); }
 const end = r.stdout.indexOf('\n', at), got = JSON.parse(r.stdout.slice(at + 5, end < 0 ? undefined : end).trim());
 const out = join(ROOT, 'public', 'assets', 'album', 'roads', 'roads.bin.gz'); mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, gzipSync(Buffer.from(got.b64, 'base64'), { level: 9 }));
 const s = got.stats;
 console.log(`laid on ${got.tiles} fine tiles (those under the roads): ${s.main} main, ${s.lesser} lesser, ${s.track} track legs (${s.km.join(', ')} km), ${s.capitals} towns of provinces, ${got.fords} river crossings, ${s.unreached} districts without a road, ${s.shaped} legs shaped, ${got.banks.km} km on the banks of rivers, ${s.passes.join(' + ')} passes`);
-console.log(`signature ${got.sig} → ${out} (${statSync(out).size} bytes)`);
+console.log(`signature ${got.sig} → ${out} (${statSync(out).size} bytes); the laying on the fine heights took ${(got.ms / 1000).toFixed(0)} s, the page ${(got.since / 1000).toFixed(0)} s from its start, the window with its turn in the queue ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 

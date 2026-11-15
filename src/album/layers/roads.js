@@ -85,6 +85,10 @@ export default async function init(album) {
   const p = album.params, division = album.division;
   if (!division?.data?.cells) { console.warn('[album] roads: no division to lay them over'); return null; }
   const file = await loadFile();
+  // The page opened for the bake (scripts/album/bake-roads.mjs, ?bakeroads=1): a network the file does not give is laid
+  // without the shapes of its mountain legs — rebake() lays it again on the fine heights at once, and the shapes are
+  // nine tenths of the time of a laying (in Node, stage 2: 1 s without them, 11 s with).
+  const baking = new URLSearchParams(globalThis.location?.search || '').has('bakeroads');
   let ribbons = [], decks = [], works = [], sites = [], net = null, drawn = [], fords = [], modelSeen, near = null, version = 0, spanSeen = '';
   let ground = null, kinds = null, levels = null, ways = new Map();       // for toMain() and infra(): made when first asked for
   const towns = () => album.layers.towns?.model?.() || null;
@@ -138,7 +142,7 @@ export default async function init(album) {
     const places = album.data.vectors.places.map((pl, i) => { const t = founded.get(i); return t ? { ...llOf(t.x, t.y), pop: pl.pop } : pl; });
     let from = 'from the file'; net = file && !fineAt ? decodeNet(file, div, div.centres, places) : null;
     if (!net) { from = fineAt ? 'laid anew on the fine heights' : file ? 'laid anew — the file is for another division: node scripts/album/bake-roads.mjs' : 'laid now, no file'; // (the shape of the mountain legs is taken from the stale file wherever a leg is still the same: finding it anew takes seconds)
-      net = roadNetwork(div, div.centres, places, undefined, { heightAt: fineAt || baseAt, courses: album.data.courses || null, reuse: file && !fineAt ? fineCache(file, div, div.centres) : null }); }
+      net = roadNetwork(div, div.centres, places, undefined, { heightAt: fineAt || (baking ? null : baseAt), courses: album.data.courses || null, reuse: file && !fineAt ? fineCache(file, div, div.centres) : null }); }
     // every line as the ribbons draw it: the steps of the chunks ironed out, the points on a straight dropped, in flat km
     drawn = net.lines.map(l => ({ set: setOf(l), kind: l.kind, km: smoothLine(roadLine(l.pts), .35, 2).map(q => kmOf(q[1], q[0])) }));
     // a road that runs along a river over ground that stands above it — in a gorge — is laid on the bank of that river
@@ -196,13 +200,14 @@ export default async function init(album) {
   // megabytes of heights. The gorge that the coarse heights do not have is there, and so is the true height of a
   // pass. → how many tiles were read
   // Only the tiles under the roads are read (a larger region has thousands of them). The way of every leg chunk by
-  // chunk does not depend on the fine heights, so the network is laid once by the heights of the page, and the
-  // tiles within 2.6 km of its legs — more than the strip a fine way may use — are the ones the second laying needs.
+  // chunk does not depend on the heights it is shaped by, so the network the page has already — from the file, or
+  // laid at the start — tells which tiles: those within 2.6 km of its legs, more than the strip a fine way may use.
+  // (It used to be laid once more by the heights of the page first: a third of the time of the bake for nothing.)
   async function rebake() {
     const fine = album.data.meta?.fine, base = album.terrain?.heightAt || division.data.raster.heightAt;
     if (!fine?.tiles?.length) { build(base); return 0; }
     const N = 2 ** fine.z, tiles = new Map(), have = new Set(fine.tiles.map(t => t[0] * 65536 + t[1])), want = new Set(), M = 2.6;
-    build(base);
+    if (!net) build(base);
     const mark = (x, y) => { const g = llOf(x, y), s = Math.sin(g.lat * Math.PI / 180), k = Math.floor((g.lon + 180) / 360 * N) * 65536 + Math.floor((.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * N); if (have.has(k)) want.add(k); };
     for (const L of net.legs) if (L.kind !== 3 && L.path) for (const t of L.path) { const x = KX0 + (t % KN + .5) * KKM, y = KY0 + (Math.floor(t / KN) + .5) * KKM; mark(x, y); mark(x - M, y - M); mark(x + M, y - M); mark(x - M, y + M); mark(x + M, y + M); }
     const list = [...want].map(k => [Math.floor(k / 65536), k % 65536]);
