@@ -5,7 +5,10 @@
 // tiles and about 100 MB. A tile of zoom 11 (about 14.5 km) is a mountain tile when the base heights inside it span
 // RELIEF metres or more, or when STEEP of its ground or more is steeper than 15°. A tile with four or more mountain
 // tiles among its eight neighbours is taken too, so that a valley inside a range is not left coarse.
-// REGION says where to look (now the Iberian Peninsula with both sides of the Pyrenees and the Balearic Islands).
+// REGION says where to look at stage 2 (the Iberian Peninsula with both sides of the Pyrenees and the Balearic
+// Islands); at stage 3 (meta.json → stage, written by fetch-data.mjs) the mountains are looked for on the worked
+// land — the mask public/assets/album/worked.bin.gz. --data <folder>: the album data to read the base from and to
+// write the tiles into, instead of public/album-data/ of the main checkout (the data of the next stage).
 // Where a tile is missing, the page has only the base heights: it fills the gap from them.
 //
 // Everything lands in the MAIN checkout, outside git (a worktree gets the baked tiles through worktree-setup.mjs):
@@ -26,11 +29,12 @@ import { join, resolve, dirname } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
+import { decodeWorked, WORKED } from '../../src/album/worked.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const MAIN = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).split('\n')[0].slice(9).trim();
 const CACHE = join(MAIN, 'data', 'album', 'terrarium');
-const DATA = join(MAIN, 'public', 'album-data');
+const DATA = process.argv.includes('--data') ? resolve(process.argv[process.argv.indexOf('--data') + 1]) : join(MAIN, 'public', 'album-data');
 const UA = { 'User-Agent': 'passionaris-album/0.1 (open-source game prototype)' };
 
 export const Z = 11, RELIEF = 800, STEEP = .15, STEP = .5, DIR = 'h11/';
@@ -43,7 +47,8 @@ const latOf = (y, z) => Math.atan(Math.sinh(Math.PI * (1 - 2 * y / 2 ** z))) * 1
 export const tileName = (x, y) => `${x}_${y}.u16d.gz`;
 
 // the mountain tiles, from the base heights of the album
-export function chooseTiles(meta, raw) {
+// (region(lat, lon): where mountains are looked for — REGION by default)
+export function chooseTiles(meta, raw, region = REGION) {
   const b = meta.base, k = 2 ** (Z - b.z), n = 256 / k;               // tiles of zoom Z per base tile; base pixels per tile
   const X0 = b.x0 * k, Y0 = b.y0 * k, W = b.w / n, H = b.h / n;
   const relief = new Float32Array(W * H), land = new Float32Array(W * H), steep = new Float32Array(W * H);
@@ -61,7 +66,7 @@ export function chooseTiles(meta, raw) {
   const core = new Uint8Array(W * H), take = new Uint8Array(W * H);
   for (let i = 0; i < W * H; i++) core[i] = land[i] >= .1 && (relief[i] >= RELIEF || steep[i] >= STEEP) ? 1 : 0;
   for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
-    if (land[ty * W + tx] < .02 || !REGION(latOf(Y0 + ty + .5, Z), lonOf(X0 + tx + .5, Z))) continue;
+    if (land[ty * W + tx] < .02 || !region(latOf(Y0 + ty + .5, Z), lonOf(X0 + tx + .5, Z))) continue;
     let near = 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const x = tx + dx, y = ty + dy;
@@ -111,7 +116,12 @@ if (resolve(process.argv[1] || '') === resolve(import.meta.filename)) {
   const meta = JSON.parse(readFileSync(join(DATA, 'meta.json'), 'utf8'));
   const gz = gunzipSync(readFileSync(join(DATA, meta.base.file)));
   const raw = new Uint16Array(gz.buffer, gz.byteOffset, gz.length / 2);
-  const c = chooseTiles(meta, raw), tiles = c.tiles;
+  let region = REGION;
+  if ((meta.stage || 2) >= 3) {            // stage 3: the mountains of the worked land
+    const mz = gunzipSync(readFileSync(join(ROOT, 'public', 'assets', 'album', 'worked.bin.gz'))), mask = decodeWorked(mz.buffer.slice(mz.byteOffset, mz.byteOffset + mz.length));
+    region = (lat, lon) => mask.at(lat, lon) === WORKED;
+  }
+  const c = chooseTiles(meta, raw, region), tiles = c.tiles;
   console.log(`zoom ${Z}: ${tiles.length} mountain tiles of ${c.W * c.H} (relief ≥ ${RELIEF} m or ${STEEP * 100} % of steep ground, holes filled), about ${(tiles.length * .11).toFixed(0)} MB to download`);
 
   if (process.argv.includes('--plan')) {

@@ -6,22 +6,33 @@
 //   meta.json — what is where
 // (The fine heights of the mountains, zoom 11, are fetched by scripts/album/fetch-heights-fine.mjs after this script.)
 // Raw downloads are cached in data/album/ (gitignored), so the script can be re-run and resumes where it stopped.
-//   node scripts/album/fetch-data.mjs [--no-textures] [--no-detail]
+//   node scripts/album/fetch-data.mjs [--no-textures] [--no-detail] [--stage 3] [--out <folder>]
+// --stage: the polygon to bake for (src/album/geo.js: STAGE, BBOXES); by default the one the code stands at.
+// --out: where to write instead of public/album-data/ — the data of the next stage are prepared beside the present
+//   ones (the leading session: <main>/data/album/stage3/album-data/) and copied over them when the switch is thrown.
+// At stage 3 the base is written already mended — the needles and wells of the coast, the pockets of the lagoons, the
+// hollows below the sea (ground/despike.js, water/hollows.js, in that order) — and meta.json says "mended": true, so
+// the loaders of the page and of Node skip those steps.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
+import { STAGE, BBOXES } from '../../src/album/geo.js';
+import { despike, mendPockets } from '../../src/album/ground/despike.js';
+import { fillHollows } from '../../src/album/water/hollows.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const MAIN = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).split('\n')[0].slice(9).trim();
 const RAW = [join(ROOT, 'data', 'raw'), join(MAIN, 'data', 'raw')].find(d => existsSync(join(d, 'ne_10m_lakes.geojson')));
 const CACHE = join(ROOT, 'data', 'album');
-const OUT = join(ROOT, 'public', 'album-data');
 const flag = f => process.argv.includes(f);
+const opt = n => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
+const OUT = opt('--out') ? resolve(opt('--out')) : join(ROOT, 'public', 'album-data');
 const UA = { 'User-Agent': 'passionaris-album/0.1 (open-source game prototype)' };
 
-export const BBOX = { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
+const stage = +(opt('--stage') || STAGE) >= 3 ? 3 : 2;
+export const BBOX = BBOXES[stage];
 export const PLACES = [
   { id: 'pyrenees', name: 'Пиренеи', lat: 42.63, lon: 0.66 },
   { id: 'ebro', name: 'Дельта Эбро', lat: 40.72, lon: 0.72 },
@@ -58,22 +69,27 @@ async function get(url, file, tries = 4) {
 async function pool(items, n, fn) { let i = 0, done = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const it = items[i++]; await fn(it); if (++done % 100 === 0) console.log(`  ${done}/${items.length}`); } })); }
 
 // ---- heights
-const tileFile = (z, x, y) => join(CACHE, 'terrarium', String(z), String(x), `${y}.png`);
-async function mosaic(z, x0, x1, y0, y1, outName) {
+// (a tile already fetched may lie in the cache of this folder or of the main one; a new one goes to the main folder,
+// where the leading session keeps the raw material)
+const tileFile = (z, x, y) => { const here = join(CACHE, 'terrarium', String(z), String(x), `${y}.png`); return existsSync(here) ? here : join(MAIN, 'data', 'album', 'terrarium', String(z), String(x), `${y}.png`); };
+async function mosaic(z, x0, x1, y0, y1, outName, mend = false) {
   const tiles = []; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) tiles.push([x, y]);
   await pool(tiles, 12, ([x, y]) => get(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`, tileFile(z, x, y)));
   const W = (x1 - x0 + 1) * 256, H = (y1 - y0 + 1) * 256, out = new Uint16Array(W * H).fill(8192 * 4);
-  let lo = 1e9, hi = -1e9;
+  let missing = 0;
   for (const [x, y] of tiles) {
-    const f = tileFile(z, x, y); if (!existsSync(f)) continue;
+    const f = tileFile(z, x, y); if (!existsSync(f)) { missing++; continue; }
     const { data, info } = await sharp(f).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const ox = (x - x0) * 256, oy = (y - y0) * 256, c = info.channels;
     for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) {
       const k = (j * 256 + i) * c, h = data[k] * 256 + data[k + 1] + data[k + 2] / 256 - 32768;
-      if (h < lo) lo = h; if (h > hi) hi = h;
       out[(oy + j) * W + ox + i] = Math.max(0, Math.min(65535, Math.round((h + 8192) * 4)));
     }
   }
+  if (missing) console.log(`  ${missing} tiles of ${tiles.length} are missing — run again`);
+  if (mend) { despike(out, W, H); mendPockets(out, W, H); fillHollows(out, W, H); }   // the page and Node then take the base as it is
+  let lo = 1e9, hi = -1e9;
+  for (let i = 0; i < out.length; i++) { const h = out[i] / 4 - 8192; if (h < lo) lo = h; if (h > hi) hi = h; }
   const gz = gzipSync(Buffer.from(out.buffer), { level: 6 });
   writeFileSync(join(OUT, outName), gz);
   console.log(`  ${outName}: ${W}×${H}, ${Math.round(lo)}…${Math.round(hi)} m, ${(gz.length / 1e6).toFixed(1)} MB`);
@@ -128,12 +144,12 @@ async function textures() {
 }
 
 mkdirSync(OUT, { recursive: true }); mkdirSync(CACHE, { recursive: true });
-const meta = { bbox: BBOX, encode: 'metres = v / 4 - 8192', sources: {
+const meta = { stage, mended: stage >= 3, bbox: BBOX, encode: 'metres = v / 4 - 8192', sources: {
   heights: 'AWS Terrain Tiles (terrarium), https://registry.opendata.aws/terrain-tiles/',
   vectors: 'Natural Earth 10m, public domain', textures: 'Poly Haven, CC0' } };
-console.log('heights: region, zoom 9');
+console.log(`heights: region of stage ${stage}, zoom 9${meta.mended ? ', mended' : ''} → ${OUT}`);
 const Z = 9;
-meta.base = await mosaic(Z, Math.floor(tx(BBOX.lon0, Z)), Math.floor(tx(BBOX.lon1, Z)), Math.floor(ty(BBOX.lat1, Z)), Math.floor(ty(BBOX.lat0, Z)), 'height-base.u16.gz');
+meta.base = await mosaic(Z, Math.floor(tx(BBOX.lon0, Z)), Math.floor(tx(BBOX.lon1, Z)), Math.floor(ty(BBOX.lat1, Z)), Math.floor(ty(BBOX.lat0, Z)), 'height-base.u16.gz', meta.mended);
 meta.places = [];
 if (!flag('--no-detail')) for (const p of PLACES) {
   console.log('heights:', p.id, 'zoom 12');

@@ -14,7 +14,9 @@ export const STAGE = 2;
 // and settlements exist everywhere inside it. At stage 3 they exist only under the mask of the worked land. The map
 // itself is the whole sphere (the owner, 15.11.2026: «Я должен видеть всю землю»): beyond lies the plain land and
 // sea of the world, drawn by the same rules without chunks (docs/BACKLOG.md, «Третий шаг»).
-export const BBOX = STAGE >= 3 ? { lon0: -10.3, lon1: 11.7, lat0: 29.3, lat1: 53.7 } : { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 };
+// (BBOXES: the rectangle of each stage — for the scripts that prepare the data of a stage before the switch is thrown)
+export const BBOXES = { 2: { lon0: -10.0, lon1: 4.5, lat0: 35.2, lat1: 44.8 }, 3: { lon0: -10.3, lon1: 11.7, lat0: 29.3, lat1: 53.7 } };
+export const BBOX = BBOXES[STAGE >= 3 ? 3 : 2];
 export const CENTRE = { lat: 40.0, lon: -2.75 };
 export const KM_PER_DEG = 111.195;
 export const COS_REF = Math.cos(CENTRE.lat * Math.PI / 180); // one fixed east-west scale for the whole grid
