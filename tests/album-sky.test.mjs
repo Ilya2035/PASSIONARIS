@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sunDir, moonDir, moonLit, moonStrength, sunTimes, sunLongitude, equatorial, lightHour, LIGHT_NAMES } from '../src/album/sky/astro.js';
 import { LIGHTS, lightShown, lightSet } from '../src/album/sky/lightswitch.js';
-import { GLOBE_GLSL, GLOBE_FROM, GLOBE_DIM, GLOBE_FULL, RELIGHT_MOST, GLOW, FRAME_DAY, relightOwn, airShare, globeAmount, globeDim, frameSunUp, raiseSun, levelLight, relight } from '../src/album/sky/globe.js';
+import { GLOBE_GLSL, GLOBE_FROM, GLOBE_DIM, GLOBE_FULL, RELIGHT_MOST, GLOW, FRAME_DAY, globeAmount, globeDim, frameSunUp, raiseSun, levelLight, relight } from '../src/album/sky/globe.js';
 import { postShader, POST_BALL, POST_CLOUDS } from '../src/album/post.js';
 import { cloudShader } from '../src/album/layers/clouds.js';
 import { LIGHT, lightUniforms, lightNumbers, lightFrame, FRAME, sunAt, HAZE_KM } from '../src/album/light.js';
@@ -215,35 +215,18 @@ test('sky: day and night on the ball — the frame is drawn by day, every place 
   // it is laid over the finished picture: by the finishing pass (only while it is on), the sky and the shell of the clouds
   assert.ok(!postShader(0).includes('globeRelight') && !postShader(POST_CLOUDS).includes('globeRelight'));
   for (const f of [POST_BALL, POST_BALL | POST_CLOUDS]) assert.match(postShader(f), /if \(ground\) c = globeDimmed\(c, globeRelight\(normalize\(wpos \+ vec3\(0\., RKM, 0\.\)\)\)\);/);
-  // … and the air over that land was drawn with the frame's light, like everything in the polygon: its part of a
-  // pixel takes the share of the frame's light on both sides of the rim. Level land under a share of air comes to
-  // one and the same light, whichever Sun the ground shader lit it with
-  for (const z of [-.4, .1, .6]) for (const f of [.1, .5]) {
-    const air = [.55, .7, .92], land = .3, zF = FRAME_DAY, fr = lightNumbers({ sun: { z: zF } }), g = Math.max(z, 0) * 1.25, gF = zF * 1.25;
-    const kIn = relight(z, zF, 1), k = relightOwn(z, fr.A, fr.B, 1), add = airShare(air, f, k, kIn);
-    for (let i = 0; i < 3; i++) {
-      const inside = (land * (fr.A[i] * gF + fr.B[i]) * (1 - f) + air[i] * f) * kIn[i], beyond = (land * (fr.A[i] * g + fr.B[i]) * (1 - f) + air[i] * f) * k[i] + add[i];
-      near(beyond, inside, 1e-9, `z ${z}, air ${f}, colour ${i}`);
-    }
+  // One measure for every pixel of the land, on both sides of the rim of the polygon: the ground shader lights the
+  // whole Earth with the Sun of the frame, and the air over it is the frame's too. Nothing of the second measure
+  // (land lit by the Sun of its own place, v0.6.114 … v0.6.131) is left, in the pass or in the functions it is given
+  for (const f of [POST_BALL, POST_BALL | POST_CLOUDS]) assert.ok(!/globeRelightOwn|kIn|inRegion\(vec2\(degrees\(asin\(clamp/.test(postShader(f)));
+  assert.ok(!GLOBE_GLSL.includes('globeRelightOwn') && !GLOBE_GLSL.includes('albumSunCol') && (GLOBE_GLSL.match(/vec3 globeDimmed\(/g) || []).length === 1);
+  // what the ground draws on level land with the frame Sun is the light the dimming counts from: land seen from a
+  // height is as bright as land seen from near, and by day (a frame Sun that was not lifted) nothing is changed at all
+  for (const zF of [FRAME_DAY, .7, .95]) {
+    const fr = lightNumbers({ sun: { z: zF } }), frame = levelLight(zF);
+    for (let i = 0; i < 3; i++) near(frame[i], fr.A[i] * zF * 1.25 + fr.B[i], 1e-9, `frame ${zF}, colour ${i}`);
+    assert.deepEqual(relight(zF, zF, 1), [1, 1, 1]);
   }
-  for (const a of airShare([.5, .6, .7], .2, [.4, .5, .6], [.4, .5, .6])) assert.equal(a, 0, 'in the polygon nothing is added');
-  // Beyond the album's polygon the ground shader has already lit the land by the Sun of its own place; only the
-  // colours of the light there are the frame's. The share is then what the light of the place is of what was drawn:
-  const fr = lightNumbers({ sun: { z: .95 } }), A = fr.A.slice(0, 3), B = fr.B.slice(0, 3);
-  // … nothing at all to change by day: the ground has drawn it right, to the last digit …
-  for (const z of [.95, .7, .5]) for (const k of relightOwn(z, A, B, 1)) near(k, 1, 1e-9, `z ${z}`);
-  // … the night side, which the ground left under the day sky, goes dark and blue; the edge of the day is warm …
-  const nightOwn = relightOwn(-.5, A, B, 1); assert.ok(nightOwn.every(k => k > .1 && k < .5) && nightOwn[2] > nightOwn[0], `${nightOwn}`);
-  const duskOwn = relightOwn(.05, A, B, 1); assert.ok(duskOwn[0] > duskOwn[2] * 1.1, `${duskOwn}`);
-  // … and the two rules meet: land drawn with the frame Sun and dimmed, and land drawn with its own Sun and dimmed, end in the same light
-  for (const z of [-.4, 0, .3, .8]) {
-    const g = Math.max(z, 0) * 1.25, own = relightOwn(z, A, B, 1), all = relight(z, .95, 1), frame = levelLight(.95);
-    for (let i = 0; i < 3; i++) near(own[i] * (A[i] * g + B[i]), all[i] * frame[i], 1e-9, `z ${z}, colour ${i}`);
-    // (and what the ground draws on level land with the frame Sun is the light the dimming counts from: so land seen
-    // from a height is as bright as land seen from near)
-    for (let i = 0; i < 3; i++) near(frame[i], A[i] * .95 * 1.25 + B[i], 1e-9);
-  }
-  assert.deepEqual(relightOwn(-.5, A, B, 0), [1, 1, 1]); assert.ok(GLOBE_GLSL.includes('g = max(z, 0.) * 1.25;') && GLOBE_GLSL.includes('globeLight(z) / (albumSunCol() * g + albumSkyCol())') && postShader(POST_BALL).includes('inRegion(vec2(degrees(asin('));
   // a finished colour is dimmed through the finish undone: the tone curve of light.js, solved for the light
   const curve = x => (x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), back = t => { const a = 2.51 - 2.43 * t, b = .03 - .59 * t; return (Math.sqrt(b * b + .56 * a * t) - b) / (2 * a); };
   for (const x of [.01, .1, .5, 1.5, 4]) near(back(curve(x)), x, 1e-9);
