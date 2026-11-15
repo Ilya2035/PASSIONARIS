@@ -100,6 +100,8 @@ export function createPanel(onClose, onGo = null) {
           if (s.place) row('Место города', s.place);              // why the town of the district stands where it stands (division/centres.js)
           if (s.settle.tracksKm >= .5) row('Тропы к деревням', `${num(s.settle.tracksKm)} км`);
         }
+        // (division/infra.js: a band of chunks a main road can be laid through joins two of its neighbours)
+        if (s.mainThrough != null) row('Главная дорога через район', s.mainThrough ? 'можно проложить' : 'нельзя проложить');
         row('Лес', pct(s.share.forest)); row('Болота', pct(s.share.swamp)); row('Застройка', pct(s.share.built));
         row('Поля', s.settle ? `${num(s.settle.fieldsKm2)} км² · ${pct(s.share.fields)}` : pct(s.share.fields));
         if (s.classes) {                                            // how level the ground is, chunk by chunk

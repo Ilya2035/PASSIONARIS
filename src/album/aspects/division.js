@@ -19,7 +19,7 @@ import { NEAR_KM, MAX_FOURS, PIECE_KM, TIE_KM } from '../division/border.js';
 import { startDivision } from '../division/runtime.js';
 
 const GLSL = /* glsl */`
-uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm, uDivSettle, uDivEdges;
+uniform int uDivision, uDivHover, uDivSel, uDivOn, uDivState, uDivKm, uDivSettle, uDivEdges, uDivInfra;
 uniform ivec2 uDivGeo;                          // the first rows of the lists of border pieces and of the pieces in tDiv (division/gpu.js); 0 none
 uniform vec3 uDivSize;                          // district, province, region size, km
 uniform float uDivFar;                          // 0 up close .. 1 high up: the borders are lines on the ground (division/lines.js)
@@ -259,6 +259,17 @@ vec3 divLook(vec3 col, vec2 pk, float px, bool water) {
       col = mix(col, sc * (.72 + .34 * lum), why >= 5 ? .42 : .66);
     }
   }
+  // what can be laid through a chunk (knob «Что можно проложить», division/infra.js): green — a main road, yellow-green
+  // — a lesser road, amber — a track, red — nothing. The chunks up close, the squares far off. Not on the water.
+  if (uDivInfra > 0 && !water) {
+    ivec2 q = ivec2(floor((pk - uChunkRect.xy) / ${FKM.toFixed(4)}));
+    if (px < .2) { vec3 kc = kmChunk(pk, a.d); q = ivec2(kc.xy); }
+    uint g = texelFetch(tDiv, clamp(q, ivec2(0), ivec2(${FN - 1})), 0).g; int lv = int((g >> 6u) & 3u);
+    if (!wet) {
+      vec3 ic = lv == 3 ? vec3(.30, .66, .34) : lv == 2 ? vec3(.74, .84, .30) : lv == 1 ? vec3(.97, .66, .20) : vec3(.80, .22, .20);
+      col = mix(col, ic * (.72 + .34 * lum), lv == 3 ? .4 : .66);
+    }
+  }
   // the district under the cursor and the chosen one: lighter inside; their outline is a line on the ground drawn
   // over the very same border (division/lines.js), at any height
   if (uDivHover >= 0 && a.d == uDivHover) col = mix(col, vec3(1.), .16);
@@ -281,7 +292,7 @@ vec3 districtAt(vec2 pk) {
 }
 
 void aspDivision(Px p, inout vec3 col, float landA) {
-  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0 && uDivSettle == 0 && uDivEdges == 0)) return;
+  if (uDivOn == 0 || (uDivision == 0 && uDivHover < 0 && uDivSel < 0 && uDivKm == 0 && uDivSettle == 0 && uDivEdges == 0 && uDivInfra == 0)) return;
   float inR = inRegion(p.ll);                     // nothing is divided beyond the album's region
   if (inR < .002) return;
   vec3 cl = landA > .02 ? divLook(col, p.pk, p.px, false) : col;
@@ -298,7 +309,7 @@ export const STATES = [['', 'нет'], ['aragon', 'Королевство Ара
 export default {
   id: 'division', title: 'Деление', glsl: GLSL,
   uniforms: {
-    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 }, uDivSettle: { value: 0 }, uDivEdges: { value: 0 },
+    uDivision: { value: 0 }, uDivHover: { value: -1 }, uDivSel: { value: -1 }, uDivOn: { value: 0 }, uDivState: { value: 0 }, uDivKm: { value: 0 }, uDivSettle: { value: 0 }, uDivEdges: { value: 0 }, uDivInfra: { value: 0 },
     uDivSize: { value: new Vector3(20, 100, 900) }, uDivFar: { value: 0 }, tDiv: { value: emptyTexture() }, uDivGeo: { value: new Vector2(0, 0) },
   },
   params: [
@@ -310,6 +321,7 @@ export default {
     // (map: the switch on the panel of the map, mapview.js)
     { key: 'divPlaces', label: 'Деление: места городов районов', group: 'modes', type: 'toggle', value: 0, map: 'Места городов районов' },
     { key: 'kmEdges', label: 'Границы по чанкам', group: 'modes', type: 'toggle', value: 0, uniform: 'uDivEdges', map: 'Границы по чанкам' },
+    { key: 'kmInfra', label: 'Что можно проложить в чанке', group: 'modes', type: 'toggle', value: 0, uniform: 'uDivInfra', map: 'Что можно проложить' },
     { key: 'noSettle', label: 'Где нельзя селиться', group: 'modes', type: 'toggle', value: 0, uniform: 'uDivSettle', map: 'Где нельзя селиться' },
     { key: 'km', label: 'Чанки 1 км² (проверка)', group: 'modes', type: 'select', options: [[0, 'нет'], [1, 'очертания'], [2, 'класс земли'], [3, 'жилые и нежилые'], [4, 'угодья']], value: 0, uniform: 'uDivKm' },
   ],
@@ -334,6 +346,8 @@ export default {
     { id: 'km-farm-natural', group: 'Режимы карты', title: 'Чанки: угодья на натуральной карте', note: 'Те же числа поверх обычной картины: видно, что поля нарисованы там, где чанки распаханы, а край полей идёт по наделам и не повторяет прямые стороны чанков.', p: { ...NATURAL, division: 1, km: 4, divLabels: 0, growth: 1.6, forest3d: 0 }, cam: { lat: 41.74, lon: -1.08, h: 24, tilt: 20, heading: 0 } },
     { id: 'division-edges', group: 'Режимы карты', title: 'Границы по чанкам: Сарагоса', note: 'Обычная карта, поверх — очертания чанков по 1 км² там, где по ним что-то проходит, а не всех чанков. Рыжие — чанки, на которых стоит поселение: толще — край поселения, тоньше — стороны между его чанками. Жёлтые — чанки под полями. Светлые тонкие — ряд чанков по обе стороны границы района, провинции или региона: граница — их внешняя сторона. Сами границы светлее и толще, чем выше уровень. Переключатель «Границы по чанкам» на панели карты.', p: { ...NATURAL, kmEdges: 1 }, cam: { lat: 41.66, lon: -0.88, h: 30, tilt: 25, heading: 0 } },
     { id: 'division-edges-pyrenees', group: 'Режимы карты', title: 'Границы по чанкам: Хака и долина Арагона', note: 'В горах: город в долине стоит на своих чанках, поля — вдоль реки, граница района идёт по гребню, и видно, какими чанками она проходит.', p: { ...NATURAL, kmEdges: 1 }, cam: { lat: 42.57, lon: -0.55, h: 40, tilt: 35, heading: 0 } },
+    { id: 'division-infra', group: 'Режимы карты', title: 'Что можно проложить в чанке: Пиренеи', note: 'Уровень инфраструктуры каждого чанка: зелёный — можно проложить главную дорогу, жёлто-зелёный — малую, рыжий — только тропу, красный — ничего. Правило и пороги — те же, по которым прокладываются дороги: чанк тем труднее, чем дороже шаг из него в любую сторону; ровный косогор лёгок — дорога идёт по нему вдоль склона. Чанк, через который уже идёт дорога, не ниже её. Наведите курсор: внизу написано, что можно проложить и какая дорога идёт. Переключатель «Что можно проложить» на панели карты.', p: { ...PAPER, kmInfra: 1, divLabels: 0 }, cam: { lat: 42.65, lon: 0.4, h: 120, tilt: 0, heading: 0 } },
+    { id: 'division-infra-natural', group: 'Режимы карты', title: 'Что можно проложить в чанке: Сомпорт', note: 'Те же уровни поверх обычной карты с дорогами: дорога перевала идёт по зелёным и жёлтым чанкам дна долины, тропы — по рыжим.', p: { ...NATURAL, roadsOn: 1, kmInfra: 1, divLabels: 0 }, cam: { lat: 42.76, lon: -0.53, h: 40, tilt: 35, heading: 0 } },
     { id: 'division-chunks', group: 'Режимы карты', title: 'Деление: район и природные ячейки', note: 'Светлые линии — очертания природных ячеек около 100 км²: по ним пока считаются лес, лёд и болота. Тёмные — границы районов. Район состоит из чанков по 1 км², а не из этих ячеек, поэтому линии совпадают не везде. Числа района суммируются по его чанкам; число ячейки делится между районами по тому, сколько её чанков в каждом.', p: { ...PAPER, division: 1, grid: 1 }, cam: { lat: 41.55, lon: -0.95, h: 160, tilt: 0, heading: 0 } },
     { id: 'division-info', group: 'Режимы карты', title: 'Деление: сведения о районе', note: 'Щелчок по району открывает сведения: провинция и регион, площадь, число чанков по 1 км², доля леса, болот, застройки и полей, сколько чанков какого класса земли и сколько жилых, суммы ресурсов. Здесь выбран район Сарагосы.', p: { ...PAPER, division: 1 }, divAt: ZARAGOZA, cam: { lat: 41.6, lon: -0.9, h: 260, tilt: 20, heading: 0 } },
     { id: 'division-sea', group: 'Режимы карты', title: 'Деление: море и острова', note: 'Моря названы: Бискайский залив, Атлантика, Кадисский залив, море Альборан, Балеарское море, Лионский залив. Прибрежное море поделено на куски напротив прибрежных районов, чтобы высадиться можно было везде.', p: { ...PAPER, division: 3 }, cam: { lat: 39.6, lon: 0.6, h: 900, tilt: 0, heading: 0 } },

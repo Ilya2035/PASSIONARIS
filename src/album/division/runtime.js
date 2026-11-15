@@ -13,6 +13,7 @@ import { createLines } from './lines.js';
 import { createPlaces } from './places.js';
 import { wallsOf } from './walls.js';
 import { chunkEdges } from './edges.js';
+import { chunkLevels, mainThrough, INFRA_CAN, ROAD_KIND } from './infra.js';
 import { nameDistricts } from './names.js';
 import { districtByLines } from './border.js';
 import { pickGround } from '../pick.js';
@@ -42,7 +43,19 @@ export async function startDivision(album, U) {
   const active = () => p.get('division') > 0 || !!p.get('divPick');
   // the bogs for chunkSettle: the share of the natural cell under bog, and the named wetlands (aspects/swamp.js)
   const settleOpts = () => { const cell = cellsOfChunks(ch).cell; return { swampOf: c => (cell[c] < ch.count ? ch.getNatural('swamp', cell[c]) : 0), wetlands: album.swamp?.wetlands || [] }; };
-  let settleShown = false, edgesShown = null;
+  let settleShown = false, edgesShown = null, infraShown = null, infra = null;
+  // what can be laid through every chunk and the districts a main road can be laid through (infra.js): from the roads
+  // once they are laid (album.roadNet.infra(): a chunk is never below the road that runs through it), before that by
+  // the same rule without them
+  function infraOf() {
+    const net = album.roadNet?.infra ? album.roadNet : null;
+    if (infra && infra.net === net && infra.div === cur.div) return infra;
+    const levels = net ? net.infra() : chunkLevels(cur.div), through = mainThrough(cur.div, levels);
+    infra = { net, div: cur.div, levels, through, kinds: net?.chunkKinds?.() || null };
+    let n = 0, no = 0; for (let d = 0; d < cur.div.count; d++) if (cur.div.kinds[d] === LAND && (cur.div.neighbours[d] || []).filter(e => cur.div.kinds[e] === LAND).length >= 2) { n++; if (!through[d]) no++; }
+    console.log(`[album] chunk levels${net ? '' : ' (before the roads)'}: no main road can be laid through ${no} of ${n} districts`);
+    return infra;
+  }
   // ---- the chunk of 1 km² under the cursor, while the chunks are shown (knob «Чанки 1 км²»)
   const kmInfo = document.createElement('div'); kmInfo.className = 'S km-info';
   kmInfo.style.cssText = 'position:fixed;left:50%;bottom:104px;transform:translateX(-50%);padding:6px 14px;background:rgba(12,16,24,.88);color:#fff;border-radius:3px;pointer-events:none;white-space:nowrap;display:none;z-index:5';
@@ -56,6 +69,7 @@ export async function startDivision(album, U) {
       const f = kmFacts(dv, data.base.at), o = kmOrder(dv, data.base.at), k = f.cls[c], lv = livingOf(k), farm = album.layers.towns?.farm?.()?.km[c] || 0;
       parts.push(`высота ${Math.round(dv.raster.hgt[c])} м`, `класс ${k} — ${CLASS_TITLE[k]}`, lv === 2 ? 'жилой' : lv === 1 ? 'едва жилой' : 'нежилой', `в порядке освоения района № ${o.rank[c] + 1}`, farm ? `под полями ${Math.max(1, Math.round(farm / 2.55))} %` : 'полей нет');
       const w = dv.settle.why[c]; parts.push(w ? `селиться: ${dv.settle.can[c] ? 'только хутор' : 'нельзя'} — ${SETTLE_WHY[w]}` : 'селиться можно');
+      const inf = infraOf(); parts.push(`можно проложить ${INFRA_CAN[inf.levels[c]]}`); if (inf.kinds?.[c]) parts.push(`идёт ${ROAD_KIND[inf.kinds[c]]}`);
       const town = album.layers.towns?.townOfChunk?.(c); if (town?.name) parts.push(`чанк ${town.town ? 'города' : 'поселения'} ${town.name}`);
       if (dv.centres.texel[d] === c) parts.push(`место города района: ${PLACE_WHY[dv.centres.why[d]]}`);
     } else parts.push('вода');
@@ -97,7 +111,9 @@ export async function startDivision(album, U) {
     // what runs along every chunk — a settlement, fields, a border (edges.js) — while the borders by chunks are shown
     edgesShown = p.get('kmEdges') ? { town: towns?.version?.() ?? -1, farm: towns?.farmVersion?.() ?? -1 } : null;
     const edges = edgesShown ? chunkEdges(cur.div, towns?.townOfChunk ? c => towns.townOfChunk(c)?.index : null, towns?.farm?.()?.km || null) : null;
-    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null, settleShown ? cur.div.settle.why : null, edges); cur.state = id;
+    // what can be laid through every chunk, while that is shown
+    const inf = p.get('kmInfra') ? infraOf() : null; infraShown = inf ? { net: inf.net } : null;
+    cur.tex = divisionTexture(ch, cur.div, mask, cur.facts, farm ? farm.km : null, settleShown ? cur.div.settle.why : null, edges, inf?.levels); cur.state = id;
     U.tDiv.value = cur.tex; U.uDivState.value = id ? 1 : 0; U.uDivOn.value = 1;
     const rows = cur.tex.userData.rows; U.uDivGeo.value.set(cur.div.geo ? rows.L0 : 0, cur.div.geo ? rows.S0 : 0);
     if (cur.lines !== id) { cur.lines = id; lines?.dispose(); lines = createLines(album, ch, cur.div, mask, data.vectors.rivers); lines.mark(hover, sel); }
@@ -127,7 +143,10 @@ export async function startDivision(album, U) {
   // (the fields of a district are those of its own chunks of 1 km², not the share of the natural cells it lies over)
   // (s.seat: the district holds the seat of its province, land, region; s.place: why its town stands where it stands)
   const summaryOf = d => { const s = districtSummary(cur.div, d, ch), t = album.layers?.towns?.districtInfo?.(d), c = cur.div.centres; if (t) { s.settle = t; if (s.chunks) s.share.fields = t.fieldsKm2 / s.chunks; }
-    s.seat = seatOf(d); s.place = c && c.texel[d] >= 0 ? PLACE_WHY[c.why[d]] : ''; return s; };
+    s.seat = seatOf(d); s.place = c && c.texel[d] >= 0 ? PLACE_WHY[c.why[d]] : '';
+    // can a main road be laid through it (infra.js; null when it has fewer than two neighbours on land to join)
+    if (cur.div.kinds[d] === LAND) s.mainThrough = (cur.div.neighbours[d] || []).filter(e => cur.div.kinds[e] === LAND).length < 2 ? null : !!infraOf().through[d];
+    return s; };
   const seatOf = d => { const b = cur.div.centres?.seat[d] || 0; return { province: !!(b & SEAT.province), land: !!(b & SEAT.land), region: !!(b & SEAT.region) }; };
   function select(d) {
     sel = d; U.uDivSel.value = d; lines?.mark(hover, sel);
@@ -167,6 +186,7 @@ export async function startDivision(album, U) {
     if ((key == null || key === 'km') && ((p.get('km') > 1 && !cur.facts) || (p.get('km') === 4) !== (farmShown >= 0))) paintState(true);
     if ((key == null || key === 'noSettle') && !!p.get('noSettle') !== settleShown) paintState(true);
     if ((key == null || key === 'kmEdges') && !!p.get('kmEdges') !== !!edgesShown) paintState(true);
+    if ((key == null || key === 'kmInfra') && !!p.get('kmInfra') !== !!infraShown) paintState(true);
     if (!active() && key !== null && sel >= 0) select(-1);
     if (key == null) { const at = album.page?.divAt; select(at ? districtAt(at[0], at[1]) : -1); }
     syncLabels();
@@ -221,6 +241,12 @@ export async function startDivision(album, U) {
     settleAt: (lat, lon) => { const c = api.chunkAt(lat, lon); if (c < 0) return null; const w = cur.div.settle.why[c]; return { chunk: c, can: cur.div.settle.can[c], why: SETTLE_WHY[w] }; },
     settleFacts: () => cur.div.settle,            // { can, why } a chunk each; the reasons: settleWhy
     settleWhy: SETTLE_WHY,
+    // ---- what can be laid through a chunk (infra.js; the rule and its limits are the roads': roads/infra.js): 3 a main
+    // road, 2 a lesser road, 1 a track, 0 nothing (and water); a chunk is never below the road that runs through it
+    infraOf: c => infraOf().levels[c] ?? 0,
+    infraLevels: () => infraOf().levels,
+    // can a main road be laid through district d: a band of chunks of the main level joins two of its neighbours
+    mainThrough: d => !!infraOf().through[d],
     // ---- the seats: the district whose town is the biggest of a province (id: its number), a historical land (id: its
     // name, provinces[p].land) or a region (id: its number) → { district, index: the place in sites, −1 none } or null
     capitalOf: (level, id) => { const sts = cur.div.centres?.seats; if (!sts) return null; const d = level === 'land' ? sts.land.get(id) : sts[level]?.[id]; return d === undefined ? null : { district: d, index: cur.div.centres.site[d] }; },
@@ -269,7 +295,8 @@ export async function startDivision(album, U) {
     if (h !== hover) { hover = h; U.uDivHover.value = h; dom.style.cursor = h >= 0 ? 'pointer' : ''; lines?.mark(hover, sel); }
     if (p.get('km') === 4 && tick % 15 === 1 && (album.layers.towns?.farmVersion?.() ?? -1) !== farmShown) paintState(true);   // the fields have changed
     { const tw = album.layers.towns; if (edgesShown && tick % 15 === 1 && tw && ((tw.version?.() ?? -1) !== edgesShown.town || (tw.farmVersion?.() ?? -1) !== edgesShown.farm)) paintState(true); }   // the settlements or their fields have
-    const text = (p.get('km') > 0 || p.get('noSettle') || p.get('kmEdges')) && last ? chunkUnder(last) : null;
+    if (infraShown && tick % 15 === 1 && infraShown.net !== (album.roadNet?.infra ? album.roadNet : null)) paintState(true);   // the roads are laid (anew)
+    const text = (p.get('km') > 0 || p.get('noSettle') || p.get('kmEdges') || p.get('kmInfra')) && last ? chunkUnder(last) : null;
     kmInfo.textContent = text || ''; kmInfo.style.display = text && !album.shot ? 'block' : 'none';
     if (sel >= 0 && shownVersion !== ch.version && tick % 15 === 1) { panel.show(summaryOf(sel)); shownVersion = ch.version; }
   } };

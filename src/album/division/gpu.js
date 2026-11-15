@@ -7,7 +7,8 @@
 //                      ground 1..5 (0 water or not known) | who can live there (0 nobody, 1 barely, 2 freely) << 3
 //                      | how much of it is under fields, a byte (town/farmland.js) << 8 — only while the chunks are
 //                      shown by their fields | why nobody can settle there (km.js chunkSettle) << 16 — while shown
-//                      | what runs along it, while the borders by chunks are shown (edges.js: bits 5, 19, 20..31);
+//                      | what runs along it, while the borders by chunks are shown (edges.js: bits 5, 19, 20..31)
+//                      | what can be laid through it, while that is shown (infra.js: 0 nothing .. 3 a main road) << 6;
 //                      b = the list of pieces of border lines near the square (border.js): its first four | how many
 //                      fours << 24 (0 none);
 //                      a = the district of the middle of the square, by the lines
@@ -50,8 +51,9 @@ const bitsOf = v => { F32[0] = v; return U32[0]; };
 export const fixOf = v => Math.max(0, Math.min(65535, Math.round((v / (2 * PIECE_KM) + .5) * 65535)));
 // rows: filled with { L0, S0 }, the first rows of the lists and of the pieces; why: km.js chunkSettle().why, when
 // the places where nobody can settle are shown (g, bits 16..18); edges: edges.js chunkEdges(), when the borders by
-// chunks are shown (g, bits 5, 19, 20..31)
-export function packDivision(ch, div, state = null, facts = null, farm = null, rows = {}, why = null, edges = null) {
+// chunks are shown (g, bits 5, 19, 20..31); infra: the level of every chunk (infra.js), when what can be laid through
+// the chunks is shown (g, bits 6..7)
+export function packDivision(ch, div, state = null, facts = null, farm = null, rows = {}, why = null, edges = null, infra = null) {
   const geo = div.geo, rd = Math.ceil(div.count / FN), rl = geo ? Math.ceil(geo.list.length / 4 / FN) : 0, rs = geo ? Math.ceil(geo.count / FN) : 0;
   const a = new Uint32Array(FN * (FN + rd + rl + rs) * 4), c = div.colour;
   rows.L0 = FN + rd; rows.S0 = FN + rd + rl;
@@ -68,6 +70,7 @@ export function packDivision(ch, div, state = null, facts = null, farm = null, r
   if (farm) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= farm[t] << 8;
   if (why) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= why[t] << 16;
   if (edges) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] = (a[t * 4 + 1] | edges[t]) >>> 0;
+  if (infra) for (let t = 0; t < FN * FN; t++) a[t * 4 + 1] |= (infra[t] & 3) << 6;
   for (let d = 0; d < div.count; d++) {
     const p = div.province[d], r = div.region[p], o = (FN * FN + d) * 4, first = div.chunks[d][0];
     const look = c.district[d] | c.province[p] << 3 | c.region[r] << 6 | div.kinds[d] << 9;
@@ -77,4 +80,4 @@ export function packDivision(ch, div, state = null, facts = null, farm = null, r
   }
   return a;
 }
-export const divisionTexture = (ch, div, state, facts = null, farm = null, why = null, edges = null) => { const rows = {}, a = packDivision(ch, div, state, facts, farm, rows, why, edges), t = utex(a, FN, a.length / 4 / FN); t.userData.rows = rows; return t; };
+export const divisionTexture = (ch, div, state, facts = null, farm = null, why = null, edges = null, infra = null) => { const rows = {}, a = packDivision(ch, div, state, facts, farm, rows, why, edges, infra), t = utex(a, FN, a.length / 4 / FN); t.userData.rows = rows; return t; };
