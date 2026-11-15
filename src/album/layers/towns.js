@@ -199,7 +199,13 @@ export default async function init(album) {
       const forest0 = ch.get('forest', k);
       if (b > 0) ch.set('built', k, Math.max(ch.get('built', k), b));
       if (f > 0) ch.set('fields', k, Math.max(ch.get('fields', k), f));
-      if (keep < 1) ch.set('forest', k, Math.min(forest0, keep));   // people fell the forest around them
+      // People fell the forest around them. Up to stage 2 the forest of the whole natural cell is lowered by the share
+      // of its fields. From stage 3 it is not: the forest shader clears the wood chunk by chunk where the fields are
+      // (setCleared, by the fields of the chunks of 1 km²), and lowering the cell as well felled the wood twice — in a
+      // ploughed cell hardly a tree stood on the chunks nobody ploughs (round Paris: not a wood in sight). Now the
+      // forest stands on the unploughed chunks. Agreed with the forest work, 16.11.2026; from afar it goes by the
+      // share of fields of the cell as before.
+      if (keep < 1 && STAGE < 3) ch.set('forest', k, Math.min(forest0, keep));
       written.set(k, { built: byteOf('built', k), fields: byteOf('fields', k), forest: byteOf('forest', k), forest0 });
     }
     crown();

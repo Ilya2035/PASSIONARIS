@@ -233,6 +233,8 @@ test('beyond the worked land — from stage 3 chunks stand only under its mask �
     const free = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at), all = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at, undefined, { where: wide });
     assert.equal(free.towns.length, 3); assert.deepEqual(all.towns.map(t => [t.index, t.x, t.y, t.R]), free.towns.map(t => [t.index, t.x, t.y, t.R]), 'where every square has a district — the present polygon — nothing changes'); }
   assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /where = cellsOf \? \(x, y\) => \{ const c = squareOf\(x, y\); return c >= 0 && cellsOf\[c\] >= 0; \} : null;/);
+  // (from stage 3 the fields do not lower the forest of the whole natural cell: the forest shader clears it chunk by chunk, and the wood stands on the unploughed chunks)
+  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /if \(keep < 1 && STAGE < 3\) ch\.set\('forest', k, Math\.min\(forest0, keep\)\);/);
   // no yard stands beyond it, though every chunk is «ploughed» in this test
   const ctx = { ...yardCtx([]), cell: half.cell, land: c => half.kind[c] === 1 };
   assert.equal(yardsAround(ctx, -50, 4405, 4).length, 0); assert.ok(yardsAround(ctx, -205, 4405, 4).length > 20);
