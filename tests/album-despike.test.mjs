@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { mendPockets, POCKET, POCKET_FLOOR, POCKET_MAX, despike, NEEDLE, NEEDLE_LAND, WELL, WELL_SEA } from '../src/album/ground/despike.js';
+import { liftDryLand, innerLandOf, DRY_LAND, mendPockets, POCKET, POCKET_FLOOR, POCKET_MAX, despike, NEEDLE, NEEDLE_LAND, WELL, WELL_SEA } from '../src/album/ground/despike.js';
 
 const raw = m => Math.round((m + 8192) * 4), W = 40, H = 30;
 // a flat shore: sea of −3 m in the west, land rising slowly to the east
@@ -79,4 +79,23 @@ test('pockets: the page does not mend them yet — the division must take the sa
   // mendPockets() goes into data.js and nodedata.js in one change, with the cells baked anew.
   const data = fs.readFileSync(new URL('../src/album/data.js', import.meta.url), 'utf8'), node = fs.readFileSync(new URL('../src/album/division/nodedata.js', import.meta.url), 'utf8');
   assert.equal(data.includes('mendPockets('), node.includes('mendPockets('), 'both loaders or neither');
+});
+
+test('dry land below the sea: what the mask calls inner land is raised above it; the shore stays where the heights put it', () => {
+  const W2 = 40, H2 = 30, raw2 = m => (m + 8192) * 4, u = new Uint16Array(W2 * H2);
+  // a land of 20 m with a chott 30 m under the sea in its middle; the sea in the west; the mask: land east of column 10
+  for (let j = 0; j < H2; j++) for (let i = 0; i < W2; i++) u[j * W2 + i] = raw2(i < 10 ? -50 : i >= 20 && i < 30 && j >= 10 && j < 20 ? -30 : 20);
+  u[5 * W2 + 10] = raw2(-2);                      // a point below zero on the very shore: the first column of the land
+  const mask = (i, j) => (i < 0 || j < 0 || i >= W2 || j >= H2 ? 0 : i < 10 ? 2 : 1);
+  // (one point of the base to one square of the mask, to keep the numbers plain)
+  const inner = (k, i, j) => { for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) if (mask(i + a, j + b) !== 1) return false; return true; };
+  const n = liftDryLand(u, W2, H2, inner);
+  assert.equal(n, 100, 'the chott and nothing else');
+  assert.equal(u[15 * W2 + 25], raw2(DRY_LAND)); assert.equal(u[15 * W2 + 5], raw2(-50), 'the sea');
+  assert.equal(u[5 * W2 + 10], raw2(-2), 'on the shore the heights decide: a square of the mask beside it is water');
+  assert.equal(u[2 * W2 + 20], raw2(20), 'land above the sea is not touched');
+  // innerLandOf: from a mask by latitude and longitude
+  const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180), at = (lat, lon) => mask(Math.floor(lon * KMD * COS), Math.floor(lat * KMD));
+  const llOf = (i, j) => [(j + .5) / KMD, (i + .5) / (KMD * COS)], f2 = innerLandOf(at, llOf, 1);
+  assert.equal(f2(0, 25, 15), true); assert.equal(f2(0, 10, 15), false, 'the square beside the sea'); assert.equal(f2(0, 5, 15), false); assert.equal(f2(0, 11, 0), false, 'the edge of the mask is the world');
 });

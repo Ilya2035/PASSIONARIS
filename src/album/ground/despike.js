@@ -90,3 +90,33 @@ export function mendPockets(u, w, h, maxPoints = POCKET_MAX) {
   }
   return mended;
 }
+
+// Dry land below the sea (docs/album/ground.md, «Суша ниже моря»). The shaders and the chunks take whatever lies
+// below zero for water. But there is land below the sea: the chotts of the Maghreb (Melrhir, 40 m under it), the
+// polders of Holland. Drawn from the heights alone, a chott was a blue lake in the desert and Holland a bay.
+// What is land is not in the heights; it is in the mask of the worked land (worked.js: 1 land, 2 its water).
+// So this step is for the script that bakes the base, which has the mask: every point at or below the sea that the
+// mask calls land is raised to DRY_LAND metres. It is asked of INNER land only — a square of the mask all of whose
+// eight neighbours are land too: the mask is drawn by squares of a kilometre, and on the coast itself the shore
+// stays where the heights put it, or it would run in steps of the mask.
+//   u, w, h: as for despike();  innerLand(k, i, j) → true for a point (index k, column i, row j) on inner land
+// Mends in place; returns how many points were raised. Run it after mendPockets() and before fillHollows(): a pit
+// in a chott is a pocket first, and what is left below zero inside the land after this step is a real lake.
+export const DRY_LAND = 1;
+export function liftDryLand(u, w, h, innerLand) {
+  const SEA = RAW(0), UP = RAW(DRY_LAND); let n = 0;
+  for (let j = 0, k = 0; j < h; j++) for (let i = 0; i < w; i++, k++) if (u[k] <= SEA && innerLand(k, i, j)) { u[k] = UP; n++; }
+  return n;
+}
+// innerLand for a mask of the worked land: at(lat, lon) → 0 the world, 1 land, 2 water (worked.js), stepKm the side of
+// its squares; llOf(i, j) → [lat, lon] of a point of the base. A point is on inner land when its square of the mask
+// and the eight around it are all land.
+export function innerLandOf(at, llOf, stepKm = 1) {
+  const dLat = stepKm / 111.195;
+  return (k, i, j) => {
+    const [lat, lon] = llOf(i, j), dLon = stepKm / (111.195 * Math.cos(40 * Math.PI / 180));   // (the plane of the chunks: the scale of 40° N)
+    if (at(lat, lon) !== 1) return false;
+    for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) if ((a || b) && at(lat + b * dLat, lon + a * dLon) !== 1) return false;
+    return true;
+  };
+}
