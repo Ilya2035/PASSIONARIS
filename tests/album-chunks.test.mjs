@@ -50,6 +50,7 @@ test('chunks: under a mask of the worked land only its texels get chunks; the re
   let east = 0; for (let tx = 0; tx < FNX; tx++) if (llOf(CI0 * CHUNK_KM + (tx + .5) * FKM, 0).lon >= 0) east++;   // columns of texels east of 0°
   assert.ok(east > 0 && east < FNX); assert.equal(none, east * FNY, 'exactly the texels the mask calls the world');
   assert.equal(w.whole, false); assert.equal(flat.whole, true); assert.ok(!flat.cell.includes(NONE));
+  assert.equal(flat.worked, null); assert.equal(w.worked(40, 2), 0); assert.equal(w.worked(40, -5), 1);   // the mask goes with the chunks
   assert.equal(w.at(40, 2), -1, 'the world has no chunk'); assert.equal(w.kind[w.at(40, -5)], 1); assert.equal(w.kind[w.at(40, -1)], 0);
   assert.ok(w.count < CNX * CNY, 'a square with no worked ground has no seed and no number');
   for (let k = 0; k < w.count; k++) { assert.ok(w.area[k] > 0, 'every chunk has ground'); for (const l of w.links[k]) assert.ok(l.k < w.count && l.k !== k); }

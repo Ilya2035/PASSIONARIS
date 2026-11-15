@@ -124,6 +124,20 @@ async function mosaic(z, x0, x1, y0, y1, outName, mend = false) {
 // ---- vectors
 const RU = { Madrid: 'Мадрид', Barcelona: 'Барселона', Lisbon: 'Лиссабон', Valencia: 'Валенсия', Seville: 'Севилья', Sevilla: 'Севилья', Zaragoza: 'Сарагоса', Málaga: 'Малага', Bilbao: 'Бильбао', Porto: 'Порту', Toulouse: 'Тулуза', Bordeaux: 'Бордо', Marseille: 'Марсель', Montpellier: 'Монпелье', Granada: 'Гранада', Córdoba: 'Кордова', Murcia: 'Мурсия', Valladolid: 'Вальядолид', Vigo: 'Виго', 'A Coruña': 'Ла-Корунья', 'La Coruña': 'Ла-Корунья', Gijón: 'Хихон', Oviedo: 'Овьедо', Santander: 'Сантандер', Pamplona: 'Памплона', 'San Sebastián': 'Сан-Себастьян', Alicante: 'Аликанте', Almería: 'Альмерия', Cádiz: 'Кадис', Cartagena: 'Картахена', Toledo: 'Толедо', Salamanca: 'Саламанка', Burgos: 'Бургос', León: 'Леон', Badajoz: 'Бадахос', Mérida: 'Мерида', Tarragona: 'Таррагона', Lleida: 'Льейда', Girona: 'Жирона', Perpignan: 'Перпиньян', Narbonne: 'Нарбонна', Bayonne: 'Байонна', Pau: 'По', Tangier: 'Танжер', Ceuta: 'Сеута', Gibraltar: 'Гибралтар', Coimbra: 'Коимбра', Faro: 'Фару', Braga: 'Брага', Évora: 'Эвора', Palma: 'Пальма', Andorra: 'Андорра', 'Andorra la Vella': 'Андорра-ла-Велья', Huelva: 'Уэльва', Jaén: 'Хаэн', Albacete: 'Альбасете', Logroño: 'Логроньо', Vitoria: 'Витория', Nîmes: 'Ним', Avignon: 'Авиньон', Agen: 'Ажен', Tétouan: 'Тетуан', Santiago: 'Сантьяго', 'Santiago de Compostela': 'Сантьяго-де-Компостела', Setúbal: 'Сетубал', Castellón: 'Кастельон', Huesca: 'Уэска', Teruel: 'Теруэль', Cuenca: 'Куэнка', Soria: 'Сория', Segovia: 'Сеговия', Ávila: 'Авила', Cáceres: 'Касерес', Lugo: 'Луго', Ourense: 'Оренсе', Tarbes: 'Тарб', Carcassonne: 'Каркасон', Béziers: 'Безье' };
 const RIV = { Ebro: 'Эбро', Tajo: 'Тахо', Tagus: 'Тахо', Tejo: 'Тежу', Duero: 'Дуэро', Douro: 'Дору', Guadiana: 'Гвадиана', Guadalquivir: 'Гвадалквивир', Garonne: 'Гаронна', Júcar: 'Хукар', Segura: 'Сегура', Miño: 'Миньо', Minho: 'Миньо', Dordogne: 'Дордонь', Rhône: 'Рона', Adour: 'Адур', Lot: 'Ло', Tarn: 'Тарн', Genil: 'Хениль', Jalón: 'Халон', Segre: 'Сегре', Cinca: 'Синка', Esla: 'Эсла', Pisuerga: 'Писуэрга', Aude: 'Од', Hérault: 'Эро', Mondego: 'Мондегу', Sado: 'Саду', Turia: 'Турия', Aragón: 'Арагон', Gállego: 'Гальего', Ariège: 'Арьеж' };
+// The outline of a lake with its islands cut in. A lake goes into vectors.json as ONE ring, and whoever asks "is this
+// point in the lake" counts crossings of that ring. So a large island must not be lost: Flevoland is a hole of 930 km²
+// in the outline of the IJsselmeer, and without it Lelystad stood in the lake (found by the division session on the
+// data of stage 3). The ring runs round the lake, goes to the island by the shortest way, round it, and back by the
+// same way: the two passes of the cut cancel in the count, the island is outside. poly: [outline, hole, …].
+export function keyhole(poly) {
+  let ring = poly[0].slice();
+  for (const hole of poly.slice(1)) {
+    let bi = 0, bj = 0, bd = Infinity;
+    for (let i = 0; i < ring.length; i++) for (let j = 0; j < hole.length; j++) { const d = (ring[i][0] - hole[j][0]) ** 2 + (ring[i][1] - hole[j][1]) ** 2; if (d < bd) { bd = d; bi = i; bj = j; } }
+    ring = [...ring.slice(0, bi + 1), ...hole.slice(bj), ...hole.slice(0, bj + 1), ...ring.slice(bi)];
+  }
+  return ring;
+}
 function vectors() {
   const B = BBOX, inside = ([lo, la]) => lo >= B.lon0 - 0.5 && lo <= B.lon1 + 0.5 && la >= B.lat0 - 0.5 && la <= B.lat1 + 0.5;
   const rd = f => JSON.parse(readFileSync(join(RAW, f), 'utf8')).features;
@@ -142,7 +156,7 @@ function vectors() {
   for (const f of rd('ne_10m_lakes.geojson')) {
     if (f.properties.featurecla === 'Reservoir' || !f.geometry) continue;
     for (const poly of f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates)
-      if (poly[0].some(inside)) lakes.push({ name: f.properties.name_ru || f.properties.name || '', ring: poly[0].map(p => [r5(p[0]), r5(p[1])]) });
+      if (poly[0].some(inside)) lakes.push({ name: f.properties.name_ru || f.properties.name || '', ring: keyhole(poly).map(p => [r5(p[0]), r5(p[1])]) });
   }
   const places = rd('ne_10m_populated_places_simple.geojson').map(f => f.properties)
     .filter(p => inside([p.longitude, p.latitude])).sort((a, b) => b.pop_max - a.pop_max).slice(0, 140)

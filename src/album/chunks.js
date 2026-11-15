@@ -254,6 +254,7 @@ export class Chunks {
     const g = buildCells(heightAt, rivers, lakes, worked), n = g.count, cell = g.cell;
     this.n = CNX; this.nx = CNX; this.ny = CNY; this.count = n; this.cell = cell;
     this.whole = !worked;                // every texel has a chunk (no mask of the worked land)
+    this.worked = worked;                // the mask the chunks were built under, (lat, lon) → 0 · 1 · 2, or null: for whoever is handed the chunks and needs it too
     this.square = g.square;              // the chunk seeded in a lattice square (j − CJ0) · CNX + (i − CI0), −1 for none
     this.squareOf = g.squareOf;          // the square of a seeded chunk (the chunks added after the seeds have none)
     this.kind = g.kind;                  // 1 a chunk of land, 0 a chunk of water (sea or lake)
