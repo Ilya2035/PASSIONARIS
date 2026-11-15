@@ -48,7 +48,10 @@ export const FARM_BESIDE = .45;   // the land next to the houses is ploughed fir
 export const RMAX = 6;           // km: the largest radius a patch can have (a chunk built up from edge to edge)
 export const CELL = .085;        // km: one block with its street, as in life
 export const BEND = .35;         // how far the lattice is bent, in cells
-export const CULTURES = { med: 1, atl: 2 };                           // manners of building (chunk channel `culture`)
+// (CULTURE_N: how many manners there are — the codes of the squares in the texture count by it, town/state.js.
+// MEDINA: the Maghreb builds dense, the lanes of a medina are a few steps wide — so much more of a cell its blocks take)
+export const CULTURE_N = 3, MEDINA = .04;
+export const CULTURES = { med: 1, atl: 2, mag: 3 };                           // manners of building (chunk channel `culture`)
 // the cell of the lattice; k is the «Размер домов» knob (1 = real size). The camera height changes nothing.
 export const cellSize = (hKm, k = 1) => CELL * Math.max(.2, k);
 
@@ -235,7 +238,7 @@ export const bendTurn = (L, qx, qy) => (BEND * .55 * Math.cos(qy * .55 + L.th * 
 //   cls   1 block around a court · 2 solid block · 3 separate houses · 4 open square · 5 building site
 //   hx hy half-size of the footprint, ox oy its shift inside the cell (cell units), rot its turn, h1..h4 random numbers
 export function cellRule(i, j, L, S) {
-  const centre = i === 0 && j === 0, atl = L.cul === CULTURES.atl, R = L.re, hamlet = L.r < STAGES[1].r;
+  const centre = i === 0 && j === 0, atl = L.cul === CULTURES.atl, dn = L.cul === CULTURES.mag ? MEDINA : 0, R = L.re, hamlet = L.r < STAGES[1].r;
   if (R < .6 * S) {                                                 // a patch smaller than a cell is a single house
     if (!centre) return null;
     const hs = Math.max(.12, Math.min(.45, .9 * R / S));
@@ -259,9 +262,10 @@ export function cellRule(i, j, L, S) {
   if (centre && L.r >= STAGES[3].r && S * 3 <= R) return { cls: 4, hx: .5, hy: .5, ox: 0, oy: 0, rot: 0, ...o };
   // three belts from the edge inward: houses with gardens, rows of houses, blocks around courts
   const rimW = .05 + .12 * R, core = !hamlet && m > rimW + .07 + .2 * R, mid = !hamlet && m > rimW, turn = (h4 - .5) * .14;
-  if (!centre && h1 > (core ? .94 : mid ? .86 : hamlet ? .9 : .7)) return null;
-  if (core) return { cls: h2 > .35 ? 1 : 2, hx: .39 + .05 * h3, hy: .39 + .05 * h4, ox: (h4 - .5) * .04, oy: (h3 - .5) * .04, rot: turn, core, ...o };
-  if (mid) return { cls: 2, hx: .31 + .1 * h3, hy: .31 + .1 * h4, ox: (h4 - .5) * .1, oy: (h3 - .5) * .1, rot: turn, ...o };
+  // (dn: the Maghreb builds denser — fewer gaps among the blocks, narrower lanes between them)
+  if (!centre && h1 > (core ? .94 + .75 * dn : mid ? .86 + 1.5 * dn : hamlet ? .9 : .7)) return null;
+  if (core) return { cls: h2 > .35 ? 1 : 2, hx: .39 + dn + .05 * h3, hy: .39 + dn + .05 * h4, ox: (h4 - .5) * .04, oy: (h3 - .5) * .04, rot: turn, core, ...o };
+  if (mid) return { cls: 2, hx: .31 + dn + .1 * h3, hy: .31 + dn + .1 * h4, ox: (h4 - .5) * .1, oy: (h3 - .5) * .1, rot: turn, ...o };
   const big = h2 < .35 || hamlet;                                   // the rim: a farmstead or a house with its garden
   return { cls: 3, hx: big ? .32 + .06 * h3 : .2 + .05 * h3, hy: big ? .27 + .05 * h4 : .12 + .04 * h4, ox: (h3 - .5) * .24, oy: (h4 - .5) * .24, rot: (h4 > .5 ? 1.5707963 : 0) + turn, big, ...o };
 }
@@ -269,9 +273,20 @@ export function cellRule(i, j, L, S) {
 // which manner of building a land has before anyone decides otherwise: the wet Atlantic north and west build loose
 // stone farmsteads under dark roofs, the rest dense tiled blocks around courts
 // (North of 45.2° — the Massif Central, the north of France, the Low Countries, the Rhine — it is the same loose
-// building under dark roofs: slate, thatch, timber. The south of France and the Maghreb build the Mediterranean way.
+// building under dark roofs: slate, thatch, timber. The south of France builds the Mediterranean way.
 // The present polygon ends at 44.8°: there this line changes nothing.)
+// The Maghreb — Africa north of the Sahara — builds its own way: flat roofs, whitewash and rammed earth, houses wall to
+// wall around inner courts, a mosque where Europe has a church. Africa lies south of the line of the sea, AFRICA (lon,
+// lat of its corners from west to east: the Strait, the Alboran Sea, between the Balearics and Algeria, south of
+// Sardinia, the Strait of Sicily), and east of the Canaries.
+export const AFRICA = [[-13, 35.95], [-5.45, 35.95], [-3, 36.0], [-1, 36.4], [1.5, 37.3], [5, 37.9], [9, 38.2], [11.5, 37.6], [11.7, 35.3], [40, 35.3]];
+export function inAfrica(lat, lon) {
+  if (lon <= AFRICA[0][0]) return false;
+  for (let i = 1; i < AFRICA.length; i++) if (lon <= AFRICA[i][0]) { const a = AFRICA[i - 1], b = AFRICA[i]; return lat < a[1] + (b[1] - a[1]) * (lon - a[0]) / (b[0] - a[0]); }
+  return lat < AFRICA[AFRICA.length - 1][1];
+}
 export function cultureAt(lat, lon) {
+  if (inAfrica(lat, lon)) return CULTURES.mag;
   const atl = (lat > 41.9 && lon < -1.4) || (lat > 43.0 && lon < .2) || (lat > 40.6 && lon < -7.6) || lat > 45.2;
   return atl ? CULTURES.atl : CULTURES.med;
 }
@@ -311,6 +326,8 @@ export const RULES_GLSL = /* glsl */`
 #define SET_BEND ${BEND.toFixed(3)}
 #define SET_LOBE ${LOBE.toFixed(3)}
 #define SET_LOBE_FULL ${LOBE_FULL.toFixed(3)}
+#define SET_CULS ${CULTURE_N}
+#define SET_MEDINA ${MEDINA.toFixed(3)}
 float setWob(vec2 pk) { return sin(pk.x * 9. + 1.3 * sin(pk.y * 7.)); }
 float setHash(ivec2 id, int k, int salt) {
   uint h = uint(id.x + 4096) * 0x27d4eb2du ^ uint(id.y + 4096) * 0x165667b1u ^ uint(k * 16 + salt) * 0x9e3779b1u;
@@ -333,7 +350,8 @@ float setLobes(vec2 v, float r, int k) {
 // its site, turned into the lattice, km.
 float setCell(ivec2 id, vec2 site, vec2 sh, float r, float cs, float sn, float cul, int k, float S, out vec2 hs, out vec2 off, out float rot, out vec4 rnd) {
   hs = vec2(0.); off = vec2(0.); rot = 0.; rnd = vec4(.5);
-  bool centre = id.x == 0 && id.y == 0, atl = cul > 1.5, hamlet = r < ${STAGES[1].r.toFixed(3)};
+  bool centre = id.x == 0 && id.y == 0, atl = cul > 1.5 && cul < 2.5, hamlet = r < ${STAGES[1].r.toFixed(3)};
+  float dn = cul > 2.5 ? SET_MEDINA : 0.;                            // the Maghreb builds denser
   if (r < .6 * S) {
     if (!centre) return 0.;
     hs = vec2(clamp(.9 * r / S, .12, .45));
@@ -356,9 +374,9 @@ float setCell(ivec2 id, vec2 site, vec2 sh, float r, float cs, float sn, float c
   }
   if (centre && r >= ${STAGES[3].r.toFixed(3)} && S * 3. <= r) { hs = vec2(.5); return 4.; }
   float rimW = .05 + .12 * r, turn = (rnd.w - .5) * .14; bool core = !hamlet && m > rimW + .07 + .2 * r, mid = !hamlet && m > rimW;
-  if (!centre && rnd.x > (core ? .94 : mid ? .86 : hamlet ? .9 : .7)) return 0.;
-  if (core) { hs = vec2(.39 + .05 * rnd.z, .39 + .05 * rnd.w); off = vec2(rnd.w - .5, rnd.z - .5) * .04; rot = turn; return rnd.y > .35 ? 1. : 2.; }
-  if (mid) { hs = vec2(.31 + .1 * rnd.z, .31 + .1 * rnd.w); off = vec2(rnd.w - .5, rnd.z - .5) * .1; rot = turn; return 2.; }
+  if (!centre && rnd.x > (core ? .94 + .75 * dn : mid ? .86 + 1.5 * dn : hamlet ? .9 : .7)) return 0.;
+  if (core) { hs = vec2(.39 + dn + .05 * rnd.z, .39 + dn + .05 * rnd.w); off = vec2(rnd.w - .5, rnd.z - .5) * .04; rot = turn; return rnd.y > .35 ? 1. : 2.; }
+  if (mid) { hs = vec2(.31 + dn + .1 * rnd.z, .31 + dn + .1 * rnd.w); off = vec2(rnd.w - .5, rnd.z - .5) * .1; rot = turn; return 2.; }
   bool big = rnd.y < .35 || hamlet;
   hs = big ? vec2(.32 + .06 * rnd.z, .27 + .05 * rnd.w) : vec2(.2 + .05 * rnd.z, .12 + .04 * rnd.w);
   off = vec2(rnd.z - .5, rnd.w - .5) * .24; rot = (rnd.w > .5 ? 1.5707963 : 0.) + turn;
@@ -369,10 +387,21 @@ float setCell(ivec2 id, vec2 site, vec2 sh, float r, float cs, float sn, float c
 // ---- the colours of buildings, one list for the blocks and for the roofs painted on the ground. As seen on screen,
 // before light. m: 0 pitched roof · 1 flat roof · 2 wall · 3 dressed stone · 4 timber · 5 cloth · 6 hay and sand ·
 // 7 dark opening · 8 yard wall · 9 boat · 10 the plot of a yard among the fields. atl: 0 Mediterranean (tile, whitewash)
-// .. 1 Atlantic (slate, thatch, granite)
+// .. 1 Atlantic (slate, thatch, granite) · 2 the Maghreb (flat roofs under lime and clay, whitewashed and earthen
+// walls, rammed earth; green glazed tile on the few pitched roofs — a mosque)
 export const MAT = { roof: 0, flat: 1, wall: 2, stone: 3, timber: 4, cloth: 5, hay: 6, dark: 7, fence: 8, hull: 9, plot: 10 };
 export const PALETTE_GLSL = /* glsl */`
+vec3 settleMag(int m, float t) {
+  if (m == 0) return mix(vec3(.27, .44, .35), vec3(.37, .50, .38), t);
+  if (m == 1) return mix(mix(vec3(.81, .76, .67), vec3(.72, .63, .51), smoothstep(.2, .75, t)), vec3(.88, .85, .79), step(.84, t));
+  if (m == 2) return mix(vec3(.87, .83, .75), vec3(.76, .62, .47), smoothstep(.5, .7, t)) * (.95 + .08 * fract(t * 5.));
+  if (m == 3) return vec3(.74, .61, .45) * (.94 + .1 * t);
+  if (m == 8) return vec3(.69, .58, .44);
+  float bed = fract(t * 2.7);                                                                // m == 10: a yard of bare earth, a few beds
+  return (bed < .28 ? vec3(.49, .52, .30) : bed < .6 ? vec3(.70, .62, .47) : vec3(.64, .55, .41)) * (.95 + .08 * fract(t * 7.));
+}
 vec3 settleMat(int m, float atl, float t) {
+  if (atl > 1.5) { if (m < 4 || m == 8 || m == 10) return settleMag(m, t); atl = 0.; }       // (timber, cloth, hay and boats are the same everywhere)
   if (m == 0) {
     vec3 tile = mix(vec3(.77, .51, .36), vec3(.65, .45, .34), smoothstep(.1, .7, t));        // new tile .. weathered
     tile = mix(tile, vec3(.79, .63, .47), step(.8, t));                                      // bleached by the sun

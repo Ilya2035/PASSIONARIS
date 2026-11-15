@@ -6,11 +6,11 @@ import { Chunks, kmOf, llOf } from '../src/album/chunks.js';
 import { DEFS } from '../src/album/params.js';
 import { PAGES } from '../src/album/pages.js';
 import settle from '../src/album/aspects/settle.js';
-import { RMAX, CELL, GN, GNY, GK, GX0, GY0, CULTURES, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
+import { RMAX, CELL, GN, GNY, GK, GX0, GY0, CULTURES, CULTURE_N, MEDINA, inAfrica, STAGES, stageOf, cellHash, cellRule, lobeOf, cellSize, radiusByte, radiusOf, radiusOfShare, siteBytes, gridOf, bend, unbend, cultureAt, fieldsBeyond, lanesBeyond,
   RULES_GLSL, PALETTE_GLSL, MAT, FARM_PIECE, FARM_TURNS } from '../src/album/town/rules.js';
 import { buildShapes, KINDS, KIND, KIND_TITLES, MAX_TRIS, SLOTS } from '../src/album/town/shapes.js';
 import { growTowns, fullRadius, reachOf, RCAP, FELL_FROM } from '../src/album/town/grow.js';
-import { planLobe, planShowcase, ROW, FLAG_WATER } from '../src/album/town/plan.js';
+import { planLobe, planShowcase, ROW, FLAG_WATER, FLAG_ATL, FLAG_MAG, MAG_KINDS } from '../src/album/town/plan.js';
 import { mirrorSettle, mirrorFarm, farmAt, settleUniforms } from '../src/album/town/state.js';
 import { yardAt, planYards, allYards, patchIndex, ploughed, yardPlace, YARD_KINDS, YARD_STEP, YARD_TILE, YARDS_PER_KM2, YARD_FARM } from '../src/album/town/yards.js';
 import { farmsteadsOfAlbum, packLand, unpackLand, landBytes } from '../src/album/save/land.js';
@@ -29,12 +29,13 @@ const S = cellSize(20);
 const centreOf = r => { const c = Math.cos(r[2]), s = Math.sin(r[2]); return [r[0] + (c * r[4] - s * r[5]) * S, r[1] + (s * r[4] + c * r[5]) * S]; };
 const patch = (x, y, r, cul = CULTURES.med) => { const [bx, by] = siteBytes(x, y), L = lobeOf(gridOf(x, y), bx, by, radiusByte(r), cul); L.rivals = []; return L; };
 
-test('settle shapes: twenty-three kinds of a few triangles each, all in one small texture', () => {
+test('settle shapes: twenty-nine kinds of a few triangles each, all in one small texture', () => {
   const s = buildShapes();
-  assert.equal(KINDS.length, 23); assert.equal(KIND_TITLES.length, 23); assert.equal(new Set(KINDS).size, 23);
+  assert.equal(KINDS.length, 29); assert.equal(KIND_TITLES.length, 29); assert.equal(new Set(KINDS).size, 29);
   assert.ok(KIND.wall === 21 && KIND.gate === 22, 'the wall and the gate come after the yards: the kinds before them keep their numbers');
-  assert.equal(s.width, SLOTS); assert.equal(s.height, 46); assert.equal(s.data.length, SLOTS * 46 * 4);
-  assert.ok(s.data.length < 32000, `the shape texture is ${s.data.length} bytes`);
+  assert.deepEqual(MAG_KINDS.map(k => KIND[k]), [23, 24, 25, 26, 27, 28], 'the kinds of the Maghreb come last: the kinds before them keep their numbers');
+  assert.equal(s.width, SLOTS); assert.equal(s.height, 58); assert.equal(s.data.length, SLOTS * 58 * 4);
+  assert.ok(s.data.length < 40000, `the shape texture is ${s.data.length} bytes`);
   s.tris.forEach((n, k) => assert.ok(n >= 12 && n <= MAX_TRIS, `${KINDS[k]}: ${n} triangles`));
   assert.ok(s.tris.reduce((a, b) => a + b) / KINDS.length < 48, 'on average under 48 triangles a block');
   for (const [k, sh] of s.shapes.entries()) for (const t of sh.t) {
@@ -45,7 +46,7 @@ test('settle shapes: twenty-three kinds of a few triangles each, all in one smal
     assert.ok(Math.abs(Math.hypot(...t.n) - 1) < 1e-6 && t.mat >= 0 && t.mat <= 10);
   }
   // heights are real against the plan: nothing but towers and sails rises above a quarter of a block
-  for (const name of ['quarter', 'quarterU', 'quarterL', 'rows', 'lanes', 'terrace', 'cluster', 'farm', 'villa', 'house', 'market', 'site']) assert.ok(Math.max(...s.shapes[KIND[name]].t.flatMap(t => t.p.map(p => p[2]))) <= .2, name);
+  for (const name of ['quarter', 'quarterU', 'quarterL', 'rows', 'lanes', 'terrace', 'cluster', 'farm', 'villa', 'house', 'market', 'site', 'riad', 'medina', 'dar', 'hawsh', 'douar']) assert.ok(Math.max(...s.shapes[KIND[name]].t.flatMap(t => t.p.map(p => p[2]))) <= .2, name);
 });
 
 test('settle rules: real sizes, one hash and one rule for the plan and for the shader', () => {
@@ -65,9 +66,9 @@ test('settle rules: real sizes, one hash and one rule for the plan and for the s
   assert.ok(Math.abs(L.x + 205) < .04 && Math.abs(L.y - 4405) < .04 && Math.abs(L.r - .85) < .02 && L.k === gridOf(-205, 4405));
   assert.deepEqual(STAGES.map(s => stageOf(s.r + .01)), [0, 1, 2, 3, 4]); assert.ok(fieldsBeyond(.07) < 1 && fieldsBeyond(.85) > 2);
   assert.equal(cultureAt(43.25, -2.93), CULTURES.atl); assert.equal(cultureAt(41.65, -.89), CULTURES.med);
-  // beyond the present polygon: the north of France, the Low Countries and the Rhine build the Atlantic way, Provence and the Maghreb the Mediterranean
+  // beyond the present polygon: the north of France, the Low Countries and the Rhine build the Atlantic way, Provence the Mediterranean; the Maghreb its own
   assert.equal(cultureAt(48.85, 2.35), CULTURES.atl); assert.equal(cultureAt(52.37, 4.9), CULTURES.atl); assert.equal(cultureAt(50.94, 6.96), CULTURES.atl);
-  assert.equal(cultureAt(43.3, 5.37), CULTURES.med); assert.equal(cultureAt(36.8, 10.18), CULTURES.med); assert.equal(cultureAt(31.63, -8), CULTURES.med); assert.equal(cultureAt(44.8, 4.4), CULTURES.med, 'nothing changes within the present polygon');
+  assert.equal(cultureAt(43.3, 5.37), CULTURES.med); assert.equal(cultureAt(36.8, 10.18), CULTURES.mag); assert.equal(cultureAt(31.63, -8), CULTURES.mag); assert.equal(cultureAt(44.8, 4.4), CULTURES.med, 'nothing changes in the north of the present polygon');
   // the lattice is bent, and the bend can be undone
   for (const [x, y] of [[0, 0], [3.5, -2], [-7, 9.25]]) { const [u, v] = unbend(L, x, y), [bx, by] = bend(L, u, v); assert.ok(Math.abs(bx - x) < 1e-3 && Math.abs(by - y) < 1e-3); }
 });
@@ -216,8 +217,56 @@ test('settle album: the aspect, its knobs and its pages', () => {
   const cams = Object.fromEntries(settle.pages.map(p => [p.id, p.cam.h]));
   assert.ok(cams['grow-1'] === 20 && cams['town-50'] === 50 && cams['town-200'] === 200 && cams['town-500'] === 500);
   const showcase = rows(planShowcase(0, 4400, 3));
-  assert.equal(showcase.length, 46); assert.deepEqual([...new Set(showcase.map(r => r[3]))].sort((a, b) => a - b), KINDS.map((_, i) => i)); assert.equal(showcase.filter(r => r[7] & 1).length, 23);
-  { const seen = new Set(showcase.map(r => `${r[0].toFixed(2)},${r[1].toFixed(2)}`)); assert.equal(seen.size, 46, 'no two blocks of the showcase stand on one spot'); }
+  // (twenty-three kinds in the Mediterranean and in the Atlantic manner; a row of the Maghreb: its six kinds and six of everybody's in its colours)
+  assert.equal(showcase.length, 58); assert.deepEqual([...new Set(showcase.map(r => r[3]))].sort((a, b) => a - b), KINDS.map((_, i) => i)); assert.equal(showcase.filter(r => r[7] & FLAG_ATL).length, 23);
+  assert.equal(showcase.filter(r => r[7] & FLAG_MAG).length, 12); assert.ok(showcase.filter(r => MAG_KINDS.includes(KINDS[r[3]])).every(r => r[7] === FLAG_MAG), 'the kinds of the Maghreb are shown in its colours only');
+  { const seen = new Set(showcase.map(r => `${r[0].toFixed(2)},${r[1].toFixed(2)}`)); assert.equal(seen.size, 58, 'no two blocks of the showcase stand on one spot'); }
+  assert.ok(ids.includes('town-mag'));
+});
+
+test('settle Maghreb: its own manner of building — flat roofs, courts within, a mosque; Africa south of the line of the sea', () => {
+  // where: Africa north of the Sahara; the islands of Europe and the Canaries are not Africa
+  const africa = { Tangier: [35.78, -5.81], Ceuta: [35.89, -5.32], Tetouan: [35.57, -5.37], Oran: [35.70, -.63], Algiers: [36.78, 3.06], Annaba: [36.9, 7.77], Bizerte: [37.27, 9.87], 'Cap Bon': [37.08, 11.05], Sfax: [34.74, 10.76],
+    Zarzis: [33.5, 11.11], 'Sidi Ifni': [29.38, -10.17], Fes: [34.03, -5], Marrakech: [31.63, -8], Tunis: [36.8, 10.18], 'La Galite': [37.52, 8.93] };
+  const europe = { Tarifa: [36.01, -5.6], Gibraltar: [36.11, -5.35], Almeria: [36.84, -2.46], 'Cabo de Gata': [36.72, -2.19], Cartagena: [37.6, -.98], Formentera: [38.65, 1.5], 'Sardinia, south': [38.86, 8.85], Marsala: [37.8, 12.43],
+    Pantelleria: [36.8, 11.95], Lampedusa: [35.5, 12.6], Malta: [35.9, 14.4], Lanzarote: [29, -13.6], Madeira: [32.7, -17], Faro: [37, -7.93], Cadiz: [36.53, -6.29] };
+  for (const [n, [lat, lon]] of Object.entries(africa)) { assert.ok(inAfrica(lat, lon), n); assert.equal(cultureAt(lat, lon), CULTURES.mag, n); }
+  for (const [n, [lat, lon]] of Object.entries(europe)) { assert.ok(!inAfrica(lat, lon), n); assert.notEqual(cultureAt(lat, lon), CULTURES.mag, n); }
+  assert.equal(CULTURES.mag, 3); assert.equal(CULTURE_N, Object.keys(CULTURES).length);
+  // what stands in a cell: the belts of a Mediterranean town, built denser — fewer gaps, wider blocks, narrower lanes
+  const med = patch(-205, 4405, .85), mag = patch(-205, 4405, .85, CULTURES.mag); let nMed = 0, nMag = 0, wider = 0, blocks = 0;
+  for (let i = -14; i <= 14; i++) for (let j = -14; j <= 14; j++) {
+    const a = cellRule(i, j, med, S), b = cellRule(i, j, mag, S); if (a) nMed++; if (b) nMag++;
+    if (a && !b) assert.fail('a cell that is built the Mediterranean way is built in the Maghreb too');
+    if (a && b && a.cls <= 2) { blocks++; assert.equal(b.cls, a.cls); if (Math.abs(b.hx - a.hx - MEDINA) < 1e-9 && Math.abs(b.hy - a.hy - MEDINA) < 1e-9) wider++; assert.ok(b.hx + Math.abs(b.ox) <= .5001 && b.hy + Math.abs(b.oy) <= .5001, 'a block keeps to its cell'); }
+  }
+  assert.ok(nMag > nMed && blocks > 100 && wider === blocks, `${nMed} → ${nMag} cells, ${wider} of ${blocks} blocks wider`);
+  for (const d of ['float dn = cul > 2.5 ? SET_MEDINA : 0.;', 'atl = cul > 1.5 && cul < 2.5', `#define SET_MEDINA ${MEDINA.toFixed(3)}`, `#define SET_CULS ${CULTURE_N}`, 'hs = vec2(.39 + dn + .05 * rnd.z, .39 + dn + .05 * rnd.w)', 'hs = vec2(.31 + dn + .1 * rnd.z, .31 + dn + .1 * rnd.w)',
+    'rnd.x > (core ? .94 + .75 * dn : mid ? .86 + 1.5 * dn : hamlet ? .9 : .7)']) assert.ok(RULES_GLSL.includes(d), d);
+  // the plan: flat-roofed kinds only, in the colours of the Maghreb; a mosque where a town of Europe has its church
+  const kindsOf = plan => { const n = {}; for (const r of plan) n[KINDS[r[3]]] = (n[KINDS[r[3]]] || 0) + 1; return n; };
+  const pitched = ['quarter', 'quarterU', 'quarterL', 'rows', 'lanes', 'cluster', 'farm', 'house', 'villa', 'tower', 'palace', 'temple', 'yard', 'longyard', 'cot'];
+  for (const r of [.07, .15, .5, .85]) {
+    const plan = rows(planLobe(patch(-205, 4405, r, CULTURES.mag), S, env)), n = kindsOf(plan);
+    assert.ok(plan.length > 0 && plan.every(q => q[7] & FLAG_MAG && !(q[7] & FLAG_ATL)), `the flags, r = ${r}`);
+    for (const k of pitched) assert.ok(!n[k], `${k} in a settlement of the Maghreb, r = ${r}: ${JSON.stringify(n)}`);
+    if (r >= .5) assert.ok(n.mosque >= 1 && n.riad > 3 && n.medina > 3 && n.dar > 3 && n.market === 1, JSON.stringify(n));
+  }
+  // (a pier of a town of the Maghreb may still stand over the water: the two flags are two bits)
+  const piers = rows(planLobe(patch(99.75, 4405, .5, CULTURES.mag), S, env)).filter(r => KINDS[r[3]] === 'pier'); assert.ok(piers.length >= 1 && piers.every(q => q[7] === (FLAG_MAG | FLAG_WATER)));
+  // its yards among the fields: a flat-roofed house in a yard of bare earth, as many as in the Mediterranean lands and at the same places
+  const town = ploughedTown(-205.3, 4405.2), ctx = yardCtx([town.L], { farm: town.farm, farmList: town.farmList });
+  const yMed = yardsAround(ctx, town.L.x, town.L.y, 12), yMag = yardsAround({ ...ctx, culture: () => CULTURES.mag }, town.L.x, town.L.y, 12);
+  assert.ok(yMag.length === yMed.length && yMag.length > 20 && yMag.every((r, n) => KINDS[r[3]] === 'douar' && r[7] === FLAG_MAG && r[0] === yMed[n][0] && r[1] === yMed[n][1] && r[2] === yMed[n][2] && r[8] === yMed[n][8]));
+  // the mirror: the manner of the cell goes into the texture with the patch, whatever the squares around hold
+  clear();
+  const k = ch.at(...Object.values(llOf(-305, 4505)).slice(0, 2)); ch.set('built', k, .02); ch.set('culture', k, CULTURES.mag / 255);
+  const out = blank(), { lobes } = mirrorSettle(ch, [], out); assert.equal(lobes.length, 1); assert.equal(lobes[0].cul, CULTURES.mag); assert.equal(out[lobes[0].k * 4 + 3], 200 + CULTURES.mag);
+  clear();
+  const g = settle.glsl;
+  for (const d of ['(code - 110) / SET_CULS', 'mod(ca - 110., float(SET_CULS)) + 1.', 'atlF = cuF > 1.5 && cuF < 2.5 ? 1. : 0.', 'float atl = cul > 1.5 && cul < 2.5 ? 1. : 0., mag = cul > 2.5 ? 1. : 0.;', 'setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court)', 'return settleMat(1, 2.,']) assert.ok(g.includes(d), d);
+  // the colours: a list of its own for roofs, walls, stone and yards; timber, cloth, hay and boats are everybody's
+  assert.ok(PALETTE_GLSL.includes('vec3 settleMag(int m, float t)') && PALETTE_GLSL.includes('if (atl > 1.5) { if (m < 4 || m == 8 || m == 10) return settleMag(m, t); atl = 0.; }'));
 });
 
 test('settle classes: the mark of a settlement follows its people, as the owner set it', async () => {
@@ -281,7 +330,7 @@ test('yards: sixteen places a square kilometre; a yard stands only in a chunk of
   const yards = yardsAround(ctx, L.x, L.y, 12);
   assert.ok(yards.length > town.m.farm.area * 1.5 && yards.length < town.m.farm.area * 3, `${yards.length} yards on ${town.m.farm.area.toFixed(0)} km² of fields`);
   assert.deepEqual(yardsAround(ctx, L.x, L.y, 12), yards, 'the same every time');
-  const names = new Set(yards.map(r => KINDS[r[3]])); assert.deepEqual([...names].sort(), [...YARD_KINDS].sort(), 'every kind of yard is there, and nothing else');
+  const names = new Set(yards.map(r => KINDS[r[3]])); assert.deepEqual([...names].sort(), YARD_KINDS.filter(k => k !== 'douar').sort(), 'every kind of yard is there, and nothing else (the fourth is the yard of the Maghreb)');
   for (const r of yards) {
     const d = Math.hypot(r[0] - L.x, r[1] - L.y);
     assert.ok(d > L.r + .4, `a yard ${(d - L.r).toFixed(2)} km from the last houses`);

@@ -16,7 +16,8 @@
 //   A     which of the 3 × 3 squares around hold a patch whose houses or fields reach into this square (their places
 //         0..8, row by row; 4 is the square itself):
 //         without a patch: 0 none · 1 + a one · 10 + 9 a + b two · 100 more
-//         with a patch, m its manner of building: 200 + m alone · 110 + 2 b + (m − 1) with one neighbour b · 210 + m with more
+//         with a patch, m its manner of building: 200 + m alone · 110 + 3 b + (m − 1) with one neighbour b · 210 + m with more
+//         (3: rules.js CULTURE_N, the number of manners)
 // Beside the coarse grid lie two more blocks of it, a texel a square (rules.js MORE_AT, GATES_AT):
 //   MORE   R, G  how far the middle of the patch lies from its site (shiftByte(); 128 = not at all): a town grows
 //                from its site toward the water
@@ -26,7 +27,7 @@
 // `built` > 0 has a patch: at the site and of the size the model of growth gave it, or, for a chunk built up by
 // anything else (a brush), in the middle of the chunk and of the area of its built share.
 import { DataTexture, RGBAFormat, UnsignedByteType, NearestFilter, ClampToEdgeWrapping, Vector4 } from 'three';
-import { CELL, GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, MORE_AT, GATES_AT, FARM_SOFT, FARM_BESIDE, FARM_SHARP, STREETS_FROM, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, shiftByte, gateByte, gateOf, CULTURES } from './rules.js';
+import { CELL, GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, MORE_AT, GATES_AT, FARM_SOFT, FARM_BESIDE, FARM_SHARP, STREETS_FROM, radiusByte, radiusOfShare, siteBytes, fineBytes, gridOf, lobeOf, villageLobe, fieldsBeyond, shiftByte, gateByte, gateOf, CULTURES, CULTURE_N } from './rules.js';
 import { KN, KNY, KKM, KX0, KY0, JITTER, kmHash } from '../division/km.js';
 
 export const settleBytes = new Uint8Array(GN * GNY * 4);              // the coarse grid
@@ -141,12 +142,13 @@ setTilt(0);
 // more: where the shifts of the patches are written (the block of the texture; a block of its own for any other `out`).
 // Returns the patches (each with the patches of the squares around as `rivals`), and whether anything changed.
 const moreOf = new WeakMap();
+const mannerOf = b => (b === CULTURES.atl || b === CULTURES.mag ? b : CULTURES.med);   // the manner of a natural cell (its channel `culture`; none yet = Mediterranean)
 export function mirrorSettle(ch, towns = [], out = settleBytes, more = out === settleBytes ? moreBytes : moreOf.get(out) || moreOf.set(out, new Uint8Array(GN * GNY * 4)).get(out)) {
   const C = ch.bytes.C, n = GN, ny = GNY, at = new Map(), homes = new Set(), hamlets = new Set();
   const put = (x, y, r, home, sx = 0, sy = 0) => {                  // one patch a square: the larger stays
     const g = gridOf(x, y); if (g < 0 || !(r > 0)) return;
     const old = at.get(g); if (old && old.r >= r) return;
-    at.set(g, { x, y, r, home, sx, sy, cul: C[home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med });
+    at.set(g, { x, y, r, home, sx, sy, cul: mannerOf(C[home * 4 + 2]) });
   };
   for (const t of towns) {
     if (t.village) { hamlets.add(t.home); continue; }               // a village lies in the fine grid (mirrorVillages)
@@ -172,7 +174,7 @@ export function mirrorSettle(ch, towns = [], out = settleBytes, more = out === s
     }
     if (p) {
       const [bx, by] = siteBytes(p.x, p.y), rb = radiusByte(p.r);
-      set(o, bx); set(o + 1, by); set(o + 2, rb); set(o + 3, around.length === 0 ? 200 + p.cul : around.length === 1 ? 110 + 2 * around[0] + (p.cul - 1) : 210 + p.cul);
+      set(o, bx); set(o + 1, by); set(o + 2, rb); set(o + 3, around.length === 0 ? 200 + p.cul : around.length === 1 ? 110 + CULTURE_N * around[0] + (p.cul - 1) : 210 + p.cul);
       const sbx = shiftByte(p.sx), sby = shiftByte(p.sy); setMore(o, sbx); setMore(o + 1, sby);
       const L = lobeOf(g, bx, by, rb, p.cul, sbx, sby); L.home = p.home; lobes.push(L); byG.set(g, L);
       continue;
@@ -199,9 +201,9 @@ export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes, 
   const C = ch.bytes.C, at = new Map(), around = new Map();
   for (const t of towns) {
     if (!t.village || !(t.fine >= 0) || !C[t.home * 4]) continue;
-    at.set(t.fine, { x: t.x, y: t.y, r: t.R, home: t.home, cul: C[t.home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med });
+    at.set(t.fine, { x: t.x, y: t.y, r: t.R, home: t.home, cul: mannerOf(C[t.home * 4 + 2]) });
   }
-  for (const t of extra) if (t.fine >= 0 && t.home >= 0 && t.R > 0 && !at.has(t.fine)) at.set(t.fine, { x: t.x, y: t.y, r: t.R, home: t.home, cul: C[t.home * 4 + 2] === CULTURES.atl ? CULTURES.atl : CULTURES.med, free: true });
+  for (const t of extra) if (t.fine >= 0 && t.home >= 0 && t.R > 0 && !at.has(t.fine)) at.set(t.fine, { x: t.x, y: t.y, r: t.R, home: t.home, cul: mannerOf(C[t.home * 4 + 2]), free: true });
   // which of the 3 × 3 squares around a square hold a village whose houses or fields reach into it
   for (const [v, q] of at) {
     const vx = v % VN, vy = (v / VN) | 0, reach = q.r + fieldsBeyond(q.r) + .32;   // nothing of a village is drawn farther from its site (aspSettle)
@@ -215,7 +217,7 @@ export function mirrorVillages(ch, towns = [], coarse = [], out = villageBytes, 
   const lobes = [], byV = new Map();
   for (const [v, q] of at) {
     const o = v * 4, [bx, by] = fineBytes(q.x, q.y), rb = radiusByte(q.r), a = around.get(v) || [];
-    scratch[o] = bx; scratch[o + 1] = by; scratch[o + 2] = rb; scratch[o + 3] = a.length === 0 ? 200 + q.cul : a.length === 1 ? 110 + 2 * a[0] + (q.cul - 1) : 210 + q.cul;
+    scratch[o] = bx; scratch[o + 1] = by; scratch[o + 2] = rb; scratch[o + 3] = a.length === 0 ? 200 + q.cul : a.length === 1 ? 110 + CULTURE_N * a[0] + (q.cul - 1) : 210 + q.cul;
     const L = villageLobe(v, bx, by, rb, q.cul); L.home = q.home; if (q.free) L.free = true; lobes.push(L); byV.set(v, L);
   }
   for (const [g, a] of around) if (!at.has(g)) { a.sort((p, q) => p - q); scratch[g * 4 + 3] = a.length === 1 ? 1 + a[0] : a.length === 2 ? 10 + 9 * a[0] + a[1] : 100; }

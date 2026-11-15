@@ -50,6 +50,14 @@ float setRoof(vec2 q, vec2 site, vec2 sh, float r, float cs, float sn, float cul
 vec3 setRoofCol(float cls, vec2 fl, float turn, vec4 rnd, float atl, float day, out float court) {
   vec2 n2; court = 0.;
   float mx = max(abs(fl.x), abs(fl.y));
+  if (atl > 1.5) {
+    // the Maghreb: flat roofs. A block is houses wall to wall, every one a cube of its own tone, a small court in
+    // many; no slope takes the sun its own way
+    vec2 hq = fl * (cls < 2.5 ? 2. : 1.), hf = abs(fract(hq) - .5);
+    float one = hash21(floor(hq) + 7. + rnd.z * 57.);
+    if (cls < 2.5) court = clamp((.2 - max(hf.x, hf.y)) / .07, 0., 1.) * step(.5, one);
+    return settleMat(1, 2., fract(rnd.z * 5.3 + one * .45)) * (.9 + .18 * one);
+  }
   if (cls < 1.5) { vec2 o = abs(fl.x) > abs(fl.y) ? vec2(sign(fl.x), 0.) : vec2(0., sign(fl.y)); n2 = o * (mx > .72 ? 1. : -1.); court = 1. - smoothstep(.40, .47, mx); }
   else if (cls < 2.5) n2 = vec2(0., sin(fl.y * 6.2832) > 0. ? 1. : -1.);
   else n2 = vec2(0., sign(fl.y));
@@ -135,7 +143,7 @@ void setTry(ivec2 c, bool fine, vec2 pk, inout float own, inout float riv, inout
 void setSquares(int code, ivec2 c0, bool fine, vec2 pk, inout float own, inout float riv, inout vec4 best, inout ivec3 bc, inout vec2 sh) {
   if (code == 100 || code >= 210) { for (int n = 0; n < 9; n++) setTry(c0 + ivec2(n % 3 - 1, n / 3 - 1), fine, pk, own, riv, best, bc, sh); }
   else if (code > 0) {
-    int c1 = code <= 9 ? code - 1 : code < 100 ? (code - 10) / 9 : 4, c2 = code <= 9 || code >= 200 ? -1 : code < 100 ? (code - 10) % 9 : (code - 110) / 2;
+    int c1 = code <= 9 ? code - 1 : code < 100 ? (code - 10) / 9 : 4, c2 = code <= 9 || code >= 200 ? -1 : code < 100 ? (code - 10) % 9 : (code - 110) / SET_CULS;
     setTry(c0 + ivec2(c1 % 3 - 1, c1 / 3 - 1), fine, pk, own, riv, best, bc, sh);
     if (c2 >= 0) setTry(c0 + ivec2(c2 % 3 - 1, c2 / 3 - 1), fine, pk, own, riv, best, bc, sh);
   }
@@ -211,7 +219,7 @@ void aspSettle(Px p, inout Land L) {
   if (best.b > 0.) {
     vec2 b = floor(best.rg * 255. + .5); float ca = floor(best.a * 255. + .5);
     r = best.b * best.b * SET_RMAX; site = SET_G0 + (vec2(bc.xy) + (b + .5) / 256.) * (village ? SET_VK : SET_GK);
-    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., 2.) + 1.;
+    th = mod(b.x * 37. + b.y * 91., 256.) * (1.5707963 / 256.); cul = ca >= 200. ? mod(ca - 200., 10.) : mod(ca - 110., float(SET_CULS)) + 1.;
     ck = village ? SET_GN * SET_GNY + bc.y * SET_VN + bc.x : bc.y * SET_GN + bc.x;
   }
   float px = p.px, S = uSettle.x, W = .5 + 2.5 * r, m = r > 0. ? own : -1e3;        // W: how far the fields reach beyond the houses
@@ -250,7 +258,8 @@ void aspSettle(Px p, inout Land L) {
     // level ground: SET_SLOPE)
     float want = (farm + uSetB.y * beside + (.5 - p.n2 * .6 - p.n3 * .4) * SET_UNEVEN - p.slope * SET_SLOPE - .5) * uSetC.y + .5;
     if (want > 0.) {
-      float atlF = step(1.5, p.cC.b * 255.), fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
+      // (the manner of the land: 2 is the Atlantic one — small hedged fields; the Maghreb, 3, ploughs as the Mediterranean does)
+      float cuF = p.cC.b * 255., atlF = cuF > 1.5 && cuF < 2.5 ? 1. : 0., fs = atlF > .5 ? .14 : .22, near = clamp((.09 - px) * 25., 0., 1.), fm = 0., border = 1.;
       vec2 cid = vec2(0.), ff = vec2(.5);
       if (near < 1.) fm = clamp(want, 0., 1.);                       // from afar: the tone of the fields, as strong as the land is ploughed
       if (near > 0.) {                                               // close by a furlong is ploughed whole or not at all: that share of the furlongs
@@ -300,7 +309,7 @@ void aspSettle(Px p, inout Land L) {
   if (tm < .003) return;
 
   // ---- the settlement itself
-  float atl = cul > 1.5 ? 1. : 0.;
+  float atl = cul > 1.5 && cul < 2.5 ? 1. : 0., mag = cul > 2.5 ? 1. : 0.;          // the manner of building: Atlantic, the Maghreb; neither — Mediterranean
   vec3 earth = mix(mix(vec3(.68, .61, .48), vec3(.48, .45, .34), atl), L.col, .25 + .3 * atl) * (.93 + .14 * p.n3), col = earth;
   float aa = clamp(px / S, .002, .5) * .9, seam = smoothstep(.3, .55, (own - riv) / S), blocks = uSettle.y, night = 1. - p.day;
   float cls, ang, edge; vec2 fl; vec4 rnd;
@@ -309,14 +318,16 @@ void aspSettle(Px p, inout Land L) {
   if (cls > 2.5 && cls < 3.5) {                                            // a house stands in its plot: a garden, a yard
     vec2 g = abs(q - floor(q + .5)); float plot = (1. - smoothstep(.40, .44, max(g.x, g.y))) * seam;
     vec3 gc = mix(mix(vec3(.47, .52, .27), vec3(.58, .48, .33), step(.5, rnd.x * 1.6)) * (.93 + .1 * step(.5, fract(q.x * 9.))), vec3(.41, .47, .25), atl);
-    gc = mix(gc, vec3(.45, .45, .41), atl * smoothstep(.36, .40, max(g.x, g.y)));    // the stone wall of an Atlantic yard
+    float yw = smoothstep(.36, .40, max(g.x, g.y));                                  // the wall around a yard
+    gc = mix(gc, vec3(.45, .45, .41), atl * yw);                                     // of stone, in the Atlantic lands
+    gc = mix(gc, mix(vec3(.70, .61, .47), vec3(.66, .55, .42), yw), mag * .8);       // the Maghreb: a yard of bare earth behind a wall of rammed earth
     col = mix(col, gc, plot * smoothstep(.5, .2, px / S));
   }
   if (cls > 3.5) col = mix(col, cls < 4.5 ? vec3(.78, .74, .66) : vec3(.77, .71, .59), cover * (cls < 4.5 ? 1. : .8));   // paved square; cleared plot of a building site
   else if (cls > .5) {
     float paint = cover * (1. - blocks), court;
     if (paint > .003) {                                                    // no block stands here: the roof is painted
-      vec3 rc = setRoofCol(cls, fl, th + ang, rnd, atl, p.day, court);
+      vec3 rc = setRoofCol(cls, fl, th + ang, rnd, atl + 2. * mag, p.day, court);
       col = mix(col, mix(rc, earth * .62, court), paint);
       col += vec3(1.5, .9, .4) * night * paint * step(.45, rnd.y) * (1. - court);           // a light in the window
     }
@@ -327,7 +338,7 @@ void aspSettle(Px p, inout Land L) {
   // cells of a pixel or two melt into one tone; from high up, where a whole settlement is a few pixels, the tone is
   // that of its roofs, so the mark stands out from the land
   float far = smoothstep(.6, 2.5, px / S);
-  col = mix(col, mix(earth, settleMat(0, atl, .3) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));
+  col = mix(col, mix(earth, settleMat(mag > .5 ? 1 : 0, atl + 2. * mag, .3) * mix(.9, .68, far), mix(.5, .9, far)), smoothstep(.25, .5, px / S) * (1. - blocks));
   // ---- a town: its main streets among the houses, and its wall around its middle, with a gate where a street
   // crosses it (town/plan.js keeps the blocks off both). A line thinner than a pixel is kept a pixel wide while it can
   // be told; from higher up it melts into the tone of the town.
@@ -373,7 +384,7 @@ export default {
     { key: 'showcase', label: 'Витрина построек', group: 'layers', type: 'toggle', value: 0 },
   ],
   pages: [
-    { id: 'town-kinds', group: G, title: 'Витрина своих построек', note: 'Двадцать три вида построек (три — дворы среди полей, каждый со своим участком; последние два — кусок городской стены с башней и ворота), увеличены для показа: в игре они стоят в настоящую величину. Два верхних ряда в средиземноморской манере (черепица, побелка), два нижних в атлантической (камень, тёмные крыши). По рядам: кварталы с двором, покоем, углом, большой дом с башней, ряды домов, ряды с переулками, дома с плоскими крышами, группа домов, двор-хутор; усадьба, дом, дом-башня, храм, площадь с рынком, укрепление, мельница, причал, стройка.', p: { showcase: 1, forest3d: 0, towns: 0, roadsOn: 0, labels: 0 }, cam: { lat: 39.25, lon: -3.0, h: 20, tilt: 50, heading: 0 } },
+    { id: 'town-kinds', group: G, title: 'Витрина своих построек', note: 'Двадцать девять видов построек (четыре — дворы среди полей, каждый со своим участком; кусок городской стены с башней и ворота; шесть — магрибские), увеличены для показа: в игре они стоят в настоящую величину. Два верхних ряда в средиземноморской манере (черепица, побелка), два следующих в атлантической (камень, тёмные крыши), нижний ряд — магрибская манера (плоские крыши, побелка и глина): дом с внутренним двором, плотная застройка медины, дом с плоской крышей, двор за глиняной стеной, мечеть, двор среди полей, а за ними общие постройки в магрибских цветах. По первым рядам: кварталы с двором, покоем, углом, большой дом с башней, ряды домов, ряды с переулками, дома с плоскими крышами, группа домов, двор-хутор; усадьба, дом, дом-башня, храм, площадь с рынком, укрепление, мельница, причал, стройка.', p: { showcase: 1, forest3d: 0, towns: 0, roadsOn: 0, labels: 0 }, cam: { lat: 39.25, lon: -3.0, h: 20, tilt: 50, heading: 0 } },
     { id: 'grow-1', group: G, title: 'Рост: хутор', note: 'Всё в настоящую величину, один к одному. Хутор — несколько дворов на сотню метров, вокруг первые поля. «Рост городов» на 0,08; двигайте ползунок и смотрите, как поселение растёт.', p: { growth: .082, forest3d: 0, labels: 0 }, cam: zar(20) },
     { id: 'grow-2', group: G, title: 'Рост: деревня', note: 'Три сотни метров в поперечнике: дома с огородами, дворы на краю, стройки следующих домов, дорожки к полям. «Рост городов» на 0,18.', p: { growth: .176, forest3d: 0, labels: 0 }, cam: zar(20) },
     { id: 'grow-3', group: G, title: 'Рост: село', note: 'Появился храм, в середине первые ряды домов, за околицей мельница. «Рост городов» на 0,33.', p: { growth: .33, forest3d: 0, labels: 0 }, cam: zar(20) },
@@ -412,6 +423,7 @@ export default {
     { id: 'farm-200', group: G, title: 'Угодья с 200 км', note: '«Рост городов» на 3. С этой высоты поля — спокойный тон там, где земля распахана всерьёз. Там, где распаханы отдельные чанки у деревень, поля с высоты не показаны и проступают, когда камера опускается.', p: { growth: 3 }, cam: { lat: 41.5, lon: -1.0, h: 200, tilt: 20, heading: 0 } },
     { id: 'town-med', group: G, title: 'Манера: средиземноморская', note: 'Плотные кварталы с дворами, черепица и побелка, узкие гнутые улицы, площадь и храм в середине, причал у воды.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.722, lon: -4.42, h: 20, tilt: 35, heading: 0 } },
     { id: 'town-atl', group: G, title: 'Манера: атлантическая', note: 'Разбросанные каменные дворы под тёмными крышами, без сетки улиц; дворы обнесены стенами, вокруг выгоны с живыми изгородями.', p: { forest3d: 0, labels: 0 }, cam: { lat: 43.25, lon: -2.93, h: 20, tilt: 35, heading: 160 } },
+    { id: 'town-mag', group: G, title: 'Манера: магрибская', note: 'Африка к югу от моря строит по-своему: плоские крыши, побелка и глина, дома стоят стена к стене вокруг внутренних дворов, переулки узкие. На месте храма — мечеть с квадратным минаретом; на краю города и среди полей — дворы за глиняной стеной.', p: { forest3d: 0, labels: 0 }, cam: { lat: 35.57, lon: -5.376, h: 20, tilt: 35, heading: 0 } },
     { id: 'fields', group: G, title: 'Поля: наделы, пар, выгон, террасы', note: 'Наделы лежат рядами, в каждом полосы со своими посевами, между ними межи и тропы, пар и выгон; на склонах террасы вдоль горизонталей. От поселения к полям расходятся дорожки. Издалека всё сливается в спокойный тон.', p: { forest3d: 0, labels: 0 }, cam: { lat: 36.735, lon: -4.44, h: 20, tilt: 40, heading: 35 } },
     { id: 'yards', group: G, title: 'Дворы среди полей', note: 'За околицей, среди полей, стоят отдельные дворы: дом, двор с сараем и стогом, длинный дом. У каждого свой участок: грядки и утоптанная земля. Всё в настоящую величину, двор — 50–80 м. Мест под двор — шестнадцать на квадратный километр, решёткой через 250 м; какие заняты, считается каждый раз одинаково. Дворы не встают на воду, реку, болото, крутой склон, дорогу и дорожку. Ручка «Дворы среди полей» меняет густоту.', p: { growth: 1.6, forest3d: 0, labels: 0 }, cam: { lat: 41.672, lon: -.905, h: 20, tilt: 35, heading: 0 } },
     { id: 'yards-dense', group: G, title: 'Дворы: густо', note: 'Та же земля, «Дворы среди полей» на 3: в средиземноморской манере это семь-восемь дворов на квадратный километр пашни. Прежние дворы стоят на своих местах, между ними встали новые.', p: { growth: 1.6, yards: 3, forest3d: 0, labels: 0 }, cam: { lat: 41.672, lon: -.905, h: 20, tilt: 35, heading: 0 } },

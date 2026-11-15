@@ -13,7 +13,7 @@ import { buildDivision, LAND } from '../src/album/division/build.js';
 import { districtCentres } from '../src/album/division/centres.js';
 import { loadAlbumData } from '../src/album/division/nodedata.js';
 import { decodeSites } from '../src/album/town/sites.js';
-import { GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, TOWN_R, CULTURES, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, peopleOf, classOf, RULES_GLSL } from '../src/album/town/rules.js';
+import { GN, GNY, GK, GX0, GY0, VN, VNY, VK, TEX_W, TEX_H, FINE_AT, COARSE_AT, VILLAGE_RMAX, TOWN_R, CULTURES, CULTURE_N, STAGES, cellSize, radiusByte, radiusOf, fineOf, fineBytes, villageLobe, fieldsBeyond, peopleOf, classOf, RULES_GLSL } from '../src/album/town/rules.js';
 import { districtSites, villagePlaces, siteNumbers, madeAllowed, SITE, PER, DENSE, GAP, NEAR, MOST, MADE_R, MADE_POP, GOOD, TOO_HIGH, SWAMP } from '../src/album/town/villages.js';
 import { growTowns, centrePlaces, fullRadius, FIELD_FLOOR, KEEP_OFF } from '../src/album/town/grow.js';
 import { mirrorSettle, mirrorVillages, packAtlas, settleBytes, atlasBytes, villageBytes, settleTex } from '../src/album/town/state.js';
@@ -169,7 +169,7 @@ test('villages: their patches lie in the fine grid of the one settlement texture
   }
   // the two villages in neighbouring squares know of each other; the far one stands alone
   const A = by[1], B = by[2], C = by[3], Dv = by[4]; assert.equal(B.fine, A.fine + 1);
-  assert.equal(fine[A.fine * 4 + 3], 110 + 2 * 5 + 0, 'a village with one neighbour, east of it'); assert.equal(fine[B.fine * 4 + 3], 110 + 2 * 3 + 0); assert.equal(fine[C.fine * 4 + 3], 200 + CULTURES.med);
+  assert.equal(fine[A.fine * 4 + 3], 110 + CULTURE_N * 5 + 0, 'a village with one neighbour, east of it'); assert.equal(fine[B.fine * 4 + 3], 110 + CULTURE_N * 3 + 0); assert.equal(fine[C.fine * 4 + 3], 200 + CULTURES.med);
   assert.equal(fine[(C.fine + 1) * 4 + 3], 1 + 3, 'the empty square east of a village knows the village west of it'); assert.equal(fine[(C.fine + VN) * 4 + 3], 1 + 1); assert.equal(fine[(C.fine + 5) * 4 + 3], 0);
   const LA = v.lobes.find(l => l.fine === A.fine), LB = v.lobes.find(l => l.fine === B.fine);
   assert.ok(LA.rivals.includes(LB) && LB.rivals.includes(LA) && !LA.rivals.includes(r.lobes[0])); assert.equal(v.lobes.find(l => l.fine === C.fine).rivals.length, 0);

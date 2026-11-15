@@ -245,6 +245,50 @@ const DEFS = [
     .box(-.5, -.3, -.17, .3, .2, { top: MAT.stone, side: MAT.stone, v: 4 })
     .box(.17, -.3, .5, .3, .2, { top: MAT.stone, side: MAT.stone, v: 4 })
     .box(-.17, -.15, .17, .15, .15, { z0: .09, top: MAT.stone, side: MAT.stone, faces: 'ns', v: 2 })],
+  // ---- the Maghreb (town/rules.js CULTURES.mag): flat roofs, whitewash and clay, blind walls to the lane, the life
+  // of a house turned to its inner court
+  // риад: four flat wings of different heights around a patio, a room on the roof
+  ['riad', 'Дом с внутренним двором', () => S()
+    .box(-.5, .2, .5, .5, .09, { v: 0 })
+    .box(-.5, -.5, .5, -.2, .075, { v: 2 })
+    .box(-.5, -.2, -.2, .2, .105, { faces: 'ew', v: 1 })
+    .box(.22, -.2, .5, .2, .08, { faces: 'ew', v: 3 })
+    .box(-.5, .28, -.26, .5, .14, { z0: .09, v: 1 })],
+  // медина: houses wall to wall, every one a cube of its own height; two small light-wells, no lane
+  ['medina', 'Плотная застройка медины', () => S()
+    .box(-.5, .08, -.08, .5, .085, { faces: 'nwe', v: 0 })
+    .box(-.08, .2, .5, .5, .11, { faces: 'nse', v: 1 })
+    .box(.14, -.5, .5, .2, .07, { faces: 'sew', v: 2 })
+    .box(-.5, -.5, .14, -.2, .095, { faces: 'nsw', v: 3 })
+    .box(-.5, -.2, -.22, .08, .065, { faces: 'ew', v: 1 })
+    .box(-.08, -.04, .14, .2, .055, { faces: 'sw', v: 2 })
+    .box(.2, .26, .42, .44, .145, { z0: .11, v: 3 })],
+  // дом: a flat-roofed house, a lower store beside it, a room on the roof
+  ['dar', 'Дом с плоской крышей', () => S()
+    .box(-.5, -.5, .2, .5, .07, { v: 0 })
+    .box(.2, -.3, .5, .5, .045, { faces: 'nse', v: 2 })
+    .box(-.34, -.1, -.02, .3, .105, { z0: .07, v: 1 })],
+  // двор за стеной: a house and stores along a wall of rammed earth, a corner tower
+  ['hawsh', 'Двор за глиняной стеной', () => S()
+    .box(-.5, .18, .2, .5, .07, { v: 0 })
+    .box(.2, -.2, .5, .5, .055, { v: 2 })
+    .box(-.5, -.5, -.44, .18, .04, { top: MAT.fence, side: MAT.fence, faces: 'ew', open: .9 })
+    .box(-.44, -.5, .5, -.44, .04, { top: MAT.fence, side: MAT.fence, faces: 'ns', open: .9 })
+    .box(.44, -.44, .5, -.2, .04, { top: MAT.fence, side: MAT.fence, faces: 'ew', open: .9 })
+    .box(-.5, .3, -.3, .5, .13, { z0: .07, v: 1 })],
+  // мечеть: naves side by side under tiled ridges, a walled court before them, a square minaret with its lantern
+  ['mosque', 'Мечеть', () => S()
+    .bar(-.3, -.5, -.02, .12, .1, { rise: .035, wall: MAT.stone, v: 0 })
+    .bar(-.02, -.5, .26, .12, .1, { rise: .035, wall: MAT.stone, sides: 'b', v: 0 })
+    .box(-.3, .12, .26, .5, .055, { side: MAT.stone, faces: 'new', lid: false })
+    .box(.26, .2, .5, .44, .3, { side: MAT.stone, v: 1 })
+    .box(.32, .26, .44, .38, .37, { z0: .3, side: MAT.stone, v: 1 })],
+  // двор среди полей: a flat-roofed house and a store in a yard of bare earth, a wall on two sides
+  ['douar', 'Двор среди полей (Магриб)', () => plot(S())
+    .box(-.4, .06, .16, .4, .065, { v: 0 })
+    .box(.2, -.3, .4, .4, .04, { faces: 'nsw', v: 2 })
+    .box(-.5, -.5, .5, -.46, .03, { top: MAT.fence, side: MAT.fence, faces: 'ns', open: .9 })
+    .box(-.5, -.46, -.46, .06, .03, { top: MAT.fence, side: MAT.fence, faces: 'ew', open: .9 })],
 ];
 
 export const KINDS = DEFS.map(d => d[0]);

@@ -15,14 +15,14 @@ import { FKM, FNX, FNY } from '../chunks.js';
 import { KN, KKM, KX0, KY0 } from '../division/km.js';
 import { GK, GN, GNY, GX0, GY0, CELL, CULTURES, FARM_SHARP, FARM_BESIDE, FARM_PIECE, FARM_TURNS, lobesToward, cellHash, fieldsBeyond, lanesBeyond, bend } from './rules.js';
 import { KIND } from './shapes.js';
-import { FLAG_ATL } from './plan.js';
+import { FLAG_ATL, FLAG_MAG } from './plan.js';
 
 export const YARD_STEP = .25, YARD_SIDE = 4;     // km between two places · places along a side of a square kilometre
 export const YARD_TILE = 16;                     // places along a side of a tile of the plan: 4 km
 // yards on a square kilometre of fully ploughed land, by the manner of building: Mediterranean people live in
 // villages and yards are few; Atlantic people live in yards scattered over the land
 export const YARDS_PER_KM2 = [0, 2.5, 5];
-export const YARD_KINDS = ['cot', 'yard', 'longyard'];             // the blocks a yard may be: light ones, each with its own plot
+export const YARD_KINDS = ['cot', 'yard', 'longyard', 'douar'];    // the blocks a yard may be: light ones, each with its own plot (the last: the yard of the Maghreb)
 // A yard stands only in a chunk of farmland: a chunk of 1 km² ploughed for the greater part. So a save knows which
 // chunks can carry yards from the fields alone, and keeps its two bytes for those chunks only (save/land.js).
 export const YARD_FARM = .5;
@@ -91,7 +91,7 @@ export function yardAt(ctx, i, j) {
   const kx = Math.floor(i / YARD_SIDE), ky = Math.floor(j / YARD_SIDE);
   if (ctx.farmSquare && !(ctx.farmSquare(kx, ky) >= YARD_FARM)) return null;
   if (ctx.landSquare && !ctx.landSquare(kx, ky)) return null;
-  const atl = ctx.culture(c) === CULTURES.atl, p = K * YARDS_PER_KM2[atl ? CULTURES.atl : CULTURES.med] / 16;
+  const cul = ctx.culture(c), atl = cul === CULTURES.atl, mag = cul === CULTURES.mag, p = K * YARDS_PER_KM2[atl ? CULTURES.atl : CULTURES.med] / 16;
   if (h0 >= p) return null;
   const farm = ctx.farm(x, y); if (!(farm > .004)) return null;      // a yard stands in a chunk of farmland
   const n = nearest(ctx.patches, x, y), L = n ? n.L : null, m = n ? n.m : -1e3;
@@ -104,6 +104,7 @@ export function yardAt(ctx, i, j) {
   if (v < .4) { kind = KIND.cot; sx = .62 + .14 * s; sy = .52 + .14 * s2; }             // a house alone in its garden
   else if (v < .75) { kind = KIND.yard; sx = .8 + .14 * s; sy = .7 + .14 * s2; }         // a house, a shed, a haystack
   else { kind = KIND.longyard; sx = .82 + .14 * s; sy = .62 + .12 * s2; }               // people and cattle under one long roof
+  if (mag) kind = KIND.douar;                                       // the Maghreb: a flat-roofed house in a yard of bare earth (the same sizes)
   const half = Math.max(sx, sy) * .5 * S;
   if (!soundGround(ctx.env, x, y, half)) return null;
   if (L && L.th != null && m > -lanesBeyond(L.r) - half - .02) {   // not on the lanes that run out of the settlement a little way
@@ -114,7 +115,7 @@ export function yardAt(ctx, i, j) {
   // are turned their own way against the compass — the ground shader, setFurlong); Atlantic ones any way
   const t = cellHash(i, j, 0, 26), rows = FARM_TURNS[Math.min(3, Math.floor(cellHash(Math.floor(x / FARM_PIECE), Math.floor(y / FARM_PIECE), 3, 41) * 4))];
   const turn = atl ? t * 6.2831853 : Math.atan2(rows[1], rows[0]) + Math.floor(t * 4) * 1.5707963 + (cellHash(i, j, 0, 27) - .5) * .3;
-  return [x, y, turn, kind, 0, 0, 0, atl ? FLAG_ATL : 0, sx, sy, cellHash(i, j, 0, 28), 1];
+  return [x, y, turn, kind, 0, 0, 0, atl ? FLAG_ATL : mag ? FLAG_MAG : 0, sx, sy, cellHash(i, j, 0, 28), 1];
 }
 // the yards of one tile of the plan (ti, tj: its number on the lattice of tiles of 4 km): rows for the blocks
 export function planYards(ctx, ti, tj) {

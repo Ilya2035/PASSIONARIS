@@ -58,12 +58,12 @@ const VERT = /* glsl */`${COMMON}
     float grow = uYard.w * (uYard.z > 0. ? 1. - smoothstep(.75 * uYard.z, uYard.z, distance(centre, uYard.xy)) : 1.);   // far yards shrink to nothing: no ring where they end
     vec2 lxy = lp.xy * aC.xy * uS * grow, pkv = centre + vec2(cr * lxy.x - sr * lxy.y, sr * lxy.x + cr * lxy.y);
     vec2 llc = vec2(centre.y / KM, centre.x / (KM * COSREF)), llv = vec2(pkv.y / KM, pkv.x / (KM * COSREF));
-    float show = max(step(1.5, aB.w), step(.6, heightLod(llc, 0.))) * step(.02, grow);  // never on water (a pier may reach over it)
+    float show = max(mod(floor(aB.w * .5), 2.), step(.6, heightLod(llc, 0.))) * step(.02, grow);  // never on water (a pier may reach over it: the second bit of its flags)
     float hv = max(heightLod(llv, uLod), 0.) * uExag / 1000.;                            // every corner stands on the relief
     vW = worldOf(llv, hv + lp.z * uS * uH * aC.w * (lp.z > 0. ? u3D : 1.) * grow + .0015);
     vN = vec3(cr * ln.x - sr * ln.y, sr * ln.x + cr * ln.y, ln.z);
     vM = vec4(mod(sa.w, 16.), floor(sa.w / 16.), sb.a * 1.5, aC.z);
-    vL = vec3(abs(ln.x) > abs(ln.y) ? lp.y : lp.x, lp.z, mod(aB.w, 2.));
+    vL = vec3(abs(ln.x) > abs(ln.y) ? lp.y : lp.x, lp.z, mod(aB.w, 2.) + 2. * step(3.5, aB.w));   // the manner: 0 Mediterranean · 1 Atlantic · 2 the Maghreb (flags 1 and 4 of the block)
     gl_Position = show > .5 ? projectionMatrix * viewMatrix * vec4(vW, 1.) : vec4(0., 0., 2., 1.);
   }`;
 const FRAG = /* glsl */`${COMMON}
@@ -75,7 +75,7 @@ const FRAG = /* glsl */`${COMMON}
     // one roof is many houses: every few steps along the ridge the tint changes
     float house = floor(vL.x * 7. + vM.y * 3.3), hr = hash21(vec2(house * .37 + 1.3, vM.w * 9.1 + vM.y * .71));
     vec3 c = settleMat(mat, vL.z, mat == 5 ? fract(vM.y * .31 + vM.w) : fract(vM.w * 5.3 + vM.y * .37 + hr * .45));
-    if (mat == 0 || mat == 2) c *= .94 + .12 * hr;
+    if (mat == 0 || mat == 2 || (mat == 1 && vL.z > 1.5)) c *= .94 + .12 * hr;   // (the flat roofs of the Maghreb too: every house its own tone)
     vec3 lin;
     if (uStyle == 6) lin = mix(vec3(.07, .09, .13), vec3(.85, .68, .38), pow(max(dot(n, uSun), 0.), 1.6) * .75 + .08);
     else {

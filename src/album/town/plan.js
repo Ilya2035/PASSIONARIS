@@ -13,7 +13,7 @@ import { cellRule, cellHash, wob, depthAt, lobesAt, LOBE, unbend, bendTurn, midO
 import { KIND } from './shapes.js';
 
 export const ROW = 12;   // numbers per block: site x, y, turn of the lattice, kind · cell i, j, own turn, flags · size x, y, tint, height
-export const FLAG_ATL = 1, FLAG_WATER = 2;                          // Atlantic colours · may stand over water (a pier)
+export const FLAG_ATL = 1, FLAG_WATER = 2, FLAG_MAG = 4;            // Atlantic colours · may stand over water (a pier) · the colours of the Maghreb
 const VILLAGE = STAGES[2].r, SMALLTOWN = STAGES[3].r, TOWN = STAGES[4].r, TAU = 6.283185307179586;
 export const LEAST = .45;                                           // a block made smaller than this share of itself is left out
 export const RIBBON = [.3, .9];                                     // km: how far past the last houses of a town houses stand along its roads — the least, the most
@@ -85,8 +85,16 @@ function shores(L, env, n) {
   return out;
 }
 // the kind of building for a cell: the class from the rule, the variety from the random numbers of the cell
-function kindOf(rule, L, atl) {
+function kindOf(rule, L, atl, mag) {
   const v = (rule.h2 * 97) % 1;                                     // one more random number, for the choice among look-alikes
+  if (mag) {                                                        // the Maghreb: flat roofs, the court inside the house
+    if (rule.mark) return L.r < SMALLTOWN ? KIND.hawsh : KIND.riad;
+    if (rule.cls === 1) return v < .55 ? KIND.riad : KIND.medina;
+    if (rule.cls === 4) return KIND.market;
+    if (rule.cls === 5) return KIND.site;
+    if (rule.cls === 2) return v < .45 ? KIND.medina : v < .8 ? KIND.terrace : KIND.riad;
+    return rule.big && v < .6 ? KIND.hawsh : KIND.dar;
+  }
   if (rule.mark) return L.r < STAGES[1].r ? KIND.farm : L.r < SMALLTOWN || atl ? KIND.cluster : KIND.quarter;
   if (rule.cls === 1) return v < .34 ? KIND.quarter : v < .56 ? KIND.quarterU : v < .76 ? KIND.quarterL : v < .9 ? KIND.palace : KIND.quarter;
   if (rule.cls === 4) return KIND.market;
@@ -98,14 +106,14 @@ function kindOf(rule, L, atl) {
 
 // → flat array of ROW numbers per block
 export function planLobe(L, S, env) {
-  const out = [], atl = L.cul === CULTURES.atl, fl = atl ? FLAG_ATL : 0, cs = Math.cos(L.th), sn = Math.sin(L.th), R = L.re;
+  const out = [], atl = L.cul === CULTURES.atl, mag = L.cul === CULTURES.mag, fl = atl ? FLAG_ATL : mag ? FLAG_MAG : 0, cs = Math.cos(L.th), sn = Math.sin(L.th), R = L.re;
   const [mx, my] = midOf(L), ax = cs * (mx - L.x) + sn * (my - L.y), ay = -sn * (mx - L.x) + cs * (my - L.y);   // the middle of the patch; the same in the lattice, km
   const world = (a, b) => [L.x + (cs * a - sn * b) * S, L.y + (sn * a + cs * b) * S];
   const cell = (kind, i, j, rot, sx, sy, tint, zs = 1) => out.push(L.x, L.y, L.th, kind, i, j, rot, fl, sx, sy, tint, zs);
   const free = (kind, x, y, ang, sx, sy, tint, flags = 0) => out.push(x, y, ang, kind, 0, 0, 0, fl + flags, sx, sy, tint, 1);
   const first = cellRule(0, 0, L, S);
   if (first?.mark) {                                                // the whole settlement is one small house
-    if (groundOk(env, L.x, L.y, first.hx * S, .3)) cell(kindOf(first, L, atl), 0, 0, 0, first.hx * 2, first.hy * 2, .5, first.hx * 2);
+    if (groundOk(env, L.x, L.y, first.hx * S, .3)) cell(kindOf(first, L, atl, mag), 0, 0, 0, first.hx * 2, first.hy * 2, .5, first.hx * 2);
     return out;
   }
   const blocked = new Set(), keepOut = [], detailed = S * 1.2 <= R, town = L.fine === undefined, wall = walled(L) && S * 2.5 <= R, streets = town && (L.gates || []).length > 0;
@@ -142,7 +150,7 @@ export function planLobe(L, S, env) {
     for (const [ti, tj] of [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]]) {
       const [qi, qj] = unbend(L, ti, tj), [x, y] = world(qi, qj);
       if (blocked.has(`${ti},${tj}`) || !groundOk(env, x, y, .45 * S, .25) || room(x, y, .46 * S) < .98) continue;
-      blocked.add(`${ti},${tj}`); const s = atl ? .78 : .92; cell(KIND.temple, qi, qj, atl ? cellHash(1, 0, L.k, 4) * 6.2831853 : bendTurn(L, qi, qj), s, s, cellHash(1, 0, L.k, 3));
+      blocked.add(`${ti},${tj}`); const s = atl ? .78 : .92; cell(mag ? KIND.mosque : KIND.temple, qi, qj, atl ? cellHash(1, 0, L.k, 4) * 6.2831853 : bendTurn(L, qi, qj), s, s, cellHash(1, 0, L.k, 3));
       break;
     }
   }
@@ -195,8 +203,8 @@ export function planLobe(L, S, env) {
     let fit = 1;
     if (rule.cls !== 4 && (streets || wall || env.road)) { fit = Math.min(1, room(x, y, half * 1.12)); if (fit < LEAST) continue; }
     const turn = bendTurn(L, qi, qj);
-    if (rule.core && L.r >= TOWN && fit === 1 && cellHash(i, j, L.k, 6) < .012) { cell(KIND.temple, qi, qj, turn, .9, .9, rule.h3); continue; }   // more temples in a city
-    const kind = kindOf(rule, L, atl), flip = rule.cls < 2.5 && kind !== KIND.market ? Math.floor(rule.h1 * 97 % 1 * 4) * 1.5707963 : 0;   // a block may face any of the four streets
+    if (rule.core && L.r >= TOWN && fit === 1 && cellHash(i, j, L.k, 6) < .012) { cell(mag ? KIND.mosque : KIND.temple, qi, qj, turn, .9, .9, rule.h3); continue; }   // more temples in a city
+    const kind = kindOf(rule, L, atl, mag), flip = rule.cls < 2.5 && kind !== KIND.market ? Math.floor(rule.h1 * 97 % 1 * 4) * 1.5707963 : 0;   // a block may face any of the four streets
     const k = (kind === KIND.market ? .96 : 1) * fit, quarter = flip % 3.1415926 > 1;
     cell(kind, qi, qj, rule.rot + turn + flip + (kind === KIND.site ? Math.floor(rule.h3 * 4) * 1.5707963 : 0), (quarter ? rule.hy : rule.hx) * 2 * k, (quarter ? rule.hx : rule.hy) * 2 * k, rule.h3);
   }
@@ -213,7 +221,7 @@ export function planLobe(L, S, env) {
       for (let t = t0 + .6 * S; t < t0 + reach; t += S * (.7 + .6 * cellHash(n, g, L.k, 33)), n++) for (const side of [-1, 1]) {
         const h = cellHash(n, g * 2 + (side > 0 ? 1 : 0), L.k, 31), v = cellHash(n, g * 2 + (side > 0 ? 1 : 0), L.k, 32);
         if (h < .3 + .55 * (t - t0) / reach) continue;                                // fewer and fewer of them
-        const kind = v < .55 ? KIND.house : v < .85 ? KIND.farm : KIND.villa, sx = kind === KIND.house ? .5 : kind === KIND.farm ? .62 : .66, sy = kind === KIND.house ? .3 : .52, half = Math.max(sx, sy) * .5 * S;
+        const one = v < .55, kind = mag ? (one ? KIND.dar : KIND.hawsh) : one ? KIND.house : v < .85 ? KIND.farm : KIND.villa, sx = one ? .5 : v < .85 ? .62 : .66, sy = one ? .3 : .52, half = Math.max(sx, sy) * .5 * S;
         const off = STREET_W / 2 + .014 + half + .5 * S * cellHash(n, g * 2 + (side > 0 ? 1 : 0), L.k, 34), x = L.x + ux * t - uy * side * off, y = L.y + uy * t + ux * side * off;
         if (depthAt(L, x, y) > -.5 * half || !groundOk(env, x, y, half, .26) || L.rivals.some(o => depthAt(o, x, y) > -.4 * S) || keepOut.some(k => Math.hypot(x - k.x, y - k.y) < k.r + half)) continue;
         if (env.road) { const dr = env.road(x, y); if (dr < half + .011 || dr > off + .05) continue; }   // by the road, not on it
@@ -226,7 +234,10 @@ export function planLobe(L, S, env) {
 
 // every kind once in both manners of building, in rows around a point: the «витрина»
 const SHOW = { quarter: [.9, .9], quarterU: [.9, .9], quarterL: [.9, .9], palace: [.9, .9], rows: [.9, .84], lanes: [.9, .86], terrace: [.88, .88], cluster: [.84, .84], farm: [.76, .68], villa: [.8, .7], house: [.52, .3], tower: [.4, .4],
-  temple: [.94, .94], market: [.96, .96], fort: [1.3, 1.3, 1.3], mill: [.5, .5], pier: [.9, .5], site: [.8, .8], yard: [.9, .8], longyard: [.9, .7], cot: [.7, .6], wall: [1, 1], gate: [.7, .7] };
+  temple: [.94, .94], market: [.96, .96], fort: [1.3, 1.3, 1.3], mill: [.5, .5], pier: [.9, .5], site: [.8, .8], yard: [.9, .8], longyard: [.9, .7], cot: [.7, .6], wall: [1, 1], gate: [.7, .7],
+  riad: [.9, .9], medina: [.92, .92], dar: [.52, .34], hawsh: [.78, .7], mosque: [.94, .94], douar: [.9, .8] };
+// the kinds only the Maghreb builds, and the ones of everybody that are shown in its colours beside them
+export const MAG_KINDS = ['riad', 'medina', 'dar', 'hawsh', 'mosque', 'douar'], MAG_SHARED = ['terrace', 'market', 'fort', 'wall', 'gate', 'site'];
 // ---- A hospice at a great pass (the owner, second step of the third wave: «горы, перевалы, дороги в горах»; the task:
 // «у больших исторических перевалов — малое укрепление или приют у дороги: Сомпорт — приют Санта-Кристина, Ронсеваль
 // — монастырь»). Three buildings of the settlements at their real size, in a row beside the road: the hall where
@@ -278,10 +289,15 @@ export function planHospice(q, dir, S, env = {}) {
 }
 
 export function planShowcase(x, y, gap) {
-  const out = [], names = Object.keys(SHOW), cols = 12, rows = Math.ceil(names.length / cols);
+  const out = [], names = Object.keys(SHOW).filter(n => !MAG_KINDS.includes(n)), cols = 12, rows = Math.ceil(names.length / cols);
   for (let c = 0; c < 2; c++) names.forEach((name, n) => {
     const col = n % cols, row = Math.floor(n / cols) + c * rows, s = SHOW[name];
     out.push(x + (col - (cols - 1) / 2) * gap, y + (rows - .5 - row) * gap, 0, KIND[name], 0, 0, 0, c ? FLAG_ATL : 0, s[0], s[1], (n * .37 + .2) % 1, s[2] || 1);
+  });
+  // (one more row, the Maghreb: its own kinds, then a few of everybody's in its colours)
+  [...MAG_KINDS, ...MAG_SHARED].forEach((name, n) => {
+    const s = SHOW[name];
+    out.push(x + (n - (cols - 1) / 2) * gap, y + (rows - .5 - 2 * rows) * gap, 0, KIND[name], 0, 0, 0, FLAG_MAG, s[0], s[1], (n * .37 + .2) % 1, s[2] || 1);
   });
   return out;
 }
