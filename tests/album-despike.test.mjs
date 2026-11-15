@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { despike, NEEDLE, NEEDLE_LAND, WELL, WELL_SEA } from '../src/album/ground/despike.js';
+import { mendPockets, POCKET, POCKET_FLOOR, POCKET_MAX, despike, NEEDLE, NEEDLE_LAND, WELL, WELL_SEA } from '../src/album/ground/despike.js';
 
 const raw = m => Math.round((m + 8192) * 4), W = 40, H = 30;
 // a flat shore: sea of −3 m in the west, land rising slowly to the east
@@ -50,4 +50,31 @@ test('despike: real land is left alone', () => {
 test('despike: the album mends the base before anything reads it', () => {
   const data = fs.readFileSync(new URL('../src/album/data.js', import.meta.url), 'utf8');
   assert.ok(data.indexOf('despike(raw, meta.base.w, meta.base.h)') > 0 && data.indexOf('despike(raw, meta.base.w, meta.base.h)') < data.indexOf('fillHollows(raw'), 'before the hollows are filled and before the texture is made');
+});
+
+test('pockets: a pit of deep water in a shallow lagoon takes the depth of the lagoon; the open sea and its bays are left', () => {
+  const W2 = 60, H2 = 40, raw2 = m => (m + 8192) * 4, u = new Uint16Array(W2 * H2).fill(raw2(12));
+  const box = (x0, y0, x1, y1, m) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) u[y * W2 + x] = raw2(m); };
+  box(0, 0, 14, H2 - 1, -60);                      // the open sea, on the edge of the base
+  box(15, 5, 22, 12, -40);                         // a deep bay of it
+  box(15, 20, 40, 34, -3);                         // a lagoon three metres deep, open to the sea over its own depth
+  box(28, 24, 33, 28, -35);                        // a pit in it
+  box(48, 6, 52, 9, -50);                          // a pit in the middle of dry land: that is the lagoon, as the heights hold it
+  const before = u.slice(), n = mendPockets(u, W2, H2);
+  assert.equal(n, 6 * 5 + 5 * 4, 'the two pits and nothing else');
+  assert.equal(u[26 * W2 + 30], raw2(-3), 'the pit in the lagoon is as deep as the lagoon');
+  assert.equal(u[7 * W2 + 50], raw2(POCKET_FLOOR), 'the pit in the land stays water: whether it is a pond or a lagoon is the rule of fillHollows');
+  assert.equal(u[8 * W2 + 18], raw2(-40), 'a bay the sea reaches through deep water');
+  assert.equal(u[20 * W2 + 5], raw2(-60)); assert.equal(u[25 * W2 + 20], raw2(-3)); assert.equal(u[2 * W2 + 40], raw2(12));
+  for (let k = 0; k < u.length; k++) assert.equal(u[k] < raw2(0), before[k] < raw2(0), 'land stays land and water stays water');
+  // a pocket larger than the limit is a sea of its own
+  const big = new Uint16Array(200 * 200).fill(raw2(-2)); for (let y = 20; y < 180; y++) for (let x = 20; x < 180; x++) big[y * 200 + x] = raw2(-30);
+  assert.ok(160 * 160 > POCKET_MAX); assert.equal(mendPockets(big, 200, 200), 0);
+  assert.ok(POCKET < POCKET_FLOOR && POCKET_FLOOR < 0);
+});
+
+test('pockets: the album mends them after the spikes and before the hollows of the water', () => {
+  const data = fs.readFileSync(new URL('../src/album/data.js', import.meta.url), 'utf8');
+  const a = data.indexOf('despike(raw, meta.base.w, meta.base.h)'), b = data.indexOf('mendPockets(raw, meta.base.w, meta.base.h)'), c = data.indexOf('fillHollows(raw');
+  assert.ok(a > 0 && a < b && b < c);
 });

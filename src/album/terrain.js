@@ -333,7 +333,10 @@ void main() {
       // gives way to the next wanders with a noise. Two families joined smoothly were drawn at first; with the code
       // of the other parts that came in since, they cost a tenth of the frame — 155 → 173 ms, 14.11.2026.)
       float w = (n3 - .5) * .5, a0 = floor(atan(g.y, g.x) / .7853982 + .5 + w) * .7853982;
-      vec3 r = ribs(pk, vec2(cos(a0), sin(a0)), smoothstep(.07, .025, px), w) * (ms * own * uCrisp * smoothstep(.22, .07, px));
+      // (The ribs are for the heights of the polygon. On the smooth swells of the world map the fall line runs one
+      // way for kilometres, and its ribs were a comb of parallel streaks across a whole snowfield — Mont Blanc from
+      // 20 km, the lead on v0.6.114.)
+      vec3 r = ribs(pk, vec2(cos(a0), sin(a0)), smoothstep(.07, .025, px), w) * (ms * own * uCrisp * smoothstep(.22, .07, px) * rg);
       gm += r.xy; rib = r.z;
     }
   }
@@ -346,7 +349,9 @@ void main() {
   // (Ribs down the fall line, five times larger than the ribs of the polygon, were tried first: every summit
   // stood in a ring of straight rays, like a hedgehog.)
   if (rg < 1. && px < 1.6 && h0 > 0.) {
-    float sw = smoothstep(.03, .25, slope) * (1. - rg) * smoothstep(1.6, .5, px);
+    // (They are for the look from a height. From near — under 100 km, and gone by 20 — they were long smears of
+    // light and shade that no ground explains: there the swell stays a plain swell.)
+    float sw = smoothstep(.03, .25, slope) * (1. - rg) * smoothstep(1.6, .5, px) * smoothstep(.02, .10, px);
     if (sw > 0.) {
       // (Every noise is read on a grid turned by its own angle, and the larger size is two noises laid together: a
       // noise read along the axes of the map shows its square cells, and the folds stood in rows of square bumps,
@@ -592,11 +597,12 @@ void main() {
   // The sea is frozen where the warmest month at sea level is about 5 °C and colder — the line of the snow by the
   // climate (worldSnow) half a kilometre under the sea: the Arctic Ocean north of Svalbard, the east coast of
   // Greenland, the seas round the Antarctic. (At 8 °C, the line of the snow itself, the ice reached Iceland and the
-  // North Cape: the pack of early spring.) The edge of the ice is broken by a noise taken in space (round a pole the
-  // patterns of pk fan out); the ice is lit as level snow is.
+  // North Cape: the pack of early spring.) The edge of the ice is broken by noise taken in space (round a pole the
+  // patterns of pk fan out): two noises, of 70 and 41 km, the second on a lattice turned in space — with one, the
+  // edge went in square steps of its cells (the lead on v0.6.114). The ice is lit as level snow is.
   if (rgW < 1. && landA < 1. && abs(lat) > 50.) {
     vec3 q = (vPos + vec3(0., RKM, 0.)) / 70.;
-    float ice = (1. - smoothstep(-650., -350., worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) - .5) * 500.)) * (1. - landA) * (1. - rgW);
+    float ice = (1. - smoothstep(-650., -350., worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) + vnoise3(mat3(.36, .48, -.8, -.8, .6, 0., .48, .64, .6) * q * 1.7 + 4.) - 1.) * 420.)) * (1. - landA) * (1. - rgW);
     if (ice > .003) col = mix(col, vec3(.61, .66, .75) * (sunCol * max(uSun.z, 0.) * 1.25 + skyCol * vec3(.86, .97, 1.2)) * (.94 + .12 * vnoise3(q * 2.9 + 9.)), ice);
   }
 

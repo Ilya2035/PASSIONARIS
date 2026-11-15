@@ -173,7 +173,9 @@ test('world: the ground shader draws the Earth beyond the polygon by the rules o
   assert.ok(terrain.includes('p.cB *= rs; p.cC *= rs;') && terrain.includes('p.cA = mix(vec4(1., clamp(.06 + .82 * mont + .5 * smoothstep(.56, .36, wet) * (1. - mont), 0., 1.)'), 'no chunks: the natural state');
   assert.ok(terrain.includes('if (rg < 1.) g *= 1. + 2. * (1. - rg);') && terrain.includes('gm += ((fa.yz * RA) * (-.175 * ta / ra) + (fb.yz * RB) * (-.14 * tb / rb) + (fd.yz * RC) * (-.31 * td / rd * fine)) * sw;'), 'the coarse heights of the world: a steeper slope and ridges by rule');
   assert.ok(terrain.includes('lakeA = smoothstep(.5 - lw2, .5 + lw2, worldClimate(ll).r) * (1. - rgW);') && terrain.includes('if (h0 < 25. || lakeA > 0.) sea = aspWater(p);'), 'the lakes of the world');
-  assert.ok(terrain.includes('worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) - .5) * 500.'), 'the ice of the polar seas');
+  assert.ok(terrain.includes('worldSnow(worldWarm(worldClimate(ll)), lat) + (vnoise3(q) + vnoise3(mat3(.36, .48, -.8, -.8, .6, 0., .48, .64, .6) * q * 1.7 + 4.) - 1.) * 420.'), 'the ice of the polar seas: its edge broken by two noises in space, the second on a turned lattice');
+  assert.ok(terrain.includes('float sw = smoothstep(.03, .25, slope) * (1. - rg) * smoothstep(1.6, .5, px) * smoothstep(.02, .10, px);'), 'the folds by rule are for the look from a height: gone by 20 km');
+  assert.ok(terrain.includes('* (ms * own * uCrisp * smoothstep(.22, .07, px) * rg);'), 'the ribs down the fall line are for the heights of the polygon only');
   assert.ok(terrain.includes('if (lakeA > 0.) p.h = -14.5 - 52. * smoothstep(.5, 1., worldClimate(ll).r);'), 'a lake of the world is no shallower than its sea: no pale rim round it');
   // no noise of a large size is read along the axes of the map: its square cells show as rectangles from afar
   const forest = read('../src/album/aspects/forest.js');
