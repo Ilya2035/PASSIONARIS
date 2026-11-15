@@ -775,7 +775,11 @@ test('settle names: every name of a settlement is Russian — transcribed by rul
   // a place without a name is left out when the list is baked
   assert.match(readFileSync(new URL('../scripts/album/bake-sites.mjs', import.meta.url), 'utf8'), /sites\.push\(\.\.\.named\.filter\(s => s\[4\]\)\);/);
   // …and a name in Arabic letters only gives way to the French or English name of the place, where the extract keeps one
-  assert.match(readFileSync(new URL('../scripts/album/bake-sites.mjs', import.meta.url), 'utf8'), /const local = p\.name && !\/\[A-Za-zÀ-ɏ\]\/\.test\(p\.name\) && \(p\.fr \|\| p\.en\) \? p\.fr \|\| p\.en : p\.name;/);
+  assert.match(readFileSync(new URL('../scripts/album/bake-sites.mjs', import.meta.url), 'utf8'), /const alt = p\.fr \|\| p\.en \|\| p\.es, local = p\.name && !\/\[A-Za-zÀ-ɏ\]\/\.test\(p\.name\) && alt \? alt : p\.name;/);
+  // (a Spanish name of a place of Morocco is read by the Spanish rules: the record carries its language, and keeps it when it is transcribed again)
+  { const units = { 'MAR-1': { rings: [[[-6, 34], [-4, 34], [-4, 36], [-6, 36]]] } }, [recs, st] = T.russifySites([[-53700, 355700, 6000, 1, 'Tetuán', null, 'es'], [-50000, 350000, 900, 2, 'Chefchaouen']], units);
+    assert.deepEqual(recs[0], [-53700, 355700, 6000, 1, 'Тетуан', 'Tetuán', 'es']); assert.equal(recs[1].length, 6); assert.deepEqual(st.byLang, { es: 1, ar: 1 });
+    assert.deepEqual(T.russifySites(recs, units)[0], recs, 'done twice, nothing changes'); }
   const unitAt = T.unitFinder({ 'ESP-1': { rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] }, 'PRT-2': { rings: [[[-3, 0], [-1, 0], [-1, 2], [-3, 2]]] } });
   assert.equal(unitAt(1, 1), 'ESP-1'); assert.equal(unitAt(-2, 1), 'PRT-2'); assert.equal(unitAt(-.8, 1), 'PRT-2', 'a place on the shore takes the nearest unit');
   // records: the Russian name, and the name of the data as the sixth number

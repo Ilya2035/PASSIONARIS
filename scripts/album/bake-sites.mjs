@@ -25,8 +25,13 @@ for (const f of readdirSync(OUT_DIR).filter(f => f.endsWith('.places.json.gz')))
   // (A name written in Arabic letters only cannot be read into Russian letter by letter: Arabic leaves the short vowels
   // out — «Тблба» for Teboulba. Where the extract keeps the French or the English name of such a place — p.fr, p.en:
   // scripts/album/osm-extract.mjs, when it stores them — that one is transcribed instead.)
-  const local = p.name && !/[A-Za-zÀ-ɏ]/.test(p.name) && (p.fr || p.en) ? p.fr || p.en : p.name;
-  sites.push([Math.round(lon * 1e4), Math.round(lat * 1e4), pop, kind, p.ru || local || '']);
+  // (The extract keeps them from v0.6.164, and the Spanish name too — p.es: the north of Morocco, once a Spanish
+  // protectorate, has little else in Latin letters. A Spanish name is read by the Spanish rules whatever the land:
+  // the record says so in its seventh place.)
+  const alt = p.fr || p.en || p.es, local = p.name && !/[A-Za-zÀ-ɏ]/.test(p.name) && alt ? alt : p.name;
+  const rec = [Math.round(lon * 1e4), Math.round(lat * 1e4), pop, kind, p.ru || local || ''];
+  if (!p.ru && local !== p.name && !p.fr && !p.en) rec.push(null, 'es');
+  sites.push(rec);
 }
 sites.sort((a, b) => b[2] - a[2] || a[0] - b[0] || a[1] - b[1]);
 const units = JSON.parse(readFileSync(join(ROOT, 'public', 'assets', 'album', 'division', 'admin.json'), 'utf8')).units;

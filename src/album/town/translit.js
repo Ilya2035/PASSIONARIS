@@ -364,9 +364,10 @@ export function russifySites(sites, units) {
   const out = sites.map(s => {
     const name = s[5] || s[4] || '';                               // (a record transcribed before is transcribed anew from the name it kept)
     if (!name || (hasCyrillic(name) && !hasLatin(name))) { kept++; return s.slice(0, 5); }
-    const lang = langAt(unitAt(s[0] / 1e4, s[1] / 1e4), s[0] / 1e4, s[1] / 1e4, name);
+    // (s[6]: the language the name of the record is written in, where it is not that of the land — a Spanish name of a place of Morocco)
+    const lang = s[6] || langAt(unitAt(s[0] / 1e4, s[1] / 1e4), s[0] / 1e4, s[1] / 1e4, name);
     byLang[lang] = (byLang[lang] || 0) + 1;
-    return [s[0], s[1], s[2], s[3], toRussian(name, lang), name];
+    return s[6] ? [s[0], s[1], s[2], s[3], toRussian(name, lang), name, s[6]] : [s[0], s[1], s[2], s[3], toRussian(name, lang), name];
   });
   return [out, { byLang, kept }];
 }
