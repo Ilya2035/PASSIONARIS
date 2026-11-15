@@ -641,23 +641,26 @@ void main() {
   }
 
 #endif
-  // ---- air between the eye and the ground, then the finish shared by everything
-  col = albumAir(col, vPos);
 #if ZONE != 1
-  // Beyond the polygon the ground hands the picture over so that the sky treats it as it treats the polygon. The
-  // land is drawn with the one Sun of the frame everywhere. The finishing pass of the sky (post.js) then dims the
-  // polygon by «light of the place / light of the frame» (globeRelight), and the land beyond it by «light of the
-  // place / what level land draws under the Sun of the place» (globeRelightOwn, since v0.6.116: in v0.6.114 the
-  // ground lit that land by the Sun of the place). So the picture goes out times the first measure over the second
-  // — over the very mix of the two that the pass lays in the band of the border — and what the pass leaves is the
-  // first measure alone, on both sides. Both are the sky's own functions (sky/globe.js), not copies: counted here
-  // by a formula of its own («level land under the Sun of the place over the same under the Sun of the frame»),
-  // the two sides parted by a sixth in the evening, when the sky's light of a low Sun and that formula disagree.
-  // Near the ground, where the pass leaves the frame alone (uGlobe.x = 0), nothing is done.
+  // ---- beyond the polygon the ground hands the land over so that the sky treats it as it treats the polygon. The
+  // land is drawn with the one Sun of the frame everywhere. The finishing pass of the sky (post.js) then brings
+  // every place to its own light. The polygon it multiplies by «light of the place / light of the frame»
+  // (globeRelight). Beyond the polygon it takes the land to be lit by the Sun of its own place (as the ground did in
+  // v0.6.114) and multiplies it by another measure, «light of the place / what level land draws under that Sun»
+  // (globeRelightOwn); the air over the land it takes to be lit by the frame, and gives it the first measure. So
+  // the land — the colour before the air — goes out times the first measure over the second: over the very mix of
+  // the two that the pass lays in the band of the border. What the pass leaves is the first measure alone, for land
+  // and air, on both sides. Both measures are the sky's own functions (sky/globe.js), not copies: counted here by a
+  // formula of its own, the two sides parted by a sixth in the evening. Near the ground, where the pass leaves the
+  // frame alone (uGlobe.x = 0), nothing is done.
+  // (Lit by the Sun of the place, as in v0.6.114, the sea of the world hardly darkened by night and slopes of the
+  // night side caught sunlight: by evening and by night the polygon stood out as a rectangle.)
   // (the weight of the polygon and the upward direction are counted again here: carried through the aspects they
   // would be two more numbers held all the way — docs/album/ground.md, «Скорость»)
   float rgL = REGION(ll); if (rgL < 1. && uGlobe.x > 0.) { vec3 upL = normalize(vPos + vec3(0., RKM, 0.)), asPolygon = globeRelight(upL); col *= asPolygon / mix(globeRelightOwn(upL), asPolygon, rgL); }
 #endif
+  // ---- air between the eye and the ground, then the finish shared by everything
+  col = albumAir(col, vPos);
   gl_FragColor = vec4(albumFinish(col), 1.);
 }`;
 // The numbers written as the edges of smoothstep() go into a table (the uniform uStep) before the shader is compiled:
