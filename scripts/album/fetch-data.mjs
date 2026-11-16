@@ -19,7 +19,7 @@ import { gzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import { STAGE, BBOXES } from '../../src/album/geo.js';
-import { despike, mendPockets } from '../../src/album/ground/despike.js';
+import { despike, mendPockets, DRY_LAND } from '../../src/album/ground/despike.js';
 import { fillHollows } from '../../src/album/water/hollows.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -73,7 +73,7 @@ async function pool(items, n, fn) { let i = 0, done = 0; await Promise.all(Array
 // where the leading session keeps the raw material)
 const tileFile = (z, x, y) => { const here = join(CACHE, 'terrarium', String(z), String(x), `${y}.png`); return existsSync(here) ? here : join(MAIN, 'data', 'album', 'terrarium', String(z), String(x), `${y}.png`); };
 // Land that lies below the sea and is not sea. By the heights alone it would be drawn as water, so where the outline
-// of a country (Natural Earth) says land, ground at or below the sea is lifted to LOW_M: flat land just above the
+// of a country (Natural Earth) says land, ground lower than LOW_M is lifted to it: flat land a little above the
 // water. Only inside these boxes — everywhere else land below the sea is a lagoon or a shore, and there the heights
 // know better than an outline. The outlines are laid LOW_FINE times finer than the base, and a point of the base is
 // lifted by the share of it that is land: the shore of the lifted ground is a smooth line, without stairs or teeth.
@@ -88,7 +88,11 @@ export const LOWLANDS = [
   { name: 'the polders of the Low Countries and the marshes of the North Sea', lon0: 1.5, lon1: 11.7, lat0: 50.7, lat1: 53.7, lakes: true, arms: true },
   { name: 'the chotts of the Sahara', lon0: 4.5, lon1: 9.7, lat0: 32.8, lat1: 35.0, lakes: false },
 ];
-export const LOW_M = 1, LOW_FINE = 4;
+// (LOW_M, metres: DRY_LAND of the ground (ground/despike.js) — one number for all, the rule of the swamps knows the
+// lifted land by it: dead-level ground at exactly this height. Not below 2 m: by the rules of the shore trees do not
+// stand below 1.2 m and the fields of a settlement fade below 2 m — with the polders at 1 m every village of Holland
+// stood as a bare pale square on grass without a field or a wood, seen on the assembly of 16.11.2026.)
+export const LOW_M = DRY_LAND, LOW_FINE = 4;
 // The arms of the sea in the delta of the Rhine, the Maas and the Scheldt (Oosterschelde, Grevelingen, Haringvliet,
 // Hollands Diep, …). The outline of the country runs along the dams of the Delta Works, so by it the arms are land
 // and were lifted with the polders: the islands of Zeeland and South Holland grew into one piece of land (seen by the

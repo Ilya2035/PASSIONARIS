@@ -34,7 +34,9 @@
 
 | Данные | Источник | Лицензия |
 |---|---|---|
-| Высоты Пиренейского полуострова и юга Франции (уровни 9 и 12; уровень 11 для гор) | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), формат terrarium; собраны Mapzen из SRTM, GMTED, ETOPO1 и других открытых наборов | Открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
+| Высоты проработанной земли: Пиренейский полуостров, Западная Европа до Рейна, Магриб (уровни 9 и 12; уровень 11 для гор) | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), формат terrarium; собраны Mapzen из SRTM, GMTED, ETOPO1 и других открытых наборов | Открытые данные с указанием источников: [список Mapzen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) |
+| Суша ниже уровня моря в этих высотах (польдеры и марши Северного моря, шотты Сахары): где суша, решают очертания стран и озёр | Natural Earth 10m (admin-0, lakes) | Общественное достояние |
+| Морские рукава дельты Рейна, Мааса и Шельды в этих высотах: очертания воды (`data/album/stage3/sea-arms.json` главной папки, вне репозитория) | © участники [OpenStreetMap](https://www.openstreetmap.org/copyright); выгрузка Нидерландов с [download.geofabrik.de](https://download.geofabrik.de) | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/): нужно указание авторства |
 | Реки, озёра, поселения | Natural Earth 10m | Общественное достояние |
 | Маска проработанной земли (`public/assets/album/worked.bin.gz`): очертания стран, озёра и линия Рейна; `scripts/album/bake-worked.mjs` | Natural Earth 10m (admin-0, lakes, rivers) | Общественное достояние |
 | Деление: очертания нынешних провинций, округов и департаментов — подсказка, к какой исторической земле тянется чанк (`public/assets/album/division/admin.json`) | Natural Earth 10m admin-1 states and provinces | Общественное достояние |

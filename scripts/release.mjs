@@ -15,6 +15,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, openSync, closeSync, statSync, rmSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { albumDataProblem } from './album-data-check.mjs';
 
 const REPO_URL = 'https://github.com/Ilya2035/PASSIONARIS.git';
 const FORBIDDEN = /(^|\/)(normals|biome)\.bin\.gz$/;
@@ -75,6 +76,10 @@ try {
       throw new Error('release: rebase onto main has conflicts — resolve them (git rebase main), then run the release again');
     }
   }
+
+  // (the installed game takes dist/ and public/ of this folder: its album data must be those the code expects)
+  const stale = albumDataProblem(ROOT, MAIN);
+  if (stale) throw new Error(`release: ${stale}, then run the release again`);
 
   step('version and changelog');
   const pkgPath = join(ROOT, 'package.json');

@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { albumDataProblem } from './album-data-check.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -23,6 +24,12 @@ const APP = join(TARGET, 'resources', 'app');
 const EXE = join(TARGET, 'Passionaris.exe');
 
 if (!existsSync(join(ROOT, 'dist', 'index.html'))) { console.error('install-local: run "npm run build" first'); process.exit(1); }
+// (a worktree whose copy of the album data is not the main folder's would install code and data of different stages)
+const stale = albumDataProblem(ROOT);
+if (stale) {
+  console.error(`install-local: the game was NOT installed — ${stale}, then build ("node node_modules/vite/bin/vite.js build") and run "node scripts/install-local.mjs" again`);
+  process.exit(1);
+}
 if (existsSync(TARGET) && !existsSync(MARK)) {
   console.error(`install-local: ${TARGET} exists and was not created by this installer — left untouched`);
   process.exit(1);
