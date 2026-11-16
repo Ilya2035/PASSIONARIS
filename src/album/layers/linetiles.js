@@ -19,9 +19,9 @@ import { Frustum, Matrix4, Sphere, Mesh, BufferGeometry } from 'three';
 import { toWorld, KM_PER_DEG, COS_REF } from '../geo.js';
 
 export const LEAF_KM = 64;             // the side of the smallest square
-export const MAX_RANGES = 12;          // a frame draws no more ranges of one mesh than this: the nearest are joined
+export const MAX_RANGES = 8;           // a frame draws no more ranges of one mesh than this: the nearest are joined
 export const MIN_PIECES = 3000;        // a mesh with fewer pieces is left as it is
-export const NEAR = 400;               // two ranges with no more pieces than this between them are drawn as one
+export const NEAR = 1500;              // two ranges with no more pieces than this between them are drawn as one
 
 // the bits of two numbers under 2^15, interleaved (x in the even places)
 const spread = v => { v &= 0x7fff; v = (v | (v << 8)) & 0x00ff00ff; v = (v | (v << 4)) & 0x0f0f0f0f; v = (v | (v << 2)) & 0x33333333; return (v | (v << 1)) & 0x55555555; };

@@ -55,7 +55,7 @@ export const FLOW = { speed: .0045, streak: .3, glint: .55, near: [.06, .03] };
 // narrower), and in a class by squares (layers/linetiles.js). From high up the shader leaves out water far thinner
 // than a pixel (SHOW): a class that is all such water is not sent to the GPU at all, and of the others a frame draws
 // the squares the camera can see — no more ranges of the index than RANGES.
-export const TIERS = [.16, .08, .04, .02, .01, .005], RANGES = 24;
+export const TIERS = [.16, .08, .04, .02, .01, .005], RANGES = 12;
 const tierOf = w => { let k = 0; while (k < TIERS.length && w < TIERS[k]) k++; return k; };
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // how a river is drawn when a pixel is px km: its least width in pixels, the widths it shows from, how far its line
