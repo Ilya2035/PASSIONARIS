@@ -23,6 +23,7 @@
 import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Color, DoubleSide, CustomBlending, SrcAlphaFactor, OneMinusSrcAlphaFactor } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
 import { KM_PER_DEG } from '../geo.js';
+import { tilePieces, visibleRanges, frustumOf, rangeDrawer, MIN_PIECES } from './linetiles.js';
 
 const D = Math.PI / 180;
 // Chaikin corner cutting, then resampling to a fixed step in km
@@ -83,10 +84,14 @@ vec3 groundLightOn(vec2 ll, float px, vec3 m) { vec3 n; vec2 s = groundShade(ll,
 // bank (of a line): for every point null, or [nx, ny, w, off] — the point lies on the bank of a river (roads/banks.js):
 // the way from the water (a unit vector, east and north), the width of the water km, how far the point is from the
 // middle of the river km. From high up a river is drawn wider than life; such a point then moves aside with it.
-export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash = 0, lift = .004, ground = lift <= .006, verge = 1, vergeColour = 0x6f6a42, vergeAlpha = .5, sea = true, woods = .8, rideColour = 0x58803c } = {}) {
+// tiles: the pieces of the ribbon are sorted into squares, and a frame draws only the squares the camera can see
+// (linetiles.js; setPx() chooses them). false for a ribbon whose corners are moved after it is made (the decks of
+// the bridges): the squares are those of the places the corners were given at first.
+export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash = 0, lift = .004, ground = lift <= .006, verge = 1, vergeColour = 0x6f6a42, vergeAlpha = .5, sea = true, woods = .8, rideColour = 0x58803c, tiles = true } = {}) {
   let n = 0; for (const l of lines) n += l.pts.length;
   const ll = new Float32Array(n * 4), dir = new Float32Array(n * 4), side = new Float32Array(n * 2), wk = new Float32Array(n * 4), fd = new Float32Array(n * 2), pos = new Float32Array(n * 6), idx = [];
   const bk = ground && lines.some(l => l.bank) ? new Float32Array(n * 8) : null;
+  const pLat = [], pLon = [];                                        // where every piece of the ribbon begins (a piece: two triangles between two points of a line)
   let v = 0;
   for (const l of lines) {
     let dist = 0;
@@ -98,12 +103,15 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
         ll[v * 2] = p[1]; ll[v * 2 + 1] = p[0]; dir[v * 2] = dx; dir[v * 2 + 1] = dy; side[v] = s ? 1 : -1; wk[v * 2] = l.width; wk[v * 2 + 1] = dist; fd[v] = l.fade ? l.fade[i] : 1;
         if (bk && l.bank && l.bank[i]) bk.set(l.bank[i], v * 4);
       }
-      if (i) { const k = v - 4; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+      if (i) { const k = v - 4; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); pLat.push(l.pts[i - 1][1]); pLon.push(l.pts[i - 1][0]); }
     }
   }
   const geo = new BufferGeometry();
   geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setAttribute('aLL', new BufferAttribute(ll, 2)); geo.setAttribute('aDir', new BufferAttribute(dir, 2));
-  geo.setAttribute('aSide', new BufferAttribute(side, 1)); geo.setAttribute('aW', new BufferAttribute(wk, 2)); geo.setAttribute('aFade', new BufferAttribute(fd, 1)); geo.setIndex(idx);
+  geo.setAttribute('aSide', new BufferAttribute(side, 1)); geo.setAttribute('aW', new BufferAttribute(wk, 2)); geo.setAttribute('aFade', new BufferAttribute(fd, 1));
+  // by squares: the corners stay where they are, the index is written square by square (a small ribbon is left whole)
+  const tiled = tiles && pLat.length >= MIN_PIECES ? tilePieces(pLat.length, pLat, pLon) : null;
+  if (tiled) { const u = new Uint32Array(idx.length); for (let j = 0, q = 0; j < tiled.order.length; j++) { const a = tiled.order[j] * 6; for (let k = 0; k < 6; k++) u[q++] = idx[a + k]; } geo.setIndex(new BufferAttribute(u, 1)); } else geo.setIndex(idx);
   if (bk) geo.setAttribute('aBank', new BufferAttribute(bk, 4));
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T),
@@ -227,9 +235,13 @@ export function makeRibbons(album, lines, { colour = 0x2a6a8a, minPx = 2.2, dash
   });
   const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = ground ? -7 : 5;   // the ground −20 … −12 · roads −7 · lakes and banks −6 · rivers −5 · bridges −4
   album.scene.add(mesh);
-  return { mesh, u: uniforms, ground,
+  const drawRanges = tiled ? rangeDrawer(mesh) : null;
+  return { mesh, u: uniforms, ground, squares: tiled ? tiled.leaves : 0,
     setPx(cam, dom) {
       const h = cam.s.h; uniforms.uPx.value = 2 * h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, dom.clientHeight);
+      // the squares in the picture; a corner stands off its place on the sea-level globe by the height of the land
+      // and by the width the ribbon is drawn with (a road on the bank of a river: by the water too), km
+      if (drawRanges) drawRanges(visibleRanges(tiled.root, frustumOf(cam.cam), 6 + 5 * (T.uExag.value || 1) + 8 * uniforms.uPx.value));
       if (!ground) return;
       // where the grid of the ground is centred and how fine it is (terrain.js); the pull toward the eye that covers
       // what the grid cannot follow, a little less than the rivers pull, so that water still lies over a road

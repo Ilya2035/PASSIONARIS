@@ -107,7 +107,8 @@ export default async function init(album) {
     decks = DECK.map((d, kind) => {
       // (a ford is marked where a road wades water that is more than a step wide, and at the fords of the rivers no road comes to)
       const list = d.type === 'ford' ? [...fords.filter(f => f.type === 'ford' && !f.weave && f.width >= FORD_MIN), ...sites.map(s => ({ ...s, sin: 1, site: true }))] : fords.filter(f => f.type === 'bridge' && f.road === d.road); if (!list.length) return null;
-      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * d.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * d.wide, lift: .005, ground: true, sea: false, woods: 0, ...(d.type === 'ford' ? {} : DECK_RIM) });
+      // (tiles: false — span() puts the corners of a deck in their places afterwards)
+      const rib = makeRibbons(album, list.map(f => ({ pts: [[0, 40], [0, 40]], width: LOOK[d.look].w * d.wide })), { colour: d.light, minPx: LOOK[d.look].px[0] * d.wide, lift: .005, ground: true, sea: false, woods: 0, tiles: false, ...(d.type === 'ford' ? {} : DECK_RIM) });
       rib.mesh.renderOrder = -4;                                    // over the water of the rivers (−5)
       return { ...rib, kind, list, d };
     }).filter(Boolean);

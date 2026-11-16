@@ -19,9 +19,10 @@ import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, Color, DoubleSid
 import { COMMON, CHUNK_GLSL, LIGHT } from '../glsl.js';
 import { SHEET_VERT, SHEET_FRAG, sheetUniforms, sheetPull } from '../aspects/water.js';
 import { KM_PER_DEG } from '../geo.js';
+import { tileTiers, collectRanges, capRanges, frustumOf, rangeDrawer, MIN_PIECES } from './linetiles.js';
 
 const D = Math.PI / 180;
-const FLAT = { atlas: 0x3d78b8, paper: 0x5f8fb5, night: 0x6f8fb0 };          // looks that draw rivers as plain lines
+const FLAT ={ atlas: 0x3d78b8, paper: 0x5f8fb5, night: 0x6f8fb0 };          // looks that draw rivers as plain lines
 export const MIN_PX = 3;               // a great river is never thinner than this on the screen; a small one .42 of it
 export const SHOW = [.035, .1];        // a river is left out when its water is under SHOW[0] of a pixel, whole from SHOW[1]
 // From high up (the owner, 13.11.2026: реки издалека «слишком жирные, потому что изогнутые… чтобы реки всё же
@@ -50,6 +51,12 @@ export const BED = { banks: 4.4, from: [3.2, 5.5] };
 // the current: km a second the streaks slide (a little quicker than life, so that it can be seen from a few km up);
 // how strong the streaks and the glints are; they are drawn while a pixel is under FLOW.near km (… wholly)
 export const FLOW = { speed: .0045, streak: .3, glint: .55, near: [.06, .03] };
+// The pieces of the sheets go by classes of width, the widest first (km of water; the last class is all that is
+// narrower), and in a class by squares (layers/linetiles.js). From high up the shader leaves out water far thinner
+// than a pixel (SHOW): a class that is all such water is not sent to the GPU at all, and of the others a frame draws
+// the squares the camera can see — no more ranges of the index than RANGES.
+export const TIERS = [.16, .08, .04, .02, .01, .005], RANGES = 24;
+const tierOf = w => { let k = 0; while (k < TIERS.length && w < TIERS[k]) k++; return k; };
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // how a river is drawn when a pixel is px km: its least width in pixels, the widths it shows from, how far its line
 // has slid toward the two smoother shapes
@@ -222,6 +229,8 @@ function build(lines) {
   let n = 0; for (const l of lines) n += l.n;
   const ll = new Float32Array(n * 4), misc = new Int8Array(n * 8), wk = new Float32Array(n * 8), gen = new Int16Array(n * 8), gdir = new Int8Array(n * 8), idx = new Uint32Array(Math.max(0, n - lines.length) * 6);
   const pack = v => Math.round(Math.max(-1, Math.min(1, v / GEN.range)) * 32767);
+  // where every piece of a sheet begins (a piece: two triangles between two points of a river), its class of width; the widest water of every class
+  const pLat = new Float32Array(idx.length / 6), pLon = new Float32Array(idx.length / 6), pTier = new Uint8Array(idx.length / 6), wide = new Float32Array(TIERS.length + 1);
   let v = 0, q = 0;
   lines.forEach((l, li) => {
     const seed = ((li * 3.7 + 1.3) % 97 + 1) * (l.dry ? -1 : 1);     // a dry river says so by the sign of its seed
@@ -237,13 +246,18 @@ function build(lines) {
         wk[v * 4] = l.w[i]; wk[v * 4 + 1] = l.dist[i]; wk[v * 4 + 2] = seed; wk[v * 4 + 3] = l.curv[i];
         for (let k = 0; k < 4; k++) { gen[v * 4 + k] = o ? pack(o[i * 4 + k]) : 0; gdir[v * 4 + k] = Math.round(way[k] * 127); }
       }
-      if (i) { const k = v - 4; idx[q++] = k; idx[q++] = k + 1; idx[q++] = k + 2; idx[q++] = k + 1; idx[q++] = k + 3; idx[q++] = k + 2; }
+      if (i) { const k = v - 4, w = Math.max(l.w[i - 1], l.w[i]), tr = tierOf(w); pLat[q / 6] = l.ll[i * 2 - 1]; pLon[q / 6] = l.ll[i * 2 - 2]; pTier[q / 6] = tr; if (w > wide[tr]) wide[tr] = w; idx[q++] = k; idx[q++] = k + 1; idx[q++] = k + 2; idx[q++] = k + 1; idx[q++] = k + 3; idx[q++] = k + 2; }
     }
   });
+  // By classes of width and by squares (linetiles.js): the corners stay where they are, the index is written class by
+  // class and square by square. At stage 3 the rivers are two million corners, and both passes — the banks and the
+  // water — went through all of them whatever the camera looked at and however high it stood.
+  const tiles = pLat.length >= MIN_PIECES ? tileTiers(pLat.length, pLat, pLon, pTier, TIERS.length + 1) : null; let index = idx;
+  if (tiles) { index = new Uint32Array(idx.length); for (let j = 0, o = 0; j < tiles.order.length; j++) { const a = tiles.order[j] * 6; for (let k = 0; k < 6; k++) index[o++] = idx[a + k]; } }
   const geo = new BufferGeometry();
   geo.setAttribute('aLL', new BufferAttribute(ll, 2)); geo.setAttribute('aW', new BufferAttribute(wk, 4)); geo.setAttribute('aMisc', new BufferAttribute(misc, 4, true));
-  geo.setAttribute('aGen', new BufferAttribute(gen, 4, true)); geo.setAttribute('aGenDir', new BufferAttribute(gdir, 4, true)); geo.setIndex(new BufferAttribute(idx, 1));   // 40 bytes a corner
-  return { geo, points: n };
+  geo.setAttribute('aGen', new BufferAttribute(gen, 4, true)); geo.setAttribute('aGenDir', new BufferAttribute(gdir, 4, true)); geo.setIndex(new BufferAttribute(index, 1));   // 40 bytes a corner
+  return { geo, points: n, tiers: tiles ? tiles.tiers.map((t, k) => t && { ...t, wide: wide[k] }) : null };
 }
 
 export default async function init(album) {
@@ -261,17 +275,26 @@ export default async function init(album) {
   const banksMat = material(0), waterMat = material(1);
   // after the ground and the lakes, before trees and houses: first the banks of every river, then the water of every river
   const add = (geo, mat, order) => { const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = order; album.scene.add(mesh); return mesh; };
-  const meshes = sets.map(set => { const b = build(set); return { mesh: add(b.geo, waterMat, -5), banks: add(b.geo, banksMat, -6), points: b.points }; });   // (a brook has banks too, since a small river has a bed)
+  const meshes = sets.map(set => { const b = build(set), mesh = add(b.geo, waterMat, -5), banks = add(b.geo, banksMat, -6);   // (a brook has banks too, since a small river has a bed)
+    // (the two meshes are of one geometry: the first range of a frame is its own, the others go to children of each)
+    return { mesh, banks, points: b.points, tiers: b.tiers, draw: b.tiers ? [rangeDrawer(mesh), rangeDrawer(banks)] : null }; });
   const p = album.params; let on = true;
   const sync = () => { on = !!p.get('riversOn') && p.get('rivers') > 0; u.uK.value = p.get('rivers'); u.uFlat.value.set(FLAT[p.get('look')] || FLAT.atlas); };
   p.on(sync); sync();
   console.log(`[album] rivers: ${lines.length} rivers, ${meshes[0].points + meshes[1].points} points, sheets and their smoother lines in ${tGen.toFixed(0)} ms`);
-  return { id: 'rivers', lines, stats: () => ({ rivers: lines.length, points: meshes[0].points + meshes[1].points, brooks: sets[1].length }),
+  return { id: 'rivers', lines, stats: () => ({ rivers: lines.length, points: meshes[0].points + meshes[1].points, brooks: sets[1].length,
+    // what the last frame drew of each of the two meshes: pieces of all its pieces, in how many ranges
+    drawn: meshes.map(m => ({ pieces: m.mesh.visible ? (m.ranges ? m.ranges.reduce((a, r) => a + r[1], 0) : m.points) : 0, of: Math.max(0, m.points - (m === meshes[0] ? sets[0].length : sets[1].length)), ranges: m.mesh.visible && m.ranges ? m.ranges.length : 0 })) }),
     update(dt, t, cam) {
       const px = u.uPx.value = 2 * cam.s.h * Math.tan(cam.cam.fov * Math.PI / 360) / Math.max(1, album.renderer.domElement.clientHeight), far = riverFar(px);
       u.uPull.value = sheetPull(album, cam);
       u.uMinPx.value = far.minPx; u.uShow.value[0] = far.show[0]; u.uShow.value[1] = far.show[1]; u.uGen.value[0] = far.gen[0]; u.uGen.value[1] = far.gen[1]; u.uLean.value = far.lean; u.uTint.value[0] = far.tint[0]; u.uTint.value[1] = far.tint[1]; u.uTint.value[2] = far.tint[2];
       meshes[0].mesh.visible = on; meshes[1].mesh.visible = on && BROOK * u.uK.value / px > far.show[0];
       for (const m of meshes) m.banks.visible = m.mesh.visible && u.uPx.value < .12;   // banks are drawn only while a great river is a few pixels wide
+      // the squares in the picture: a corner stands off its place on the sea-level globe by the height of the land,
+      // by the width the sheet is drawn with and, from high up, by its slide toward the smoother line, km
+      const fr = frustumOf(cam.cam), pad = 4 + 5 * (u.uExag?.value || 1) + GEN.range * Math.max(far.gen[0], far.gen[1]) + 8 * px;
+      const thin = far.show[0] * px / Math.max(u.uK.value, 1e-6) * .999;      // km of water: what is no wider the sheet leaves out (VERT: show)
+      for (const m of meshes) if (m.draw && m.mesh.visible) { const r = []; for (const tr of m.tiers) if (tr && tr.wide > thin) collectRanges(tr.root, fr, pad, r); capRanges(r, RANGES); m.draw[0](r); m.draw[1](r); m.ranges = r; }
     } };
 }
