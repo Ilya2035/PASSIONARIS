@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PerspectiveCamera, BufferGeometry, BufferAttribute, Mesh, MeshBasicMaterial } from 'three';
-import { tilePieces, tileTiers, visibleRanges, collectRanges, capRanges, frustumOf, rangeDrawer, zcode, LEAF_KM, MAX_RANGES } from '../src/album/layers/linetiles.js';
+import { tilePieces, tileTiers, visibleRanges, collectRanges, capRanges, frustumOf, rangeDrawer, zcode, LEAF_KM, MAX_RANGES, NEAR } from '../src/album/layers/linetiles.js';
 import { TIERS, RANGES, riverFar } from '../src/album/layers/rivers.js';
 import { toWorld, KM_PER_DEG, COS_REF, BBOXES } from '../src/album/geo.js';
 
@@ -43,7 +43,7 @@ test('line tiles: every piece once, square by square, in a square in the order i
 test('line tiles: a camera near the ground draws a small part, and everything it can see', () => {
   // the Pyrenees from 25 km, looking south-east; Paris from 60 km, looking north; the delta of the Rhine straight down
   for (const [name, at, h, to, most] of [['pyrenees', [42.9, .5], 25, [42.6, .7], .3], ['paris', [48.3, 2.3], 60, [48.9, 2.35], .4], ['delta', [51.75, 4.3], 60, [51.76, 4.3], .05]]) {
-    const cam = camera(at, h, to), fr = frustumOf(cam), ranges = visibleRanges(T.root, fr, 10);
+    const cam = camera(at, h, to), fr = frustumOf(cam), ranges = visibleRanges(T.root, fr, 10, MAX_RANGES, 0);
     assert.ok(ranges.length >= 1 && ranges.length <= MAX_RANGES, name + ': ' + ranges.length + ' ranges');
     let drawn = 0; for (let k = 0; k < ranges.length; k++) { drawn += ranges[k][1]; if (k) assert.ok(ranges[k][0] > ranges[k - 1][0] + ranges[k - 1][1], 'in order, none touching the next'); }
     assert.ok(drawn < N * most, name + ': ' + drawn + ' of ' + N + ' pieces drawn');
@@ -52,9 +52,9 @@ test('line tiles: a camera near the ground draws a small part, and everything it
     for (let i = 0; i < N; i++) if (fr.containsPoint(toWorld(lat[i], lon[i], 0))) { seen++; assert.ok(covered(ranges, pos[i]), name + ': a piece in the picture is drawn'); }
     assert.ok(seen > 0 && seen <= drawn, name + ': ' + seen + ' pieces in the picture');
     // … with a margin, more is drawn, never less
-    const wide = visibleRanges(T.root, fr, 60); let more = 0; for (const r of wide) more += r[1]; assert.ok(more >= drawn);
+    const wide = visibleRanges(T.root, fr, 60, MAX_RANGES, 0); let more = 0; for (const r of wide) more += r[1]; assert.ok(more >= drawn);
     // … and with few ranges allowed, the same pieces and more
-    const few = visibleRanges(T.root, fr, 10, 2); assert.ok(few.length <= 2); for (const r of ranges) assert.ok(covered(few, r[0]) && covered(few, r[0] + r[1] - 1));
+    const few = visibleRanges(T.root, fr, 10, 2, 0); assert.ok(few.length <= 2); for (const r of ranges) assert.ok(covered(few, r[0]) && covered(few, r[0] + r[1] - 1));
   }
 });
 
@@ -110,9 +110,13 @@ test('line tiles: by classes first — class by class, in a class square by squa
   // without the narrow class nothing of it is drawn
   const wideOnly = collectRanges(C.tiers[0].root, fr, 10); for (const q of wideOnly) assert.ok(q[0] + q[1] <= C.tiers[0].count);
   // too many ranges: the nearest are joined, what was drawn is still drawn
-  const many = [[0, 5], [10, 5], [16, 4], [100, 10], [300, 1]], few = capRanges(many.map(q => q.slice()), 3);
+  const many = [[0, 5], [10, 5], [16, 4], [100, 10], [300, 1]], few = capRanges(many.map(q => q.slice()), 3, 0);
   assert.deepEqual(few, [[0, 20], [100, 10], [300, 1]]);
   assert.deepEqual(capRanges([[3, 4]], 1), [[3, 4]]); assert.deepEqual(capRanges([], 2), []);
+  // ranges with only a few pieces between them are drawn as one: a draw call costs more than those pieces
+  assert.deepEqual(capRanges(many.map(q => q.slice()), 9, 5), [[0, 20], [100, 10], [300, 1]]);
+  assert.deepEqual(capRanges(many.map(q => q.slice()), 9, 80), [[0, 110], [300, 1]]);
+  assert.ok(NEAR > 50 && NEAR < 5000);
 });
 
 test('line tiles: the sheets of the rivers go by classes of width, the widest first', () => {

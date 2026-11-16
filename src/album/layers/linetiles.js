@@ -21,6 +21,7 @@ import { toWorld, KM_PER_DEG, COS_REF } from '../geo.js';
 export const LEAF_KM = 64;             // the side of the smallest square
 export const MAX_RANGES = 12;          // a frame draws no more ranges of one mesh than this: the nearest are joined
 export const MIN_PIECES = 3000;        // a mesh with fewer pieces is left as it is
+export const NEAR = 400;               // two ranges with no more pieces than this between them are drawn as one
 
 // the bits of two numbers under 2^15, interleaved (x in the even places)
 const spread = v => { v &= 0x7fff; v = (v | (v << 8)) & 0x00ff00ff; v = (v | (v << 4)) & 0x0f0f0f0f; v = (v | (v << 2)) & 0x33333333; return (v | (v << 1)) & 0x55555555; };
@@ -102,16 +103,18 @@ export function collectRanges(root, frustum, pad = 0, out = []) {
   walk(root);
   return out;
 }
-// no more than `max` ranges: while there are more, the two with the least between them become one (what lies between
-// is drawn too: a little work for nothing, never a hole)
-export function capRanges(out, max = MAX_RANGES) {
+// Fewer ranges. Two with no more than `near` pieces between them become one: a draw call costs more than those few
+// pieces. And no more than `max` ranges: while there are more, the two with the least between them become one.
+// (What lies between is drawn too: a little work for nothing, never a hole.)
+export function capRanges(out, max = MAX_RANGES, near = NEAR) {
+  for (let i = out.length - 1; i > 0; i--) if (out[i][0] - out[i - 1][0] - out[i - 1][1] <= near) { out[i - 1][1] = out[i][0] + out[i][1] - out[i - 1][0]; out.splice(i, 1); }
   while (out.length > max) {
     let at = 1, gap = Infinity; for (let i = 1; i < out.length; i++) { const g = out[i][0] - out[i - 1][0] - out[i - 1][1]; if (g < gap) { gap = g; at = i; } }
     out[at - 1][1] = out[at][0] + out[at][1] - out[at - 1][0]; out.splice(at, 1);
   }
   return out;
 }
-export const visibleRanges = (root, frustum, pad = 0, max = MAX_RANGES) => capRanges(collectRanges(root, frustum, pad), max);
+export const visibleRanges = (root, frustum, pad = 0, max = MAX_RANGES, near = NEAR) => capRanges(collectRanges(root, frustum, pad), max, near);
 
 // Lets a mesh draw several ranges of its index. per: indices a piece. → draw(ranges): the mesh draws the first range,
 // its children made here the others; draw(null): everything, as a mesh does by itself. The children take the
