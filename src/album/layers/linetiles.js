@@ -116,19 +116,20 @@ export function capRanges(out, max = MAX_RANGES, near = NEAR) {
 }
 export const visibleRanges = (root, frustum, pad = 0, max = MAX_RANGES, near = NEAR) => capRanges(collectRanges(root, frustum, pad), max, near);
 
-// Lets a mesh draw several ranges of its index. per: indices a piece. → draw(ranges): the mesh draws the first range,
-// its children made here the others; draw(null): everything, as a mesh does by itself. The children take the
-// material and the render order of the mesh as they are at that moment, and are hidden with it.
+// Lets a mesh draw several ranges of its index. per: indices a piece — or, for pieces of different sizes (a bridge),
+// where every piece begins in the index, one number more than there are pieces. → draw(ranges): the mesh draws the
+// first range, its children made here the others; draw(null): everything, as a mesh does by itself. The children
+// take the material and the render order of the mesh as they are at that moment, and are hidden with it.
 export function rangeDrawer(mesh, per = 6) {
-  const geo = mesh.geometry, kids = [], whole = geo.dispose.bind(geo);
+  const geo = mesh.geometry, kids = [], whole = geo.dispose.bind(geo), at = typeof per === 'number' ? k => k * per : k => per[k];
   geo.dispose = () => { for (const k of kids) k.geometry.dispose(); whole(); };
   return ranges => {
-    if (!ranges) geo.setDrawRange(0, Infinity); else if (!ranges.length) geo.setDrawRange(0, 0); else geo.setDrawRange(ranges[0][0] * per, ranges[0][1] * per);
+    if (!ranges) geo.setDrawRange(0, Infinity); else if (!ranges.length) geo.setDrawRange(0, 0); else geo.setDrawRange(at(ranges[0][0]), at(ranges[0][0] + ranges[0][1]) - at(ranges[0][0]));
     const n = ranges ? ranges.length : 0;
     for (let i = 1; i < n; i++) {
       let k = kids[i - 1];
       if (!k) { const g = new BufferGeometry(); for (const name in geo.attributes) g.setAttribute(name, geo.attributes[name]); g.setIndex(geo.index); k = kids[i - 1] = new Mesh(g, mesh.material); k.frustumCulled = false; mesh.add(k); }
-      k.geometry.setDrawRange(ranges[i][0] * per, ranges[i][1] * per); k.material = mesh.material; k.renderOrder = mesh.renderOrder; k.visible = true;
+      k.geometry.setDrawRange(at(ranges[i][0]), at(ranges[i][0] + ranges[i][1]) - at(ranges[i][0])); k.material = mesh.material; k.renderOrder = mesh.renderOrder; k.visible = true;
     }
     for (let i = Math.max(0, n - 1); i < kids.length; i++) kids[i].visible = false;
     return n;

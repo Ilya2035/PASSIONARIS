@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { PerspectiveCamera, BufferGeometry, BufferAttribute, Mesh, MeshBasicMaterial } from 'three';
 import { tilePieces, tileTiers, visibleRanges, collectRanges, capRanges, frustumOf, rangeDrawer, zcode, LEAF_KM, MAX_RANGES, NEAR } from '../src/album/layers/linetiles.js';
 import { TIERS, RANGES, riverFar } from '../src/album/layers/rivers.js';
+import { worksGeometry, worksTiles, WORKS_TILES } from '../src/album/roads/works.js';
 import { toWorld, KM_PER_DEG, COS_REF, BBOXES } from '../src/album/geo.js';
 
 // pieces scattered over the rectangle of stage 3, the same every run
@@ -126,4 +127,30 @@ test('line tiles: the sheets of the rivers go by classes of width, the widest fi
   // from 1700 km water under 76 m is left out, from 820 km under 36 m: whole classes go
   const thin = h => { const px = 2 * h * Math.tan(16 * Math.PI / 180) / 900; return riverFar(px).show[0] * px; };
   assert.ok(TIERS.filter(w => w <= thin(1700)).length >= 3 && TIERS.filter(w => w <= thin(820)).length >= 2 && TIERS.filter(w => w <= thin(25)).length === 0);
+});
+
+test('line tiles: the works of the roads — every bridge keeps its triangles together, the bridges go by squares', () => {
+  // four hundred works over Iberia and France: bridges of the three kinds and ferries, each with its own number of triangles
+  const kinds = ['stone', 'timber', 'foot', 'ferry'], list = [];
+  for (let i = 0; i < 400; i++) list.push({ lat: 36 + (i * 7919 % 1000) / 1000 * 14, lon: -9 + (i * 104729 % 1000) / 1000 * 16, dx: 1, dy: 0, width: .02 + (i % 9) * .02, sin: 1, kind: kinds[i % 4], road: .008, minPx: 1.6 });
+  const geo = worksGeometry(list), items = geo.userData.items, old = Array.from(geo.index.array);
+  assert.equal(items.length, list.length + 1); assert.equal(items[0], 0); assert.equal(items[list.length], old.length);
+  for (let i = 0; i < list.length; i++) assert.ok(items[i + 1] > items[i] && (items[i + 1] - items[i]) % 6 === 0, 'a work is whole quads');
+  assert.ok(new Set(list.map((_, i) => items[i + 1] - items[i])).size > 3, 'works of different sizes');
+  const t = worksTiles(geo, list);
+  assert.ok(t && t.leaves > 20 && t.starts.length === list.length + 1 && t.starts[list.length] === old.length && t.index.length === old.length);
+  // the same triangles, work by work: every block of the new index is the block of one work
+  const blocks = new Map(list.map((_, i) => [old.slice(items[i], items[i + 1]).join(','), i])), seen = new Set();
+  for (let k = 0; k < list.length; k++) { const i = blocks.get(Array.from(t.index.subarray(t.starts[k], t.starts[k + 1])).join(',')); assert.ok(i !== undefined && !seen.has(i)); seen.add(i); }
+  assert.equal(seen.size, list.length);
+  // a few works are left as they are
+  assert.equal(worksTiles(worksGeometry(list.slice(0, WORKS_TILES.min - 1)), list.slice(0, WORKS_TILES.min - 1)), null);
+  // the ranges of works of different sizes: where each begins is read from the list of starts
+  geo.setIndex(new BufferAttribute(t.index, 1)); const mesh = new Mesh(geo, new MeshBasicMaterial()), draw = rangeDrawer(mesh, t.starts);
+  draw([[3, 2], [10, 5]]);
+  assert.deepEqual([geo.drawRange.start, geo.drawRange.count], [t.starts[3], t.starts[5] - t.starts[3]]);
+  assert.deepEqual([mesh.children[0].geometry.drawRange.start, mesh.children[0].geometry.drawRange.count], [t.starts[10], t.starts[15] - t.starts[10]]);
+  // a camera near the ground draws the bridges it can see, not all
+  const fr = frustumOf(camera([42.9, .5], 25, [42.6, .7])), r = visibleRanges(t.root, fr, 10, undefined, WORKS_TILES.near); let n = 0; for (const q of r) n += q[1];
+  assert.ok(n < list.length * .5, n + ' of ' + list.length + ' works drawn');
 });

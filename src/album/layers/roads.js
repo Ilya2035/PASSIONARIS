@@ -260,6 +260,7 @@ export default async function init(album) {
       for (const w of works) {
         w.mesh.visible = on && bf > 0 && kr > 0 && !w.dark && p.get(LOOK[w.kind + 1].key) !== 0; if (!w.mesh.visible) continue;
         w.u.uPx.value = px; w.u.uAlpha.value = bf; w.u.uPull.value = .6 * (.02 + cam.s.h * .0005);
+        w.cull(cam.cam, 6 + 5 * (w.u.uExag.value || 1) + 8 * px);                // only the squares in the picture (layers/linetiles.js)
         w.u.uRiver.value[0] = px * rf.minPx; w.u.uRiver.value[1] = rf.lean; w.u.uRiver.value[2] = kr;
       }
     } };

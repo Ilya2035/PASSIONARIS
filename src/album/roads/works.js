@@ -13,6 +13,7 @@
 import { BufferGeometry, BufferAttribute, Mesh, ShaderMaterial, DoubleSide, CustomBlending, SrcAlphaFactor, OneMinusSrcAlphaFactor } from 'three';
 import { COMMON, CHUNK_GLSL, LIGHT, lightUniforms } from '../glsl.js';
 import { GROUND_LIGHT } from '../layers/ribbon.js';
+import { tilePieces, visibleRanges, frustumOf, rangeDrawer } from '../layers/linetiles.js';
 
 // metres: how high the deck stands over the water, how thick it is, its camber, the length of a ramp km, a pier or a pair of posts every … km of river
 export const WORKS = {
@@ -30,6 +31,7 @@ const rgb = c => [(c >> 16 & 255) / 255, (c >> 8 & 255) / 255, (c & 255) / 255];
 // → BufferGeometry. A corner: aC the middle of the crossing; aD the way of the road, the water, 1 / sin; aP its place —
 // along (in halves of the span), across (in halves of the deck), up (metres), from what (0 the deck · 1 the water ·
 // 2 the ground under it); aQ km added along and across; aR the road, its least pixels, the height of the deck.
+// geo.userData.items: where the triangles of every work begin in the index, and where the last one ends.
 export function worksGeometry(list) {
   const C = [], D = [], P = [], Q = [], R = [], Nn = [], Col = [], idx = []; let n = 0, cur = null, H = 0;
   const vert = (c, nrm, col) => { C.push(cur.lat, cur.lon); D.push(cur.dx, cur.dy, cur.width, 1 / Math.max(.5, cur.sin || 1)); P.push(c[0], c[2], c[4], c[5]); Q.push(c[1], c[3]); R.push(cur.road, cur.minPx, H); Nn.push(nrm[0], nrm[1], nrm[2]); Col.push(col[0], col[1], col[2]); return n++; };
@@ -41,8 +43,9 @@ export function worksGeometry(list) {
     quad(c(0, 0, 0), c(1, 0, 0), c(1, 0, 1), c(0, 0, 1), [0, -1, 0], side); quad(c(1, 1, 0), c(0, 1, 0), c(0, 1, 1), c(1, 1, 1), [0, 1, 0], side);
     quad(c(0, 1, 0), c(0, 0, 0), c(0, 0, 1), c(0, 1, 1), [-1, 0, 0], side); quad(c(1, 0, 0), c(1, 1, 0), c(1, 1, 1), c(1, 0, 1), [1, 0, 0], side);
   };
+  const items = [];
   for (const f of list) {
-    cur = f;
+    cur = f; items.push(idx.length);
     if (f.kind === 'ferry') {
       H = 0; const F = WORKS.ferry, wall = rgb(F.hut[0]), roof = rgb(F.hut[1]), wood = rgb(F.wood), dark = rgb(F.wood).map(v => v * .7);
       // a landing stage on each bank, from the bank a few metres out over the water
@@ -86,10 +89,21 @@ export function worksGeometry(list) {
   const geo = new BufferGeometry(), f32 = (a, k, name) => geo.setAttribute(name, new BufferAttribute(new Float32Array(a), k));
   geo.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3));
   f32(C, 2, 'aC'); f32(D, 4, 'aD'); f32(P, 4, 'aP'); f32(Q, 2, 'aQ'); f32(R, 3, 'aR'); f32(Nn, 3, 'aN'); f32(Col, 3, 'aCol'); geo.setIndex(idx);
+  items.push(idx.length); geo.userData.items = items;
   return geo;
 }
 
-// the mesh of the works, added to the scene: { mesh, u, set(cam, dom, …) }
+// How few works are left as one mesh drawn whole; works with no more than NEAR of them between two ranges are drawn as one.
+export const WORKS_TILES = { min: 300, near: 12 };
+// The works by squares (layers/linetiles.js): the triangles of each work stay together, the works are put in the
+// index square by square. → { index, starts } or null when there are too few
+export function worksTiles(geo, list) {
+  const items = geo.userData.items; if (!items || list.length < WORKS_TILES.min) return null;
+  const t = tilePieces(list.length, list.map(f => f.lat), list.map(f => f.lon)), old = geo.index.array, index = new Uint32Array(old.length), starts = new Uint32Array(list.length + 1); let q = 0;
+  t.order.forEach((i, k) => { starts[k] = q; for (let a = items[i]; a < items[i + 1]; a++) index[q++] = old[a]; }); starts[list.length] = q;
+  return { index, starts, root: t.root, leaves: t.leaves };
+}
+// the mesh of the works, added to the scene: { mesh, u, cull(camera, pad km) — the squares of a frame }
 export function makeWorks(album, list, { wide = 2 } = {}) {
   const T = album.terrain.u;
   const uniforms = { uBase: T.uBase, uBaseRect: T.uBaseRect, uDet: T.uDet, uDetRect: T.uDetRect, uDetOn: T.uDetOn, uExag: T.uExag, uShade: T.uShade, ...lightUniforms(T), ...album.chunks.uniforms,
@@ -135,7 +149,9 @@ export function makeWorks(album, list, { wide = 2 } = {}) {
         gl_FragDepth = clamp(vZW.x / vZW.y * .5 + .5, 0., 1.);
       }`,
   });
-  const mesh = new Mesh(worksGeometry(list), mat); mesh.frustumCulled = false; mesh.renderOrder = -3;   // … bridges −4 · their works −3
+  const geo = worksGeometry(list), tiles = worksTiles(geo, list); if (tiles) geo.setIndex(new BufferAttribute(tiles.index, 1));
+  const mesh = new Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = -3;   // … bridges −4 · their works −3
   album.scene.add(mesh);
-  return { mesh, u: uniforms };
+  const draw = tiles ? rangeDrawer(mesh, tiles.starts) : null;
+  return { mesh, u: uniforms, squares: tiles ? tiles.leaves : 0, cull(camera, pad = 10) { if (draw) draw(visibleRanges(tiles.root, frustumOf(camera), pad, undefined, WORKS_TILES.near)); } };
 }
