@@ -4,7 +4,9 @@
 // The state comes from the chunks: p.cA.a = share of the chunk's land under swamp, p.cB = (ice, snow, flood, spare).
 // Which swamp grows at a place is not stored: it follows from the height, the wetness and the sea (swampKind).
 
-import { FKM, FNX, FNY, CHUNK_KM, CI0, CJ0 } from '../chunks.js';
+import { FKM, FNX, FNY, CHUNK_KM, CI0, CJ0, NONE } from '../chunks.js';
+import { KN, KNY, KKM, KX0, KY0, kmHash } from '../division/km.js';
+import { farmBytes } from '../town/state.js';
 import { BBOX, STAGE } from '../geo.js';
 import { wetAt as climateWet } from '../ground/climate.js';
 import { DRY_LAND } from '../ground/despike.js';
@@ -170,6 +172,100 @@ export function naturalSwamp(ch, heightAt, { wetlands = [] } = {}) {
   return out;
 }
 
+// ---- STAGE 3: the swamp of the chunks of 1 km² (division/km.js). A natural cell is some 100 km², and its share of
+// swamp says how much of it is swamp, not where: the shader used to lay that share by a noise, and a flood plain of
+// 15 km² came out as blots all over its cell, some of them far from the river (the lead at Zaragoza, 15.11.2026).
+// Here every square of 1 km² of a cell with swamp gets a mark — how readily water stands on it — and the squares of
+// the cell take its swamp in the order of their marks until the area of the cell's swamp is laid:
+//   low ground of the cell first · level ground before a slope · near water (the sea, a lagoon, a river of the map)
+//   before far from it · a hollow before a rise · and a little chance, so that level country does not fill in rows.
+// The swamp of a cell stays what it was; only its place inside the cell is new. The answer is softened over the
+// squares around (a swamp does not end at the side of a square).
+//   ch: Chunks;  heightAt(lat, lon) → m;  natural: the share of swamp of every natural cell (naturalSwamp);
+//   rivers: the rivers of the map, [{ pts: [[lon, lat], …] }]
+// → Uint8Array KN × KNY, square j · KN + i: its share of swamp, 0..255. The settlements keep it beside the fields of
+// the chunks (town/state.js, mirrorSwamp) and the ground shader reads it there (swampKm below).
+export const KM_REACH = 6;                                  // squares: how far water is looked for
+export function swampKmOf(ch, heightAt, natural, { rivers = [] } = {}) {
+  const n = KN * KNY, cell = ch.cell, cells = ch.count, of = new Int32Array(n).fill(-1), count = new Uint32Array(cells);
+  for (let j = 0, c = 0; j < KNY; j++) {
+    const ty = Math.min(FNY - 1, Math.floor((j + .5) * KKM / FKM));
+    for (let i = 0; i < KN; i++, c++) {
+      const k = cell[ty * FNX + Math.min(FNX - 1, Math.floor((i + .5) * KKM / FKM))];
+      if (k === NONE || k >= cells || ch.kind[k] !== 1 || !(natural[k] > 0)) continue;
+      of[c] = k; count[k]++;
+    }
+  }
+  // the heights of the squares, as they are asked for
+  const hs = new Float32Array(n).fill(NaN);
+  const hAt = c => { let v = hs[c]; if (v !== v) { const i = c % KN, j = (c - i) / KN; v = hs[c] = heightAt((KY0 + (j + .5) * KKM) / KMD, (KX0 + (i + .5) * KKM) / (KMD * COS)); } return v; };
+  const hOf = (i, j) => hAt(Math.max(0, Math.min(KNY - 1, j)) * KN + Math.max(0, Math.min(KN - 1, i)));
+  // the squares a river of the map runs through
+  const river = new Uint8Array(n);
+  for (const r of rivers) for (let q = 1; q < (r.pts || []).length; q++) {
+    const x0 = r.pts[q - 1][0] * KMD * COS, y0 = r.pts[q - 1][1] * KMD, x1 = r.pts[q][0] * KMD * COS, y1 = r.pts[q][1] * KMD, steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (KKM * .4)));
+    for (let t = 0; t <= steps; t++) { const i = Math.floor((x0 + (x1 - x0) * t / steps - KX0) / KKM), j = Math.floor((y0 + (y1 - y0) * t / steps - KY0) / KKM); if (i >= 0 && j >= 0 && i < KN && j < KNY) river[j * KN + i] = 1; }
+  }
+  // how far the nearest water is from a square, in squares (KM_REACH: none within reach)
+  const waterFrom = (i, j) => {
+    for (let r = 0; r <= KM_REACH; r++) for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) {
+      if (Math.max(Math.abs(a), Math.abs(b)) !== r) continue;
+      const x = i + a, y = j + b; if (x < 0 || y < 0 || x >= KN || y >= KNY) continue;
+      if (river[y * KN + x] || hAt(y * KN + x) <= 0) return r;
+    }
+    return KM_REACH;
+  };
+  // the squares of every cell, one cell after another
+  const start = new Uint32Array(cells + 1); for (let k = 0; k < cells; k++) start[k + 1] = start[k] + count[k];
+  const list = new Uint32Array(start[cells]), fill = start.slice(0, cells);
+  for (let c = 0; c < n; c++) if (of[c] >= 0) list[fill[of[c]]++] = c;
+  const share = new Float32Array(n);
+  for (let k = 0; k < cells; k++) {
+    const m = count[k]; if (!m) continue;
+    let lo = Infinity, hi = -Infinity;
+    for (let q = start[k]; q < start[k + 1]; q++) { const h = hAt(list[q]); if (h < lo) lo = h; if (h > hi) hi = h; }
+    const mark = [];
+    for (let q = start[k]; q < start[k + 1]; q++) {
+      const c = list[q], i = c % KN, j = (c - i) / KN, h = hAt(c), e = hOf(i + 1, j), w = hOf(i - 1, j), no = hOf(i, j + 1), so = hOf(i, j - 1);
+      const steep = Math.min(1, Math.max(Math.abs(h - e), Math.abs(h - w), Math.abs(h - no), Math.abs(h - so)) / 30);
+      const rise = Math.max(0, Math.min(1, .5 + (h - (e + w + no + so) / 4) / 20));
+      mark.push([.35 * (h - lo) / (hi - lo + 5) + .25 * steep + .25 * waterFrom(i, j) / KM_REACH + .10 * rise + .05 * kmHash(i, j, 77), c]);
+    }
+    mark.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    const area = Math.min(.95, natural[k]) * m, whole = Math.floor(area);
+    for (let q = 0; q < whole; q++) share[mark[q][1]] = 1;
+    if (whole < m) share[mark[whole][1]] = area - whole;
+  }
+  // softened over the squares around: 1 2 1 / 2 4 2 / 1 2 1
+  const km = new Uint8Array(n);
+  for (let j = 0, c = 0; j < KNY; j++) for (let i = 0; i < KN; i++, c++) {
+    let sum = 0;
+    for (let b = -1; b <= 1; b++) { const y = j + b; if (y < 0 || y >= KNY) continue; for (let a = -1; a <= 1; a++) { const x = i + a; if (x < 0 || x >= KN) continue; const v = share[y * KN + x]; if (v > 0) sum += v * (a ? 1 : 2) * (b ? 1 : 2); } }
+    if (sum > 0) km[c] = Math.round(sum / 16 * 255);
+  }
+  return km;
+}
+// has the settlement work written the swamp of the chunks into its texture (mirrorSwamp: the six low bits of A)?
+// Looked up on a few squares that hold swamp; bytes: the chunk rows of that texture.
+export function swampKmMirrored(km, bytes = farmBytes) {
+  if (!km || bytes.length < km.length * 4) return false;
+  let seen = 0;
+  for (let c = 0; c < km.length && seen < 8; c += 97) { if (km[c] < 8) continue; if ((bytes[c * 4 + 3] & 63) !== km[c] >> 2) return false; seen++; }
+  return seen > 0;
+}
+// the shader: where the settlements keep the share (a texel a square, square (i, j) at (i, j)), joined between the
+// four squares around a point. It stands in the text of the ground shader AFTER the settlement aspect, whose texture
+// it reads — in the forest aspect, which is the next one of the same hand (aspects/index.js); the swamp's own text,
+// which comes first, only names it.
+export const SWAMP_KM_GLSL = S3 ? /* glsl */`
+float swampKmAt(ivec2 c) { return mod(floor(texelFetch(tSettle, clamp(c, ivec2(0), ivec2(${KN - 1}, ${KNY - 1})), 0).a * 255. + .5), 64.); }
+float swampKm(vec2 pk) {
+  vec2 t = (pk - vec2(${KX0.toFixed(1)}, ${KY0.toFixed(1)})) / ${KKM.toFixed(1)} - .5, f = fract(t); ivec2 c = ivec2(floor(t));
+  vec4 v = vec4(swampKmAt(c), swampKmAt(c + ivec2(1, 0)), swampKmAt(c + ivec2(0, 1)), swampKmAt(c + ivec2(1, 1)));
+  return mix(mix(v.x, v.y, f.x), mix(v.z, v.w, f.x), f.y) / 63.;
+}
+` : '';
+
 // ---- rules in GLSL, shared with anything that must know what a swamp is at a point.
 // They need COMMON of glsl.js (heightLod, vnoise) and nothing else: no uniforms, no screen derivatives.
 // Used outside this file: the forest (swampTreeless) and, since v0.6.140, the vertex shader of the yards of the
@@ -225,7 +321,16 @@ float swampTreeless(float s, vec2 pk, vec2 ll, float wet, float n2, float n3) {
 
 const GLSL = /* glsl */`
 uniform float uSwampWater, uSwampIron;
-${SWAMP_RULES}
+${SWAMP_RULES}${S3 ? `
+// (stage 3) the swamp of the chunks of 1 km²: uSwampKm is 1 once the settlements keep it in their texture; swampKm()
+// stands further down the text (SWAMP_KM_GLSL). How deep into the swamp a point is, by that share: the swamp lies
+// where the chunks hold it, and the noise only frays its edge.
+uniform float uSwampKm;
+float swampKm(vec2 pk);
+float swampDepthKm(float sk, float f, vec2 ll, float hs, float slope, float bog) {
+  float low = clamp((max(heightLod(ll, 4.5), 0.) - hs) / (4. + hs * .03), -1., 1.);
+  return (sk - .5) * 1.6 + (.5 - f) * .3 + low * .2 - smoothstep(mix(.012, .07, bog), mix(.05, .28, bog), slope) * 1.3;
+}` : ''}
 // a line of water of half-width w km, a km away from the middle of a pixel px km wide: the share of the pixel it covers
 float swampLine(float a, float w, float px) { return clamp((min(w, a + .5 * px) - max(-w, a - .5 * px)) / px, 0., 1.); }
 
@@ -234,11 +339,13 @@ void aspSwamp(Px p, inout Land L) {
   float s = p.cA.a;
   if (s < .004 || p.h < -1.) return;
   vec2 pk = p.pk; float px = p.px, far = smoothstep(1.5, 4.5, px), f = swampField(pk, p.n2, p.n3, px);
-  if (s * 1.05 - f + .3 < -.07 && far <= 0.) return;                                  // dry even in the lowest hollow
+${S3 ? `  float sk = -1.;
+  if (uSwampKm > .5) { sk = swampKm(pk); if (sk < .02 && far <= 0.) return; }             // no swamp in the chunks around
+  else if (s * 1.05 - f + .3 < -.07 && far <= 0.) return;                             // (the chunks are not known yet: by the noise, as at stage 2)` : `  if (s * 1.05 - f + .3 < -.07 && far <= 0.) return;                                  // dry even in the lowest hollow`}
   float hs = swampHeight(p.ll), slope = swampSlope(p.ll, hs);
   float hk = hs + (p.n2 - .5) * 3. + (p.n3 - .5) * 1.5;                               // a little unevenness, so the kinds do not change along the cells of the height data
   vec4 kind = swampKind(p.ll, hk, p.wet);
-  float d = swampDepth(s, f, p.ll, hs, slope, kind.x);
+  float d = ${S3 ? 'sk < 0. ? swampDepth(s, f, p.ll, hs, slope, kind.x) : swampDepthKm(sk, f, p.ll, hs, slope, kind.x)' : 'swampDepth(s, f, p.ll, hs, slope, kind.x)'};
   // (The edge of the swamp is a few pixels wide, and no wider than it was. With one width at every height a small
   // swamp seen from 20 km was a blurred blot — the lead on the flood plain of the Ebro at Zaragoza, 15.11.2026.)
   float swE = clamp(px * 1.2, .012, .07);
@@ -325,7 +432,7 @@ const KINDS = ['bog', 'fen', 'salt', 'carr'], KIND_COL = [[.78, .33, .10], [.50,
 
 export default {
   id: 'swamp', title: 'Болота', glsl: GLSL,
-  uniforms: { uSwampWater: { value: .5 }, uSwampIron: { value: 1 } },
+  uniforms: { uSwampWater: { value: .5 }, uSwampIron: { value: 1 }, ...(S3 ? { uSwampKm: { value: 0 } } : {}) },
   params: [
     { key: 'swampWater', label: 'Вода в болотах', group: 'land', min: 0, max: 1, step: .05, value: .5, uniform: 'uSwampWater' },
     { key: 'swampIron', label: 'Болотное железо: ржавый оттенок', group: 'land', min: 0, max: 2, step: .1, value: 1, unit: '×', uniform: 'uSwampIron' },
@@ -354,6 +461,15 @@ export default {
     const centres = Array.from({ length: ch.count }, (_, k) => ch.centre(k));
     const kindOf = k => swampKind(centres[k].lat, centres[k].lon, ch.height[k]), ironOf = k => swampIron(ch.get('swamp', k), centres[k].lat, centres[k].lon, ch.height[k]);
     album.swamp = { natural, wetlands, kindOf, ironOf };
+    // (stage 3) the swamp of the chunks of 1 km²: km — a byte a chunk, kmVersion — grows when it changes. The
+    // settlements watch the version and write the array into their texture; until they have, the shader lays the
+    // swamp by its noise (uSwampKm 0).
+    let kmSeen = !S3;
+    if (S3) {
+      const t0 = performance.now();
+      album.swamp.km = swampKmOf(ch, album.data.base.at, natural, { rivers: album.data.vectors?.rivers || [] }); album.swamp.kmVersion = 1;
+      console.info(`[album] swamp of the chunks of 1 km²: ${Math.round(performance.now() - t0)} ms`);
+    }
 
     // a demonstration of winter: the swamps freeze, light snow lies on the land, more of it on the open mire
     ch.onReset(c => {
@@ -387,6 +503,9 @@ export default {
     });
     if (p.get('swampFrost')) ch.reset();
     if (showMap()) shown = ch.version;
-    return { id: 'swamp', update() { if (p.get('swampMap') && shown !== ch.version) { showMap(); shown = ch.version; } } };
+    return { id: 'swamp', update() {
+      if (p.get('swampMap') && shown !== ch.version) { showMap(); shown = ch.version; }
+      if (!kmSeen && swampKmMirrored(album.swamp.km)) { kmSeen = true; album.terrain.u.uSwampKm.value = 1; }
+    } };
   },
 };

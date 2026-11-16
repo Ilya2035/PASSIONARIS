@@ -338,7 +338,7 @@ test('stage 3: a level of the grid is cut into blocks, and a fourth variant draw
   // the shader: the fourth variant reads no chunks, and the parts that live on them are not in it
   const terrain = read('../src/album/terrain.js'), forest = read('../src/album/aspects/forest.js');
   assert.ok(terrain.includes('#if ZONE == 3 || ZONE == 4\n#define NO_CHUNKS'));
-  for (const g of ['#ifdef NO_CHUNKS\n  p.cA = vec4(1., 0., 1., 0.); p.cB = vec4(0.); p.cC = vec4(0.);', '#ifndef NO_CHUNKS\n    ground = aspShore(', '#ifndef NO_CHUNKS\n    aspSwamp(p, L);', '#ifndef NO_CHUNKS\n  aspDivision(', '#ifndef NO_CHUNKS\n  // the chunks themselves:']) assert.ok(terrain.includes(g), g);
+  for (const g of ['#ifdef NO_CHUNKS\n  p.cA = vec4(1., 0., 1., 0.); p.cB = vec4(0.); p.cC = vec4(0.);', '#if ZONE != 3\n    ground = aspShore(', '#ifndef NO_CHUNKS\n    aspSwamp(p, L);', '#ifndef NO_CHUNKS\n  aspDivision(', '#ifndef NO_CHUNKS\n  // the chunks themselves:']) assert.ok(terrain.includes(g), g);
   assert.ok(terrain.includes('#if ZONE != 3\n    float lb = 1.6 + max(log2(px / .234), 0.)'), 'the relief of the polygon is read by the fourth variant too');
   assert.equal(forest.split('#ifndef NO_CHUNKS\n').length - 1, 2); assert.ok(!forest.includes('#if ZONE != 3'));
   // the class: at stage 3 five variants, each with its own groups; the list of a level answers .uniforms

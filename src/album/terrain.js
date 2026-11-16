@@ -623,7 +623,11 @@ void main() {
     vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;
     if (fract((ga + gb) * .5) > .25) { gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }
     ground *= mix(vec3(1.), texDetail(sandW > .35 ? tSand : (rockW > .45 || kind < .10) ? tRock : kind < .46 ? tDry : tGrass, gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope)));
-#ifndef NO_CHUNKS
+    // (The shore is drawn wherever the heights are the detailed ones — on the plain land inside the rectangle too,
+    // though no chunk lies there: it needs none. Left out of that variant, the rule «no tree within reach of the
+    // surf» was left out with it, and the marshes of the German coast, lifted to 1 m in the base, stood under
+    // forest in the blocks of plain land and bare in the blocks beside them — straight edges, 16.11.2026.)
+#if ZONE != 3
     ground = aspShore(p, ground, L.cover);                           // beaches and rocks at the waterline (the water work)
 #endif
     L.col = ground;

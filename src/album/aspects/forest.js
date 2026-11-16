@@ -9,6 +9,7 @@
 // forest under them). A small model here lets a felled chunk grow over again.
 import { kmOf } from '../chunks.js';
 import { wetAt as climateWet, treelineAt } from '../ground/climate.js';
+import { SWAMP_KM_GLSL } from './swamp.js';
 
 // ---- the natural state: the world of 5000 BC, before anyone felled anything
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -211,7 +212,7 @@ vec3 albumForestTint(float con, float age, float wet, float hl, float lat, float
 `;
 
 const GLSL = /* glsl */`
-${FOREST_RULES}
+${SWAMP_KM_GLSL}${FOREST_RULES}
 uniform float uForestVol;   // the height of the canopy as it is drawn: 0 flat paint, 1 the usual
 // crowns: a jittered lattice of points like worleyV() — xy = vector to the nearest point, z = distance to it, w = its
 // random number. The number is taken from the hash that places the point, which stays good far from the origin.

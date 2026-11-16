@@ -269,3 +269,49 @@ test('natural swamp on the real heights: the known swamps are where they should 
   }
   for (const [lat, lon] of [[41.3, -6.3], [39.75, -6.9], [38.2, -7.5], [41.3, .2]]) assert.ok(near(lat, lon) < .15, `no marsh on the reservoir at ${lat}, ${lon}: ${near(lat, lon)}`);
 });
+
+test('the swamp of the chunks of 1 km²: the swamp of a cell lies on its squares by the water, and its area is kept', async () => {
+  const { swampKmOf, swampKmMirrored, SWAMP_KM_GLSL, KM_REACH } = await import('../src/album/aspects/swamp.js');
+  const { KN, KNY, KX0, KY0 } = await import('../src/album/division/km.js');
+  const { FKM, FNX, FNY, NONE } = await import('../src/album/chunks.js');
+  const KMD = 111.195, COS = Math.cos(40 * Math.PI / 180);
+  const river = { rank: 5, pts: [[-4.5, 39.02], [-7.97, 39.02]] }, ch = new Chunks(world, [river]), nat = naturalSwamp(ch, world, {});
+  const km = swampKmOf(ch, world, nat, { rivers: [river] });
+  assert.equal(km.length, KN * KNY, 'a byte a square of the lattice of the chunks');
+  assert.equal(KM_REACH, 6);
+  // the area: what the cells hold is what their squares hold
+  let want = 0, got = 0; const squares = new Uint32Array(ch.count);
+  for (let j = 0, c = 0; j < KNY; j++) for (let i = 0; i < KN; i++, c++) { got += km[c] / 255; const k = ch.cell[Math.min(FNY - 1, Math.floor((j + .5) / FKM)) * FNX + Math.min(FNX - 1, Math.floor((i + .5) / FKM))]; if (k !== NONE && k < ch.count && ch.kind[k] === 1) squares[k]++; }
+  for (let k = 0; k < ch.count; k++) if (ch.kind[k] === 1 && nat[k] > 0) want += Math.min(.95, nat[k]) * squares[k];
+  assert.ok(want > 1000 && Math.abs(got - want) < want * .01, `${got.toFixed(0)} squares of swamp laid, ${want.toFixed(0)} held by the cells`);
+  // the flood plain of the river: a fifth of each cell is swamp, and it lies along the river, not all over the cell
+  const yr = 39.02 * KMD; let near = 0, all = 0;
+  for (let j = 0; j < KNY; j++) for (let i = 0; i < KN; i++) { if (km[j * KN + i] < 128) continue; const lon = (KX0 + i + .5) / (KMD * COS), y = KY0 + j + .5; if (lon < -6.8 || lon > -4.6 || y / KMD < 38.4 || y / KMD > 39.6) continue; all++; if (Math.abs(y - yr) <= 3) near++; }
+  assert.ok(all > 300 && near / all > .75, `${near} of ${all} squares of swamp of the flood plain lie within 3 km of the river`);
+  // nothing in the sea, nothing on the hills (their cells hold no swamp)
+  const at = (lat, lon) => km[Math.floor(lat * KMD - KY0) * KN + Math.floor(lon * KMD * COS - KX0)];
+  assert.equal(at(40, -9), 0); assert.equal(at(40, -2), 0);
+  // the same land gives the same answer
+  assert.deepEqual(swampKmOf(ch, world, nat, { rivers: [river] }), km);
+  // the settlements keep it in the six low bits of A of their chunk rows (town/state.js, mirrorSwamp)
+  const bytes = new Uint8Array(km.length * 4); for (let c = 0; c < km.length; c++) bytes[c * 4 + 3] = 192 + (km[c] >> 2);
+  assert.equal(swampKmMirrored(km, bytes), true); assert.equal(swampKmMirrored(km, new Uint8Array(km.length * 4).fill(255)), false, 'not written yet'); assert.equal(swampKmMirrored(null, bytes), false);
+  const { mirrorSwamp } = await import('../src/album/town/state.js');
+  const own = new Uint8Array(km.length * 4); for (let c = 0; c < km.length; c++) own[c * 4 + 3] = c % 3 === 0 ? 0 : c % 3 === 1 ? 128 : 255;
+  mirrorSwamp(km, own); assert.equal(swampKmMirrored(km, own), true, 'what the settlements write is what the swamp reads');
+  // the shader: at stage 2 none of it is in the text; at stage 3 the function stands after the texture it reads
+  const { ASPECT_GLSL } = await import('../src/album/aspects/index.js');
+  if (!S3) { assert.equal(SWAMP_KM_GLSL, ''); assert.ok(!ASPECT_GLSL.includes('swampKm') && !swamp.uniforms.uSwampKm); }
+  else {
+    assert.ok(SWAMP_KM_GLSL.includes('mod(floor(texelFetch(tSettle, clamp(c, ivec2(0), ivec2(') && SWAMP_KM_GLSL.includes(') / 63.;'), 'the six low bits of A, 64 steps');
+    assert.ok(swamp.glsl.includes('float swampKm(vec2 pk);') && swamp.glsl.includes('uniform float uSwampKm;') && swamp.uniforms.uSwampKm.value === 0, 'named in the swamp text, off until the settlements have written it');
+    assert.ok(ASPECT_GLSL.indexOf('uniform sampler2D tSettle') > 0 && ASPECT_GLSL.indexOf('uniform sampler2D tSettle') < ASPECT_GLSL.indexOf('float swampKm(vec2 pk) {'), 'defined after the texture of the settlements');
+    assert.ok(swamp.glsl.includes('if (uSwampKm > .5) { sk = swampKm(pk); if (sk < .02 && far <= 0.) return; }') && swamp.glsl.includes('sk < 0. ? swampDepth(s, f, p.ll, hs, slope, kind.x) : swampDepthKm(sk, f, p.ll, hs, slope, kind.x)'), 'by the chunks once they are known, by the noise until then');
+  }
+  // the contract as the settlements keep it: the array, its version, the six bits
+  const state = fs.readFileSync(new URL('../src/album/town/state.js', import.meta.url), 'utf8'), towns = fs.readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+  assert.ok(state.includes('export function mirrorSwamp(km, out = farmBytes) {') && state.includes('export const farmBytes = atlasBytes.subarray(0, KN * KNY * 4);'));
+  assert.ok(towns.includes('sw?.km ? sw.kmVersion | 0 : 0'), 'the settlements watch album.swamp.km and album.swamp.kmVersion');
+  const src = fs.readFileSync(new URL('../src/album/aspects/swamp.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(src.includes('album.swamp.km = swampKmOf(ch, album.data.base.at, natural, { rivers: album.data.vectors?.rivers || [] }); album.swamp.kmVersion = 1;') && src.includes('let kmSeen = !S3;'), 'the page counts it at stage 3 only');
+});
