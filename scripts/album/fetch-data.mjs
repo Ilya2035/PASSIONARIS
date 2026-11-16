@@ -83,7 +83,9 @@ const tileFile = (z, x, y) => { const here = join(CACHE, 'terrarium', String(z),
 //   the chotts of the Sahara (Melrhir, Merouane, el Gharsa): salt pans down to 40 m below the sea — dry ground, not
 //     lakes of blue water.
 export const LOWLANDS = [
-  { name: 'the polders of the Low Countries', lon0: 1.5, lon1: 7.3, lat0: 50.7, lat1: 53.7, lakes: true },
+  // (east to the edge of the rectangle: the marshes of East Frisia and of the Elbe are the same land below the sea —
+  // with the box ending at 7.3° the sea stood over Germany along a straight line, seen by the ground session)
+  { name: 'the polders of the Low Countries and the marshes of the North Sea', lon0: 1.5, lon1: 11.7, lat0: 50.7, lat1: 53.7, lakes: true },
   { name: 'the chotts of the Sahara', lon0: 4.5, lon1: 9.7, lat0: 32.8, lat1: 35.0, lakes: false },
 ];
 export const LOW_M = 1, LOW_FINE = 4;
