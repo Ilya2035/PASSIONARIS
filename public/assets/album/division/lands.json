@@ -9,12 +9,17 @@
   {
    "id": "westeurope",
    "name": "Западная Европа",
-   "about": "земли от Пиренеев до Рейна; в альбом попадает их юг — Гасконь, Гиень, Лангедок, Руссильон"
+   "about": "земли от Пиренеев до Рейна: Франция без Корсики, Бенилюкс, левый берег Рейна (владелец, 15.11.2026: «Бенилюкс тоже относится… типа по Рейну»)"
   },
   {
    "id": "maghreb",
    "name": "Магриб",
-   "about": "северный берег Африки от Танжера до Кабилии"
+   "about": "Марокко, север Алжира и Тунис — от Атлантики до залива Габес, к югу до края Сахары (Анти-Атлас, Сахарский Атлас, Джерид)"
+  },
+  {
+   "id": "corsica",
+   "name": "Корсика",
+   "about": "остров Корсика — свой регион, не Западная Европа (владелец, 15.11.2026): регион по правилу «группы островов»; Сардиния войдёт в него, когда окажется в полигоне"
   }
  ],
  "lands": [
@@ -101,6 +106,186 @@
   {
    "id": "algiers",
    "name": "Алжир и Кабилия",
+   "region": "maghreb"
+  },
+  {
+   "id": "normandy",
+   "name": "Нормандия",
+   "region": "westeurope"
+  },
+  {
+   "id": "brittany",
+   "name": "Бретань",
+   "region": "westeurope"
+  },
+  {
+   "id": "picardy",
+   "name": "Пикардия, Артуа и Фландрия",
+   "region": "westeurope"
+  },
+  {
+   "id": "iledefrance",
+   "name": "Иль-де-Франс",
+   "region": "westeurope"
+  },
+  {
+   "id": "loire",
+   "name": "Орлеане и долина Луары",
+   "region": "westeurope"
+  },
+  {
+   "id": "champagne",
+   "name": "Шампань",
+   "region": "westeurope"
+  },
+  {
+   "id": "lorraine",
+   "name": "Лотарингия и Эльзас",
+   "region": "westeurope"
+  },
+  {
+   "id": "burgundy",
+   "name": "Бургундия и Франш-Конте",
+   "region": "westeurope"
+  },
+  {
+   "id": "berry",
+   "name": "Берри, Бурбонне и Ниверне",
+   "region": "westeurope"
+  },
+  {
+   "id": "poitou",
+   "name": "Пуату и Шаранта",
+   "region": "westeurope"
+  },
+  {
+   "id": "limousin",
+   "name": "Лимузен и Овернь",
+   "region": "westeurope"
+  },
+  {
+   "id": "lyonnais",
+   "name": "Лионне и Дофине",
+   "region": "westeurope"
+  },
+  {
+   "id": "savoy",
+   "name": "Савойя",
+   "region": "westeurope"
+  },
+  {
+   "id": "provence",
+   "name": "Прованс и Ницца",
+   "region": "westeurope"
+  },
+  {
+   "id": "corsica",
+   "name": "Корсика",
+   "region": "corsica"
+  },
+  {
+   "id": "flanders",
+   "name": "Фландрия",
+   "region": "westeurope"
+  },
+  {
+   "id": "brabant",
+   "name": "Брабант",
+   "region": "westeurope"
+  },
+  {
+   "id": "hainaut",
+   "name": "Эно и Намюр",
+   "region": "westeurope"
+  },
+  {
+   "id": "liegeland",
+   "name": "Льеж и Лимбург",
+   "region": "westeurope"
+  },
+  {
+   "id": "luxland",
+   "name": "Люксембург и Арденны",
+   "region": "westeurope"
+  },
+  {
+   "id": "holland",
+   "name": "Голландия и Зеландия",
+   "region": "westeurope"
+  },
+  {
+   "id": "gelre",
+   "name": "Утрехт, Гелдерн и Оверэйсел",
+   "region": "westeurope"
+  },
+  {
+   "id": "frisia",
+   "name": "Фрисландия, Гронинген и Дренте",
+   "region": "westeurope"
+  },
+  {
+   "id": "rhineland",
+   "name": "Рейнская область",
+   "region": "westeurope"
+  },
+  {
+   "id": "palatinate",
+   "name": "Пфальц, Саар и Рейнхессен",
+   "region": "westeurope"
+  },
+  {
+   "id": "atlanticmorocco",
+   "name": "Атлантическое Марокко",
+   "region": "maghreb"
+  },
+  {
+   "id": "fesmeknes",
+   "name": "Фес и Мекнес",
+   "region": "maghreb"
+  },
+  {
+   "id": "eastmorocco",
+   "name": "Восточное Марокко и Тафилалт",
+   "region": "maghreb"
+  },
+  {
+   "id": "marrakesh",
+   "name": "Марракеш и Высокий Атлас",
+   "region": "maghreb"
+  },
+  {
+   "id": "sousdraa",
+   "name": "Сус и Драа",
+   "region": "maghreb"
+  },
+  {
+   "id": "highplateaus",
+   "name": "Высокие плато",
+   "region": "maghreb"
+  },
+  {
+   "id": "constantine",
+   "name": "Константина",
+   "region": "maghreb"
+  },
+  {
+   "id": "ziban",
+   "name": "Сахарский Атлас и Зибан",
+   "region": "maghreb"
+  },
+  {
+   "id": "tunisnorth",
+   "name": "Тунис и Телль",
+   "region": "maghreb"
+  },
+  {
+   "id": "sahel",
+   "name": "Сахель и Сфакс",
+   "region": "maghreb"
+  },
+  {
+   "id": "tunissouth",
+   "name": "Юг Туниса",
    "region": "maghreb"
   }
  ],
@@ -1415,8 +1600,7 @@
    "name": "Ним",
    "region": "westeurope",
    "admin": [
-    "FRA-5293",
-    "FRA-5274"
+    "FRA-5293"
    ],
    "at": [
     [
@@ -1520,9 +1704,7 @@
    "region": "maghreb",
    "admin": [
     "DZA-2145",
-    "DZA-2144",
-    "DZA-2147",
-    "DZA-2146"
+    "DZA-2144"
    ],
    "at": [
     [
@@ -1538,8 +1720,7 @@
    "region": "maghreb",
    "admin": [
     "DZA-2202",
-    "DZA-2203",
-    "DZA-2201"
+    "DZA-2203"
    ],
    "at": [
     [
@@ -1555,8 +1736,7 @@
    "region": "maghreb",
    "admin": [
     "DZA-2200",
-    "DZA-2206",
-    "DZA-2205"
+    "DZA-2206"
    ],
    "at": [
     [
@@ -1604,9 +1784,7 @@
    "region": "maghreb",
    "admin": [
     "DZA-2213",
-    "DZA-2199",
-    "DZA-2212",
-    "DZA-2214"
+    "DZA-2199"
    ],
    "at": [
     [
@@ -1622,9 +1800,7 @@
    "region": "maghreb",
    "admin": [
     "DZA-2197",
-    "DZA-2210",
-    "DZA-2208",
-    "DZA-2207"
+    "DZA-2210"
    ],
    "at": [
     [
@@ -1633,13 +1809,2626 @@
     ]
    ],
    "land": "algiers"
+  },
+  {
+   "id": "caux",
+   "name": "Руан и Ко",
+   "region": "westeurope",
+   "land": "normandy",
+   "admin": [
+    "FRA-5343"
+   ],
+   "at": [
+    [
+     49.65,
+     1
+    ]
+   ]
+  },
+  {
+   "id": "evrecin",
+   "name": "Эврёсен и Нормандский Вексен",
+   "region": "westeurope",
+   "land": "normandy",
+   "admin": [
+    "FRA-5290"
+   ],
+   "at": [
+    [
+     49.1,
+     1
+    ]
+   ]
+  },
+  {
+   "id": "bessin",
+   "name": "Бессен и Ож",
+   "region": "westeurope",
+   "land": "normandy",
+   "admin": [
+    "FRA-5275"
+   ],
+   "at": [
+    [
+     49.1,
+     -0.35
+    ]
+   ]
+  },
+  {
+   "id": "cotentin",
+   "name": "Котантен, Авраншен и Нормандские острова",
+   "region": "westeurope",
+   "land": "normandy",
+   "admin": [
+    "FRA-5322",
+    "JEY+00?",
+    "GGY+00?"
+   ],
+   "at": [
+    [
+     49.1,
+     -1.3
+    ]
+   ]
+  },
+  {
+   "id": "alencon",
+   "name": "Алансонне и Перш",
+   "region": "westeurope",
+   "land": "normandy",
+   "admin": [
+    "FRA-5332"
+   ],
+   "at": [
+    [
+     48.6,
+     0.1
+    ]
+   ]
+  },
+  {
+   "id": "cornouaille",
+   "name": "Леон и Корнуай",
+   "region": "westeurope",
+   "land": "brittany",
+   "admin": [
+    "FRA-5292"
+   ],
+   "at": [
+    [
+     48.25,
+     -4.1
+    ]
+   ]
+  },
+  {
+   "id": "tregor",
+   "name": "Трегор и Пентьевр",
+   "region": "westeurope",
+   "land": "brittany",
+   "admin": [
+    "FRA-5283"
+   ],
+   "at": [
+    [
+     48.4,
+     -2.8
+    ]
+   ]
+  },
+  {
+   "id": "vannetais",
+   "name": "Ваннете",
+   "region": "westeurope",
+   "land": "brittany",
+   "admin": [
+    "FRA-5327"
+   ],
+   "at": [
+    [
+     47.85,
+     -2.85
+    ]
+   ]
+  },
+  {
+   "id": "rennais",
+   "name": "Ренне и Сен-Мало",
+   "region": "westeurope",
+   "land": "brittany",
+   "admin": [
+    "FRA-5308"
+   ],
+   "at": [
+    [
+     48.15,
+     -1.65
+    ]
+   ]
+  },
+  {
+   "id": "nantais",
+   "name": "Нанте",
+   "region": "westeurope",
+   "land": "brittany",
+   "admin": [
+    "FRA-5316"
+   ],
+   "at": [
+    [
+     47.35,
+     -1.75
+    ]
+   ]
+  },
+  {
+   "id": "flandre",
+   "name": "Французская Фландрия и Эно",
+   "region": "westeurope",
+   "land": "picardy",
+   "admin": [
+    "FRA-5330"
+   ],
+   "at": [
+    [
+     50.45,
+     3.25
+    ]
+   ]
+  },
+  {
+   "id": "artois",
+   "name": "Артуа и Булонне",
+   "region": "westeurope",
+   "land": "picardy",
+   "admin": [
+    "FRA-5334"
+   ],
+   "at": [
+    [
+     50.5,
+     2.3
+    ]
+   ]
+  },
+  {
+   "id": "amienois",
+   "name": "Амьенуа и Понтьё",
+   "region": "westeurope",
+   "land": "picardy",
+   "admin": [
+    "FRA-5345"
+   ],
+   "at": [
+    [
+     49.95,
+     2.3
+    ]
+   ]
+  },
+  {
+   "id": "beauvaisis",
+   "name": "Бовези и Валуа",
+   "region": "westeurope",
+   "land": "picardy",
+   "admin": [
+    "FRA-5331"
+   ],
+   "at": [
+    [
+     49.4,
+     2.4
+    ]
+   ]
+  },
+  {
+   "id": "vermandois",
+   "name": "Вермандуа и Суасонне",
+   "region": "westeurope",
+   "land": "picardy",
+   "admin": [
+    "FRA-5263"
+   ],
+   "at": [
+    [
+     49.55,
+     3.55
+    ]
+   ]
+  },
+  {
+   "id": "paris",
+   "name": "Париж и Франс",
+   "region": "westeurope",
+   "land": "iledefrance",
+   "admin": [
+    "FRA-5333",
+    "FRA-5306",
+    "FRA-5344",
+    "FRA-5350",
+    "FRA-5349"
+   ],
+   "at": [
+    [
+     48.86,
+     2.35
+    ],
+    [
+     49.07,
+     2.1
+    ]
+   ]
+  },
+  {
+   "id": "hurepoix",
+   "name": "Юрепуа и Мантуа",
+   "region": "westeurope",
+   "land": "iledefrance",
+   "admin": [
+    "FRA-5357",
+    "FRA-5289"
+   ],
+   "at": [
+    [
+     48.8,
+     1.85
+    ],
+    [
+     48.5,
+     2.25
+    ]
+   ]
+  },
+  {
+   "id": "brie",
+   "name": "Бри",
+   "region": "westeurope",
+   "land": "iledefrance",
+   "admin": [
+    "FRA-5342"
+   ],
+   "at": [
+    [
+     48.6,
+     2.95
+    ]
+   ]
+  },
+  {
+   "id": "orleanais",
+   "name": "Орлеане",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5317"
+   ],
+   "at": [
+    [
+     47.9,
+     2.25
+    ]
+   ]
+  },
+  {
+   "id": "chartrain",
+   "name": "Шартрен и Бос",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5291"
+   ],
+   "at": [
+    [
+     48.35,
+     1.35
+    ]
+   ]
+  },
+  {
+   "id": "blesois",
+   "name": "Блезуа и Вандомуа",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5314"
+   ],
+   "at": [
+    [
+     47.6,
+     1.4
+    ]
+   ]
+  },
+  {
+   "id": "touraine",
+   "name": "Турень",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5310"
+   ],
+   "at": [
+    [
+     47.25,
+     0.7
+    ]
+   ]
+  },
+  {
+   "id": "anjou",
+   "name": "Анжу",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5321"
+   ],
+   "at": [
+    [
+     47.4,
+     -0.55
+    ]
+   ]
+  },
+  {
+   "id": "maine",
+   "name": "Мэн",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5340"
+   ],
+   "at": [
+    [
+     47.95,
+     0.2
+    ]
+   ]
+  },
+  {
+   "id": "lavallois",
+   "name": "Нижний Мэн",
+   "region": "westeurope",
+   "land": "loire",
+   "admin": [
+    "FRA-5324"
+   ],
+   "at": [
+    [
+     48.15,
+     -0.65
+    ]
+   ]
+  },
+  {
+   "id": "reims",
+   "name": "Ремуа и Шалон",
+   "region": "westeurope",
+   "land": "champagne",
+   "admin": [
+    "FRA-5323"
+   ],
+   "at": [
+    [
+     48.95,
+     4.25
+    ]
+   ]
+  },
+  {
+   "id": "troyes",
+   "name": "Труа",
+   "region": "westeurope",
+   "land": "champagne",
+   "admin": [
+    "FRA-5270"
+   ],
+   "at": [
+    [
+     48.3,
+     4.15
+    ]
+   ]
+  },
+  {
+   "id": "bassigny",
+   "name": "Бассиньи",
+   "region": "westeurope",
+   "land": "champagne",
+   "admin": [
+    "FRA-5300"
+   ],
+   "at": [
+    [
+     48.1,
+     5.2
+    ]
+   ]
+  },
+  {
+   "id": "rethelois",
+   "name": "Арденны и Ретелуа",
+   "region": "westeurope",
+   "land": "champagne",
+   "admin": [
+    "FRA-5268"
+   ],
+   "at": [
+    [
+     49.6,
+     4.65
+    ]
+   ]
+  },
+  {
+   "id": "nancy",
+   "name": "Нанси и Туль",
+   "region": "westeurope",
+   "land": "lorraine",
+   "admin": [
+    "FRA-5325"
+   ],
+   "at": [
+    [
+     48.75,
+     6.15
+    ]
+   ]
+  },
+  {
+   "id": "messin",
+   "name": "Мессен и Немецкая Лотарингия",
+   "region": "westeurope",
+   "land": "lorraine",
+   "admin": [
+    "FRA-5328",
+    "FRA-5273"
+   ],
+   "at": [
+    [
+     49.05,
+     6.65
+    ],
+    [
+     48.92,
+     7.1
+    ]
+   ]
+  },
+  {
+   "id": "barrois",
+   "name": "Барруа и Верден",
+   "region": "westeurope",
+   "land": "lorraine",
+   "admin": [
+    "FRA-5326"
+   ],
+   "at": [
+    [
+     49,
+     5.4
+    ]
+   ]
+  },
+  {
+   "id": "vosges",
+   "name": "Вогезы",
+   "region": "westeurope",
+   "land": "lorraine",
+   "admin": [
+    "FRA-5355"
+   ],
+   "at": [
+    [
+     48.2,
+     6.4
+    ]
+   ]
+  },
+  {
+   "id": "basalsace",
+   "name": "Нижний Эльзас",
+   "region": "westeurope",
+   "land": "lorraine",
+   "admin": [
+    "FRA-5273"
+   ],
+   "at": [
+    [
+     48.65,
+     7.55
+    ]
+   ]
+  },
+  {
+   "id": "hautalsace",
+   "name": "Верхний Эльзас и Бельфор",
+   "region": "westeurope",
+   "land": "lorraine",
+   "admin": [
+    "FRA-5296",
+    "FRA-5348"
+   ],
+   "at": [
+    [
+     47.85,
+     7.25
+    ],
+    [
+     47.63,
+     6.9
+    ]
+   ]
+  },
+  {
+   "id": "dijonnais",
+   "name": "Дижонне и Осуа",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5282"
+   ],
+   "at": [
+    [
+     47.4,
+     4.75
+    ]
+   ]
+  },
+  {
+   "id": "maconnais",
+   "name": "Шалонне, Маконне и Шароле",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5339"
+   ],
+   "at": [
+    [
+     46.65,
+     4.55
+    ]
+   ]
+  },
+  {
+   "id": "auxerrois",
+   "name": "Осеруа и Сенонне",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5356"
+   ],
+   "at": [
+    [
+     47.85,
+     3.6
+    ]
+   ]
+  },
+  {
+   "id": "bresse",
+   "name": "Бресс и Бюже",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5262"
+   ],
+   "at": [
+    [
+     46.1,
+     5.35
+    ]
+   ]
+  },
+  {
+   "id": "besancon",
+   "name": "Безансонне и Монбельяр",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5287"
+   ],
+   "at": [
+    [
+     47.15,
+     6.35
+    ]
+   ]
+  },
+  {
+   "id": "aval",
+   "name": "Аваль и Юра",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5312"
+   ],
+   "at": [
+    [
+     46.75,
+     5.7
+    ]
+   ]
+  },
+  {
+   "id": "amont",
+   "name": "Амон",
+   "region": "westeurope",
+   "land": "burgundy",
+   "admin": [
+    "FRA-5301"
+   ],
+   "at": [
+    [
+     47.65,
+     6.1
+    ]
+   ]
+  },
+  {
+   "id": "berry",
+   "name": "Берри",
+   "region": "westeurope",
+   "land": "berry",
+   "admin": [
+    "FRA-5279"
+   ],
+   "at": [
+    [
+     47.05,
+     2.5
+    ]
+   ]
+  },
+  {
+   "id": "basberry",
+   "name": "Нижний Берри",
+   "region": "westeurope",
+   "land": "berry",
+   "admin": [
+    "FRA-5309"
+   ],
+   "at": [
+    [
+     46.75,
+     1.55
+    ]
+   ]
+  },
+  {
+   "id": "bourbonnais",
+   "name": "Бурбонне",
+   "region": "westeurope",
+   "land": "berry",
+   "admin": [
+    "FRA-5264"
+   ],
+   "at": [
+    [
+     46.4,
+     3.2
+    ]
+   ]
+  },
+  {
+   "id": "nivernais",
+   "name": "Ниверне",
+   "region": "westeurope",
+   "land": "berry",
+   "admin": [
+    "FRA-5329"
+   ],
+   "at": [
+    [
+     47.1,
+     3.5
+    ]
+   ]
+  },
+  {
+   "id": "poitou",
+   "name": "Верхнее Пуату",
+   "region": "westeurope",
+   "land": "poitou",
+   "admin": [
+    "FRA-5354"
+   ],
+   "at": [
+    [
+     46.55,
+     0.45
+    ]
+   ]
+  },
+  {
+   "id": "niortais",
+   "name": "Ниорте и Гатин",
+   "region": "westeurope",
+   "land": "poitou",
+   "admin": [
+    "FRA-5285"
+   ],
+   "at": [
+    [
+     46.55,
+     -0.3
+    ]
+   ]
+  },
+  {
+   "id": "baspoitou",
+   "name": "Нижнее Пуату",
+   "region": "westeurope",
+   "land": "poitou",
+   "admin": [
+    "FRA-5353"
+   ],
+   "at": [
+    [
+     46.65,
+     -1.3
+    ]
+   ]
+  },
+  {
+   "id": "aunis",
+   "name": "Онис и Сентонж",
+   "region": "westeurope",
+   "land": "poitou",
+   "admin": [
+    "FRA-5278"
+   ],
+   "at": [
+    [
+     45.75,
+     -0.75
+    ]
+   ]
+  },
+  {
+   "id": "angoumois",
+   "name": "Ангумуа",
+   "region": "westeurope",
+   "land": "poitou",
+   "admin": [
+    "FRA-5277"
+   ],
+   "at": [
+    [
+     45.7,
+     0.2
+    ]
+   ]
+  },
+  {
+   "id": "limousin",
+   "name": "Лимузен",
+   "region": "westeurope",
+   "land": "limousin",
+   "admin": [
+    "FRA-5303"
+   ],
+   "at": [
+    [
+     45.9,
+     1.25
+    ]
+   ]
+  },
+  {
+   "id": "baslimousin",
+   "name": "Нижний Лимузен",
+   "region": "westeurope",
+   "land": "limousin",
+   "admin": [
+    "FRA-5280"
+   ],
+   "at": [
+    [
+     45.35,
+     1.9
+    ]
+   ]
+  },
+  {
+   "id": "marche",
+   "name": "Марш",
+   "region": "westeurope",
+   "land": "limousin",
+   "admin": [
+    "FRA-5284"
+   ],
+   "at": [
+    [
+     46.1,
+     2
+    ]
+   ]
+  },
+  {
+   "id": "limagne",
+   "name": "Нижняя Овернь",
+   "region": "westeurope",
+   "land": "limousin",
+   "admin": [
+    "FRA-5335"
+   ],
+   "at": [
+    [
+     45.7,
+     3.15
+    ]
+   ]
+  },
+  {
+   "id": "lyonnais",
+   "name": "Лионне и Божоле",
+   "region": "westeurope",
+   "land": "lyonnais",
+   "admin": [
+    "FRA-5338"
+   ],
+   "at": [
+    [
+     45.85,
+     4.6
+    ]
+   ]
+  },
+  {
+   "id": "forez",
+   "name": "Форе",
+   "region": "westeurope",
+   "land": "lyonnais",
+   "admin": [
+    "FRA-5315"
+   ],
+   "at": [
+    [
+     45.75,
+     4.2
+    ]
+   ]
+  },
+  {
+   "id": "dauphine",
+   "name": "Гренобле и Вьеннуа",
+   "region": "westeurope",
+   "land": "lyonnais",
+   "admin": [
+    "FRA-5311"
+   ],
+   "at": [
+    [
+     45.25,
+     5.6
+    ]
+   ]
+  },
+  {
+   "id": "valentinois",
+   "name": "Валентинуа и Диуа",
+   "region": "westeurope",
+   "land": "lyonnais",
+   "admin": [
+    "FRA-5288"
+   ],
+   "at": [
+    [
+     44.7,
+     5.15
+    ]
+   ]
+  },
+  {
+   "id": "gapencais",
+   "name": "Гапансе и Бриансонне",
+   "region": "westeurope",
+   "land": "lyonnais",
+   "admin": [
+    "FRA-5304"
+   ],
+   "at": [
+    [
+     44.65,
+     6.3
+    ]
+   ]
+  },
+  {
+   "id": "savoie",
+   "name": "Савойя, Морьен и Тарантез",
+   "region": "westeurope",
+   "land": "savoy",
+   "admin": [
+    "FRA-5341"
+   ],
+   "at": [
+    [
+     45.5,
+     6.4
+    ]
+   ]
+  },
+  {
+   "id": "genevois",
+   "name": "Женевуа, Шабле и Фосиньи",
+   "region": "westeurope",
+   "land": "savoy",
+   "admin": [
+    "FRA-5302"
+   ],
+   "at": [
+    [
+     46.05,
+     6.4
+    ]
+   ]
+  },
+  {
+   "id": "marseille",
+   "name": "Марсель, Экс и Арль",
+   "region": "westeurope",
+   "land": "provence",
+   "admin": [
+    "FRA-5274"
+   ],
+   "at": [
+    [
+     43.5,
+     5.3
+    ],
+    [
+     43.68,
+     4.63
+    ]
+   ]
+  },
+  {
+   "id": "comtat",
+   "name": "Конта-Венессен и Авиньон",
+   "region": "westeurope",
+   "land": "provence",
+   "admin": [
+    "FRA-5352"
+   ],
+   "at": [
+    [
+     44,
+     5.15
+    ]
+   ]
+  },
+  {
+   "id": "toulon",
+   "name": "Тулон и Фрежюс",
+   "region": "westeurope",
+   "land": "provence",
+   "admin": [
+    "FRA-5351"
+   ],
+   "at": [
+    [
+     43.45,
+     6.2
+    ]
+   ]
+  },
+  {
+   "id": "hauteprovence",
+   "name": "Верхний Прованс",
+   "region": "westeurope",
+   "land": "provence",
+   "admin": [
+    "FRA-5265"
+   ],
+   "at": [
+    [
+     44.1,
+     6.2
+    ]
+   ]
+  },
+  {
+   "id": "nice",
+   "name": "Ницца и Грас",
+   "region": "westeurope",
+   "land": "provence",
+   "admin": [
+    "FRA-5266"
+   ],
+   "at": [
+    [
+     43.95,
+     7.1
+    ]
+   ]
+  },
+  {
+   "id": "cismonte",
+   "name": "Корсика по эту сторону гор",
+   "region": "corsica",
+   "land": "corsica",
+   "admin": [
+    "FRA-5297"
+   ],
+   "at": [
+    [
+     42.4,
+     9.2
+    ]
+   ]
+  },
+  {
+   "id": "pumonti",
+   "name": "Корсика по ту сторону гор",
+   "region": "corsica",
+   "land": "corsica",
+   "admin": [
+    "FRA-5281"
+   ],
+   "at": [
+    [
+     41.85,
+     8.95
+    ]
+   ]
+  },
+  {
+   "id": "westflanders",
+   "name": "Западная Фландрия",
+   "region": "westeurope",
+   "land": "flanders",
+   "admin": [
+    "BEL-3479"
+   ],
+   "at": [
+    [
+     51,
+     3.05
+    ]
+   ]
+  },
+  {
+   "id": "eastflanders",
+   "name": "Восточная Фландрия",
+   "region": "westeurope",
+   "land": "flanders",
+   "admin": [
+    "BEL-3478"
+   ],
+   "at": [
+    [
+     51.05,
+     3.75
+    ]
+   ]
+  },
+  {
+   "id": "antwerp",
+   "name": "Антверпен и Кемпен",
+   "region": "westeurope",
+   "land": "brabant",
+   "admin": [
+    "BEL-3480"
+   ],
+   "at": [
+    [
+     51.2,
+     4.75
+    ]
+   ]
+  },
+  {
+   "id": "brussels",
+   "name": "Брюссель и Лёвен",
+   "region": "westeurope",
+   "land": "brabant",
+   "admin": [
+    "BEL-3474",
+    "BEL-3475",
+    "BEL-3482"
+   ],
+   "at": [
+    [
+     50.83,
+     4.55
+    ]
+   ]
+  },
+  {
+   "id": "northbrabant",
+   "name": "Северный Брабант",
+   "region": "westeurope",
+   "land": "brabant",
+   "admin": [
+    "NLD-3483"
+   ],
+   "at": [
+    [
+     51.6,
+     5.1
+    ]
+   ]
+  },
+  {
+   "id": "hainautprov",
+   "name": "Эно",
+   "region": "westeurope",
+   "land": "hainaut",
+   "admin": [
+    "BEL-2"
+   ],
+   "at": [
+    [
+     50.45,
+     3.95
+    ]
+   ]
+  },
+  {
+   "id": "namur",
+   "name": "Намюр",
+   "region": "westeurope",
+   "land": "hainaut",
+   "admin": [
+    "BEL-3476"
+   ],
+   "at": [
+    [
+     50.25,
+     4.85
+    ]
+   ]
+  },
+  {
+   "id": "liege",
+   "name": "Льеж",
+   "region": "westeurope",
+   "land": "liegeland",
+   "admin": [
+    "BEL-3481"
+   ],
+   "at": [
+    [
+     50.45,
+     5.75
+    ]
+   ]
+  },
+  {
+   "id": "loon",
+   "name": "Лоон",
+   "region": "westeurope",
+   "land": "liegeland",
+   "admin": [
+    "BEL-3"
+   ],
+   "at": [
+    [
+     51,
+     5.4
+    ]
+   ]
+  },
+  {
+   "id": "maastricht",
+   "name": "Маастрихт и Верхний Гелдерн",
+   "region": "westeurope",
+   "land": "liegeland",
+   "admin": [
+    "NLD-898"
+   ],
+   "at": [
+    [
+     51.25,
+     5.95
+    ]
+   ]
+  },
+  {
+   "id": "arlon",
+   "name": "Бельгийский Люксембург",
+   "region": "westeurope",
+   "land": "luxland",
+   "admin": [
+    "BEL-3477"
+   ],
+   "at": [
+    [
+     49.95,
+     5.5
+    ]
+   ]
+  },
+  {
+   "id": "luxembourg",
+   "name": "Люксембург",
+   "region": "westeurope",
+   "land": "luxland",
+   "admin": [
+    "LUX-906",
+    "LUX-907",
+    "LUX-908"
+   ],
+   "at": [
+    [
+     49.75,
+     6.1
+    ]
+   ]
+  },
+  {
+   "id": "zeeland",
+   "name": "Зеландия",
+   "region": "westeurope",
+   "land": "holland",
+   "admin": [
+    "NLD-903"
+   ],
+   "at": [
+    [
+     51.5,
+     3.85
+    ],
+    [
+     51.5,
+     3.61
+    ],
+    [
+     51.65,
+     3.92
+    ],
+    [
+     51.58,
+     4.1
+    ],
+    [
+     51.3,
+     3.85
+    ]
+   ]
+  },
+  {
+   "id": "southholland",
+   "name": "Южная Голландия",
+   "region": "westeurope",
+   "land": "holland",
+   "admin": [
+    "NLD-3485"
+   ],
+   "at": [
+    [
+     52,
+     4.55
+    ]
+   ]
+  },
+  {
+   "id": "northholland",
+   "name": "Северная Голландия",
+   "region": "westeurope",
+   "land": "holland",
+   "admin": [
+    "NLD-3486"
+   ],
+   "at": [
+    [
+     52.55,
+     4.85
+    ]
+   ]
+  },
+  {
+   "id": "utrecht",
+   "name": "Утрехт",
+   "region": "westeurope",
+   "land": "gelre",
+   "admin": [
+    "NLD-3484"
+   ],
+   "at": [
+    [
+     52.1,
+     5.2
+    ]
+   ]
+  },
+  {
+   "id": "guelders",
+   "name": "Гелдерн",
+   "region": "westeurope",
+   "land": "gelre",
+   "admin": [
+    "NLD-896"
+   ],
+   "at": [
+    [
+     52.05,
+     5.9
+    ]
+   ]
+  },
+  {
+   "id": "overijssel",
+   "name": "Оверэйсел",
+   "region": "westeurope",
+   "land": "gelre",
+   "admin": [
+    "NLD-899"
+   ],
+   "at": [
+    [
+     52.45,
+     6.3
+    ]
+   ]
+  },
+  {
+   "id": "flevoland",
+   "name": "Флеволанд",
+   "region": "westeurope",
+   "land": "gelre",
+   "admin": [
+    "NLD-902"
+   ],
+   "at": [
+    [
+     52.5,
+     5.55
+    ],
+    [
+     52.71,
+     5.75
+    ]
+   ]
+  },
+  {
+   "id": "friesland",
+   "name": "Фрисландия",
+   "region": "westeurope",
+   "land": "frisia",
+   "admin": [
+    "NLD-895"
+   ],
+   "at": [
+    [
+     53.1,
+     5.8
+    ]
+   ]
+  },
+  {
+   "id": "groningen",
+   "name": "Гронинген",
+   "region": "westeurope",
+   "land": "frisia",
+   "admin": [
+    "NLD-897"
+   ],
+   "at": [
+    [
+     53.25,
+     6.7
+    ]
+   ]
+  },
+  {
+   "id": "drenthe",
+   "name": "Дренте",
+   "region": "westeurope",
+   "land": "frisia",
+   "admin": [
+    "NLD-894"
+   ],
+   "at": [
+    [
+     52.85,
+     6.55
+    ]
+   ]
+  },
+  {
+   "id": "cleves",
+   "name": "Клеве и Нижний Рейн",
+   "region": "westeurope",
+   "land": "rhineland",
+   "admin": [
+    "DEU-1572"
+   ],
+   "at": [
+    [
+     51.55,
+     6.3
+    ]
+   ]
+  },
+  {
+   "id": "aachen",
+   "name": "Ахен и Юлих",
+   "region": "westeurope",
+   "land": "rhineland",
+   "admin": [
+    "DEU-1572"
+   ],
+   "at": [
+    [
+     50.8,
+     6.2
+    ]
+   ]
+  },
+  {
+   "id": "cologne",
+   "name": "Кёльн и Бонн",
+   "region": "westeurope",
+   "land": "rhineland",
+   "admin": [
+    "DEU-1572"
+   ],
+   "at": [
+    [
+     50.85,
+     6.85
+    ],
+    [
+     51.15,
+     6.6
+    ]
+   ]
+  },
+  {
+   "id": "koblenz",
+   "name": "Кобленц, Эйфель и Хунсрюк",
+   "region": "westeurope",
+   "land": "rhineland",
+   "admin": [
+    "DEU-1580"
+   ],
+   "at": [
+    [
+     50.25,
+     7.1
+    ],
+    [
+     49.98,
+     7.55
+    ]
+   ]
+  },
+  {
+   "id": "trier",
+   "name": "Трир и Мозель",
+   "region": "westeurope",
+   "land": "rhineland",
+   "admin": [
+    "DEU-1580"
+   ],
+   "at": [
+    [
+     49.85,
+     6.7
+    ],
+    [
+     49.95,
+     7.05
+    ]
+   ]
+  },
+  {
+   "id": "saar",
+   "name": "Саар",
+   "region": "westeurope",
+   "land": "palatinate",
+   "admin": [
+    "DEU-1581"
+   ],
+   "at": [
+    [
+     49.35,
+     6.95
+    ]
+   ]
+  },
+  {
+   "id": "pfalz",
+   "name": "Пфальц",
+   "region": "westeurope",
+   "land": "palatinate",
+   "admin": [
+    "DEU-1580"
+   ],
+   "at": [
+    [
+     49.35,
+     7.75
+    ]
+   ]
+  },
+  {
+   "id": "rheinhessen",
+   "name": "Рейнхессен",
+   "region": "westeurope",
+   "land": "palatinate",
+   "admin": [
+    "DEU-1580"
+   ],
+   "at": [
+    [
+     49.8,
+     8.15
+    ]
+   ]
+  },
+  {
+   "id": "gharb",
+   "name": "Гарб",
+   "region": "maghreb",
+   "land": "atlanticmorocco",
+   "admin": [
+    "MAR-1448"
+   ],
+   "at": [
+    [
+     34.5,
+     -6.1
+    ]
+   ]
+  },
+  {
+   "id": "rabat",
+   "name": "Рабат и Сале",
+   "region": "maghreb",
+   "land": "atlanticmorocco",
+   "admin": [
+    "MAR-1451"
+   ],
+   "at": [
+    [
+     33.85,
+     -6.4
+    ]
+   ]
+  },
+  {
+   "id": "chaouia",
+   "name": "Шавия и Касабланка",
+   "region": "maghreb",
+   "land": "atlanticmorocco",
+   "admin": [
+    "MAR-1449",
+    "MAR-1450"
+   ],
+   "at": [
+    [
+     33,
+     -7.6
+    ]
+   ]
+  },
+  {
+   "id": "ouardigha",
+   "name": "Уардига",
+   "region": "maghreb",
+   "land": "atlanticmorocco",
+   "admin": [
+    "MAR-1449"
+   ],
+   "at": [
+    [
+     32.85,
+     -6.9
+    ]
+   ]
+  },
+  {
+   "id": "doukkala",
+   "name": "Дуккала",
+   "region": "maghreb",
+   "land": "atlanticmorocco",
+   "admin": [
+    "MAR-1457"
+   ],
+   "at": [
+    [
+     32.9,
+     -8.3
+    ]
+   ]
+  },
+  {
+   "id": "abda",
+   "name": "Абда",
+   "region": "maghreb",
+   "land": "atlanticmorocco",
+   "admin": [
+    "MAR-1457"
+   ],
+   "at": [
+    [
+     32.3,
+     -9
+    ]
+   ]
+  },
+  {
+   "id": "fes",
+   "name": "Фес",
+   "region": "maghreb",
+   "land": "fesmeknes",
+   "admin": [
+    "MAR-1446",
+    "MAR-1447"
+   ],
+   "at": [
+    [
+     34.05,
+     -5
+    ],
+    [
+     34.5,
+     -4.65
+    ]
+   ]
+  },
+  {
+   "id": "meknes",
+   "name": "Мекнес",
+   "region": "maghreb",
+   "land": "fesmeknes",
+   "admin": [
+    "MAR-1452"
+   ],
+   "at": [
+    [
+     33.9,
+     -5.55
+    ]
+   ]
+  },
+  {
+   "id": "taza",
+   "name": "Таза",
+   "region": "maghreb",
+   "land": "fesmeknes",
+   "admin": [
+    "MAR-1447"
+   ],
+   "at": [
+    [
+     34.2,
+     -4
+    ]
+   ]
+  },
+  {
+   "id": "middleatlas",
+   "name": "Заян",
+   "region": "maghreb",
+   "land": "fesmeknes",
+   "admin": [
+    "MAR-1452"
+   ],
+   "at": [
+    [
+     32.9,
+     -5.65
+    ]
+   ]
+  },
+  {
+   "id": "ifrane",
+   "name": "Ифран и Азру",
+   "region": "maghreb",
+   "land": "fesmeknes",
+   "admin": [
+    "MAR-1452"
+   ],
+   "at": [
+    [
+     33.45,
+     -5.15
+    ]
+   ]
+  },
+  {
+   "id": "moulouya",
+   "name": "Верхняя Мулуя",
+   "region": "maghreb",
+   "land": "fesmeknes",
+   "admin": [
+    "MAR-1452",
+    "MAR-1446"
+   ],
+   "at": [
+    [
+     32.7,
+     -4.75
+    ],
+    [
+     33.3,
+     -4.35
+    ]
+   ]
+  },
+  {
+   "id": "oujda",
+   "name": "Уджда",
+   "region": "maghreb",
+   "land": "eastmorocco",
+   "admin": [
+    "MAR-1454"
+   ],
+   "at": [
+    [
+     34.65,
+     -1.95
+    ]
+   ]
+  },
+  {
+   "id": "dahra",
+   "name": "Дахра",
+   "region": "maghreb",
+   "land": "eastmorocco",
+   "admin": [
+    "MAR-1454"
+   ],
+   "at": [
+    [
+     33.6,
+     -2.1
+    ]
+   ]
+  },
+  {
+   "id": "figuig",
+   "name": "Фигиг и Бу-Арфа",
+   "region": "maghreb",
+   "land": "eastmorocco",
+   "admin": [
+    "MAR-1454"
+   ],
+   "at": [
+    [
+     32.3,
+     -1.7
+    ]
+   ]
+  },
+  {
+   "id": "tafilalt",
+   "name": "Тафилалт",
+   "region": "maghreb",
+   "land": "eastmorocco",
+   "admin": [
+    "MAR-1452"
+   ],
+   "at": [
+    [
+     31.25,
+     -4.2
+    ]
+   ]
+  },
+  {
+   "id": "ziz",
+   "name": "Зиз",
+   "region": "maghreb",
+   "land": "eastmorocco",
+   "admin": [
+    "MAR-1452"
+   ],
+   "at": [
+    [
+     32,
+     -4.4
+    ]
+   ]
+  },
+  {
+   "id": "tadla",
+   "name": "Тадла",
+   "region": "maghreb",
+   "land": "marrakesh",
+   "admin": [
+    "MAR-1453"
+   ],
+   "at": [
+    [
+     32.35,
+     -6.4
+    ]
+   ]
+  },
+  {
+   "id": "azilal",
+   "name": "Азилаль",
+   "region": "maghreb",
+   "land": "marrakesh",
+   "admin": [
+    "MAR-1453"
+   ],
+   "at": [
+    [
+     31.9,
+     -6.55
+    ]
+   ]
+  },
+  {
+   "id": "haouz",
+   "name": "Марракеш и Хауз",
+   "region": "maghreb",
+   "land": "marrakesh",
+   "admin": [
+    "MAR-1456"
+   ],
+   "at": [
+    [
+     31.6,
+     -8
+    ]
+   ]
+  },
+  {
+   "id": "srarhna",
+   "name": "Сраргна и Рехамна",
+   "region": "maghreb",
+   "land": "marrakesh",
+   "admin": [
+    "MAR-1456"
+   ],
+   "at": [
+    [
+     32.1,
+     -7.6
+    ]
+   ]
+  },
+  {
+   "id": "haha",
+   "name": "Хаха и Шиадма",
+   "region": "maghreb",
+   "land": "marrakesh",
+   "admin": [
+    "MAR-1456"
+   ],
+   "at": [
+    [
+     31.5,
+     -9.6
+    ]
+   ]
+  },
+  {
+   "id": "sous",
+   "name": "Сус",
+   "region": "maghreb",
+   "land": "sousdraa",
+   "admin": [
+    "MAR-1455"
+   ],
+   "at": [
+    [
+     30.45,
+     -9
+    ]
+   ]
+  },
+  {
+   "id": "ouarzazate",
+   "name": "Уарзазат и Дадес",
+   "region": "maghreb",
+   "land": "sousdraa",
+   "admin": [
+    "MAR-1455"
+   ],
+   "at": [
+    [
+     31,
+     -6.6
+    ]
+   ]
+  },
+  {
+   "id": "draa",
+   "name": "Долина Драа",
+   "region": "maghreb",
+   "land": "sousdraa",
+   "admin": [
+    "MAR-1455"
+   ],
+   "at": [
+    [
+     30.45,
+     -5.95
+    ]
+   ]
+  },
+  {
+   "id": "antiatlas",
+   "name": "Анти-Атлас и Тизнит",
+   "region": "maghreb",
+   "land": "sousdraa",
+   "admin": [
+    "MAR-1455",
+    "MAR-3457"
+   ],
+   "at": [
+    [
+     29.7,
+     -9.4
+    ],
+    [
+     29.72,
+     -8.97
+    ]
+   ]
+  },
+  {
+   "id": "tata",
+   "name": "Тата и Бани",
+   "region": "maghreb",
+   "land": "sousdraa",
+   "admin": [
+    "MAR-3457"
+   ],
+   "at": [
+    [
+     29.75,
+     -7.95
+    ]
+   ]
+  },
+  {
+   "id": "tlemcen",
+   "name": "Тлемсен",
+   "region": "maghreb",
+   "land": "oran",
+   "admin": [
+    "DZA-2147"
+   ],
+   "at": [
+    [
+     34.9,
+     -1.35
+    ]
+   ]
+  },
+  {
+   "id": "sidibelabbes",
+   "name": "Сиди-Бель-Аббес",
+   "region": "maghreb",
+   "land": "oran",
+   "admin": [
+    "DZA-2146"
+   ],
+   "at": [
+    [
+     34.85,
+     -0.35
+    ]
+   ]
+  },
+  {
+   "id": "saida",
+   "name": "Саида",
+   "region": "maghreb",
+   "land": "oran",
+   "admin": [
+    "DZA-2204"
+   ],
+   "at": [
+    [
+     34.8,
+     0.15
+    ]
+   ]
+  },
+  {
+   "id": "mascara",
+   "name": "Маскара",
+   "region": "maghreb",
+   "land": "oran",
+   "admin": [
+    "DZA-2201"
+   ],
+   "at": [
+    [
+     35.3,
+     0.15
+    ]
+   ]
+  },
+  {
+   "id": "bejaia",
+   "name": "Беджая и Малая Кабилия",
+   "region": "maghreb",
+   "land": "algiers",
+   "admin": [
+    "DZA-2208"
+   ],
+   "at": [
+    [
+     36.6,
+     4.9
+    ]
+   ]
+  },
+  {
+   "id": "tiaret",
+   "name": "Тиарет",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2205"
+   ],
+   "at": [
+    [
+     35.37,
+     1.32
+    ]
+   ]
+  },
+  {
+   "id": "sersou",
+   "name": "Серсу",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2205"
+   ],
+   "at": [
+    [
+     35,
+     2.3
+    ]
+   ]
+  },
+  {
+   "id": "djelfa",
+   "name": "Джельфа",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2212"
+   ],
+   "at": [
+    [
+     34.67,
+     3.25
+    ]
+   ]
+  },
+  {
+   "id": "ainoussera",
+   "name": "Айн-Уссера",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2212"
+   ],
+   "at": [
+    [
+     35.45,
+     2.9
+    ]
+   ]
+  },
+  {
+   "id": "ouladnail",
+   "name": "Улед-Наиль",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2212"
+   ],
+   "at": [
+    [
+     34.1,
+     3.6
+    ]
+   ]
+  },
+  {
+   "id": "hodna",
+   "name": "Ходна",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2214"
+   ],
+   "at": [
+    [
+     35.7,
+     4.5
+    ]
+   ]
+  },
+  {
+   "id": "bousaada",
+   "name": "Бу-Саада",
+   "region": "maghreb",
+   "land": "highplateaus",
+   "admin": [
+    "DZA-2214"
+   ],
+   "at": [
+    [
+     35.2,
+     4.15
+    ]
+   ]
+  },
+  {
+   "id": "setif",
+   "name": "Сетиф и Меджана",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2215",
+    "DZA-2207"
+   ],
+   "at": [
+    [
+     36.1,
+     5.15
+    ]
+   ]
+  },
+  {
+   "id": "constantineprov",
+   "name": "Константина и Мила",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2217",
+    "DZA-2220"
+   ],
+   "at": [
+    [
+     36.35,
+     6.45
+    ]
+   ]
+  },
+  {
+   "id": "jijel",
+   "name": "Джиджель и Скикда",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2165",
+    "DZA-2166"
+   ],
+   "at": [
+    [
+     36.75,
+     6.4
+    ]
+   ]
+  },
+  {
+   "id": "annaba",
+   "name": "Бона и Эль-Кала",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2163",
+    "DZA-2164"
+   ],
+   "at": [
+    [
+     36.8,
+     7.85
+    ]
+   ]
+  },
+  {
+   "id": "guelma",
+   "name": "Гельма и Сук-Ахрас",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2218",
+    "DZA-2222"
+   ],
+   "at": [
+    [
+     36.3,
+     7.6
+    ]
+   ]
+  },
+  {
+   "id": "harakta",
+   "name": "Характа",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2221"
+   ],
+   "at": [
+    [
+     35.85,
+     7.1
+    ]
+   ]
+  },
+  {
+   "id": "aures",
+   "name": "Аурес",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2216"
+   ],
+   "at": [
+    [
+     35.3,
+     6.3
+    ]
+   ]
+  },
+  {
+   "id": "khenchela",
+   "name": "Хеншела",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2219"
+   ],
+   "at": [
+    [
+     35.3,
+     7.15
+    ]
+   ]
+  },
+  {
+   "id": "tebessa",
+   "name": "Тебесса и Немемча",
+   "region": "maghreb",
+   "land": "constantine",
+   "admin": [
+    "DZA-2223"
+   ],
+   "at": [
+    [
+     35.2,
+     7.95
+    ]
+   ]
+  },
+  {
+   "id": "biskra",
+   "name": "Зибан",
+   "region": "maghreb",
+   "land": "ziban",
+   "admin": [
+    "DZA-2211"
+   ],
+   "at": [
+    [
+     34.85,
+     5.75
+    ]
+   ]
+  },
+  {
+   "id": "ouledjellal",
+   "name": "Западный Зибан",
+   "region": "maghreb",
+   "land": "ziban",
+   "admin": [
+    "DZA-2211"
+   ],
+   "at": [
+    [
+     34.45,
+     5
+    ]
+   ]
+  },
+  {
+   "id": "laghouat",
+   "name": "Лагуат и Джебель-Амур",
+   "region": "maghreb",
+   "land": "ziban",
+   "admin": [
+    "DZA-2193"
+   ],
+   "at": [
+    [
+     33.85,
+     2.85
+    ]
+   ]
+  },
+  {
+   "id": "elbayadh",
+   "name": "Эль-Баяд",
+   "region": "maghreb",
+   "land": "ziban",
+   "admin": [
+    "DZA-2190"
+   ],
+   "at": [
+    [
+     33.6,
+     1
+    ]
+   ]
+  },
+  {
+   "id": "naama",
+   "name": "Наама и Горы Ксуров",
+   "region": "maghreb",
+   "land": "ziban",
+   "admin": [
+    "DZA-2149"
+   ],
+   "at": [
+    [
+     33.3,
+     -0.6
+    ]
+   ]
+  },
+  {
+   "id": "tunis",
+   "name": "Тунис и Загуан",
+   "region": "maghreb",
+   "land": "tunisnorth",
+   "admin": [
+    "TUN-108",
+    "TUN-104",
+    "TUN-102",
+    "TUN-120"
+   ],
+   "at": [
+    [
+     36.65,
+     10.1
+    ]
+   ]
+  },
+  {
+   "id": "bizerte",
+   "name": "Бизерта",
+   "region": "maghreb",
+   "land": "tunisnorth",
+   "admin": [
+    "TUN-105"
+   ],
+   "at": [
+    [
+     37.1,
+     9.65
+    ]
+   ]
+  },
+  {
+   "id": "capbon",
+   "name": "Кап-Бон",
+   "region": "maghreb",
+   "land": "tunisnorth",
+   "admin": [
+    "TUN-107"
+   ],
+   "at": [
+    [
+     36.75,
+     10.75
+    ]
+   ]
+  },
+  {
+   "id": "beja",
+   "name": "Беджа и Меджерда",
+   "region": "maghreb",
+   "land": "tunisnorth",
+   "admin": [
+    "TUN-103",
+    "TUN-106"
+   ],
+   "at": [
+    [
+     36.65,
+     9
+    ]
+   ]
+  },
+  {
+   "id": "kef",
+   "name": "Эль-Кеф и Сильяна",
+   "region": "maghreb",
+   "land": "tunisnorth",
+   "admin": [
+    "TUN-109",
+    "TUN-115"
+   ],
+   "at": [
+    [
+     36,
+     9
+    ]
+   ]
+  },
+  {
+   "id": "kairouan",
+   "name": "Кайруан",
+   "region": "maghreb",
+   "land": "sahel",
+   "admin": [
+    "TUN-118"
+   ],
+   "at": [
+    [
+     35.6,
+     9.9
+    ]
+   ]
+  },
+  {
+   "id": "sahelprov",
+   "name": "Сахель",
+   "region": "maghreb",
+   "land": "sahel",
+   "admin": [
+    "TUN-119",
+    "TUN-117",
+    "TUN-116"
+   ],
+   "at": [
+    [
+     35.6,
+     10.6
+    ]
+   ]
+  },
+  {
+   "id": "sfax",
+   "name": "Сфакс",
+   "region": "maghreb",
+   "land": "sahel",
+   "admin": [
+    "TUN-114"
+   ],
+   "at": [
+    [
+     34.75,
+     10.4
+    ]
+   ]
+  },
+  {
+   "id": "kasserine",
+   "name": "Касерин",
+   "region": "maghreb",
+   "land": "sahel",
+   "admin": [
+    "TUN-110"
+   ],
+   "at": [
+    [
+     35.1,
+     9
+    ]
+   ]
+  },
+  {
+   "id": "sidibouzid",
+   "name": "Сиди-Бу-Зид",
+   "region": "maghreb",
+   "land": "sahel",
+   "admin": [
+    "TUN-113"
+   ],
+   "at": [
+    [
+     34.9,
+     9.5
+    ]
+   ]
+  },
+  {
+   "id": "gafsa",
+   "name": "Гафса",
+   "region": "maghreb",
+   "land": "tunissouth",
+   "admin": [
+    "TUN-112"
+   ],
+   "at": [
+    [
+     34.4,
+     8.8
+    ]
+   ]
+  },
+  {
+   "id": "jerid",
+   "name": "Джерид",
+   "region": "maghreb",
+   "land": "tunissouth",
+   "admin": [
+    "TUN-101"
+   ],
+   "at": [
+    [
+     33.9,
+     8.4
+    ]
+   ]
+  },
+  {
+   "id": "nefzaoua",
+   "name": "Нефзауа",
+   "region": "maghreb",
+   "land": "tunissouth",
+   "admin": [
+    "TUN-97"
+   ],
+   "at": [
+    [
+     33.6,
+     9
+    ]
+   ]
+  },
+  {
+   "id": "gabes",
+   "name": "Габес",
+   "region": "maghreb",
+   "land": "tunissouth",
+   "admin": [
+    "TUN-111"
+   ],
+   "at": [
+    [
+     33.85,
+     9.9
+    ]
+   ]
+  },
+  {
+   "id": "djerba",
+   "name": "Джерба и Меденин",
+   "region": "maghreb",
+   "land": "tunissouth",
+   "admin": [
+    "TUN-96"
+   ],
+   "at": [
+    [
+     33.5,
+     10.8
+    ]
+   ]
+  },
+  {
+   "id": "tataouine",
+   "name": "Татавин и Дахар",
+   "region": "maghreb",
+   "land": "tunissouth",
+   "admin": [
+    "TUN-98"
+   ],
+   "at": [
+    [
+     32.9,
+     10.4
+    ]
+   ]
   }
  ],
  "seas": [
   {
    "id": "biscay",
    "name": "Бискайский залив",
-   "about": "с Кантабрийским морем; на западе — от мыса Ортегаль к северу",
+   "about": "с Кантабрийским морем; на западе и севере — до линии мыс Ортегаль — мыс Пенмарк",
    "at": [
     [
      44.1,
@@ -1652,12 +4441,12 @@
      43.77
     ],
     [
-     -6.9,
-     45.4
+     -4.37,
+     47.8
     ],
     [
      1,
-     45.4
+     47.8
     ],
     [
      1,
@@ -1672,7 +4461,7 @@
   {
    "id": "atlantic",
    "name": "Атлантический океан у Галисии и Португалии",
-   "about": "от мыса Ортегаль до мыса Сан-Висенти",
+   "about": "от мыса Ортегаль до мыса Сан-Висенти и до линии Сан-Висенти — Спартель; в открытом море — от широты мыса Пенмарк до широты Спартеля",
    "at": [
     [
      41.5,
@@ -1682,11 +4471,11 @@
    "outline": [
     [
      -13,
-     46.5
+     47.8
     ],
     [
-     -6.9,
-     45.4
+     -4.37,
+     47.8
     ],
     [
      -7.87,
@@ -1701,12 +4490,8 @@
      35.79
     ],
     [
-     -6.2,
-     33.5
-    ],
-    [
      -13,
-     33.5
+     35.79
     ]
    ]
   },
@@ -1902,7 +4687,7 @@
   {
    "id": "algero",
    "name": "Алжиро-Прованский бассейн",
-   "about": "открытое Средиземное море между Балеарскими островами и Алжиром",
+   "about": "открытое Средиземное море между Балеарскими островами, Алжиром, Провансом, Корсикой и Сардинией",
    "at": [
     [
      37.4,
@@ -1923,12 +4708,36 @@
      33.5
     ],
     [
-     6,
+     9.55,
      33.5
     ],
     [
-     6,
-     42.86
+     9.55,
+     39.1
+    ],
+    [
+     9.25,
+     41.35
+    ],
+    [
+     9.2,
+     42
+    ],
+    [
+     9.4,
+     43
+    ],
+    [
+     7.53,
+     43.78
+    ],
+    [
+     7,
+     44.2
+    ],
+    [
+     5.2,
+     44.2
     ],
     [
      5.2,
@@ -1965,6 +4774,351 @@
     [
      -1.5,
      37.6
+    ]
+   ]
+  },
+  {
+   "id": "celtic",
+   "name": "Кельтское море",
+   "about": "к западу от линии Уэссан — Лендс-Энд; на юге до широты мыса Пенмарк",
+   "at": [
+    [
+     49.3,
+     -7.5
+    ]
+   ],
+   "outline": [
+    [
+     -13,
+     47.8
+    ],
+    [
+     -5.5,
+     47.8
+    ],
+    [
+     -5.5,
+     48.46
+    ],
+    [
+     -5.1,
+     48.46
+    ],
+    [
+     -5.7,
+     50.07
+    ],
+    [
+     -5.7,
+     51.6
+    ],
+    [
+     -13,
+     51.6
+    ]
+   ]
+  },
+  {
+   "id": "iroise",
+   "name": "Море Ируаз",
+   "about": "у западного края Бретани: от мыса Пенмарк до острова Уэссан, с Брестским рейдом и Дуарненезской бухтой",
+   "at": [
+    [
+     48.15,
+     -4.9
+    ]
+   ],
+   "outline": [
+    [
+     -5.5,
+     47.8
+    ],
+    [
+     -4.37,
+     47.8
+    ],
+    [
+     -4.1,
+     48
+    ],
+    [
+     -4.2,
+     48.45
+    ],
+    [
+     -5.1,
+     48.46
+    ],
+    [
+     -5.5,
+     48.46
+    ]
+   ]
+  },
+  {
+   "id": "channel",
+   "name": "Ла-Манш",
+   "about": "от линии Уэссан — Лендс-Энд до Па-де-Кале",
+   "at": [
+    [
+     49.9,
+     -2.5
+    ]
+   ],
+   "outline": [
+    [
+     -5.7,
+     50.07
+    ],
+    [
+     -5.1,
+     48.46
+    ],
+    [
+     -4.2,
+     48.45
+    ],
+    [
+     -1.5,
+     48.3
+    ],
+    [
+     1,
+     49
+    ],
+    [
+     1.7,
+     50.3
+    ],
+    [
+     1.9,
+     50.97
+    ],
+    [
+     1.45,
+     51.15
+    ],
+    [
+     0,
+     51.2
+    ],
+    [
+     -3,
+     51
+    ],
+    [
+     -5,
+     50.3
+    ]
+   ]
+  },
+  {
+   "id": "northsea",
+   "name": "Северное море",
+   "about": "его южный край: от Па-де-Кале на северо-восток, у Фландрии",
+   "at": [
+    [
+     51.3,
+     2.4
+    ]
+   ],
+   "outline": [
+    [
+     1.9,
+     50.97
+    ],
+    [
+     1.45,
+     51.15
+    ],
+    [
+     1.6,
+     51.6
+    ],
+    [
+     10,
+     51.6
+    ],
+    [
+     10,
+     50.5
+    ],
+    [
+     2.5,
+     50.5
+    ]
+   ]
+  },
+  {
+   "id": "ligurian",
+   "name": "Лигурийское море",
+   "about": "к северу от линии мыс Корс — граница Франции и Италии у Ментоны",
+   "at": [
+    [
+     43.6,
+     8.4
+    ]
+   ],
+   "outline": [
+    [
+     7.53,
+     43.78
+    ],
+    [
+     9.4,
+     43
+    ],
+    [
+     12,
+     43
+    ],
+    [
+     12,
+     44.6
+    ],
+    [
+     7.5,
+     44.6
+    ]
+   ]
+  },
+  {
+   "id": "tyrrhenian",
+   "name": "Тирренское море",
+   "about": "к востоку от Корсики и Сардинии, к югу до линии Сардиния — Сицилия; в альбом попадает его западный край",
+   "at": [
+    [
+     42.4,
+     9.65
+    ]
+   ],
+   "outline": [
+    [
+     9.4,
+     43
+    ],
+    [
+     12,
+     43
+    ],
+    [
+     12,
+     38.9
+    ],
+    [
+     9.55,
+     38.9
+    ],
+    [
+     9.55,
+     39.1
+    ],
+    [
+     9.25,
+     41.35
+    ],
+    [
+     9.2,
+     42
+    ]
+   ]
+  },
+  {
+   "id": "moroccoatl",
+   "name": "Атлантический океан у Марокко",
+   "about": "от мыса Спартель на юг вдоль берега Марокко",
+   "at": [
+    [
+     32.5,
+     -9.8
+    ]
+   ],
+   "outline": [
+    [
+     -13,
+     35.79
+    ],
+    [
+     -5.92,
+     35.79
+    ],
+    [
+     -6.2,
+     33.5
+    ],
+    [
+     -6.2,
+     27.5
+    ],
+    [
+     -13,
+     27.5
+    ]
+   ]
+  },
+  {
+   "id": "sicily",
+   "name": "Сицилийский пролив",
+   "about": "между Тунисом, Сардинией и Сицилией, к западу от линии мыс Бон — мыс Лилибей; с Тунисским заливом",
+   "at": [
+    [
+     37.4,
+     10.4
+    ]
+   ],
+   "outline": [
+    [
+     9.55,
+     38.9
+    ],
+    [
+     12.43,
+     37.8
+    ],
+    [
+     11.04,
+     37.08
+    ],
+    [
+     9.55,
+     36.5
+    ]
+   ]
+  },
+  {
+   "id": "syrtis",
+   "name": "Залив Хаммамет и Малый Сирт",
+   "about": "восточный берег Туниса: от мыса Бон до Джербы и залива Габес",
+   "at": [
+    [
+     34.6,
+     11.2
+    ]
+   ],
+   "outline": [
+    [
+     11.04,
+     37.08
+    ],
+    [
+     12.43,
+     37.8
+    ],
+    [
+     15,
+     37.8
+    ],
+    [
+     15,
+     31.5
+    ],
+    [
+     9.5,
+     31.5
+    ],
+    [
+     9.5,
+     36.5
     ]
    ]
   }

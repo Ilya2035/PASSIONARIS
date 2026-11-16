@@ -9,7 +9,7 @@ export const R = 6371;
 // (worked.js). Everything that differs between the two is told from this number, so the change is one line here,
 // made together with the new data and the re-baked files of every part, in one release. To try stage 3 in a
 // worktree, change the number there and do not commit it.
-export const STAGE = 2;
+export const STAGE = 3;
 // BBOX is the rectangle of the detailed heights. At stage 2 it is also the worked polygon: chunks, districts, roads
 // and settlements exist everywhere inside it. At stage 3 they exist only under the mask of the worked land. The map
 // itself is the whole sphere (the owner, 15.11.2026: «Я должен видеть всю землю»): beyond lies the plain land and
