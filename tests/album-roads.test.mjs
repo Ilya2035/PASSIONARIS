@@ -18,7 +18,7 @@ import { roadGround, legBetween, stepCost, roadNetwork, roadLine, provinceTowns,
 import { INFRA, LEVEL, chunkEase, levelOf, infraLevels, STEEP as STEEP_INFRA, HIGH as HIGH_INFRA } from '../src/album/roads/infra.js';
 import { HISTORIC, PASSES } from '../src/album/roads/historic.js';
 import { FINE, FW, FH, cellXY, cellChunk, cellGround, fineRivers, climbs, finePoints } from '../src/album/roads/shape.js';
-import { riverCrossings, squareBridges, crossingType, fordable, fordSites, cutAtTowns, townIndex, nearIndex, BRIDGE, FORD, FORD_MIN, WEAVE, TOWN_EDGE } from '../src/album/roads/crossings.js';
+import { riverCrossings, squareBridges, crossingType, fordable, fordSites, cutAtTowns, townIndex, nearIndex, seaShores, BRIDGE, FORD, FORD_MIN, WEAVE, TOWN_EDGE, SEA } from '../src/album/roads/crossings.js';
 import { decodeSites, SITE_KINDS } from '../src/album/town/sites.js';
 import { LOOK, THIN, roadFar } from '../src/album/layers/roads.js';
 import { worksGeometry, WORKS } from '../src/album/roads/works.js';
@@ -225,6 +225,55 @@ test('roads: where a road meets a river — a bridge, a ford or a ferry by the r
     const ends = [-1, 1].map(s => [c.x + s * c.dx * c.span / 2, c.y + s * c.dy * c.span / 2]);
     for (const e of ends) assert.ok(way.km.some(q => Math.hypot(q[0] - e[0], q[1] - e[1]) < 1e-9), 'the road comes to each end of the deck');
   }
+});
+
+test('roads: over an arm of the sea a crossing reaches from shore to shore — a ferry, or a bridge over a narrow neck', () => {
+  // An arm of the sea runs east–west: under water between Y − half and Y + half, 3 m deep; the land stands at 2.5 m.
+  // The file of the rivers has a line down its middle, as wide as a channel (the Hollands Diep: 338 m in the file,
+  // a kilometre and a half of water). A road runs north across it.
+  const X = -200, Y = 4400, arm = half => (x, y) => (Math.abs(y - Y) < half ? -3 : 2.5);
+  const channel = (dy, w, name) => { const n = 21, ll = new Float64Array(n * 2); for (let i = 0; i < n; i++) { const p = llOf(X - 5 + i * .5, Y + dy); ll[i * 2] = p.lon; ll[i * 2 + 1] = p.lat; } return { n, ll, w: new Float32Array(n).fill(w), name, ru: '' }; };
+  const road = (kind, lean = 0, to = 81) => ({ kind, km: Array.from({ length: to }, (_, i) => [X + (i - 40) * .1 * lean, Y - 4 + i * .1]) });
+  const courses = { rivers: [channel(0, .3, 'Рукав')] }, near = (a, b, e = .02) => Math.abs(a - b) < e;
+  assert.ok(SEA.h < 0 && SEA.mainMax > BRIDGE.lesserMax && SEA.max > 1 && SEA.min > FORD_MIN);
+  // without the heights nothing is known of the sea: the width of the file
+  { const [c] = riverCrossings([road(1)], courses); assert.ok(c.type === 'ferry' && !c.sea && near(c.width, .3, 1e-3)); }
+  // a lesser road: a ferry from shore to shore, its middle in the middle of the water, along the road
+  { const list = riverCrossings([road(1)], courses, 1, arm(.7)); assert.equal(list.length, 1); const c = list[0];
+    assert.ok(c.sea && c.type === 'ferry' && near(c.width, 1.4) && near(c.x, X) && near(c.y, Y) && near(c.at, 4) && near(c.dx, 0, 1e-6) && near(c.dy, 1, 1e-6) && c.sin === 1, JSON.stringify(c));
+    assert.ok(near(c.span, c.width + 2 * BRIDGE.abut, 1e-9) && near(c.rx * c.dx + c.ry * c.dy, 0, 1e-9) && c.river === 'Рукав');
+    for (const s of [-1, 1]) assert.ok(near(arm(.7)(c.x + s * c.dx * (c.width / 2 + .01), c.y + s * c.dy * (c.width / 2 + .01)), 2.5, 1e-9) && arm(.7)(c.x + s * c.dx * (c.width / 2 - .02), c.y + s * c.dy * (c.width / 2 - .02)) < 0, 'each end stands on its shore'); }
+  // a main road: no bridge of stone over a kilometre and a half of sea; over a neck of 300 m it stands, as long as the neck
+  assert.deepEqual(riverCrossings([road(0)], courses, 1, arm(.7)).map(c => [c.type, c.sea]), [['ferry', true]]);
+  { const [c] = riverCrossings([road(0)], courses, 1, arm(.15)); assert.ok(c.type === 'bridge' && c.sea && near(c.width, .3), JSON.stringify(c));
+    assert.deepEqual(riverCrossings([road(1)], courses, 1, arm(.15)).map(c => c.type), ['ferry'], 'a lesser road spans no more than over a river');
+    assert.deepEqual(riverCrossings([road(1)], courses, 1, arm(.06)).map(c => c.type), ['bridge']); assert.deepEqual(riverCrossings([road(2)], courses, 1, arm(.06)).map(c => c.type), ['ferry']);
+    const way = road(0), [b] = squareBridges([way], riverCrossings([way], courses, 1, arm(.15)));       // the road comes to both ends of the deck
+    assert.ok(b.square && near(b.span, .3 + 2 * BRIDGE.abut)); for (const s of [-1, 1]) assert.ok(way.km.some(q => Math.hypot(q[0] - (b.x + s * b.dx * b.span / 2), q[1] - (b.y + s * b.dy * b.span / 2)) < 1e-9)); }
+  // a road that crosses aslant: the water along the road is longer than the arm is wide
+  { const [c] = riverCrossings([road(1, .5)], courses, 1, arm(.7)); assert.ok(c.sea && near(c.width, 1.4 * Math.hypot(1, .5)) && near(c.dx / c.dy, .5, 1e-6) && near(c.x, X) && near(c.y, Y)); }
+  // two lines of the file under one water (a channel and its arm) are one crossing; on dry ground a river keeps its own width
+  { const two = { rivers: [channel(0, .3, 'Рукав'), channel(.3, .1, 'Протока'), channel(2, .06, 'Река')] }, list = riverCrossings([road(1)], two, 1, arm(.7));
+    assert.deepEqual(list.map(c => [c.river, c.sea ? 'sea' : c.type]).sort(), [['Река', 'bridge'], ['Рукав', 'sea']]); assert.ok(near(list.find(c => !c.sea).width, .06, 1e-3)); }
+  // the water is open to the end of the road, or too wide for a ferry: nothing stands there
+  assert.equal(riverCrossings([road(1, 0, 43)], courses, 1, arm(.7)).length, 0); assert.equal(riverCrossings([road(1)], courses, 1, arm(3.9)).length, 1); assert.equal(riverCrossings([{ kind: 1, km: Array.from({ length: 401 }, (_, i) => [X, Y - 20 + i * .1]) }], courses, 1, arm(SEA.max / 2 + .5)).length, 0);
+  // two ferries over the sea less than WEAVE apart are no shallows of a bank: both stay ferries
+  { const wide = (x, y) => (Math.abs(y - Y) < .3 || Math.abs(y - Y - 1.2) < .3 ? -3 : 2.5), list = riverCrossings([road(1)], { rivers: [channel(0, .3, 'Рукав'), channel(1.2, .3, 'Рукав')] }, 1, wide);
+    assert.deepEqual(list.map(c => [c.type, !!c.weave, near(c.width, .6)]), [['ferry', false, true], ['ferry', false, true]]); }
+  // a river whose line runs on under the sea: its fords are marked on the land only
+  { const n = 201, ll = new Float64Array(n * 2); for (let i = 0; i < n; i++) { const p = llOf(X + 10, Y - 10 + i * .1); ll[i * 2] = p.lon; ll[i * 2 + 1] = p.lat; }
+    const down = { rivers: [{ n, ll, w: new Float32Array(n).fill(.03), name: 'К морю', ru: '' }] }, shore = (x, y) => (y > Y ? -2 : 3), dry = fordSites(down, () => 3), wet = fordSites(down, shore);
+    assert.ok(dry.some(s => s.y > Y) && wet.length >= 1 && wet.length < dry.length && wet.every(s => s.y <= Y), dry.length + ' fords on dry land, ' + wet.length + ' with the lower half under the sea'); }
+  // the shores themselves
+  { const pts = Array.from({ length: 81 }, (_, i) => [X, Y - 4 + i * .1]), ats = Float32Array.from(pts, (_, i) => i * .1), sh = seaShores(pts, ats, 4, arm(.7));
+    assert.ok(near(sh.at0, 3.3) && near(sh.at1, 4.7) && near(sh.y0, Y - .7) && near(sh.y1, Y + .7) && near(sh.x0, X)); assert.equal(seaShores(pts.slice(0, 44), ats.slice(0, 44), 4, arm(.7)), null); }
+  // the works: the sea is told by a width below nought, and a bridge over it has its piers as over a river as wide
+  { const at = (kind, width) => ({ lat: 40, lon: -3, dx: 1, dy: 0, width, sin: 1, kind, road: .008, minPx: 2 }), sea = worksGeometry([at('ferry', -1.4)]).attributes, river = worksGeometry([at('ferry', 1.4)]).attributes;
+    assert.equal(sea.aP.count, river.aP.count); for (let v = 0; v < sea.aD.count; v++) assert.equal(sea.aD.getZ(v), Math.fround(-1.4));
+    assert.equal(worksGeometry([at('stone', -.3)]).attributes.aP.count, worksGeometry([at('stone', .3)]).attributes.aP.count); }
+  { const src = readFileSync(join(ROOT, 'src/album/roads/works.js'), 'utf8'), layer = readFileSync(join(ROOT, 'src/album/layers/roads.js'), 'utf8');
+    assert.match(src, /if \(aD\.z < 0\.\) water = -aD\.z;/, 'the works of the sea reach from shore to shore whatever the rivers are drawn like');
+    assert.match(layer, /width: f\.sea \? -f\.width : f\.width/); assert.match(layer, /f\.sea \? f\.width : riverDrawn\(f\.width \* kr, px\)/); }
 });
 
 test('roads: a road stops at the first houses of a settlement, and whoever asks is told how near a road is', () => {

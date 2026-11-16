@@ -26,8 +26,9 @@ export const WORKS = {
 const rgb = c => [(c >> 16 & 255) / 255, (c >> 8 & 255) / 255, (c & 255) / 255];
 
 // list: [{ lat, lon (the middle of the crossing), dx, dy (the way the road runs: a unit vector, east and north), width
-// (km of water), sin (of the angle between road and river), kind: 'stone' | 'timber' | 'foot' | 'ferry', road (km: the
-// width of the road), minPx (the least width of that road on the screen) }]
+// (km of water; negative: of the sea — roads/crossings.js, SEA — which is as wide as the heights have it whatever
+// the rivers are drawn like), sin (of the angle between road and river), kind: 'stone' | 'timber' | 'foot' | 'ferry',
+// road (km: the width of the road), minPx (the least width of that road on the screen) }]
 // → BufferGeometry. A corner: aC the middle of the crossing; aD the way of the road, the water, 1 / sin; aP its place —
 // along (in halves of the span), across (in halves of the deck), up (metres), from what (0 the deck · 1 the water ·
 // 2 the ground under it); aQ km added along and across; aR the road, its least pixels, the height of the deck.
@@ -59,7 +60,7 @@ export function worksGeometry(list) {
       block([-1, WORKS.abut + .001, 0, .0022, -.25, 1], [-1, WORKS.abut + .0062, 0, .004, .5, 1], rgb(F.boat), rgb(F.boat).map(v => v * .75));
       continue;
     }
-    const W = WORKS[f.kind], top = rgb(W.top), side = rgb(W.side), rail = rgb(W.rail), tw = W.narrow || 1, span = f.width / Math.max(.5, f.sin || 1), cam = s => W.camber * (1 - s * s);
+    const W = WORKS[f.kind], top = rgb(W.top), side = rgb(W.side), rail = rgb(W.rail), tw = W.narrow || 1, span = Math.abs(f.width) / Math.max(.5, f.sin || 1), cam = s => W.camber * (1 - s * s);
     H = W.H;
     // the deck, in pieces along the road; a stone one rises a little to its middle
     const SEG = W.camber ? 6 : 1;
@@ -118,6 +119,7 @@ export function makeWorks(album, list, { wide = 2 } = {}) {
         // the water as it is drawn (the same sums as the sheet of the river): the works reach from bank to bank of that
         float real = aD.z * uRiver.z, s2 = clamp(real / .16, 0., 1.);
         float water = max(real, uRiver.x * mix(mix(.42, 1., sqrt(s2)), mix(uRiverLeast.x, uRiverLeast.y, s2), uRiver.y));
+        if (aD.z < 0.) water = -aD.z;                                                       // the sea: from shore to shore as the heights have it
         float reach = water * .5 * aD.w + ${WORKS.abut.toFixed(3)} + uPx * .5;
         float roadReal = aR.x * uK, road = max(roadReal, aR.y * uPx), grow = clamp(road / max(roadReal, 1e-6), 1., 6.);                     // drawn wider than life from high up, and a little taller
         if (aR.z < .5) grow = clamp(uPx * ${WORKS.ferry.px.toFixed(1)} / .009, grow, 8.);                                                   // the hut of a ferry (9 m long) is never under a few pixels

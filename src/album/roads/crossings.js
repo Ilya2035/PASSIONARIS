@@ -15,6 +15,10 @@
 //     реальности, надо попытаться отметить все места брода».
 //   • A FERRY is where there is neither: the road comes down to the bank, a hut and a boat stand there, and the road
 //     goes on from the other bank.
+//   • Over the SEA — an arm of it, an estuary: where the heights say sea the river is not drawn (layers/rivers.js),
+//     but its line in the file runs on under the water, as wide as a channel. A crossing on such a line is a crossing
+//     of the sea: it reaches from shore to shore as the heights have them, and it is a ferry unless the neck is narrow
+//     enough for a bridge (SEA, seaShores()).
 //   • A road STOPS at the first houses of a settlement: inside, the streets of the settlement take over.
 // Plain JavaScript without the GPU. Everything is in flat km (chunks.js, kmOf).
 import { kmOf } from '../chunks.js';
@@ -28,6 +32,10 @@ export const BRIDGE = { min: .01, lesserMax: .15, footMax: .04, abut: .012, wide
 // than every `every` km, and none within `clear` km of a place where a road crosses already.
 export const FORD = { max: .045, bank: 6, reach: .12, every: 5, clear: 1.5, step: .2 };
 export const WEAVE = 2.5;                           // km along a road: see riverCrossings()
+// the sea under a road: `h` metres under which a point of a river line is under the sea (the same as layers/rivers.js);
+// `step` km between the probes along the road; `max` km of water no ferry crosses; `mainMax` km: the widest neck a
+// main road bridges (a lesser road and a track: as over a river); `min` km: less water than this is no sea at all
+export const SEA = { h: -.3, step: .06, max: 12, mainMax: .35, min: .03 };
 export const TOWN_EDGE = .92;                       // a road stops at this share of the radius of a settlement
 const SOFT = .04;                                   // km over which it fades out there
 
@@ -49,9 +57,26 @@ export function fordable(w, x, y, dx, dy, heightAt = null, dry = false) {
 }
 
 const key = (i, j) => i * 100003 + j;
+// The shores of the sea a road stands over at `at` km of its line. pts: the line (flat km), ats: km along it to each
+// of its points, heightAt(x, y) → metres. → { x0, y0, at0, x1, y1, at1 }: where the ground comes out of the water on
+// each side, back and on along the road — or null when the water reaches an end of the line or is wider than SEA.max.
+export function seaShores(pts, ats, at, heightAt, S = SEA) {
+  const last = ats.length - 1, end = ats[last];
+  const pos = a => { let lo = 1, hi = last; while (lo < hi) { const m = (lo + hi) >> 1; if (ats[m] < a) lo = m + 1; else hi = m; }
+    const t = Math.max(0, Math.min(1, (a - ats[lo - 1]) / Math.max(1e-9, ats[lo] - ats[lo - 1]))); return [pts[lo - 1][0] + (pts[lo][0] - pts[lo - 1][0]) * t, pts[lo - 1][1] + (pts[lo][1] - pts[lo - 1][1]) * t]; };
+  const wet = a => { const p = pos(a); return heightAt(p[0], p[1]) < 0; };
+  const shore = dir => {
+    for (let a = at; ;) { const b = a + dir * S.step; if (b < 0 || b > end || Math.abs(b - at) > S.max) return null;
+      if (!wet(b)) { let lo = a, hi = b; for (let i = 0; i < 6; i++) { const m = (lo + hi) / 2; if (wet(m)) lo = m; else hi = m; } return (lo + hi) / 2; }
+      a = b; }
+  };
+  const a0 = shore(-1), a1 = a0 === null ? null : shore(1); if (a0 === null || a1 === null || a1 - a0 > S.max) return null;
+  const p = pos(a0), q = pos(a1); return { x0: p[0], y0: p[1], at0: a0, x1: q[0], y1: q[1], at1: a1 };
+}
 // lines: [{ km: [[x, y] …], kind }] (the roads as drawn); courses: decodeCourses() of water/courses.js
 // → [{ x, y, type, road (kind), line (its number), at (km along that line), width (km of water), river (name), dry, dx, dy (the way the road
-//      runs, a unit vector), rx, ry (the way the river runs), span (km: the deck from bank to bank along the road, with its abutments) }]
+//      runs, a unit vector), rx, ry (the way the river runs), span (km: the deck from bank to bank along the road, with its abutments),
+//      sea (the crossing is of the sea: width is the water from shore to shore along the road, x, y its middle) }]
 export function riverCrossings(lines, courses, cell = 1, heightAt = null) {
   const grid = new Map(), out = [], ats = [];                    // ats: km along every line to each of its points
   lines.forEach((l, li) => {
@@ -87,21 +112,35 @@ export function riverCrossings(lines, courses, cell = 1, heightAt = null) {
   }
   // the arms of one river side by side, or a river drawn twice: one crossing, the widest water
   out.sort((p, q) => p.line - q.line || q.width - p.width);
-  const kept = [];
-  for (const c of out) { if (kept.some(k => k.line === c.line && Math.hypot(k.x - c.x, k.y - c.y) < Math.max(.06, (k.width + c.width) * .75))) continue; kept.push(c); }
+  const all = [];
+  for (const c of out) { if (all.some(k => k.line === c.line && Math.hypot(k.x - c.x, k.y - c.y) < Math.max(.06, (k.width + c.width) * .75))) continue; all.push(c); }
+  // The line of a river under the sea (SEA, above): the crossing is of the sea. It reaches from shore to shore along
+  // the road; no stone bridge stands over an arm of the sea — a ferry, unless the neck is narrow enough for a bridge.
+  // Several lines under one water are one crossing; where the water is open to an end of the road, nothing stands.
+  const kept = [], done = new Set();
+  for (const c of all) {
+    if (!heightAt || !(heightAt(c.x, c.y) < SEA.h)) { kept.push(c); continue; }
+    const sh = seaShores(lines[c.line].km, ats[c.line], c.at, heightAt); if (!sh) continue;
+    const w = Math.hypot(sh.x1 - sh.x0, sh.y1 - sh.y0); if (w < SEA.min) { kept.push(c); continue; }
+    const id = c.line + ':' + Math.round(sh.at0 * 50); if (done.has(id)) continue; done.add(id);
+    const kind = lines[c.line].kind, dx = (sh.x1 - sh.x0) / w, dy = (sh.y1 - sh.y0) / w;
+    kept.push({ ...c, at: (sh.at0 + sh.at1) / 2, x: (sh.x0 + sh.x1) / 2, y: (sh.y0 + sh.y1) / 2, width: w, dx, dy, rx: -dy, ry: dx, sin: 1, span: w + 2 * BRIDGE.abut, sea: true,
+      type: w <= (kind === 0 ? SEA.mainMax : kind === 1 ? BRIDGE.lesserMax : BRIDGE.footMax) ? 'bridge' : 'ferry' });
+  }
   // A road that runs beside a river may touch its bends: it steps over the water and comes straight back. That is no
   // bridge: two crossings of one river less than WEAVE km apart along one road are forded shallows of the bank.
   const byLine = new Map(); for (const c of kept) (byLine.get(c.line) || byLine.set(c.line, []).get(c.line)).push(c);
   for (const list of byLine.values()) {
     list.sort((p, q) => p.at - q.at);
-    for (let i = 0; i + 1 < list.length; i++) { const a = list[i], b = list[i + 1]; if (a.river === b.river && b.at - a.at < WEAVE && a.type !== 'ford' && b.type !== 'ford') { a.type = b.type = 'ford'; a.weave = b.weave = true; i++; } }
+    for (let i = 0; i + 1 < list.length; i++) { const a = list[i], b = list[i + 1]; if (a.river === b.river && b.at - a.at < WEAVE && a.type !== 'ford' && b.type !== 'ford' && !a.sea && !b.sea) { a.type = b.type = 'ford'; a.weave = b.weave = true; i++; } }
   }
   return kept;
 }
 
 // The fords of the rivers, whether a road comes to them or not: along every river that can be waded, the best place
 // of every stretch of FORD.every km — the lowest banks. courses: decodeCourses(); heightAt(x, y) → metres; taken:
-// [{ x, y }] places where a road crosses already (riverCrossings()) — no ford is marked within FORD.clear km of one.
+// [{ x, y }] places where a road crosses already (riverCrossings()) — no ford is marked within FORD.clear km of one,
+// and none where the line of the river lies under the sea (SEA.h): no river is drawn there.
 // → [{ x, y, width, river, dx, dy (across the river: a unit vector), rx, ry (the way the river runs) }]
 export function fordSites(courses, heightAt, taken = []) {
   const out = [], grid = new Map(), C = FORD.clear;
@@ -121,7 +160,7 @@ export function fordSites(courses, heightAt, taken = []) {
           next = run + FORD.step;
           const sx = (qx - px) / len, sy = (qy - py) / len, x = (px + qx) / 2, y = (py + qy) / 2, h = heightAt(x, y), reach = FORD.reach + w / 2;
           const up = Math.max(heightAt(x - sy * reach, y + sx * reach) - h, heightAt(x + sy * reach, y - sx * reach) - h), score = Math.max(0, up) + Math.abs(run - from - FORD.every / 2) * .2;
-          if (up <= FORD.bank && !near(x, y) && (!best || score < best.score)) best = { score, x, y, width: w, river: r.ru || r.name || '', dx: -sy, dy: sx, rx: sx, ry: sy, up };
+          if (up <= FORD.bank && h >= SEA.h && !near(x, y) && (!best || score < best.score)) best = { score, x, y, width: w, river: r.ru || r.name || '', dx: -sy, dy: sx, rx: sx, ry: sy, up };
         }
       }
       px = qx; py = qy;

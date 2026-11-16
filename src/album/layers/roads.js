@@ -114,7 +114,7 @@ export default async function init(album) {
     }).filter(Boolean);
     // the bridges themselves and the ferries: by the kind of their road, so that each can be switched off with it
     works = WORK.map((name, kind) => {
-      const list = fords.filter(f => (f.type === 'bridge' || f.type === 'ferry') && f.road === kind).map(f => { const g = llOf(f.x, f.y); return { lat: g.lat, lon: g.lon, dx: f.dx, dy: f.dy, width: f.width, sin: f.sin, kind: f.type === 'ferry' ? 'ferry' : name, road: LOOK[kind + 1].w, minPx: LOOK[kind + 1].px[0] }; });
+      const list = fords.filter(f => (f.type === 'bridge' || f.type === 'ferry') && f.road === kind).map(f => { const g = llOf(f.x, f.y); return { lat: g.lat, lon: g.lon, dx: f.dx, dy: f.dy, width: f.sea ? -f.width : f.width, sin: f.sin, kind: f.type === 'ferry' ? 'ferry' : name, road: LOOK[kind + 1].w, minPx: LOOK[kind + 1].px[0] }; });
       return list.length ? { ...makeWorks(album, list, { wide: BRIDGE.wide }), kind } : null;
     }).filter(Boolean);
     for (const w of works) { w.u.uRiverLeast.value[0] = MID.least[0]; w.u.uRiverLeast.value[1] = MID.least[1]; }
@@ -126,7 +126,7 @@ export default async function init(album) {
     for (const d of decks) {
       const ll = d.mesh.geometry.attributes.aLL, dir = d.mesh.geometry.attributes.aDir;
       d.list.forEach((f, i) => {
-        const half = riverDrawn(f.width * kr, px) / f.sin / 2 + (d.d.type === 'ford' ? .002 : BRIDGE.abut) + px * .5;
+        const half = (f.sea ? f.width : riverDrawn(f.width * kr, px)) / f.sin / 2 + (d.d.type === 'ford' ? .002 : BRIDGE.abut) + px * .5;   // (the sea is drawn as wide as it is)
         const a = llOf(f.x - f.dx * half, f.y - f.dy * half), b = llOf(f.x + f.dx * half, f.y + f.dy * half), c = Math.cos(a.lat * Math.PI / 180);
         let ex = (b.lon - a.lon) * c, ey = b.lat - a.lat; const len = Math.hypot(ex, ey) || 1; ex /= len; ey /= len;
         for (let v = 0; v < 4; v++) { const q = v < 2 ? a : b; ll.setXY(i * 4 + v, q.lat, q.lon); dir.setXY(i * 4 + v, ex, ey); }
