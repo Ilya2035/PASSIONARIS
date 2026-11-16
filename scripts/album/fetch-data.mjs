@@ -85,24 +85,40 @@ const tileFile = (z, x, y) => { const here = join(CACHE, 'terrarium', String(z),
 export const LOWLANDS = [
   // (east to the edge of the rectangle: the marshes of East Frisia and of the Elbe are the same land below the sea —
   // with the box ending at 7.3° the sea stood over Germany along a straight line, seen by the ground session)
-  { name: 'the polders of the Low Countries and the marshes of the North Sea', lon0: 1.5, lon1: 11.7, lat0: 50.7, lat1: 53.7, lakes: true },
+  { name: 'the polders of the Low Countries and the marshes of the North Sea', lon0: 1.5, lon1: 11.7, lat0: 50.7, lat1: 53.7, lakes: true, arms: true },
   { name: 'the chotts of the Sahara', lon0: 4.5, lon1: 9.7, lat0: 32.8, lat1: 35.0, lakes: false },
 ];
 export const LOW_M = 1, LOW_FINE = 4;
+// The arms of the sea in the delta of the Rhine, the Maas and the Scheldt (Oosterschelde, Grevelingen, Haringvliet,
+// Hollands Diep, …). The outline of the country runs along the dams of the Delta Works, so by it the arms are land
+// and were lifted with the polders: the islands of Zeeland and South Holland grew into one piece of land (seen by the
+// roads session on the data of stage 3). Their outlines — OpenStreetMap, gathered by the roads session into
+// data/album/stage3/sea-arms.json of the main folder — are cut out of the land of a box marked `arms`, and ground
+// inside them that stands above ARM_M is lowered to it: shallow water of the sea, by the share of the point that is
+// water, like the lift. The other groups of that file (what is left of the Zuiderzee, the Lauwersmeer) are not
+// touched: the Zuiderzee is water by the lakes of the outline already.
+export const ARM_M = -3, ARM_GROUPS = ['delta'];
+function seaArms() {
+  const f = join(MAIN, 'data', 'album', 'stage3', 'sea-arms.json');
+  if (!existsSync(f)) { console.log('  no outlines of the arms of the sea (data/album/stage3/sea-arms.json of the main folder): the delta stays as the outline of the country has it'); return []; }
+  return JSON.parse(readFileSync(f, 'utf8')).arms.filter(a => ARM_GROUPS.includes(a.group)).map(a => [a.ring, ...(a.holes || [])]);
+}
 function liftLowlands(out, z, x0, y0, W, H) {
   if (!RAW) return 0;
-  const px = lon => tx(lon, z) * 256 - x0 * 256, py = lat => ty(lat, z) * 256 - y0 * 256, low = (LOW_M + 8192) * 4;
+  const px = lon => tx(lon, z) * 256 - x0 * 256, py = lat => ty(lat, z) * 256 - y0 * 256, low = (LOW_M + 8192) * 4, deep = (ARM_M + 8192) * 4;
   const rd = f => JSON.parse(readFileSync(join(RAW, f), 'utf8')).features;
   const polysOf = g => (!g ? [] : g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []);
   const countries = rd('ne_10m_admin_0_countries.geojson').flatMap(f => polysOf(f.geometry));
   const lakes = rd('ne_10m_lakes.geojson').filter(f => f.properties.featurecla !== 'Reservoir').flatMap(f => polysOf(f.geometry));
+  const arms = LOWLANDS.some(b => b.arms) ? seaArms() : [];
   let lifted = 0;
   for (const b of LOWLANDS) {
     const i0 = Math.max(0, Math.floor(px(b.lon0))), i1 = Math.min(W - 1, Math.ceil(px(b.lon1))), j0 = Math.max(0, Math.floor(py(b.lat1))), j1 = Math.min(H - 1, Math.ceil(py(b.lat0)));
     if (i1 < i0 || j1 < j0) continue;
     const Q = LOW_FINE, bw = (i1 - i0 + 1) * Q, bh = (j1 - j0 + 1) * Q, land = new Uint8Array(bw * bh), xs = [];
+    const sea = b.arms && arms.length ? new Uint8Array(bw * bh) : null;   // the fine points inside an arm of the sea
     // the fine points whose middle lies inside a polygon (even-odd: its holes stay out) are set to v
-    const fill = (poly, v) => {
+    const fill = (poly, v, into = land) => {
       const rings = poly.map(r => r.map(p => [(px(p[0]) - i0) * Q, (py(p[1]) - j0) * Q]));
       let ya = 1e9, yb = -1e9, xa = 1e9, xb = -1e9;
       for (const p of rings[0]) { if (p[1] < ya) ya = p[1]; if (p[1] > yb) yb = p[1]; if (p[0] < xa) xa = p[0]; if (p[0] > xb) xb = p[0]; }
@@ -111,18 +127,23 @@ function liftLowlands(out, z, x0, y0, W, H) {
         const y = j + .5; xs.length = 0;
         for (const r of rings) for (let k = 0, c = r.length - 1; k < r.length; c = k++) { const p = r[k], q = r[c]; if ((p[1] > y) !== (q[1] > y)) xs.push(p[0] + (y - p[1]) * (q[0] - p[0]) / (q[1] - p[1])); }
         xs.sort((p, q) => p - q);
-        for (let k = 0; k + 1 < xs.length; k += 2) for (let i = Math.max(0, Math.ceil(xs[k] - .5)); i <= Math.min(bw - 1, Math.ceil(xs[k + 1] - .5) - 1); i++) land[j * bw + i] = v;
+        for (let k = 0; k + 1 < xs.length; k += 2) for (let i = Math.max(0, Math.ceil(xs[k] - .5)); i <= Math.min(bw - 1, Math.ceil(xs[k + 1] - .5) - 1); i++) into[j * bw + i] = v;
       }
     };
     for (const p of countries) fill(p, 1);
     if (b.lakes) for (const p of lakes) fill(p, 0);
-    let n = 0;
+    if (sea) for (const p of arms) { fill(p, 0); fill(p, 1, sea); }
+    let n = 0, cut = 0;
     for (let j = 0; j < bh / Q; j++) for (let i = 0; i < bw / Q; i++) {
-      const t = (j0 + j) * W + i0 + i; if (out[t] >= low) continue;
-      let share = 0; for (let b2 = 0; b2 < Q; b2++) for (let a2 = 0; a2 < Q; a2++) share += land[(j * Q + b2) * bw + i * Q + a2];
-      if (share) { out[t] = Math.round(out[t] + (low - out[t]) * share / (Q * Q)); n++; }
+      const t = (j0 + j) * W + i0 + i, v = out[t]; if (v >= low && !sea) continue;
+      let share = 0, wet = 0;
+      for (let b2 = 0; b2 < Q; b2++) for (let a2 = 0; a2 < Q; a2++) { const f = (j * Q + b2) * bw + i * Q + a2; share += land[f]; if (sea) wet += sea[f]; }
+      let h = v;
+      if (v < low && share) { h += (low - v) * share / (Q * Q); n++; }
+      if (wet && v > deep) { h += (deep - v) * wet / (Q * Q); cut++; }
+      if (h !== v) out[t] = Math.round(h);
     }
-    console.log(`  ${b.name}: ${n} points lifted above the sea`);
+    console.log(`  ${b.name}: ${n} points lifted above the sea${sea ? `, ${cut} points of the arms of the sea lowered to ${ARM_M} m` : ''}`);
     lifted += n;
   }
   return lifted;
