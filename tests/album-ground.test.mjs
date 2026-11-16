@@ -155,7 +155,7 @@ test('ground shader: the grain lies on the land at fixed sizes, nothing is switc
   for (const name of ['tGrass', 'tDry', 'tRock', 'tSand', 'tSnow', 'tForest']) assert.match(src, new RegExp(`#define ${name} \\d`), name);
   assert.ok(Math.max(...[...src.matchAll(/#define t(?:Grass|Dry|Rock|Sand|Snow|Forest) (\d)/g)].map(m => +m[1])) < GROUND_TILES.length, 'every name is a layer that exists');
   // the climate comes from the baked map; the wetness of a place also knows its slope and its hollow
-  for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk, 1. - rg)', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
+  for (const need of ['albumClimate(ll)', 'albumWetOf(clim, hl, n1)', 'groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk, ', 'gTreeline = albumTreelineOf(clim)']) assert.ok(src.includes(need), need);
   // the square of the grain is laid as a patchwork — shifted from patch to patch, turned over in every other one —
   // so that its own shapes do not stand in rows; and it is weaker on level ground than on slopes
   for (const need of ['vec2 gp = pk + vec2(ga * 3.71 + gb * 1.37, ga * 1.93 + gb * 4.19), gdx = pdx, gdy = pdy;', '{ gp = gp.yx; gdx = gdx.yx; gdy = gdy.yx; }', 'gp, px, gdx, gdy), uGrainK * (.6 + .4 * smoothstep(.015, .10, slope)) * (1. - .7 * smoothstep(.5, .9, slope)));']) assert.ok(src.includes(need), need);
@@ -256,7 +256,8 @@ test('the size of a pixel does not depend on how the camera is turned: a rock wa
 
 test('shadows cast by the relief fade with the height of the camera', () => {
   const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8').split('\r\n').join('\n');
-  assert.ok(terrain.includes('float sh = 1., d = max(e * 2., .4), shK = 1. - smoothstep(.30, 1.10, px);'), 'from 0.3 to 1.1 km a pixel: about 350 to 1300 km of height');
+  assert.ok(terrain.includes('float sh = 1., d = max(e * 2., .4), shK = (1. - smoothstep(${SHADOW_PX[0].toFixed(2)}, ${SHADOW_PX[1].toFixed(2)}, px)) * uShadowK;'), 'from 0.3 to 1.1 km a pixel, and by the height of the camera');
+  assert.ok(terrain.includes('for (int i = 0; i < uShadowN; i++) {') && terrain.includes('uniform float uShadowK; uniform int uShadowN;') && terrain.includes('uShadowK: { value: 1 }, uShadowN: { value: SHADOW_STEPS },'), 'the steps of the loop are a number of the frame');
   assert.ok(terrain.includes('sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.) * shK);') && !terrain.includes('if (shK > 0.)') && !terrain.includes('sh = mix(1., sh, shK)'), 'the fade is a factor inside the loop: under a condition or laid on after it, it cost 30 ms a frame');
   // one Sun for the frame: the sky dims every place in the finishing pass (sky/globe.js)
   const main = terrain.slice(terrain.lastIndexOf('void main() {')).replace(/\/\/[^\n]*/g, '');
@@ -266,4 +267,25 @@ test('shadows cast by the relief fade with the height of the camera', () => {
   assert.ok(main.includes('col = albumAir(col, vPos);\n  gl_FragColor = vec4(albumFinish(col), 1.);'));
   const post = fs.readFileSync(new URL('../src/album/post.js', import.meta.url), 'utf8');
   assert.ok(post.includes('if (ground) c = globeDimmed(c, globeRelight(normalize(wpos + vec3(0., RKM, 0.))));') && !post.includes('globeRelightOwn'), 'the finishing pass of the sky dims the polygon and the land beyond it alike (if it takes them apart again, the ground must hand the land over accordingly — v0.6.124)');
+});
+
+test('shadows of the relief from afar: by the height of the camera whatever the window, and no step of the loop where none can show', async () => {
+  const { shadowsAt, pixelLow, SHADOW_PX, SHADOW_ALT, SHADOW_STEPS } = await import('../src/album/terrain.js');
+  assert.deepEqual(SHADOW_PX, [.30, 1.10]); assert.deepEqual(SHADOW_ALT, [1300, 1650]); assert.equal(SHADOW_STEPS, 5);
+  // the smallest pixel of a frame: straight below the camera, as the shader measures it
+  const px = (alt, points) => pixelLow(alt, 32, points);
+  assert.ok(Math.abs(px(1000, 1353) - Math.SQRT2 * 2 * Math.tan(16 * Math.PI / 180) / 1353 * 1000) < 1e-12);
+  assert.ok(px(1836, 1353) > 1.09 && px(1836, 1353) < 1.11, 'a window 1353 points high: by the pixel alone the shadows went at 1840 km');
+  assert.ok(px(2750, 2025) > 1.09 && px(2750, 2025) < 1.11, 'and only at 2750 km in one of 2025 points');
+  // near and at the middle heights nothing changes: full strength, all the steps
+  for (const alt of [20, 200, 700, 1300]) assert.deepEqual(shadowsAt(alt, px(alt, 1353)), { k: 1, n: 5 }, alt + ' km');
+  // from 1300 to 1650 km the height takes them away, in any window; above, no step is run
+  const mid = shadowsAt(1475, px(1475, 2025)); assert.ok(Math.abs(mid.k - .5) < 1e-9 && mid.n === 5);
+  for (const points of [900, 1353, 2025, 2880]) { assert.deepEqual(shadowsAt(1650, px(1650, points)), { k: 0, n: 0 }, 'gone at 1650 km'); assert.deepEqual(shadowsAt(1700, px(1700, points)), { k: 0, n: 0 }); }
+  // a small window: the pixel is too large for a shadow before the height says so — no step either
+  assert.deepEqual(shadowsAt(1280, px(1280, 900)), { k: 1, n: 0 }); assert.ok(px(1280, 900) >= SHADOW_PX[1]);
+  // the class sets them for every frame from the camera of the frame and the picture it is drawn into
+  const terrain = fs.readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(terrain.includes('mesh.onBeforeRender = clip ? (r, sc, cam) => { this.shadows(r, cam); clipOn(r); } : (r, sc, cam) => this.shadows(r, cam);'));
+  assert.ok(terrain.includes('const p = camera.position, alt = Math.hypot(p.x, p.y + R, p.z) - R, rt = renderer.getRenderTarget();') && terrain.includes('this.u.uShadowK.value = s.k; this.u.uShadowN.value = s.n;'));
 });

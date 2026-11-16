@@ -9,7 +9,7 @@
 //   climate   public/assets/album/ground/world.bin.gz (ground/climate.js, scripts/album/bake-world-climate.mjs)
 // There are no chunks there: the land is in its natural state, as the rules of the ground and of the forest give it.
 // This file is the part that needs no browser: where the polygon ends, and the heights of the world on the CPU.
-import { BBOX } from '../geo.js';
+import { BBOX, STAGE } from '../geo.js';
 
 export const WMAP_W = 8192, WMAP_H = 4096;
 // a point of the world map at the equator, km, and how many levels coarser that is than the heights of the polygon
@@ -88,19 +88,47 @@ export function worldAt(h, lat, lon, w = WMAP_W, rows = WMAP_H) {
 //   h         the world map, decoded (changed in place)
 //   regionAt  the heights of the polygon, (lat, lon) → m; they must reach FIT_REACH degrees beyond its border
 // The fit is whole out to REGION_FADE + FIT_PAD beyond the border and is gone FIT_FEATHER further.
+// (Beyond the border. The heights of the polygon end at its border: asked for a place past it, regionAt() answers
+// with the last point on its side. Until stage 3 the fit took that answer for the 0.28° beyond the border as well,
+// which drew the last row of the polygon out: where a shore runs along the border — the coast of East Frisia along
+// 53.7° N — the land at the border stood out into the sea as straight-sided blocks 30 km long (16.11.2026). At
+// stage 3 a point beyond the border keeps the world's own height and is shifted by what the fit changed at the
+// nearest point of the border, so that the two still meet there; and it stays on its own side of the sea — what the
+// world map has as water is left water, what it has as land is left land. At stage 2 the rule is as it was.)
 export const FIT_PAD = .02, FIT_FEATHER = .06, FIT_REACH = REGION_FADE + FIT_PAD + FIT_FEATHER;
-export function fitWorld(h, regionAt, w = WMAP_W, rows = WMAP_H) {
+export function fitWorld(h, regionAt, w = WMAP_W, rows = WMAP_H, shift = STAGE >= 3) {
   const dLat = 180 / rows, dLon = 360 / w, K = 5;
   const y0 = Math.max(0, Math.floor((90 - BBOX.lat1 - FIT_REACH) / dLat)), y1 = Math.min(rows - 1, Math.ceil((90 - BBOX.lat0 + FIT_REACH) / dLat));
   const x0 = Math.floor((BBOX.lon0 - FIT_REACH + 180) / dLon), x1 = Math.ceil((BBOX.lon1 + FIT_REACH + 180) / dLon);
+  const mean = (lat, lon) => { let sum = 0; for (let b = 0; b < K; b++) for (let a = 0; a < K; a++) sum += regionAt(lat + ((b + .5) / K - .5) * dLat, lon + ((a + .5) / K - .5) * dLon); return sum / (K * K); };
+  const latOf = y => 90 - (y + .5) * dLat, lonOf = x => -180 + (x + .5) * dLon, at = (x, y) => y * w + ((x % w) + w) % w;
   let n = 0;
+  if (!shift) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const lat = latOf(y), lon = lonOf(x), k = ss(-FIT_FEATHER, 0, regionEdge(lat, lon) + REGION_FADE + FIT_PAD);
+      if (k <= 0) continue;
+      const o = at(x, y);
+      h[o] = Math.round(h[o] + (mean(lat, lon) - h[o]) * k); n++;
+    }
+    return n;
+  }
+  // the points of the map whose middle lies inside the polygon: columns xa..xb, rows ya..yb
+  const xa = Math.ceil((BBOX.lon0 + 180) / dLon - .5), xb = Math.floor((BBOX.lon1 + 180) / dLon - .5), ya = Math.ceil((90 - BBOX.lat1) / dLat - .5), yb = Math.floor((90 - BBOX.lat0) / dLat - .5);
+  const cw = xb - xa + 1, by = new Float32Array(Math.max(0, cw * (yb - ya + 1)));
+  // inside: the mean of the polygon over the cell, and by how much that moved the point
+  for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) { const o = at(x, y), v = mean(latOf(y), lonOf(x)); by[(y - ya) * cw + x - xa] = v - h[o]; h[o] = Math.round(v); n++; }
+  if (!by.length) return n;
+  const moved = (x, y) => by[(Math.max(ya, Math.min(yb, y)) - ya) * cw + Math.max(xa, Math.min(xb, x)) - xa];
+  // beyond: the world's own height, moved as the border was moved beside it (the mean of three points along the border)
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const lat = 90 - (y + .5) * dLat, lon = -180 + (x + .5) * dLon, k = ss(-FIT_FEATHER, 0, regionEdge(lat, lon) + REGION_FADE + FIT_PAD);
+    if (x >= xa && x <= xb && y >= ya && y <= yb) continue;
+    const k = ss(-FIT_FEATHER, 0, regionEdge(latOf(y), lonOf(x)) + REGION_FADE + FIT_PAD);
     if (k <= 0) continue;
-    let sum = 0;
-    for (let b = 0; b < K; b++) for (let a = 0; a < K; a++) sum += regionAt(lat + ((b + .5) / K - .5) * dLat, lon + ((a + .5) / K - .5) * dLon);
-    const o = y * w + ((x % w) + w) % w;
-    h[o] = Math.round(h[o] + (sum / (K * K) - h[o]) * k); n++;
+    const sideX = x < xa || x > xb, sideY = y < ya || y > yb;
+    const d = sideX && !sideY ? (moved(x, y - 1) + moved(x, y) + moved(x, y + 1)) / 3 : sideY && !sideX ? (moved(x - 1, y) + moved(x, y) + moved(x + 1, y)) / 3 : moved(x, y);
+    const o = at(x, y), hw = h[o]; let v = hw + d * k;
+    if (hw <= 0) v = Math.min(v, Math.max(hw, -1)); else v = Math.max(v, Math.min(hw, 1));
+    h[o] = Math.round(v); n++;
   }
   return n;
 }

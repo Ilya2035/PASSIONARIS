@@ -129,6 +129,22 @@ export const S3_STATE_SET = `
 #elif ZONE == 2 || ZONE == 0
   gState = min(smoothstep(${STATE_FADE[0]}, ${STATE_FADE[1]}, regionEdge(ll)), chunkHere(pk));
 #endif`;
+// ---- the shadows cast by the relief, from afar. They fade as a pixel grows from SHADOW_PX[0] to SHADOW_PX[1] km (in
+// the shader, pixel by pixel) and, whatever the window, as the camera rises from SHADOW_ALT[0] to SHADOW_ALT[1] km:
+// «large shadows must go as the camera rises» (the owner, 15.11.2026). By the size of a pixel alone they went at
+// 1840 km in a window 1353 points high and only at 2750 km in one of 2025 — the larger the screen, the longer the
+// dark blots stayed. alt: the camera above the sea, km; pxLow: the smallest pixel of the frame, km (the one straight
+// below the camera). → k: the strength the height leaves them, 0 .. 1; n: how many steps of the loop to run — none
+// where no pixel of the frame can show a shadow. The loop is a fifth of a far frame (Iberia from 1700 km: 181 ms
+// with it, 159 without, on the integrated AMD at 3600 × 2025), and counted by a uniform it costs nothing near.
+export const SHADOW_PX = [.30, 1.10], SHADOW_ALT = [1300, 1650], SHADOW_STEPS = 5;
+export function shadowsAt(alt, pxLow) {
+  const t = Math.max(0, Math.min(1, (alt - SHADOW_ALT[0]) / (SHADOW_ALT[1] - SHADOW_ALT[0]))), k = 1 - t * t * (3 - 2 * t);
+  return { k, n: k > 0 && pxLow < SHADOW_PX[1] ? SHADOW_STEPS : 0 };
+}
+// the smallest pixel of a frame, km, as the shader measures a pixel (the root of the sum of the squares of its two
+// sides): fov of the camera in degrees, the height of the picture in points, the camera above the ground in km
+export const pixelLow = (alt, fov, points) => Math.SQRT2 * 2 * Math.tan(fov * Math.PI / 360) / points * alt;
 // a texture of one point, for a map that is missing
 const flat = (format, data) => { const t = new DataTexture(data, 1, 1, format, data instanceof Float32Array ? FloatType : UnsignedByteType); t.colorSpace = NoColorSpace; t.needsUpdate = true; return t; };
 const f1 = n => Number(n).toFixed(1);
@@ -217,6 +233,7 @@ ${COMMON}
 ${CHUNK_GLSL}${STAGE >= 3 ? S3_CHUNK_HERE : ''}
 ${LIGHT}
 uniform float uTime, uShade, uSnow, uForestK, uSeason;
+uniform float uShadowK; uniform int uShadowN;                       // the shadows of the relief from afar: shadowsAt()
 uniform int uGrid, uData;
 // The grain of the ground: squares of real ground about 10 km across, seen from a satellite, with their broad tones
 // taken out (scripts/album/bake-ground-tiles.mjs). They are layers of one texture: a pixel shader may read only 16
@@ -486,8 +503,11 @@ void main() {
   // (far, depth) carry the relief there.
   // (The fade is a factor inside the loop. The loop under a condition, skipped where no shadow shows, or the fade
   // laid on after it, cost 30 ms of the 170 of a frame: the same picture, 204 and 197 ms against 169.)
-  float sh = 1., d = max(e * 2., .4), shK = 1. - smoothstep(.30, 1.10, px);
-  for (int i = 0; i < 5; i++) {
+  // (What does not cost is the number of its steps as a uniform, the same for every pixel of the frame: uShadowN is
+  // ${SHADOW_STEPS} wherever a shadow can show and 0 once the camera stands too high for any — shadowsAt(). uShadowK: what the
+  // height of the camera leaves of the shadows, whatever the window.)
+  float sh = 1., d = max(e * 2., .4), shK = (1. - smoothstep(${SHADOW_PX[0].toFixed(2)}, ${SHADOW_PX[1].toFixed(2)}, px)) * uShadowK;
+  for (int i = 0; i < uShadowN; i++) {
     vec2 q = ll + vec2(sd.y * d / KM, sd.x * d / (KM * cl));
     float occ = (max(heightLod(q, lod0 + float(i) * .8), 0.) - hl) * uExag - d * 1000. * tanEl;
     sh = min(sh, 1. - clamp(occ / (d * 90. + 4.), 0., 1.) * shK);
@@ -565,7 +585,11 @@ void main() {
     float rockW = clamp(steep * (.75 + .5 * n3) + smoothstep(treeline + 250., treeline + 700., hl) * .8 + (ridge * .15 + max(crest, 0.) * 1.8) * smoothstep(treeline - 900., treeline - 100., hl), 0., 1.);
     rockW *= 1. - .18 * humid * (1. - smoothstep(treeline - 300., treeline + 100., hl));   // (in wet country grass and bushes hold on the ledges of a wall below the tree line)
     float sandW = (1. - smoothstep(1., 5., hl)) * (1. - smoothstep(.015, .06, slope)) * .7;   // low flats by the sea; the beach itself is the water work's (aspShore)
-    vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk, 1. - rg);
+    // (the last number: how much of the land here is the plain land of the world, whose soils go in regions of
+    // hundreds of km from afar. Stage 3: the land without chunks inside the rectangle of the heights is that land too
+    // — taken for the land of the polygon, the Sahara inside the rectangle was a cloth of grey and yellow patches of
+    // tens of km and the Sahara beyond it was not: a rectangle seen from 12 000 km, 16.11.2026.)
+    vec3 ground = groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk, ${STAGE >= 3 ? '1. - rg * rs' : '1. - rg'});
     if (rockW > .004) {
       float rk = px < 1.2 ? mix(.5, vnoise(pk / 2.3 + 3.), smoothstep(1.2, .4, px)) : .5, rk2 = px < 4. ? mix(.5, vnoise(pk / 9. + 17.), smoothstep(4., 1.5, px)) : .5;
       vec3 rockCol = mix(vec3(.47, .45, .43), vec3(.66, .64, .61), n2);                                              // grey limestone and granite
@@ -786,7 +810,7 @@ export class Terrain {
     this.u = {
       uBase: { value: data.base.tex }, uBaseRect: { value: new Vector4(...data.base.rect) },
       uDet: { value: data.base.tex }, uDetRect: { value: new Vector4(0, 0, 1, 1) }, uDetOn: { value: 0 },
-      uExag: { value: 1.6 }, uShade: { value: 1.6 }, uSun: { value: new Vector3(-.5, .45, .74).normalize() }, uTime: { value: 0 },
+      uExag: { value: 1.6 }, uShade: { value: 1.6 }, uShadowK: { value: 1 }, uShadowN: { value: SHADOW_STEPS }, uSun: { value: new Vector3(-.5, .45, .74).normalize() }, uTime: { value: 0 },
       uSat: { value: 1.12 }, uSnow: { value: 0 }, uForestK: { value: 1 }, uHaze: { value: .09 }, uExposure: { value: 1.05 }, uWarm: { value: 0 }, uSeason: { value: 0 },
       uStyle: { value: 0 }, uGrid: { value: 0 }, uData: { value: 0 },
       uFire: { value: null }, uFireRect: { value: new Vector4(0, 0, 1, 1) }, uFireOn: { value: 0 }, uQuake: { value: new Vector4(0, 0, 0, 0) },
@@ -821,7 +845,9 @@ export class Terrain {
         mesh = new Mesh(own2, list);
       } else mesh = new Mesh(g, mat);
       mesh.frustumCulled = false; mesh.renderOrder = order;
-      if (clip) { mesh.onBeforeRender = clipOn; mesh.onAfterRender = clipOff; }
+      // (before a grid is drawn: the shadows of this frame; the planes it is cut by)
+      mesh.onBeforeRender = clip ? (r, sc, cam) => { this.shadows(r, cam); clipOn(r); } : (r, sc, cam) => this.shadows(r, cam);
+      if (clip) mesh.onAfterRender = clipOff;
       scene.add(mesh);
       return mesh;
     });
@@ -864,6 +890,14 @@ export class Terrain {
     this.detail = !!d;
     if (!d) { this.u.uDetOn.value = 0; return; }
     this.u.uDet.value = d.tex; this.u.uDetRect.value.set(...d.rect); this.u.uDetOn.value = 1 + (this.fine || 0);
+  }
+  // The shadows of the relief for the frame that is about to be drawn (shadowsAt): from the camera of that frame and
+  // the size of the picture it is drawn into. Called by every grid before its draw; the numbers are the same for all.
+  shadows(renderer, camera) {
+    const p = camera.position, alt = Math.hypot(p.x, p.y + R, p.z) - R, rt = renderer.getRenderTarget();
+    const points = rt ? rt.height : renderer.getDrawingBufferSize(this.size || (this.size = new Vector2())).y;
+    const s = shadowsAt(alt, pixelLow(alt, camera.fov || 32, Math.max(1, points)));
+    this.u.uShadowK.value = s.k; this.u.uShadowN.value = s.n;
   }
   // Stage 3: the blocks of level l (centre lat, lon; a cell of c km) are handed to the variants — every block to the
   // one that suits what lies under it, a block on the rim of the rectangle of the heights to two. Blocks that follow

@@ -58,21 +58,41 @@ export function despike(u, w, h) {
 // shallows, so fillHollows() of the water leaves them. Drawn, they were dark blue squares in pale water (the lead
 // on v0.6.114, at the mouth of the Rhône).
 // A pocket is water deeper than POCKET that the open sea — the deep water touching the edge of the base — does not
-// reach through water as deep. A pocket of no more than POCKET_MAX points takes the middle height of the ring of
+// reach through water as deep and wide enough (the neck, below). A pocket of no more than POCKET_MAX points takes the middle height of the ring of
 // points around it — the depth of its lagoon — and is never left shallower than POCKET_FLOOR: where land is what
 // lies around (the pit IS the lagoon, as the heights hold it), it stays water, a metre and a half deep. Whether such
 // a patch of water is a pond to be dried or a lagoon is the water's own rule, fillHollows(), which runs next; what
 // is land and what is water this function never changes. A real basin behind a shallow sill (a lagoon 10 m deep)
 // becomes level at 5 m, which is how it is seen from above anyway; larger ones (none in the polygon of Iberia)
 // are left.
-export const POCKET = -5, POCKET_FLOOR = -1.5, POCKET_MAX = 3000;
+// (The neck. On the base of stage 3 the largest pit of the Camargue — 324 points down to −54 m in the shallows of the
+// Gulf of Beauduc — hangs on the open sea by a thread of deep points one or two wide, so the sea «reached» it and
+// it stayed: a dark blue square at the shore (w3-roads, 16.11.2026). The sea now reaches only through deep water at
+// least 2 · POCKET_NECK + 1 points wide — 670 m. What it cannot reach so is a pocket: the pits, and with them the
+// deep of a narrow harbour or of a cove two points wide, which becomes as shallow as the water around it.)
+export const POCKET = -5, POCKET_FLOOR = -1.5, POCKET_MAX = 3000, POCKET_NECK = 1;
 // u, w, h: as for despike(). Mends in place; returns how many points were mended.
-export function mendPockets(u, w, h, maxPoints = POCKET_MAX) {
+export function mendPockets(u, w, h, maxPoints = POCKET_MAX, neck = POCKET_NECK) {
   const D = RAW(POCKET), FLOOR = RAW(POCKET_FLOOR), n = w * h, seen = new Uint8Array(n), stack = [];
-  const push = i => { if (!seen[i] && u[i] < D) { seen[i] = 1; stack.push(i); } };
+  // wide: a deep point with nothing but deep points within `neck` of it (beyond the edge of the base lies the sea).
+  // The open sea is what the edge of the base reaches over such points, and `neck` points of deep water around that.
+  let wide = null;
+  if (neck > 0) {
+    const row = new Uint8Array(n); wide = new Uint8Array(n);
+    for (let y = 0, k = 0; y < h; y++) for (let x = 0; x < w; x++, k++) { let ok = 1; for (let d = -neck; d <= neck; d++) { const X = x + d; if (X >= 0 && X < w && u[k + d] >= D) { ok = 0; break; } } row[k] = ok; }
+    for (let y = 0, k = 0; y < h; y++) for (let x = 0; x < w; x++, k++) { let ok = 1; for (let d = -neck; d <= neck; d++) { const Y = y + d; if (Y >= 0 && Y < h && !row[k + d * w]) { ok = 0; break; } } wide[k] = ok; }
+  }
+  const push = i => { if (!seen[i] && (wide ? wide[i] : u[i] < D)) { seen[i] = 1; stack.push(i); } };
   for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
   for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
   while (stack.length) { const i = stack.pop(), x = i % w; if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (i >= w) push(i - w); if (i < n - w) push(i + w); }
+  // (the sea takes back its own rim of deep water: step by step, each step from the points of the steps before it)
+  for (let step = 1; step <= neck; step++) for (let y = 0, k = 0; y < h; y++) for (let x = 0; x < w; x++, k++) {
+    if (seen[k] || u[k] >= D) continue;
+    let near = false;
+    for (let dy = -1; dy <= 1 && !near; dy++) { const Y = y + dy; if (Y < 0 || Y >= h) continue; for (let dx = -1; dx <= 1; dx++) { const X = x + dx; if (X < 0 || X >= w) continue; const v = seen[Y * w + X]; if (v && v <= step) { near = true; break; } } }
+    if (near) seen[k] = step + 1;
+  }
   let mended = 0; const comp = [], rim = [];
   for (let s = 0; s < n; s++) {
     if (seen[s] || u[s] >= D) continue;

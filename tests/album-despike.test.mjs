@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { liftDryLand, innerLandOf, DRY_LAND, mendPockets, POCKET, POCKET_FLOOR, POCKET_MAX, despike, NEEDLE, NEEDLE_LAND, WELL, WELL_SEA } from '../src/album/ground/despike.js';
+import { liftDryLand, innerLandOf, DRY_LAND, mendPockets, POCKET, POCKET_FLOOR, POCKET_MAX, POCKET_NECK, despike, NEEDLE, NEEDLE_LAND, WELL, WELL_SEA } from '../src/album/ground/despike.js';
 
 const raw = m => Math.round((m + 8192) * 4), W = 40, H = 30;
 // a flat shore: sea of −3 m in the west, land rising slowly to the east
@@ -71,6 +71,31 @@ test('pockets: a pit of deep water in a shallow lagoon takes the depth of the la
   const big = new Uint16Array(200 * 200).fill(raw2(-2)); for (let y = 20; y < 180; y++) for (let x = 20; x < 180; x++) big[y * 200 + x] = raw2(-30);
   assert.ok(160 * 160 > POCKET_MAX); assert.equal(mendPockets(big, 200, 200), 0);
   assert.ok(POCKET < POCKET_FLOOR && POCKET_FLOOR < 0);
+});
+
+test('pockets: a pit that hangs on the sea by a thread of deep water is a pocket; a bay with a wide mouth is the sea', () => {
+  const W2 = 60, H2 = 40, raw2 = m => (m + 8192) * 4;
+  // the open sea in the west, shallows east of it, and in the shallows a pit joined to the sea by a channel of deep
+  // water `wide` points wide
+  const make = wide => {
+    const u = new Uint16Array(W2 * H2).fill(raw2(-2));
+    const box = (x0, y0, x1, y1, m) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) u[y * W2 + x] = raw2(m); };
+    box(0, 0, 14, H2 - 1, -60); box(30, 14, 39, 23, -50); box(15, 18, 29, 18 + wide - 1, -20);
+    return u;
+  };
+  assert.equal(POCKET_NECK, 1, 'the sea reaches through deep water three points wide and more');
+  for (const wide of [1, 2]) {
+    const u = make(wide), n = mendPockets(u, W2, H2);
+    assert.equal(u[18 * W2 + 34], raw2(-2), `a channel ${wide} wide: the pit takes the depth of the shallows`);
+    assert.equal(u[10 * W2 + 5], raw2(-60), 'the open sea is left'); assert.equal(u[18 * W2 + 14], raw2(-60), 'with its own rim of deep water'); assert.equal(u[18 * W2 + 15], raw2(-2), 'the thread itself goes with the pit');
+    assert.equal(n, 100 + 15 * wide, 'the pit and the thread');
+  }
+  { const u = make(3), before = u.slice(); assert.equal(mendPockets(u, W2, H2), 0, 'a channel three wide: a bay of the sea'); assert.deepEqual(u, before); }
+  // without the neck: the rule as it was — whatever deep water touches is the sea
+  { const u = make(1); assert.equal(mendPockets(u, W2, H2, POCKET_MAX, 0), 0); }
+  // a narrow cove of the sea, two points wide, becomes as shallow as the water around it: no land appears
+  { const u = new Uint16Array(W2 * H2).fill(raw2(-2)); for (let y = 0; y < H2; y++) for (let x = 0; x < 15; x++) u[y * W2 + x] = raw2(-60); for (let x = 15; x < 26; x++) { u[20 * W2 + x] = raw2(-30); u[21 * W2 + x] = raw2(-30); }
+    const before = u.slice(); mendPockets(u, W2, H2); assert.equal(u[20 * W2 + 24], raw2(-2)); for (let k = 0; k < u.length; k++) assert.equal(u[k] < raw2(0), before[k] < raw2(0)); }
 });
 
 test('pockets: the page does not mend them yet — the division must take the same step first', () => {

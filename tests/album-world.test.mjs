@@ -74,18 +74,45 @@ test('world heights: the ice sheets are lifted to their surface, and the copied 
 test('world heights: round the polygon the world map says what the polygon says', () => {
   // a world map of 720 × 360 points (half a degree) at 100 m everywhere; the polygon stands at 900 m
   const w = 720, rows = 360, h = new Int16Array(w * rows).fill(100), mid = [(BBOX.lat0 + BBOX.lat1) / 2, (BBOX.lon0 + BBOX.lon1) / 2];
-  const n = fitWorld(h, () => 900, w, rows);
+  const n = fitWorld(h, () => 900, w, rows, false);
   assert.ok(n > 300, 'the points of the map inside the polygon and a little beyond');
   assert.equal(worldAt(h, mid[0], mid[1], w, rows), 900, 'inside: the height of the polygon');
   assert.equal(worldAt(h, BBOX.lat1 + 3, mid[1], w, rows), 100, 'far beyond: the world as it was');
   assert.equal(worldAt(h, -20, 120, w, rows), 100);
   // the mean over a cell: a polygon that is a slope gives every point the height at its own middle
-  const s2 = new Int16Array(w * rows); fitWorld(s2, (lat, lon) => (lat - 35) * 1000, w, rows);
+  const s2 = new Int16Array(w * rows); fitWorld(s2, (lat, lon) => (lat - 35) * 1000, w, rows, false);
   const lat = 90 - (Math.floor((90 - 40) / .5) + .5) * .5;
   assert.ok(Math.abs(s2[Math.floor((90 - lat) / .5) * w + Math.floor((mid[1] + 180) / .5)] - (lat - 35) * 1000) < 2);
   assert.ok(Math.abs(FIT_REACH - (REGION_FADE + FIT_PAD + FIT_FEATHER)) < 1e-12 && FIT_REACH < .29, 'the fit stays inside what the heights of the polygon cover beyond its border');
   const data = read('../src/album/data.js');
   assert.ok(data.includes('if (world) { fitWorld(world.h, regionAt); world.tex = worldHeightTexture(world.h, world.w, world.rows); }'), 'fitted before it becomes a texture');
+});
+
+test('world heights at stage 3: beyond the border the world keeps its own shore and only meets the polygon at the border', async () => {
+  const { STAGE } = await import('../src/album/geo.js');
+  const src = read('../src/album/ground/world.js');
+  assert.ok(src.includes('export function fitWorld(h, regionAt, w = WMAP_W, rows = WMAP_H, shift = STAGE >= 3) {'), 'at stage 2 the rule is as it was');
+  // a world map of a tenth of a degree: sea at −40 m north of the polygon, land at 200 m east of it, 50 m inside;
+  // the polygon itself is low land, 5 m, right up to its border — a shore that runs along the border
+  const w = 3600, rows = 1800, dl = .1, mk = () => { const h = new Int16Array(w * rows).fill(50); for (let y = 0; y < rows; y++) for (let x = 0; x < w; x++) { const lat = 90 - (y + .5) * dl, lon = -180 + (x + .5) * dl; if (lat > BBOX.lat1) h[y * w + x] = -40; else if (lon > BBOX.lon1) h[y * w + x] = 200; } return h; };
+  const mid = [(BBOX.lat0 + BBOX.lat1) / 2, (BBOX.lon0 + BBOX.lon1) / 2], cell = (lat, lon) => Math.floor((90 - lat) / dl) * w + Math.floor((lon + 180) / dl);
+  const old = mk(); fitWorld(old, () => 5, w, rows, false);
+  assert.ok(old[cell(BBOX.lat1 + .15, mid[1])] > 0, 'the old rule: the land of the border drawn out into the sea');
+  const h = mk(), n = fitWorld(h, () => 5, w, rows, true);
+  assert.ok(n > 1000);
+  assert.equal(h[cell(mid[0], mid[1])], 5, 'inside: the polygon');
+  assert.equal(h[cell(BBOX.lat1 - .06, mid[1])], 5, 'up to the border');
+  for (const d of [.05, .15, .25]) { const v = h[cell(BBOX.lat1 + d, mid[1])]; assert.ok(v < 0, `${d}° into the sea beyond the border: water (${v} m)`); }
+  assert.equal(h[cell(BBOX.lat1 + 1, mid[1])], -40, 'far beyond: the world as it was');
+  // land beyond the border stays land and is brought to meet the polygon: 200 m shifted by the −45 m of the border
+  const e1 = h[cell(mid[0], BBOX.lon1 + .05)], e2 = h[cell(mid[0], BBOX.lon1 + .27)];
+  assert.ok(Math.abs(e1 - 155) <= 1, `at the border the land beyond is moved as the border was: ${e1}`); assert.ok(e2 > 155 && e2 <= 200, `and comes back to its own height over the feather: ${e2}`);
+  assert.equal(h[cell(mid[0], BBOX.lon1 + 1)], 200);
+  // where the shift would sink land or lift the sea, the world keeps its side
+  const low = mk(); for (let k = 0; k < low.length; k++) if (low[k] === 200) low[k] = 20;
+  fitWorld(low, () => 5, w, rows, true);
+  assert.ok(low[cell(mid[0], BBOX.lon1 + .05)] >= 1, 'land 20 m high moved down by 45 m is still land');
+  if (STAGE >= 3) { const d = mk(); fitWorld(d, () => 5, w, rows); assert.deepEqual(d, h, 'the page fits so at stage 3'); }
 });
 
 test('world file: the format keeps every number to a byte', () => {
@@ -181,7 +208,7 @@ test('world: the ground shader draws the Earth beyond the polygon by the rules o
   const forest = read('../src/album/aspects/forest.js');
   assert.ok(forest.includes('vnoise(mat2(.8, -.6, .6, .8) * pk / 2.1 + 11.) + vnoise(mat2(.28, .96, -.96, .28) * pk / 3.7 + 47.)') && !forest.includes('vnoise(pk / 2.6 + 11.)'), 'the stands of the forest');
   assert.ok(ground.includes('vnoise(mat2(.83, .56, -.56, .83) * pk / 310. + 11.)') && ground.includes('vnoise(mat2(.37, -.93, .93, .37) * pk / 420. + 57.)'), 'the regions of soil of the deserts');
-  assert.ok(ground.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk, float wild) {') && terrain.includes('conc, pk, 1. - rg);'), 'the bare ground is told that it lies beyond the polygon');
+  assert.ok(ground.includes('vec3 groundBare(vec3 nz, float wet, float summer, float px, float hl, float slope, float conc, vec2 pk, float wild) {') && terrain.includes("conc, pk, ${STAGE >= 3 ? '1. - rg * rs' : '1. - rg'});"), 'the bare ground is told that it lies beyond the polygon');
   // nothing of the world is carried through the aspects: how far inside the polygon a pixel lies is counted again where it is needed
   const main = terrain.slice(terrain.lastIndexOf('void main() {')), after = main.slice(main.indexOf('aspForest(p, L);'));
   assert.ok(!/[^a-zA-Z]rg[^a-zA-Z]/.test(after.replace(/\/\/[^\n]*/g, '')), 'rg is not used after the aspects');
@@ -304,6 +331,8 @@ test('stage 3: a level of the grid is cut into blocks, and a fourth variant draw
   assert.deepEqual(blockZones(BBOX.lat1, lon, .5, .5, 'some'), [false, true, true, false, true]);
   assert.deepEqual(blockZones(BBOX.lat1, lon, .5, .5, 'all'), [true, true, true, false, false]);
   assert.deepEqual(blockZones(BBOX.lat1 + 3, lon, .5, .5, 'none'), [false, false, true, false, false]);
+  // the plain land inside the rectangle has the soils of the world from afar, not the patches of the polygon
+  assert.ok(read('../src/album/terrain.js').includes("groundBare(vec3(n1, n2, n3), wet, clim.a, px, hl, slope, conc, pk, ${STAGE >= 3 ? '1. - rg * rs' : '1. - rg'});"));
   // the fifth variant: the shader of the fast one with the question «is a chunk here»; it reads the chunks
   assert.ok(read('../src/album/terrain.js').includes('#elif ZONE == 5\n#define ALBUM_WORLD 0\n#define REGION(ll) 1.\n#define STATE(ll) gState\n#else'));
   // the shader: the fourth variant reads no chunks, and the parts that live on them are not in it
