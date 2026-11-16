@@ -124,3 +124,16 @@ test('dry land below the sea: what the mask calls inner land is raised above it;
   const llOf = (i, j) => [(j + .5) / KMD, (i + .5) / (KMD * COS)], f2 = innerLandOf(at, llOf, 1);
   assert.equal(f2(0, 25, 15), true); assert.equal(f2(0, 10, 15), false, 'the square beside the sea'); assert.equal(f2(0, 5, 15), false); assert.equal(f2(0, 11, 0), false, 'the edge of the mask is the world');
 });
+
+test('dry land below the sea: lifted high enough to be land like any other, and to a height the base stores exactly', () => {
+  assert.equal(DRY_LAND, 2.5);
+  assert.equal(DRY_LAND * 4 % 1, 0, 'a multiple of the step of the base: the swamps know lifted land by this very number');
+  // the two rules that take low ground for the edge of the water (not of this work: their lines are held here)
+  const read = f => fs.readFileSync(new URL('../src/album/' + f, import.meta.url), 'utf8').split('\r\n').join('\n');
+  assert.ok(read('aspects/water.js').includes('cover *= smoothstep(1.2, 3.8, p.hl);'), 'the shore: no tree below 1.2 m');
+  assert.ok(read('aspects/settle.js').includes('fm *= smoothstep(.4, 2., p.h)'), 'the fields of a settlement fade out below 2 m');
+  assert.ok(DRY_LAND > 1.2 && DRY_LAND >= 2, 'trees stand on lifted land and its fields are whole');
+  // and the height comes from the constant alone: no number of its own in the step or in the rule of the swamps
+  const step = read('ground/despike.js'), sw = read('aspects/swamp.js');
+  assert.ok(step.includes('const SEA = RAW(0), UP = RAW(DRY_LAND);') && sw.includes('Math.abs(h - DRY_LAND) < .01'));
+});

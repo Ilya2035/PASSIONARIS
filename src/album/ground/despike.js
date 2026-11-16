@@ -122,7 +122,13 @@ export function mendPockets(u, w, h, maxPoints = POCKET_MAX, neck = POCKET_NECK)
 //   u, w, h: as for despike();  innerLand(k, i, j) → true for a point (index k, column i, row j) on inner land
 // Mends in place; returns how many points were raised. Run it after mendPockets() and before fillHollows(): a pit
 // in a chott is a pocket first, and what is left below zero inside the land after this step is a real lake.
-export const DRY_LAND = 1;
+// DRY_LAND is 2.5 m and not lower (16.11.2026; it was 1 m): lifted land must be land like any other, and two rules of
+// the map take low ground for the edge of the water. The shore lets no tree stand below 1.2 m (aspects/water.js,
+// aspShore), the fields of a settlement fade out below 2 m (aspects/settle.js) — at 1 m every village of Holland,
+// Flanders and the marshes stood as a bare pale square of 1 km² on level grass, with no field and no wood about it.
+// A multiple of .25 m, the step of the base: the number is stored exactly, and the swamps know lifted land by it
+// (aspects/swamp.js, naturalSwamp). Whoever lifts land takes the number from here — one height for all of it.
+export const DRY_LAND = 2.5;
 export function liftDryLand(u, w, h, innerLand) {
   const SEA = RAW(0), UP = RAW(DRY_LAND); let n = 0;
   for (let j = 0, k = 0; j < h; j++) for (let i = 0; i < w; i++, k++) if (u[k] <= SEA && innerLand(k, i, j)) { u[k] = UP; n++; }

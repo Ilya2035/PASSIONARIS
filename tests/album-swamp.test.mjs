@@ -9,6 +9,7 @@ import { DEFS } from '../src/album/params.js';
 import { BBOX, BBOXES, STAGE, mercX, mercY } from '../src/album/geo.js';
 import { decodeWorked } from '../src/album/worked.js';
 import { useClimate, decodeClimate } from '../src/album/ground/climate.js';
+import { DRY_LAND } from '../src/album/ground/despike.js';
 
 // ALL: the file; LIST: the wetlands of the polygon of this stage, as the page takes them
 const ALL = JSON.parse(fs.readFileSync(new URL('../public/assets/album/swamp/wetlands.json', import.meta.url), 'utf8')).wetlands, LIST = wetlandsOfStage(ALL);
@@ -119,8 +120,8 @@ test('natural swamp: level ground at the sea and in the wet takes it; hills, the
 });
 
 test('stage 3: land lifted from below the sea holds no swamp by the rule; a wetland of the list still lies on it', () => {
-  // the coastal plain of the small world as a polder: dead-level ground at exactly 1 m, as liftDryLand leaves it
-  const polder = (lat, lon) => lon >= -8 && lon < -7.2 ? 1 : world(lat, lon);
+  // the coastal plain of the small world as a polder: dead-level ground at exactly DRY_LAND m, as liftDryLand leaves it
+  const polder = (lat, lon) => lon >= -8 && lon < -7.2 ? DRY_LAND : world(lat, lon);
   const ch = new Chunks(polder), nat = naturalSwamp(ch, polder, {}), k = ch.at(40, -7.6);
   if (S3) assert.equal(nat[k], 0, 'a polder is dry behind its dikes: no marsh of nature');
   else assert.ok(nat[k] >= .3, `stage 2: level ground at the height of the sea, as ever: ${nat[k]}`);
