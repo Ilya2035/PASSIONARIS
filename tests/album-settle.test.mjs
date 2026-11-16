@@ -232,7 +232,16 @@ test('beyond the worked land — from stage 3 chunks stand only under its mask �
     assert.deepEqual(edge.towns.map(t => t.index).sort(), [0, 2]); assert.ok(edge.towns.every(t => t.x < -200), 'every settlement stands in a district');
     const free = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at), all = growTowns(ch, [place(-199.4, 4405, 60000), place(-150, 4405, 60000), place(-230, 4405, 60000)], 1, at, undefined, { where: wide });
     assert.equal(free.towns.length, 3); assert.deepEqual(all.towns.map(t => [t.index, t.x, t.y, t.R]), free.towns.map(t => [t.index, t.x, t.y, t.R]), 'where every square has a district — the present polygon — nothing changes'); }
-  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /where = cellsOf \? \(x, y\) => \{ const c = squareOf\(x, y\); return c >= 0 && cellsOf\[c\] >= 0; \} : null;/);
+  assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /where = cellsOf \? \(x, y\) => \{ const c = squareOf\(x, y\); return c >= 0 && cellsOf\[c\] >= 0 && bogAt\(x, y\) !== 1; \} : null;/);
+  // From stage 3 the swamp is a state of the chunks of 1 km² (the swamp work: album.swamp.km): a chunk more than half
+  // swamp takes no place, no settlement, no house, no yard and no field. On stage 2 the share of the natural cell is asked.
+  { const src = readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8');
+    assert.ok(src.includes("const swampKm = () => (STAGE >= 3 && album.swamp?.km) || null;") && src.includes("const bogAt = (x, y) => { const km = swampKm(); if (!km) return -1; const c = squareOf(x, y); return c >= 0 && km[c] > 127 ? 1 : 0; };"));
+    assert.equal(src.split('const b = bogAt(x, y); if (b >= 0) return b;').length, 3, 'the ground of the houses and yards, and the places of the villages'); assert.ok(src.includes('wet: swampKm() }'));
+    const n = KN * KNY, cls = new Uint8Array(n).fill(1), hgt = new Float32Array(n).fill(300), wet = new Uint8Array(n), c0 = 600 * KN + 600; wet[c0 + 1] = 200; wet[c0 + 2] = 51;
+    const world = new Chunks(() => 300), plain = farmGround(world, () => 300, { cls, hgt }), g = farmGround(world, () => 300, { cls, hgt, wet });
+    assert.ok(Math.abs(g.room(c0) - plain.room(c0)) < 1e-6 && plain.room(c0 + 1) > 0, 'a dry chunk is ploughed as before'); assert.equal(g.room(c0 + 1), 0, 'a chunk more than half swamp is never ploughed');
+    assert.ok(Math.abs(g.room(c0 + 2) - plain.room(c0 + 2) * .8) < 1e-5, 'a chunk a fifth swamp is ploughed by its dry four fifths'); }
   // (from stage 3 the fields do not lower the forest of the whole natural cell: the forest shader clears it chunk by chunk, and the wood stands on the unploughed chunks)
   assert.match(readFileSync(new URL('../src/album/layers/towns.js', import.meta.url), 'utf8'), /if \(keep < 1 && STAGE < 3\) ch\.set\('forest', k, Math\.min\(forest0, keep\)\);/);
   // no yard stands beyond it, though every chunk is «ploughed» in this test
@@ -445,7 +454,7 @@ test('yards: light blocks with their own plot; the knob and the pages are in the
     assert.match(src, /import \{ SWAMP_RULES \} from '\.\.\/aspects\/swamp\.js';/); assert.match(src, /\$\{CHUNK_GLSL\}\s+\$\{SWAMP_RULES\}/);
     assert.match(src, /if \(uBog > \.5 && show > \.5\) \{\s+float sw = textureLod\(tChunkA, chunkUV\(centre\), 0\.\)\.a;/);
     assert.match(src, /if \(swampDepth\(sw, swampField\(centre, fbm\(centre \/ 7\.3 \+ 5\.\), vnoise\(centre \/ 1\.1\), 0\.\), llc, hs, swampSlope\(llc, hs\), cold\) > -\.03\) show = 0\.;/);
-    assert.match(src, /uYard: \{ value: new Vector4\(0, 0, 0, 1\) \}, uBog: \{ value: 0 \} \} \}\);/); assert.match(src, /\.\.\.mat\.uniforms, uYard: \{ value: new Vector4\(0, 0, 0, 1\) \}, uBog: \{ value: 1 \} \}/);
+    assert.match(src, /uYard: \{ value: new Vector4\(0, 0, 0, 1\) \}, uBog: \{ value: 0 \} \} \}\);/); assert.match(src, /\.\.\.mat\.uniforms, uYard: \{ value: new Vector4\(0, 0, 0, 1\) \}, uBog: \{ value: STAGE >= 3 \? 0 : 1 \} \}/);
     // (the noises are the ground's own at their near values: terrain.js)
     const ground = readFileSync(new URL('../src/album/terrain.js', import.meta.url), 'utf8');
     assert.ok(ground.includes('fbm(pk / 7.3 + 5.)') && ground.includes('vnoise(pk / 1.1)'), 'the noises of the ground the swamp is painted with'); }

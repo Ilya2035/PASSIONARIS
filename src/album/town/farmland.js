@@ -90,7 +90,10 @@ export function farmGround(ch, at, land = null, swamp = null, treeline = null) {
       if (!land) { const i = c % KN; [k, h] = roughClass(at, i, (c - i) / KN); cls[c] = k; }
       // (a square with no natural cell lies beyond the worked land — chunks.js NONE, from stage 3: nothing is ploughed there)
       const cell = cellOf.cell[c], line = lineAt ? lineAt(c) / LINE_REF : 1;
-      v = land?.bog?.[c] ? 0 : FARM_CAP[k] * (1 - step(FARM_HIGH[0] * line, FARM_HIGH[1] * line, h)) * (cell < ch.count ? dry[cell] : 0) * KKM * KKM;
+      // (land.wet — from stage 3: the swamp of the chunk itself, a byte, album.swamp.km of the swamp work. A chunk more
+      // than half swamp is never ploughed, a drier one by its dry share. Without it: the dry share of the natural cell.)
+      const wet = land?.wet ? land.wet[c] : -1, dryC = cell >= ch.count ? 0 : wet >= 0 ? (wet > 127 ? 0 : 1 - wet / 255) : dry[cell];
+      v = land?.bog?.[c] ? 0 : FARM_CAP[k] * (1 - step(FARM_HIGH[0] * line, FARM_HIGH[1] * line, h)) * dryC * KKM * KKM;
       return room[c] = v < FARM_LEAST ? 0 : v;
     } };
   return g;
